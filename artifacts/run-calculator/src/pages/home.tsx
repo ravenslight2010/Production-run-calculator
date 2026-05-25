@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Activity, Clock, Settings, Factory, Timer, CalendarDays } from "lucide-react";
+import { Activity, Clock, Settings, Factory, Timer, CalendarDays, Printer } from "lucide-react";
 
 import {
   Form,
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
 
 const formSchema = z.object({
   targetQuantity: z.coerce.number().min(0, "Must be positive").default(5000),
@@ -101,14 +102,29 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-8 font-sans">
       <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex items-center space-x-3 mb-8">
-          <div className="w-10 h-10 rounded bg-primary text-primary-foreground flex items-center justify-center">
-            <Factory className="w-6 h-6" />
+        <header className="flex items-center justify-between mb-8 print:mb-4">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded bg-primary text-primary-foreground flex items-center justify-center print:hidden">
+              <Factory className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">Production Run Calculator</h1>
+              <p className="text-sm text-muted-foreground">Precision manufacturing planning & schedule estimation</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Production Run Calculator</h1>
-            <p className="text-sm text-muted-foreground">Precision manufacturing planning & schedule estimation</p>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              document.body.setAttribute("data-print-date", new Date().toLocaleString());
+              window.print();
+            }}
+            className="print:hidden flex items-center gap-2"
+            data-testid="button-export-pdf"
+          >
+            <Printer className="w-4 h-4" />
+            Export PDF
+          </Button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

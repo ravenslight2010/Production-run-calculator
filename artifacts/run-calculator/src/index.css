@@ -161,3 +161,86 @@
     @apply font-sans antialiased bg-background text-foreground;
   }
 }
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 12pt;
+  }
+
+  .dark {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --card-border: 214 32% 85%;
+    --border: 214 32% 85%;
+    --muted-foreground: 215 16% 40%;
+    --primary: 35 100% 45%;
+    --primary-foreground: 0 0% 100%;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .print\:mb-4 {
+    margin-bottom: 1rem !important;
+  }
+
+  /* Remove shadows and backdrop blur for print */
+  [class*="shadow"] {
+    box-shadow: none !important;
+  }
+
+  [class*="backdrop"] {
+    backdrop-filter: none !important;
+  }
+
+  /* Force single-column layout */
+  .grid {
+    display: block !important;
+  }
+
+  .lg\:col-span-5,
+  .lg\:col-span-7 {
+    width: 100% !important;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Make the results grid horizontal for print */
+  .grid-cols-1.md\:grid-cols-2 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 1rem !important;
+  }
+
+  .grid-cols-1.sm\:grid-cols-3 {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 1rem !important;
+  }
+
+  /* Add print timestamp footer */
+  body::after {
+    content: "Generated " attr(data-print-date);
+    display: block;
+    text-align: center;
+    font-size: 9pt;
+    color: #64748b;
+    margin-top: 2rem;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 0.5rem;
+  }
+
+  @page {
+    margin: 1.5cm 2cm;
+    size: A4 portrait;
+  }
+}
