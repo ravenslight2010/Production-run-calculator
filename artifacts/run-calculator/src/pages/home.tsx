@@ -20,6 +20,7 @@ import {
   Save,
   Trash2,
   X,
+  RotateCcw,
 } from "lucide-react";
 
 import {
@@ -200,6 +201,7 @@ export default function Home() {
   const queryClient = useQueryClient();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [runLabel, setRunLabel] = useState("");
+  const [activeTab, setActiveTab] = useState("info");
 
   const { data: savedRuns, isLoading: runsLoading } = useListRuns();
   const createRun = useCreateRun({
@@ -374,7 +376,7 @@ export default function Home() {
 
         <Form {...form}>
           <form>
-            <Tabs defaultValue="info" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid grid-cols-5 w-full mb-4 print:hidden">
                 <TabsTrigger value="info" data-testid="tab-info">
                   <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
@@ -923,9 +925,24 @@ export default function Home() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
+                                className="text-primary hover:text-primary hover:bg-primary/10 px-2"
+                                onClick={() => {
+                                  form.reset(run.inputs as FormValues);
+                                  setActiveTab("info");
+                                }}
+                                data-testid={`button-load-run-${run.id}`}
+                                title="Load this run"
+                              >
+                                <RotateCcw className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
                                 className="text-destructive hover:text-destructive hover:bg-destructive/10 px-2"
                                 onClick={() => deleteRun.mutate({ id: run.id })}
                                 data-testid={`button-delete-run-${run.id}`}
+                                title="Delete this run"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
