@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Production Run Calculator"
+version = "1.0.0"
+id = "artifacts/run-calculator"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 26038
+
+[services.development]
+run = "pnpm --filter @workspace/run-calculator run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/run-calculator", "run", "build" ]
+publicDir = "artifacts/run-calculator/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "26038"
+BASE_PATH = "/"
