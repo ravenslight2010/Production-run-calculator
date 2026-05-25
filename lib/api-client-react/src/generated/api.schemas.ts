@@ -21,6 +21,7 @@ export interface ProductionRun {
   totalTimeSec: number;
   batchesNeeded: string;
   inputs: ProductionRunInputs;
+  notes?: string;
   createdAt: string;
 }
 
@@ -35,5 +36,6 @@ export interface ProductionRunInput {
   totalTimeSec: number;
   batchesNeeded: string;
   inputs: ProductionRunInputInputs;
+  notes?: string;
 }
 

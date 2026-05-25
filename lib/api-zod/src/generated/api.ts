@@ -30,6 +30,7 @@ export const ListRunsResponseItem = zod.object({
   "totalTimeSec": zod.number(),
   "batchesNeeded": zod.string(),
   "inputs": zod.record(zod.string(), zod.unknown()),
+  "notes": zod.string().optional(),
   "createdAt": zod.coerce.date()
 })
 export const ListRunsResponse = zod.array(ListRunsResponseItem)
@@ -46,7 +47,8 @@ export const CreateRunBody = zod.object({
   "pizzasPerMin": zod.string(),
   "totalTimeSec": zod.number(),
   "batchesNeeded": zod.string(),
-  "inputs": zod.record(zod.string(), zod.unknown())
+  "inputs": zod.record(zod.string(), zod.unknown()),
+  "notes": zod.string().optional()
 })
 
 

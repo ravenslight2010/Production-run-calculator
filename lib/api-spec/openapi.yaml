@@ -121,6 +121,8 @@ components:
         inputs:
           type: object
           additionalProperties: true
+        notes:
+          type: string
         createdAt:
           type: string
           format: date-time
@@ -153,3 +155,5 @@ components:
         inputs:
           type: object
           additionalProperties: true
+        notes:
+          type: string

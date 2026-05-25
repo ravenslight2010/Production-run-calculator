@@ -201,6 +201,7 @@ export default function Home() {
   const queryClient = useQueryClient();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [runLabel, setRunLabel] = useState("");
+  const [runNotes, setRunNotes] = useState("");
   const [activeTab, setActiveTab] = useState("info");
 
   const { data: savedRuns, isLoading: runsLoading } = useListRuns();
@@ -210,6 +211,7 @@ export default function Home() {
         queryClient.invalidateQueries({ queryKey: getListRunsQueryKey() });
         setSaveDialogOpen(false);
         setRunLabel("");
+        setRunNotes("");
       },
     },
   });
@@ -225,6 +227,7 @@ export default function Home() {
     createRun.mutate({
       data: {
         label: runLabel.trim(),
+        notes: runNotes.trim(),
         casesNeeded: v.casesNeeded,
         casesLeft: calc.casesLeftToRun,
         skidsCompleted: v.skidsCompleted,
@@ -901,6 +904,11 @@ export default function Home() {
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 {new Date(run.createdAt).toLocaleString()}
                               </p>
+                              {run.notes && (
+                                <p className="text-xs text-muted-foreground/80 mt-1 italic line-clamp-2" data-testid={`run-notes-${run.id}`}>
+                                  {run.notes}
+                                </p>
+                              )}
                             </div>
                             <div className="flex items-center gap-4 text-right shrink-0">
                               <div>
@@ -991,6 +999,19 @@ export default function Home() {
                   <span className="text-muted-foreground">Pizzas/min</span>
                   <span className="font-mono font-semibold">{fmtNum(calc.ppm, 1)}</span>
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-muted-foreground">
+                  Notes <span className="text-xs">(optional)</span>
+                </label>
+                <textarea
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                  rows={3}
+                  placeholder="e.g. Line ran slow, batch had issues…"
+                  value={runNotes}
+                  onChange={(e) => setRunNotes(e.target.value)}
+                  data-testid="input-run-notes"
+                />
               </div>
             </div>
             <DialogFooter className="gap-2">

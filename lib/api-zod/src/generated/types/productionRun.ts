@@ -17,5 +17,6 @@ export interface ProductionRun {
   totalTimeSec: number;
   batchesNeeded: string;
   inputs: ProductionRunInputs;
+  notes?: string;
   createdAt: Date;
 }

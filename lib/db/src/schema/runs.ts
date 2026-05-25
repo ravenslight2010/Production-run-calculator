@@ -12,6 +12,7 @@ export const productionRunsTable = pgTable("production_runs", {
   totalTimeSec: integer("total_time_sec").notNull(),
   batchesNeeded: numeric("batches_needed", { precision: 8, scale: 2 }).notNull(),
   inputs: jsonb("inputs").notNull(),
+  notes: text("notes").default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
