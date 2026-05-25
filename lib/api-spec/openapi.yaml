@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: runs
+    description: Production run history
 paths:
   /healthz:
     get:
@@ -24,6 +26,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /runs:
+    get:
+      operationId: listRuns
+      tags: [runs]
+      summary: List saved production runs
+      responses:
+        "200":
+          description: List of saved runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProductionRun"
+    post:
+      operationId: createRun
+      tags: [runs]
+      summary: Save a production run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductionRunInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionRun"
+        "400":
+          description: Invalid input
+
+  /runs/{id}:
+    delete:
+      operationId: deleteRun
+      tags: [runs]
+      summary: Delete a saved run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +88,68 @@ components:
       required:
         - status
 
+    ProductionRun:
+      type: object
+      required:
+        - id
+        - label
+        - casesNeeded
+        - casesLeft
+        - skidsCompleted
+        - pizzasPerMin
+        - totalTimeSec
+        - batchesNeeded
+        - inputs
+        - createdAt
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        casesNeeded:
+          type: integer
+        casesLeft:
+          type: integer
+        skidsCompleted:
+          type: integer
+        pizzasPerMin:
+          type: string
+        totalTimeSec:
+          type: integer
+        batchesNeeded:
+          type: string
+        inputs:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ProductionRunInput:
+      type: object
+      required:
+        - casesNeeded
+        - casesLeft
+        - skidsCompleted
+        - pizzasPerMin
+        - totalTimeSec
+        - batchesNeeded
+        - inputs
+      properties:
+        label:
+          type: string
+        casesNeeded:
+          type: integer
+        casesLeft:
+          type: integer
+        skidsCompleted:
+          type: integer
+        pizzasPerMin:
+          type: string
+        totalTimeSec:
+          type: integer
+        batchesNeeded:
+          type: string
+        inputs:
+          type: object
+          additionalProperties: true
