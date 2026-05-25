@@ -1,8 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Activity, Clock, Settings, Factory, Timer, CalendarDays, Printer } from "lucide-react";
+import {
+  Factory,
+  Printer,
+  Layers,
+  Clock,
+  Droplets,
+  ClipboardList,
+} from "lucide-react";
 
 import {
   Form,
@@ -13,110 +20,293 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const formSchema = z.object({
-  targetQuantity: z.coerce.number().min(0, "Must be positive").default(5000),
-  unitsPerRun: z.coerce.number().min(0, "Must be positive").default(250),
-  runTime: z.coerce.number().min(0, "Must be positive").default(45),
-  runTimeUnit: z.enum(["minutes", "hours"]).default("minutes"),
-  setupTime: z.coerce.number().min(0, "Must be positive").default(15),
-  setupTimeUnit: z.enum(["minutes", "hours"]).default("minutes"),
-  efficiency: z.coerce.number().min(0).max(100, "Max 100%").default(95),
-  workingHoursPerDay: z.coerce.number().min(0.1, "Must be > 0").default(8),
+  // Line settings
+  casesNeeded: z.coerce.number().min(0).default(384),
+  crustsPerCycle: z.coerce.number().min(1).default(5),
+  cycleSpeed: z.coerce.number().min(0.1).default(7.8),
+  speedAdjustment: z.coerce.number().min(0.01).default(1.0),
+  pizzasPerCase: z.coerce.number().min(1).default(12),
+  casesPerSkid: z.coerce.number().min(1).default(48),
+  casesPerLayer: z.coerce.number().min(1).default(6),
+  doughballsPerTray: z.coerce.number().min(1).default(24),
+  doughBatchYield: z.coerce.number().min(1).default(620),
+  // Progress tracking
+  skidsCompleted: z.coerce.number().min(0).default(5),
+  casesOnCurrentSkid: z.coerce.number().min(0).default(6),
+  traysOnLine: z.coerce.number().min(0).default(43),
+  batchesReady: z.coerce.number().min(0).default(0),
+  // Frontline weights (oz per pizza application rate)
+  sauceOzPerPizza: z.coerce.number().min(0).default(4),
+  sauceBarrelLbs: z.coerce.number().min(0.1).default(450),
+  app1OzPerPizza: z.coerce.number().min(0).default(0),
+  app1BatchLbs: z.coerce.number().min(0.1).default(30),
+  app2OzPerPizza: z.coerce.number().min(0).default(4),
+  app2BatchLbs: z.coerce.number().min(0.1).default(55),
+  app3OzPerPizza: z.coerce.number().min(0).default(0),
+  app3BatchLbs: z.coerce.number().min(0.1).default(45),
+  app4OzPerPizza: z.coerce.number().min(0).default(4),
+  app4BatchLbs: z.coerce.number().min(0.1).default(55),
+  pepOzPerPizza: z.coerce.number().min(0).default(0),
 });
 
 type FormValues = z.infer<typeof formSchema>;
+
+function fmtTime(totalSec: number): string {
+  if (!isFinite(totalSec) || totalSec < 0) return "—";
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.round(totalSec % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fmtNum(n: number, dec = 2): string {
+  if (!isFinite(n)) return "—";
+  return n.toFixed(dec);
+}
+
+function StatRow({
+  label,
+  value,
+  testId,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  testId?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-baseline justify-between py-2.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
+    >
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span
+        className={`font-mono font-semibold text-sm tabular-nums ${highlight ? "text-primary text-base" : "text-foreground"}`}
+        data-testid={testId}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
+      {children}
+    </p>
+  );
+}
+
+function NumField({
+  control,
+  name,
+  label,
+  step,
+  testId,
+}: {
+  control: any;
+  name: keyof FormValues;
+  label: string;
+  step?: string;
+  testId?: string;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+          <FormControl>
+            <Input
+              type="number"
+              step={step ?? "any"}
+              className="font-mono bg-background/50 h-9 text-sm"
+              data-testid={testId ?? `input-${name}`}
+              {...field}
+              onChange={(e) =>
+                field.onChange(e.target.value === "" ? "" : Number(e.target.value))
+              }
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
 
 export default function Home() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      targetQuantity: 5000,
-      unitsPerRun: 250,
-      runTime: 45,
-      runTimeUnit: "minutes",
-      setupTime: 15,
-      setupTimeUnit: "minutes",
-      efficiency: 95,
-      workingHoursPerDay: 8,
+      casesNeeded: 384,
+      crustsPerCycle: 5,
+      cycleSpeed: 7.8,
+      speedAdjustment: 1.0,
+      pizzasPerCase: 12,
+      casesPerSkid: 48,
+      casesPerLayer: 6,
+      doughballsPerTray: 24,
+      doughBatchYield: 620,
+      skidsCompleted: 5,
+      casesOnCurrentSkid: 6,
+      traysOnLine: 43,
+      batchesReady: 0,
+      sauceOzPerPizza: 4,
+      sauceBarrelLbs: 450,
+      app1OzPerPizza: 0,
+      app1BatchLbs: 30,
+      app2OzPerPizza: 4,
+      app2BatchLbs: 55,
+      app3OzPerPizza: 0,
+      app3BatchLbs: 45,
+      app4OzPerPizza: 4,
+      app4BatchLbs: 55,
+      pepOzPerPizza: 0,
     },
     mode: "onChange",
   });
 
-  const {
-    targetQuantity,
-    unitsPerRun,
-    runTime,
-    runTimeUnit,
-    setupTime,
-    setupTimeUnit,
-    efficiency,
-    workingHoursPerDay,
-  } = form.watch();
+  const v = form.watch();
 
-  // Calculations
-  const isValid =
-    targetQuantity > 0 &&
-    unitsPerRun > 0 &&
-    efficiency > 0 &&
-    workingHoursPerDay > 0 &&
-    runTime >= 0 &&
-    setupTime >= 0;
-
-  const effectiveUnitsPerRun = unitsPerRun * (efficiency / 100);
-  const runsRequired =
-    isValid && effectiveUnitsPerRun > 0 ? Math.ceil(targetQuantity / effectiveUnitsPerRun) : 0;
-
-  const runTimeMins = runTimeUnit === "hours" ? runTime * 60 : runTime;
-  const setupTimeMins = setupTimeUnit === "hours" ? setupTime * 60 : setupTime;
-
-  const totalRunTimeMins = runsRequired * runTimeMins;
-  const totalSetupTimeMins = runsRequired * setupTimeMins;
-  const totalProductionTimeMins = totalRunTimeMins + totalSetupTimeMins;
-
-  const daysToComplete =
-    isValid && workingHoursPerDay > 0
-      ? totalProductionTimeMins / 60 / workingHoursPerDay
-      : 0;
-  const roundedDays = Math.ceil(daysToComplete * 10) / 10;
-
-  const formatTime = (totalMins: number) => {
-    if (!isValid || totalMins === 0) return "—";
-    const h = Math.floor(totalMins / 60);
-    const m = Math.round(totalMins % 60);
-    if (h === 0 && m === 0) return "0m";
-    if (h === 0) return `${m}m`;
-    if (m === 0) return `${h}h`;
-    return `${h}h ${m}m`;
-  };
-
-  // Dark mode class handler since it's a standalone frontend
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
 
+  const calc = useMemo(() => {
+    const ppm =
+      v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
+
+    const traysPerSkid =
+      (v.casesPerSkid * v.pizzasPerCase) / v.doughballsPerTray;
+    const traysPerBatch = v.doughBatchYield / v.doughballsPerTray;
+    const batchesPerSkid = traysPerSkid / traysPerBatch;
+
+    const casesOnLine = v.casesPerSkid;
+    const casesLeftToRun =
+      v.casesNeeded - v.skidsCompleted * v.casesPerSkid - casesOnLine;
+    const casesActualLeft = casesLeftToRun - v.casesOnCurrentSkid;
+
+    const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
+    const doughOnHand =
+      v.traysOnLine * v.doughballsPerTray +
+      v.batchesReady * v.doughBatchYield;
+    const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
+    const batchesNeeded = doughDeficit / v.doughBatchYield;
+    const traysNeeded = doughDeficit / v.doughballsPerTray;
+    const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
+
+    const casesOnLastSkid =
+      v.casesNeeded % v.casesPerSkid === 0
+        ? v.casesPerSkid
+        : v.casesNeeded % v.casesPerSkid;
+
+    // Timing (all in seconds)
+    const timePressHzSec = ppm > 0 ? 60 / v.cycleSpeed : 0;
+    const timePerTraySec =
+      ppm > 0 ? (v.doughballsPerTray / ppm) * 60 : 0;
+    const timePerBatchSec =
+      ppm > 0 ? (v.doughBatchYield / ppm) * 60 : 0;
+    const timePerSkidSec =
+      ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
+    const totalTimeSec =
+      ppm > 0 ? (casesActualLeft * v.pizzasPerCase * 60) / ppm : 0;
+    const doughMadeTimeSec =
+      ppm > 0 ? (v.traysOnLine * v.doughballsPerTray * 60) / ppm : 0;
+
+    const rackTimes = [10, 12, 16, 18, 20, 22].map((n) => ({
+      trays: n,
+      sec: ppm > 0 ? (n * v.doughballsPerTray * 60) / ppm : 0,
+    }));
+
+    // Frontline — batches = total_oz_needed / (batch_lbs * 16)
+    const totalPizzasRun = casesLeftToRun * v.pizzasPerCase;
+    const sauceBatches =
+      v.sauceBarrelLbs > 0
+        ? (totalPizzasRun * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
+        : 0;
+    const app1Batches =
+      v.app1BatchLbs > 0
+        ? (totalPizzasRun * v.app1OzPerPizza) / (v.app1BatchLbs * 16)
+        : 0;
+    const app2Batches =
+      v.app2BatchLbs > 0
+        ? (totalPizzasRun * v.app2OzPerPizza) / (v.app2BatchLbs * 16)
+        : 0;
+    const app3Batches =
+      v.app3BatchLbs > 0
+        ? (totalPizzasRun * v.app3OzPerPizza) / (v.app3BatchLbs * 16)
+        : 0;
+    const app4Batches =
+      v.app4BatchLbs > 0
+        ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
+        : 0;
+    const pepLbs = (totalPizzasRun * v.pepOzPerPizza) / 16;
+
+    return {
+      ppm,
+      traysPerSkid,
+      traysPerBatch,
+      batchesPerSkid,
+      casesOnLine,
+      casesLeftToRun,
+      casesActualLeft,
+      batchesNeeded,
+      traysNeeded,
+      buffer,
+      casesOnLastSkid,
+      timePressHzSec,
+      timePerTraySec,
+      timePerBatchSec,
+      timePerSkidSec,
+      totalTimeSec,
+      doughMadeTimeSec,
+      rackTimes,
+      sauceBatches,
+      app1Batches,
+      app2Batches,
+      app3Batches,
+      app4Batches,
+      pepLbs,
+    };
+  }, [v]);
+
   return (
-    <div className="min-h-screen bg-background text-foreground p-4 md:p-8 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        <header className="flex items-center justify-between mb-8 print:mb-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded bg-primary text-primary-foreground flex items-center justify-center print:hidden">
-              <Factory className="w-6 h-6" />
+    <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Header */}
+        <header className="flex items-center justify-between print:mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded bg-primary text-primary-foreground flex items-center justify-center print:hidden">
+              <Factory className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">Production Run Calculator</h1>
-              <p className="text-sm text-muted-foreground">Precision manufacturing planning & schedule estimation</p>
+              <h1 className="text-xl font-bold tracking-tight">
+                Production Run Calculator
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Pizza line planning & schedule estimation
+              </p>
             </div>
           </div>
           <Button
             variant="outline"
             size="sm"
             onClick={() => {
-              document.body.setAttribute("data-print-date", new Date().toLocaleString());
+              document.body.setAttribute(
+                "data-print-date",
+                new Date().toLocaleString()
+              );
               window.print();
             }}
             className="print:hidden flex items-center gap-2"
@@ -127,285 +317,479 @@ export default function Home() {
           </Button>
         </header>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Inputs Panel */}
-          <Card className="lg:col-span-5 bg-card/50 backdrop-blur border-border/50 shadow-lg">
-            <CardHeader className="pb-4">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Settings className="w-5 h-5 text-primary" />
-                Run Parameters
-              </CardTitle>
-              <CardDescription>Enter the specifications for the production run</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Form {...form}>
-                <form className="space-y-5">
-                  <div className="space-y-4">
-                    <FormField
-                      control={form.control}
-                      name="targetQuantity"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Target Quantity</FormLabel>
-                          <FormControl>
-                            <div className="relative">
-                              <Input
-                                type="number"
-                                className="font-mono text-lg bg-background/50 h-11"
-                                placeholder="0"
-                                data-testid="input-target-quantity"
-                                {...field}
-                                onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                              />
-                            </div>
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+        <Form {...form}>
+          <form>
+            <Tabs defaultValue="info" className="w-full">
+              <TabsList className="grid grid-cols-4 w-full mb-4 print:hidden">
+                <TabsTrigger value="info" data-testid="tab-info">
+                  <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
+                  Enter Info
+                </TabsTrigger>
+                <TabsTrigger value="dough" data-testid="tab-dough">
+                  <Layers className="w-3.5 h-3.5 mr-1.5" />
+                  Dough
+                </TabsTrigger>
+                <TabsTrigger value="timing" data-testid="tab-timing">
+                  <Clock className="w-3.5 h-3.5 mr-1.5" />
+                  Timing
+                </TabsTrigger>
+                <TabsTrigger value="frontline" data-testid="tab-frontline">
+                  <Droplets className="w-3.5 h-3.5 mr-1.5" />
+                  Frontline
+                </TabsTrigger>
+              </TabsList>
 
-                    <FormField
-                      control={form.control}
-                      name="unitsPerRun"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Units Per Run</FormLabel>
-                          <FormControl>
-                            <Input
-                              type="number"
-                              className="font-mono text-lg bg-background/50 h-11"
-                              placeholder="0"
-                              data-testid="input-units-per-run"
-                              {...field}
-                              onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+              {/* ─── ENTER INFO ─── */}
+              <TabsContent value="info">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <Card className="bg-card/50 border-border/50 shadow-md">
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Line Settings
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5 space-y-3">
+                      <NumField
+                        control={form.control}
+                        name="casesNeeded"
+                        label="Cases Needed"
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="crustsPerCycle"
+                          label="Crusts Per Cycle"
+                          step="1"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="cycleSpeed"
+                          label="Cycle Speed (cyc/min)"
+                        />
+                      </div>
+                      <NumField
+                        control={form.control}
+                        name="speedAdjustment"
+                        label="Speed Adjustment"
+                      />
+                      <Separator className="opacity-30" />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="pizzasPerCase"
+                          label="Pizzas Per Case"
+                          step="1"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="casesPerSkid"
+                          label="Cases Per Skid"
+                          step="1"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="casesPerLayer"
+                          label="Cases Per Layer"
+                          step="1"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="doughballsPerTray"
+                          label="Doughballs Per Tray"
+                          step="1"
+                        />
+                      </div>
+                      <NumField
+                        control={form.control}
+                        name="doughBatchYield"
+                        label="Dough Batch Yield (doughballs)"
+                        step="1"
+                      />
+                    </CardContent>
+                  </Card>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <FormField
+                  <Card className="bg-card/50 border-border/50 shadow-md">
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Current Progress
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5 space-y-3">
+                      <NumField
                         control={form.control}
-                        name="runTime"
-                        render={({ field }) => (
-                          <FormItem className="col-span-2">
-                            <FormLabel>Run Time</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                className="font-mono text-lg bg-background/50 h-11"
-                                placeholder="0"
-                                data-testid="input-run-time"
-                                {...field}
-                                onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                        name="skidsCompleted"
+                        label="Total Skids Completed"
+                        step="1"
                       />
-                      <FormField
+                      <NumField
                         control={form.control}
-                        name="runTimeUnit"
-                        render={({ field }) => (
-                          <FormItem className="pt-[22px]">
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger className="h-11 bg-background/50" data-testid="select-run-time-unit">
-                                  <SelectValue />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="minutes">mins</SelectItem>
-                                <SelectItem value="hours">hours</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                        name="casesOnCurrentSkid"
+                        label="Cases on Current Skid"
+                        step="1"
                       />
-                    </div>
+                      <NumField
+                        control={form.control}
+                        name="traysOnLine"
+                        label="Total Trays on Line"
+                        step="1"
+                      />
+                      <NumField
+                        control={form.control}
+                        name="batchesReady"
+                        label="Batches of Dough Ready"
+                      />
+                    </CardContent>
 
-                    <div className="grid grid-cols-3 gap-3">
-                      <FormField
-                        control={form.control}
-                        name="setupTime"
-                        render={({ field }) => (
-                          <FormItem className="col-span-2">
-                            <FormLabel>Setup Time Per Run</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                className="font-mono text-lg bg-background/50 h-11"
-                                placeholder="0"
-                                data-testid="input-setup-time"
-                                {...field}
-                                onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                    {/* Quick summary */}
+                    <div className="mx-5 mb-5 rounded-md bg-primary/10 border border-primary/20 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
+                        Quick Summary
+                      </p>
+                      <StatRow
+                        label="Cases Left to Run"
+                        value={fmtNum(calc.casesLeftToRun, 0)}
+                        testId="output-cases-left"
+                        highlight
                       />
-                      <FormField
-                        control={form.control}
-                        name="setupTimeUnit"
-                        render={({ field }) => (
-                          <FormItem className="pt-[22px]">
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                              <FormControl>
-                                <SelectTrigger className="h-11 bg-background/50" data-testid="select-setup-time-unit">
-                                  <SelectValue />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                <SelectItem value="minutes">mins</SelectItem>
-                                <SelectItem value="hours">hours</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                      <StatRow
+                        label="Time Left"
+                        value={fmtTime(calc.totalTimeSec)}
+                        testId="output-time-left"
+                        highlight
                       />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      <FormField
-                        control={form.control}
-                        name="efficiency"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Machine Efficiency</FormLabel>
-                            <FormControl>
-                              <div className="relative">
-                                <Input
-                                  type="number"
-                                  className="font-mono text-lg pr-8 bg-background/50 h-11"
-                                  placeholder="100"
-                                  data-testid="input-efficiency"
-                                  {...field}
-                                  onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                                />
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">%</span>
-                              </div>
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-
-                      <FormField
-                        control={form.control}
-                        name="workingHoursPerDay"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Working Hours / Day</FormLabel>
-                            <FormControl>
-                              <Input
-                                type="number"
-                                className="font-mono text-lg bg-background/50 h-11"
-                                placeholder="8"
-                                data-testid="input-working-hours"
-                                step="0.5"
-                                {...field}
-                                onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                      <StatRow
+                        label="Pizzas / Min"
+                        value={fmtNum(calc.ppm, 1)}
+                        testId="output-ppm"
                       />
                     </div>
-                  </div>
-                </form>
-              </Form>
-            </CardContent>
-          </Card>
-
-          {/* Results Panel */}
-          <div className="lg:col-span-7 space-y-4">
-            <Card className="bg-card border-border shadow-xl overflow-hidden relative">
-              {/* Top Accent line */}
-              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
-              
-              <CardContent className="p-6 md:p-8">
-                <div className="mb-6 flex items-center justify-between">
-                  <h2 className="text-xl font-bold tracking-tight">Production Estimate</h2>
-                  {!isValid && (
-                    <span className="text-sm font-medium text-destructive px-2 py-1 bg-destructive/10 rounded" data-testid="status-invalid">
-                      Invalid inputs
-                    </span>
-                  )}
+                  </Card>
                 </div>
+              </TabsContent>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-                  {/* Primary Output: Runs */}
-                  <div className="bg-background/50 p-6 rounded-lg border border-border/50 flex flex-col justify-center">
-                    <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                      <Activity className="w-4 h-4" />
-                      <span className="text-sm font-medium uppercase tracking-wider">Runs Required</span>
-                    </div>
-                    <div className="text-5xl lg:text-6xl font-mono font-bold text-primary" data-testid="output-runs-required">
-                      {isValid ? runsRequired : "—"}
-                    </div>
-                  </div>
+              {/* ─── DOUGH ─── */}
+              <TabsContent value="dough">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                    <div className="h-1 bg-primary w-full" />
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        What You Need Now
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5">
+                      <div className="mb-2">
+                        <p
+                          className="text-5xl font-mono font-bold text-primary"
+                          data-testid="output-batches-needed"
+                        >
+                          {fmtNum(calc.batchesNeeded, 2)}
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Batches to mix
+                        </p>
+                      </div>
+                      <Separator className="my-4 opacity-30" />
+                      <div>
+                        <p
+                          className="text-3xl font-mono font-bold"
+                          data-testid="output-trays-needed"
+                        >
+                          {fmtNum(calc.traysNeeded, 0)}
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Trays needed
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                  {/* Primary Output: Days */}
-                  <div className="bg-background/50 p-6 rounded-lg border border-border/50 flex flex-col justify-center">
-                    <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                      <CalendarDays className="w-4 h-4" />
-                      <span className="text-sm font-medium uppercase tracking-wider">Days to Complete</span>
-                    </div>
-                    <div className="text-5xl lg:text-6xl font-mono font-bold text-foreground" data-testid="output-days-required">
-                      {isValid ? roundedDays : "—"}
-                    </div>
-                  </div>
+                  <Card className="bg-card/50 border-border/50 shadow-md">
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Run Details
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5">
+                      <StatRow
+                        label="Cases Left to Run"
+                        value={fmtNum(calc.casesLeftToRun, 0)}
+                        testId="output-dough-cases-left"
+                      />
+                      <StatRow
+                        label="Approx. Cases on Line"
+                        value={fmtNum(calc.casesOnLine, 0)}
+                        testId="output-cases-on-line"
+                      />
+                      <StatRow
+                        label="Approx. Buffer (cases)"
+                        value={fmtNum(calc.buffer, 1)}
+                        testId="output-buffer"
+                      />
+                      <StatRow
+                        label="Cases on Last Skid"
+                        value={fmtNum(calc.casesOnLastSkid, 0)}
+                        testId="output-last-skid-cases"
+                      />
+                      <Separator className="my-3 opacity-30" />
+                      <StatRow
+                        label="Trays Per Skid"
+                        value={fmtNum(calc.traysPerSkid, 2)}
+                        testId="output-trays-per-skid"
+                      />
+                      <StatRow
+                        label="Trays Per Batch"
+                        value={fmtNum(calc.traysPerBatch, 2)}
+                        testId="output-trays-per-batch"
+                      />
+                      <StatRow
+                        label="Batches Per Skid"
+                        value={fmtNum(calc.batchesPerSkid, 2)}
+                        testId="output-batches-per-skid"
+                      />
+                    </CardContent>
+                  </Card>
                 </div>
+              </TabsContent>
 
-                <Separator className="my-8 opacity-50" />
+              {/* ─── TIMING ─── */}
+              <TabsContent value="timing">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-5">
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                      <div className="h-1 bg-primary w-full" />
+                      <CardContent className="p-5">
+                        <div className="mb-2">
+                          <p
+                            className="text-4xl font-mono font-bold text-primary"
+                            data-testid="output-total-time-left"
+                          >
+                            {fmtTime(calc.totalTimeSec)}
+                          </p>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Total time left for run
+                          </p>
+                        </div>
+                        <Separator className="my-4 opacity-30" />
+                        <StatRow
+                          label="Time for Dough to Clear"
+                          value={fmtTime(calc.doughMadeTimeSec)}
+                          testId="output-dough-time"
+                        />
+                        <StatRow
+                          label="Pizzas Per Minute"
+                          value={fmtNum(calc.ppm, 1)}
+                          testId="output-timing-ppm"
+                        />
+                      </CardContent>
+                    </Card>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                  <div>
-                    <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-                      <Clock className="w-4 h-4" />
-                      <span className="text-xs font-medium uppercase tracking-wider">Total Run Time</span>
-                    </div>
-                    <div className="text-2xl font-mono font-semibold" data-testid="output-total-run-time">
-                      {formatTime(totalRunTimeMins)}
-                    </div>
+                    <Card className="bg-card/50 border-border/50 shadow-md">
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Per Unit Times
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5">
+                        <StatRow
+                          label="Time Per Press Cycle"
+                          value={fmtNum(calc.timePressHzSec, 2) + "s"}
+                          testId="output-time-per-cycle"
+                        />
+                        <StatRow
+                          label="Time Per Tray"
+                          value={fmtTime(calc.timePerTraySec)}
+                          testId="output-time-per-tray"
+                        />
+                        <StatRow
+                          label="Time Per Batch"
+                          value={fmtTime(calc.timePerBatchSec)}
+                          testId="output-time-per-batch"
+                        />
+                        <StatRow
+                          label="Time Per Skid"
+                          value={fmtTime(calc.timePerSkidSec)}
+                          testId="output-time-per-skid"
+                          highlight
+                        />
+                      </CardContent>
+                    </Card>
                   </div>
 
-                  <div>
-                    <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-                      <Settings className="w-4 h-4" />
-                      <span className="text-xs font-medium uppercase tracking-wider">Total Setup</span>
-                    </div>
-                    <div className="text-2xl font-mono font-semibold" data-testid="output-total-setup-time">
-                      {formatTime(totalSetupTimeMins)}
-                    </div>
-                  </div>
-
-                  <div className="sm:pl-6 sm:border-l border-border/50">
-                    <div className="flex items-center gap-1.5 text-muted-foreground mb-2">
-                      <Timer className="w-4 h-4 text-primary" />
-                      <span className="text-xs font-bold uppercase tracking-wider text-primary">Total Time</span>
-                    </div>
-                    <div className="text-3xl font-mono font-bold text-foreground" data-testid="output-total-production-time">
-                      {formatTime(totalProductionTimeMins)}
-                    </div>
-                  </div>
+                  <Card className="bg-card/50 border-border/50 shadow-md">
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Rack Times
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5">
+                      {calc.rackTimes.map(({ trays, sec }) => (
+                        <StatRow
+                          key={trays}
+                          label={`${trays}-Tray Rack`}
+                          value={fmtTime(sec)}
+                          testId={`output-rack-${trays}`}
+                        />
+                      ))}
+                    </CardContent>
+                  </Card>
                 </div>
-              </CardContent>
-            </Card>
+              </TabsContent>
 
-            <div className="text-xs text-muted-foreground text-center pt-4 opacity-60 flex items-center justify-center gap-2">
-              <Activity className="w-3 h-3" />
-              <span>Live calculations based on {(efficiency || 0)}% efficiency rating</span>
-            </div>
-          </div>
-        </div>
+              {/* ─── FRONTLINE ─── */}
+              <TabsContent value="frontline">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <Card className="bg-card/50 border-border/50 shadow-md">
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Sauce & Applicator Weights
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5 space-y-4">
+                      <SectionLabel>Sauce</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="sauceOzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="sauceBarrelLbs"
+                          label="Barrel Weight (lbs)"
+                        />
+                      </div>
+
+                      <SectionLabel>Applicator 1</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="app1OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="app1BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
+
+                      <SectionLabel>Applicator 2</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="app2OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="app2BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
+
+                      <SectionLabel>Applicator 3</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="app3OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="app3BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
+
+                      <SectionLabel>Applicator 4</SectionLabel>
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="app4OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="app4BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
+
+                      <SectionLabel>Pepperoni</SectionLabel>
+                      <NumField
+                        control={form.control}
+                        name="pepOzPerPizza"
+                        label="Oz Per Pizza"
+                      />
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                    <div className="h-1 bg-primary w-full" />
+                    <CardHeader className="pb-2 pt-4 px-5">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Batches Needed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-5 pb-5">
+                      <p className="text-xs text-muted-foreground mb-4">
+                        Based on{" "}
+                        <span className="font-mono text-foreground">
+                          {fmtNum(calc.casesLeftToRun, 0)}
+                        </span>{" "}
+                        cases ×{" "}
+                        <span className="font-mono text-foreground">
+                          {v.pizzasPerCase}
+                        </span>{" "}
+                        pizzas/case
+                      </p>
+                      <StatRow
+                        label="Sauce"
+                        value={fmtNum(calc.sauceBatches, 2) + " batches"}
+                        testId="output-sauce-batches"
+                        highlight={calc.sauceBatches > 0}
+                      />
+                      <StatRow
+                        label="Applicator 1"
+                        value={fmtNum(calc.app1Batches, 2) + " batches"}
+                        testId="output-app1-batches"
+                        highlight={calc.app1Batches > 0}
+                      />
+                      <StatRow
+                        label="Applicator 2"
+                        value={fmtNum(calc.app2Batches, 2) + " batches"}
+                        testId="output-app2-batches"
+                        highlight={calc.app2Batches > 0}
+                      />
+                      <StatRow
+                        label="Applicator 3"
+                        value={fmtNum(calc.app3Batches, 2) + " batches"}
+                        testId="output-app3-batches"
+                        highlight={calc.app3Batches > 0}
+                      />
+                      <StatRow
+                        label="Applicator 4"
+                        value={fmtNum(calc.app4Batches, 2) + " batches"}
+                        testId="output-app4-batches"
+                        highlight={calc.app4Batches > 0}
+                      />
+                      <Separator className="my-3 opacity-30" />
+                      <StatRow
+                        label="Pepperoni"
+                        value={fmtNum(calc.pepLbs, 2) + " lbs"}
+                        testId="output-pep-lbs"
+                        highlight={calc.pepLbs > 0}
+                      />
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </form>
+        </Form>
       </div>
     </div>
   );
