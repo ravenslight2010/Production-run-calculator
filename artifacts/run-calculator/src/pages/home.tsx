@@ -284,6 +284,7 @@ export default function Home() {
     const batchesNeeded = doughDeficit / v.doughBatchYield;
     const traysNeeded = doughDeficit / v.doughballsPerTray;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
+    const doughShortCases = doughDeficit / v.pizzasPerCase;
 
     // Spreadsheet B9: roundup(casesPerSkid - casesOnLine, 0)
     const casesOnLastSkid = Math.ceil(
@@ -352,6 +353,7 @@ export default function Home() {
       batchesNeeded,
       traysNeeded,
       buffer,
+      doughShortCases,
       casesOnLastSkid,
       timePressHzSec,
       timePerTraySec,
@@ -637,11 +639,25 @@ export default function Home() {
                         value={fmtNum(calc.casesOnLine, 0)}
                         testId="output-cases-on-line"
                       />
-                      <StatRow
-                        label="Approx. Buffer (cases)"
-                        value={fmtNum(calc.buffer, 1)}
-                        testId="output-buffer"
-                      />
+                      <div className="flex items-center justify-between py-1.5" data-testid="output-dough-status">
+                        <span className="text-sm text-muted-foreground">Dough Status</span>
+                        {calc.doughShortCases > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
+                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
+                          </span>
+                        ) : calc.buffer > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
+                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
+                            +{fmtNum(calc.buffer, 1)} cases ahead
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                            Balanced
+                          </span>
+                        )}
+                      </div>
                       <StatRow
                         label="Cases on Last Skid"
                         value={fmtNum(calc.casesOnLastSkid, 0)}
