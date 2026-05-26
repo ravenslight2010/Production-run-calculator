@@ -50,6 +50,7 @@ const formSchema = z.object({
   crustsPerCycle: z.coerce.number().min(1).default(5),
   cycleSpeed: z.coerce.number().min(0.1).default(7.8),
   speedAdjustment: z.coerce.number().min(0.01).default(1.0),
+  freezerSpeed: z.coerce.number().min(0).default(39),
   pizzasPerCase: z.coerce.number().min(1).default(12),
   casesPerSkid: z.coerce.number().min(1).default(48),
   casesPerLayer: z.coerce.number().min(1).default(6),
@@ -172,6 +173,7 @@ export default function Home() {
       crustsPerCycle: 5,
       cycleSpeed: 7.8,
       speedAdjustment: 1.0,
+      freezerSpeed: 39,
       pizzasPerCase: 12,
       casesPerSkid: 48,
       casesPerLayer: 6,
@@ -436,11 +438,18 @@ export default function Home() {
                           label="Cycle Speed (cyc/min)"
                         />
                       </div>
-                      <NumField
-                        control={form.control}
-                        name="speedAdjustment"
-                        label="Speed Adjustment"
-                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="speedAdjustment"
+                          label="Speed Adjustment"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="freezerSpeed"
+                          label="Freezer Speed (piz/min)"
+                        />
+                      </div>
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -661,6 +670,12 @@ export default function Home() {
                           label="Pizzas Per Minute"
                           value={fmtNum(calc.ppm, 1)}
                           testId="output-timing-ppm"
+                        />
+                        <StatRow
+                          label="Freezer Speed"
+                          value={fmtNum(v.freezerSpeed, 1) + " piz/min"}
+                          testId="output-freezer-speed"
+                          highlight={v.freezerSpeed > 0 && calc.ppm > v.freezerSpeed}
                         />
                       </CardContent>
                     </Card>
