@@ -50,7 +50,7 @@ const formSchema = z.object({
   crustsPerCycle: z.coerce.number().min(1).default(5),
   cycleSpeed: z.coerce.number().min(0.1).default(7.8),
   speedAdjustment: z.coerce.number().min(0.01).default(1.0),
-  freezerSpeed: z.coerce.number().min(0).default(39),
+  freezerTime: z.coerce.number().min(0).default(15),
   pizzasPerCase: z.coerce.number().min(1).default(12),
   casesPerSkid: z.coerce.number().min(1).default(48),
   casesPerLayer: z.coerce.number().min(1).default(6),
@@ -173,7 +173,7 @@ export default function Home() {
       crustsPerCycle: 5,
       cycleSpeed: 7.8,
       speedAdjustment: 1.0,
-      freezerSpeed: 39,
+      freezerTime: 15,
       pizzasPerCase: 12,
       casesPerSkid: 48,
       casesPerLayer: 6,
@@ -254,10 +254,27 @@ export default function Home() {
     const traysPerBatch = v.doughBatchYield / v.doughballsPerTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
-    const casesOnLine = v.casesPerSkid;
+    // Spreadsheet: casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase * speedAdj, 0)
+    const freezerTime = Number(v.freezerTime);
+    const casesOnLine =
+      ppm > 0
+        ? Math.floor((ppm * freezerTime) / v.pizzasPerCase * v.speedAdjustment)
+        : 0;
+
+    // Spreadsheet Dough!B4: casesNeeded - skidsCompleted*casesPerSkid - casesOnCurrentSkid - casesOnLine + casesPerLayer
     const casesLeftToRun =
-      v.casesNeeded - v.skidsCompleted * v.casesPerSkid - casesOnLine;
-    const casesActualLeft = casesLeftToRun - v.casesOnCurrentSkid;
+      v.casesNeeded -
+      v.skidsCompleted * v.casesPerSkid -
+      v.casesOnCurrentSkid -
+      casesOnLine +
+      v.casesPerLayer;
+
+    // For timing: same but without casesPerLayer (Timing sheet formula)
+    const casesForTiming =
+      v.casesNeeded -
+      v.skidsCompleted * v.casesPerSkid -
+      v.casesOnCurrentSkid -
+      casesOnLine;
 
     const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
     const doughOnHand =
@@ -268,23 +285,30 @@ export default function Home() {
     const traysNeeded = doughDeficit / v.doughballsPerTray;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
 
-    const casesOnLastSkid =
-      v.casesNeeded % v.casesPerSkid === 0
-        ? v.casesPerSkid
-        : v.casesNeeded % v.casesPerSkid;
+    // Spreadsheet B9: roundup(casesPerSkid - casesOnLine, 0)
+    const casesOnLastSkid = Math.ceil(
+      Math.max(0, v.casesPerSkid - casesOnLine)
+    );
 
-    // Timing (all in seconds)
-    const timePressHzSec = ppm > 0 ? 60 / v.cycleSpeed : 0;
+    // Timing — spreadsheet D5 = (60/cycleSpeed)/speedAdjustment
+    const timePressHzSec =
+      ppm > 0 ? (60 / v.cycleSpeed) / v.speedAdjustment : 0;
     const timePerTraySec =
-      ppm > 0 ? (v.doughballsPerTray / ppm) * 60 : 0;
+      ppm > 0 ? (v.doughballsPerTray / v.crustsPerCycle) * timePressHzSec : 0;
     const timePerBatchSec =
       ppm > 0 ? (v.doughBatchYield / ppm) * 60 : 0;
     const timePerSkidSec =
       ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
     const totalTimeSec =
-      ppm > 0 ? (casesActualLeft * v.pizzasPerCase * 60) / ppm : 0;
+      ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : 0;
+    // Spreadsheet: includes batchesReady dough
     const doughMadeTimeSec =
-      ppm > 0 ? (v.traysOnLine * v.doughballsPerTray * 60) / ppm : 0;
+      ppm > 0
+        ? ((v.traysOnLine * v.doughballsPerTray +
+            v.batchesReady * v.doughBatchYield) /
+            ppm) *
+          60
+        : 0;
 
     const rackTimes = [10, 12, 16, 18, 20, 22].map((n) => ({
       trays: n,
@@ -292,10 +316,12 @@ export default function Home() {
     }));
 
     // Frontline — batches = total_oz_needed / (batch_lbs * 16)
+    // Spreadsheet adds casesPerLayer as a buffer to sauce total only
     const totalPizzasRun = casesLeftToRun * v.pizzasPerCase;
+    const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer;
     const sauceBatches =
       v.sauceBarrelLbs > 0
-        ? (totalPizzasRun * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
+        ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
         : 0;
     const app1Batches =
       v.app1BatchLbs > 0
@@ -322,7 +348,7 @@ export default function Home() {
       batchesPerSkid,
       casesOnLine,
       casesLeftToRun,
-      casesActualLeft,
+      casesForTiming,
       batchesNeeded,
       traysNeeded,
       buffer,
@@ -446,8 +472,8 @@ export default function Home() {
                         />
                         <NumField
                           control={form.control}
-                          name="freezerSpeed"
-                          label="Freezer Speed (piz/min)"
+                          name="freezerTime"
+                          label="Freezer Time (min)"
                         />
                       </div>
                       <Separator className="opacity-30" />
@@ -672,10 +698,9 @@ export default function Home() {
                           testId="output-timing-ppm"
                         />
                         <StatRow
-                          label="Freezer Speed"
-                          value={fmtNum(Number(v.freezerSpeed), 1) + " piz/min"}
-                          testId="output-freezer-speed"
-                          highlight={Number(v.freezerSpeed) > 0 && calc.ppm > Number(v.freezerSpeed)}
+                          label="Freezer Time"
+                          value={fmtNum(Number(v.freezerTime), 1) + " min"}
+                          testId="output-freezer-time"
                         />
                       </CardContent>
                     </Card>
