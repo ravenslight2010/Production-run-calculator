@@ -165,6 +165,65 @@ function NumField({
   );
 }
 
+function StepperField({
+  control,
+  name,
+  label,
+  min = 0,
+  step = 1,
+}: {
+  control: any;
+  name: keyof FormValues;
+  label: string;
+  min?: number;
+  step?: number;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => {
+        const current = Number(field.value) || 0;
+        return (
+          <FormItem>
+            <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+            <FormControl>
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => field.onChange(Math.max(min, current - step))}
+                  className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
+                  data-testid={`btn-dec-${name}`}
+                >
+                  −
+                </button>
+                <input
+                  type="number"
+                  {...field}
+                  onChange={(e) =>
+                    field.onChange(e.target.value === "" ? "" : Number(e.target.value))
+                  }
+                  className="h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0"
+                  data-testid={`input-${name}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => field.onChange(current + step)}
+                  className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
+                  data-testid={`btn-inc-${name}`}
+                >
+                  +
+                </button>
+              </div>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        );
+      }}
+    />
+  );
+}
+
 export default function Home() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -537,17 +596,15 @@ export default function Home() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-5 pb-5 space-y-3">
-                      <NumField
+                      <StepperField
                         control={form.control}
                         name="skidsCompleted"
                         label="Total Skids Completed"
-                        step="1"
                       />
-                      <NumField
+                      <StepperField
                         control={form.control}
                         name="casesOnCurrentSkid"
                         label="Cases on Current Skid"
-                        step="1"
                       />
                       <NumField
                         control={form.control}
