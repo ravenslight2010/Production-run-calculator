@@ -673,9 +673,9 @@ export default function Home() {
                         />
                         <StatRow
                           label="Freezer Speed"
-                          value={fmtNum(v.freezerSpeed, 1) + " piz/min"}
+                          value={fmtNum(Number(v.freezerSpeed), 1) + " piz/min"}
                           testId="output-freezer-speed"
-                          highlight={v.freezerSpeed > 0 && calc.ppm > v.freezerSpeed}
+                          highlight={Number(v.freezerSpeed) > 0 && calc.ppm > Number(v.freezerSpeed)}
                         />
                       </CardContent>
                     </Card>
