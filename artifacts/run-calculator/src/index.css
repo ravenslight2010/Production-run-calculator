@@ -203,9 +203,23 @@
     backdrop-filter: none !important;
   }
 
-  /* Force single-column layout */
-  .grid {
+  /* Force single-column layout (tab UI only, not print report) */
+  .grid:not([data-print-report] .grid):not([data-print-report].grid) {
     display: block !important;
+  }
+
+  /* Print report grids keep their multi-column layout */
+  [data-print-report] .grid {
+    display: grid !important;
+  }
+  [data-print-report] .grid-cols-4 {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+  [data-print-report] .grid-cols-2 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  [data-print-report] .grid-cols-3 {
+    grid-template-columns: repeat(3, 1fr) !important;
   }
 
   .lg\:col-span-5,
