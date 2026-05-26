@@ -285,6 +285,7 @@ export default function Home() {
     const traysNeeded = doughDeficit / v.doughballsPerTray;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
     const doughShortCases = doughDeficit / v.pizzasPerCase;
+    const doughDepletionSec = ppm > 0 ? (doughOnHand / ppm) * 60 : 0;
 
     // Spreadsheet B9: roundup(casesPerSkid - casesOnLine, 0)
     const casesOnLastSkid = Math.ceil(
@@ -354,6 +355,7 @@ export default function Home() {
       traysNeeded,
       buffer,
       doughShortCases,
+      doughDepletionSec,
       casesOnLastSkid,
       timePressHzSec,
       timePerTraySec,
@@ -708,6 +710,22 @@ export default function Home() {
                           value={fmtTime(calc.doughMadeTimeSec)}
                           testId="output-dough-time"
                         />
+                        <div className="flex items-center justify-between py-1.5" data-testid="output-dough-depletion">
+                          <span className="text-sm text-muted-foreground">Dough Runs Out In</span>
+                          {calc.doughDepletionSec <= 0 ? (
+                            <span className="text-sm font-semibold text-muted-foreground">—</span>
+                          ) : calc.doughDepletionSec >= calc.totalTimeSec ? (
+                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
+                              <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
+                              {fmtTime(calc.doughDepletionSec)} (run covered)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                              <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
+                              {fmtTime(calc.doughDepletionSec)} (short!)
+                            </span>
+                          )}
+                        </div>
                         <StatRow
                           label="Pizzas Per Minute"
                           value={fmtNum(calc.ppm, 1)}
