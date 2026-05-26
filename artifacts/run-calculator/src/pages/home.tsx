@@ -606,13 +606,12 @@ export default function Home() {
                         name="casesOnCurrentSkid"
                         label="Cases on Current Skid"
                       />
-                      <NumField
+                      <StepperField
                         control={form.control}
                         name="traysOnLine"
                         label="Total Trays on Line"
-                        step="1"
                       />
-                      <NumField
+                      <StepperField
                         control={form.control}
                         name="batchesReady"
                         label="Batches of Dough Ready"
