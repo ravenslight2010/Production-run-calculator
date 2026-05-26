@@ -205,6 +205,13 @@ export default function Home() {
   const [runLabel, setRunLabel] = useState("");
   const [runNotes, setRunNotes] = useState("");
   const [activeTab, setActiveTab] = useState("info");
+  const [nowTime, setNowTime] = useState(() => new Date());
+  const [runToTime, setRunToTime] = useState(() => {
+    const d = new Date();
+    d.setHours(d.getHours() + 2);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
+  const [batchMixMinutes, setBatchMixMinutes] = useState(10);
 
   const { data: savedRuns, isLoading: runsLoading } = useListRuns();
   const createRun = useCreateRun({
@@ -243,6 +250,11 @@ export default function Home() {
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNowTime(new Date()), 30_000);
+    return () => clearInterval(id);
   }, []);
 
   const calc = useMemo(() => {
@@ -684,6 +696,76 @@ export default function Home() {
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* Run to Time card */}
+                {(() => {
+                  const target = new Date(nowTime);
+                  const [hrs, mins] = runToTime.split(":").map(Number);
+                  target.setHours(hrs, mins, 0, 0);
+                  if (target <= nowTime) target.setDate(target.getDate() + 1);
+                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
+                  const doughballsPossible = batchesPossible * Number(v.doughBatchYield);
+                  const casesCovered = Number(v.pizzasPerCase) > 0 ? doughballsPossible / Number(v.pizzasPerCase) : 0;
+                  const nowLabel = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+                  return (
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-0">
+                      <div className="h-1 bg-amber-500 w-full" />
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5" />
+                          Run to Time
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                          <div>
+                            <label className="text-xs text-muted-foreground block mb-1">Current Time</label>
+                            <p className="font-mono text-lg font-bold">{nowLabel}</p>
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground block mb-1">Run Until</label>
+                            <input
+                              type="time"
+                              value={runToTime}
+                              onChange={(e) => setRunToTime(e.target.value)}
+                              className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-muted-foreground block mb-1">Min / Batch</label>
+                            <input
+                              type="number"
+                              min={1}
+                              value={batchMixMinutes}
+                              onChange={(e) => setBatchMixMinutes(Math.max(1, Number(e.target.value)))}
+                              className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            />
+                          </div>
+                        </div>
+                        <Separator className="mb-4 opacity-30" />
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                          <div className="bg-muted/30 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold text-amber-400">{Math.round(minutesAvailable)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Minutes available</p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold text-primary">{batchesPossible}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Batches possible</p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold">{fmtNum(doughballsPossible, 0)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Doughballs made</p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold">{fmtNum(casesCovered, 1)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">Cases covered</p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
               </TabsContent>
 
               {/* ─── TIMING ─── */}
