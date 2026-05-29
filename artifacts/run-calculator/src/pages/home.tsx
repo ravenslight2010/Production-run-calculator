@@ -751,6 +751,10 @@ export default function Home() {
   const [flavorInput, setFlavorInput] = useState("");
   const [showBrandDrop, setShowBrandDrop] = useState(false);
   const [showFlavorDrop, setShowFlavorDrop] = useState(false);
+  const [confirmDeleteBrand, setConfirmDeleteBrand] = useState<string | null>(null);
+  const [confirmDeleteFlavor, setConfirmDeleteFlavor] = useState<string | null>(null);
+  const confirmDeleteBrandRef = useRef<string | null>(null);
+  const confirmDeleteFlavorRef = useRef<string | null>(null);
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
@@ -891,6 +895,12 @@ export default function Home() {
     return trimmed;
   }
 
+  function removeBrand(name: string) {
+    const updated = brands.filter(b => b !== name);
+    setBrands(updated);
+    saveList(BRANDS_KEY, updated);
+  }
+
   function addFlavor(name: string) {
     const trimmed = name.trim();
     if (!trimmed || flavors.includes(trimmed)) return trimmed ? trimmed : flavors[0];
@@ -898,6 +908,12 @@ export default function Home() {
     setFlavors(updated);
     saveList(FLAVORS_KEY, updated);
     return trimmed;
+  }
+
+  function removeFlavor(name: string) {
+    const updated = flavors.filter(f => f !== name);
+    setFlavors(updated);
+    saveList(FLAVORS_KEY, updated);
   }
 
   function startRun() {
@@ -1151,25 +1167,41 @@ export default function Home() {
                       }
                       if (e.key === "Escape") setShowBrandDrop(false);
                     }}
-                    onBlur={() => setTimeout(() => setShowBrandDrop(false), 150)}
+                    onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
                   />
                   {showBrandDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-40 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
                       {brands
                         .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
-                        .map((b) => (
-                          <button
-                            key={b}
-                            type="button"
-                            className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
-                            onMouseDown={() => {
-                              setRunBrandFlavor(b, currentRun?.flavor ?? "");
-                              setShowBrandDrop(false);
-                            }}
-                          >
-                            {b}
-                          </button>
-                        ))}
+                        .map((b) =>
+                          confirmDeleteBrand === b ? (
+                            <div key={b} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{b}"?</span>
+                              <span className="flex gap-1 shrink-0">
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeBrand(b); confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); setShowBrandDrop(false); }}>Yes</button>
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); }}>No</button>
+                              </span>
+                            </div>
+                          ) : (
+                            <div key={b} className="flex items-center">
+                              <button
+                                type="button"
+                                className={`flex-1 text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
+                                onMouseDown={() => { setRunBrandFlavor(b, currentRun?.flavor ?? ""); setShowBrandDrop(false); }}
+                              >
+                                {b}
+                              </button>
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
+                                onMouseDown={e => { e.stopPropagation(); confirmDeleteBrandRef.current = b; setConfirmDeleteBrand(b); }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )
+                        )}
                       {brandInput.trim() && !brands.includes(brandInput.trim()) && (
                         <button
                           type="button"
@@ -1213,25 +1245,41 @@ export default function Home() {
                       }
                       if (e.key === "Escape") setShowFlavorDrop(false);
                     }}
-                    onBlur={() => setTimeout(() => setShowFlavorDrop(false), 150)}
+                    onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
                   />
                   {showFlavorDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-40 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
                       {flavors
                         .filter((f) => f.toLowerCase().includes(flavorInput.toLowerCase()))
-                        .map((f) => (
-                          <button
-                            key={f}
-                            type="button"
-                            className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
-                            onMouseDown={() => {
-                              setRunBrandFlavor(currentRun?.brand ?? "", f);
-                              setShowFlavorDrop(false);
-                            }}
-                          >
-                            {f}
-                          </button>
-                        ))}
+                        .map((f) =>
+                          confirmDeleteFlavor === f ? (
+                            <div key={f} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{f}"?</span>
+                              <span className="flex gap-1 shrink-0">
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeFlavor(f); confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); setShowFlavorDrop(false); }}>Yes</button>
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); }}>No</button>
+                              </span>
+                            </div>
+                          ) : (
+                            <div key={f} className="flex items-center">
+                              <button
+                                type="button"
+                                className={`flex-1 text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
+                                onMouseDown={() => { setRunBrandFlavor(currentRun?.brand ?? "", f); setShowFlavorDrop(false); }}
+                              >
+                                {f}
+                              </button>
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
+                                onMouseDown={e => { e.stopPropagation(); confirmDeleteFlavorRef.current = f; setConfirmDeleteFlavor(f); }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )
+                        )}
                       {flavorInput.trim() && !flavors.includes(flavorInput.trim()) && (
                         <button
                           type="button"
