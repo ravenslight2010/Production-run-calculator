@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -223,6 +223,7 @@ const MAX_RUNS = 30;
 
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
+type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
 function runLabel(r: RunMeta) {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
@@ -380,12 +381,84 @@ export default function Home() {
   const [showBrandDrop, setShowBrandDrop] = useState(false);
   const [showFlavorDrop, setShowFlavorDrop] = useState(false);
 
+  // ── Sync refs ──────────────────────────────────────────────────────────────
+  const clientId = useRef<string>(
+    (() => {
+      let id = sessionStorage.getItem("run-calc-client-id");
+      if (!id) { id = genId(); sessionStorage.setItem("run-calc-client-id", id); }
+      return id;
+    })()
+  );
+  const dayStateRef = useRef(dayState);
+  const lastLocalEditRef = useRef(0);
+  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSyncApplyingRef = useRef(false);
+  const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
+
+  // Keep dayStateRef current
+  useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
+
+  // Update the apply-sync callback so it always captures fresh form/state refs
+  useEffect(() => {
+    applySyncCallbackRef.current = (payload: SyncPayload) => {
+      isSyncApplyingRef.current = true;
+      for (const [id, vals] of Object.entries(payload.runValues)) {
+        saveRunValues(id, vals as FormValues);
+      }
+      setDayState(prev => {
+        const newRuns = payload.dayState.runs;
+        const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
+        const newDs = { ...prev, runs: newRuns, currentIndex: newIndex };
+        saveDayState(newDs);
+        return newDs;
+      });
+      const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
+        form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
+      }
+      requestAnimationFrame(() => { isSyncApplyingRef.current = false; });
+    };
+  });
+
+  // SSE connection — receives updates from other clients
+  useEffect(() => {
+    const es = new EventSource("/api/sync/events?clientId=" + clientId.current);
+    es.onmessage = (e: MessageEvent) => {
+      try {
+        const msg = JSON.parse(e.data as string) as { data: SyncPayload | null };
+        if (msg.data) applySyncCallbackRef.current(msg.data);
+      } catch {}
+    };
+    return () => es.close();
+  }, []);
+
+  function schedulePush(ds: DayState, delay = 600) {
+    if (isSyncApplyingRef.current) return;
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+    const curId = ds.runs[ds.currentIndex]?.id;
+    pushTimerRef.current = setTimeout(() => {
+      const runValues: Record<string, FormValues> = {};
+      for (const run of ds.runs) {
+        runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
+      }
+      const payload: SyncPayload = { dayState: { runs: ds.runs }, runValues };
+      fetch("/api/sync/today", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderId: clientId.current, payload }),
+      }).catch(() => {});
+    }, delay);
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (currentRunId) {
       saveRunValues(currentRunId, v);
       if (currentRun?.brand || currentRun?.flavor) {
         saveProfile(currentRun.brand, currentRun.flavor, v);
       }
+      lastLocalEditRef.current = Date.now();
+      schedulePush(dayStateRef.current);
     }
   }, [v, currentRunId]);
 
@@ -415,6 +488,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     form.reset(DEFAULT_VALUES);
+    schedulePush(newDs, 0);
   }
 
   function setRunBrandFlavor(brand: string, flavor: string) {
@@ -434,6 +508,7 @@ export default function Home() {
     // Load profile for new brand+flavor if it exists
     const profile = loadProfile(brand, flavor);
     if (profile) form.reset(profile);
+    schedulePush(newDs, 0);
   }
 
   function addBrand(name: string) {
@@ -461,6 +536,7 @@ export default function Home() {
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
+    schedulePush(newDs, 0);
   }
 
   function endRun() {
@@ -479,6 +555,7 @@ export default function Home() {
     if (nextIndex !== dayState.currentIndex) {
       form.reset(loadRunValues(dayState.runs[nextIndex].id));
     }
+    schedulePush(newDs, 0);
   }
 
   const runStatus: "pending" | "running" | "ended" =
