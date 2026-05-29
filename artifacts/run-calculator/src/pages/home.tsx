@@ -2,13 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  useListRuns,
-  useCreateRun,
-  useDeleteRun,
-  getListRunsQueryKey,
-} from "@workspace/api-client-react";
 import {
   Factory,
   Printer,
@@ -16,11 +9,6 @@ import {
   Clock,
   Droplets,
   ClipboardList,
-  History,
-  Save,
-  Trash2,
-  X,
-  RotateCcw,
 } from "lucide-react";
 
 import {
@@ -36,13 +24,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 
 const formSchema = z.object({
   // Line settings
@@ -259,10 +240,6 @@ export default function Home() {
 
   const v = form.watch();
 
-  const queryClient = useQueryClient();
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [runLabel, setRunLabel] = useState("");
-  const [runNotes, setRunNotes] = useState("");
   const [activeTab, setActiveTab] = useState("info");
   const [nowTime, setNowTime] = useState(() => new Date());
   const [runToTime, setRunToTime] = useState(() => {
@@ -271,41 +248,6 @@ export default function Home() {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
   const [batchMixMinutes, setBatchMixMinutes] = useState(10);
-
-  const { data: savedRuns, isLoading: runsLoading } = useListRuns();
-  const createRun = useCreateRun({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRunsQueryKey() });
-        setSaveDialogOpen(false);
-        setRunLabel("");
-        setRunNotes("");
-      },
-    },
-  });
-  const deleteRun = useDeleteRun({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListRunsQueryKey() });
-      },
-    },
-  });
-
-  function handleSaveRun() {
-    createRun.mutate({
-      data: {
-        label: runLabel.trim(),
-        notes: runNotes.trim(),
-        casesNeeded: v.casesNeeded,
-        casesLeft: calc.casesLeftToRun,
-        skidsCompleted: v.skidsCompleted,
-        pizzasPerMin: calc.ppm.toFixed(2),
-        totalTimeSec: Math.round(calc.totalTimeSec),
-        batchesNeeded: calc.batchesNeeded.toFixed(2),
-        inputs: v as Record<string, unknown>,
-      },
-    });
-  }
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -483,7 +425,7 @@ export default function Home() {
         <Form {...form}>
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
-              <TabsList className="grid grid-cols-5 w-full mb-4 print:hidden">
+              <TabsList className="grid grid-cols-4 w-full mb-4 print:hidden">
                 <TabsTrigger value="info" data-testid="tab-info">
                   <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
                   Enter Info
@@ -499,15 +441,6 @@ export default function Home() {
                 <TabsTrigger value="frontline" data-testid="tab-frontline">
                   <Droplets className="w-3.5 h-3.5 mr-1.5" />
                   Frontline
-                </TabsTrigger>
-                <TabsTrigger value="history" data-testid="tab-history">
-                  <History className="w-3.5 h-3.5 mr-1.5" />
-                  History
-                  {savedRuns && savedRuns.length > 0 && (
-                    <span className="ml-1.5 text-[10px] font-bold bg-primary text-primary-foreground rounded-full px-1.5 py-0.5 leading-none">
-                      {savedRuns.length}
-                    </span>
-                  )}
                 </TabsTrigger>
               </TabsList>
 
@@ -640,16 +573,6 @@ export default function Home() {
                         value={fmtNum(calc.ppm, 1)}
                         testId="output-ppm"
                       />
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="w-full mt-4 flex items-center gap-2"
-                        onClick={() => setSaveDialogOpen(true)}
-                        data-testid="button-save-run"
-                      >
-                        <Save className="w-3.5 h-3.5" />
-                        Save This Run
-                      </Button>
                     </div>
                   </Card>
                 </div>
@@ -1079,101 +1002,6 @@ export default function Home() {
                 </div>
               </TabsContent>
 
-              {/* ─── HISTORY ─── */}
-              <TabsContent value="history">
-                <Card className="bg-card/50 border-border/50 shadow-md">
-                  <CardHeader className="pb-2 pt-4 px-5">
-                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                      Saved Runs
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-5 pb-5">
-                    {runsLoading ? (
-                      <p className="text-sm text-muted-foreground py-6 text-center">
-                        Loading…
-                      </p>
-                    ) : !savedRuns || savedRuns.length === 0 ? (
-                      <div className="text-center py-10 space-y-2">
-                        <History className="w-8 h-8 text-muted-foreground/40 mx-auto" />
-                        <p className="text-sm text-muted-foreground">
-                          No saved runs yet. Hit "Save This Run" on the Enter Info tab.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {savedRuns.map((run) => (
-                          <div
-                            key={run.id}
-                            className="flex items-center gap-4 p-3 rounded-md border border-border/50 bg-background/40 hover:bg-background/70 transition-colors"
-                            data-testid={`run-row-${run.id}`}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="font-semibold text-sm truncate">
-                                {run.label || (
-                                  <span className="text-muted-foreground italic">Unnamed run</span>
-                                )}
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {new Date(run.createdAt).toLocaleString()}
-                              </p>
-                              {run.notes && (
-                                <p className="text-xs text-muted-foreground/80 mt-1 italic line-clamp-2" data-testid={`run-notes-${run.id}`}>
-                                  {run.notes}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-4 text-right shrink-0">
-                              <div>
-                                <p className="text-xs text-muted-foreground">Cases Left</p>
-                                <p className="font-mono font-semibold text-sm text-primary" data-testid={`run-cases-${run.id}`}>
-                                  {run.casesLeft}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">Time Left</p>
-                                <p className="font-mono font-semibold text-sm" data-testid={`run-time-${run.id}`}>
-                                  {fmtTime(run.totalTimeSec)}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground">Piz/Min</p>
-                                <p className="font-mono font-semibold text-sm" data-testid={`run-ppm-${run.id}`}>
-                                  {parseFloat(run.pizzasPerMin).toFixed(1)}
-                                </p>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-primary hover:text-primary hover:bg-primary/10 px-2"
-                                onClick={() => {
-                                  form.reset(run.inputs as FormValues);
-                                  setActiveTab("info");
-                                }}
-                                data-testid={`button-load-run-${run.id}`}
-                                title="Load this run"
-                              >
-                                <RotateCcw className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive hover:bg-destructive/10 px-2"
-                                onClick={() => deleteRun.mutate({ id: run.id })}
-                                data-testid={`button-delete-run-${run.id}`}
-                                title="Delete this run"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
             </Tabs>
           </form>
         </Form>
@@ -1310,76 +1138,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ─── SAVE DIALOG ─── */}
-        <Dialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Save Run</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <label className="text-sm text-muted-foreground">
-                  Run label <span className="text-xs">(optional)</span>
-                </label>
-                <Input
-                  placeholder="e.g. Monday AM shift, Order #4821…"
-                  value={runLabel}
-                  onChange={(e) => setRunLabel(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSaveRun()}
-                  data-testid="input-run-label"
-                  autoFocus
-                />
-              </div>
-              <div className="rounded-md bg-muted/40 border border-border/40 p-3 space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Cases left</span>
-                  <span className="font-mono font-semibold">{fmtNum(calc.casesLeftToRun, 0)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Time left</span>
-                  <span className="font-mono font-semibold">{fmtTime(calc.totalTimeSec)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Pizzas/min</span>
-                  <span className="font-mono font-semibold">{fmtNum(calc.ppm, 1)}</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-muted-foreground">
-                  Notes <span className="text-xs">(optional)</span>
-                </label>
-                <textarea
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
-                  rows={3}
-                  placeholder="e.g. Line ran slow, batch had issues…"
-                  value={runNotes}
-                  onChange={(e) => setRunNotes(e.target.value)}
-                  data-testid="input-run-notes"
-                />
-              </div>
-            </div>
-            <DialogFooter className="gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSaveDialogOpen(false)}
-                data-testid="button-cancel-save"
-              >
-                <X className="w-4 h-4 mr-1.5" />
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={handleSaveRun}
-                disabled={createRun.isPending}
-                data-testid="button-confirm-save"
-              >
-                <Save className="w-4 h-4 mr-1.5" />
-                {createRun.isPending ? "Saving…" : "Save Run"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
     </div>
   );
