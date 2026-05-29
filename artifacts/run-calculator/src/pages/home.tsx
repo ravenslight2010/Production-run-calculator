@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
   Factory,
-  Printer,
   Layers,
   Clock,
   Droplets,
@@ -1386,22 +1385,6 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              document.body.setAttribute(
-                "data-print-date",
-                new Date().toLocaleString()
-              );
-              window.print();
-            }}
-            className="print:hidden flex items-center gap-2"
-            data-testid="button-export-pdf"
-          >
-            <Printer className="w-4 h-4" />
-            Export PDF
-          </Button>
         </header>
 
         <Form {...form}>
@@ -2125,137 +2108,6 @@ export default function Home() {
           </form>
         </Form>
 
-        {/* ─── PRINT REPORT (hidden in browser, shown on print) ─── */}
-        <div className="hidden print:block text-[11pt] space-y-5" data-print-report>
-
-          {/* Summary bar */}
-          <div className="grid grid-cols-4 gap-3 border border-border/60 rounded p-3 bg-card/30">
-            <div>
-              <p className="text-[8pt] uppercase tracking-wider text-muted-foreground">Cases Needed</p>
-              <p className="font-mono font-bold text-lg">{v.casesNeeded}</p>
-            </div>
-            <div>
-              <p className="text-[8pt] uppercase tracking-wider text-muted-foreground">Cases Left to Run</p>
-              <p className="font-mono font-bold text-lg text-primary">{fmtNum(calc.casesLeftToRun, 0)}</p>
-            </div>
-            <div>
-              <p className="text-[8pt] uppercase tracking-wider text-muted-foreground">Time Left</p>
-              <p className="font-mono font-bold text-lg text-primary">{fmtTime(calc.totalTimeSec)}</p>
-            </div>
-            <div>
-              <p className="text-[8pt] uppercase tracking-wider text-muted-foreground">Pizzas / Min</p>
-              <p className="font-mono font-bold text-lg">{fmtNum(calc.ppm, 1)}</p>
-            </div>
-          </div>
-
-          {/* Inputs */}
-          <div>
-            <h2 className="text-[8pt] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border/50 pb-1 mb-2">Line Settings</h2>
-            <div className="grid grid-cols-4 gap-x-6 gap-y-1">
-              {[
-                ["Cases Needed", v.casesNeeded],
-                ["Crusts / Cycle", v.crustsPerCycle],
-                ["Cycle Speed (cyc/min)", v.cycleSpeed],
-                ["Speed Adjustment", v.speedAdjustment],
-                ["Freezer Time (min)", v.freezerTime],
-                ["Pizzas / Case", v.pizzasPerCase],
-                ["Cases / Skid", v.casesPerSkid],
-                ["Cases / Layer", v.casesPerLayer],
-                ["Doughballs / Tray", v.doughballsPerTray],
-                ["Dough Batch Yield", v.doughBatchYield],
-                ["Skids Completed", v.skidsCompleted],
-                ["Cases on Current Skid", v.casesOnCurrentSkid],
-                ["Trays on Line", v.traysOnLine],
-                ["Batches Ready", v.batchesReady],
-              ].map(([label, val]) => (
-                <div key={String(label)} className="flex justify-between text-[9pt] py-0.5">
-                  <span className="text-muted-foreground">{label}</span>
-                  <span className="font-mono font-semibold">{val}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-5">
-            {/* Dough */}
-            <div>
-              <h2 className="text-[8pt] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border/50 pb-1 mb-2">Dough</h2>
-              <div className="space-y-0.5">
-                {[
-                  ["Batches to Mix", fmtNum(calc.batchesNeeded, 2)],
-                  ["Trays Needed", fmtNum(calc.traysNeeded, 0)],
-                  ["Cases on Line", fmtNum(calc.casesOnLine, 0)],
-                  ["Cases on Last Skid", fmtNum(calc.casesOnLastSkid, 0)],
-                  ["Trays / Skid", fmtNum(calc.traysPerSkid, 2)],
-                  ["Trays / Batch", fmtNum(calc.traysPerBatch, 2)],
-                  ["Batches / Skid", fmtNum(calc.batchesPerSkid, 2)],
-                ].map(([label, val]) => (
-                  <div key={String(label)} className="flex justify-between text-[9pt] py-0.5 border-b border-border/20">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono font-semibold">{val}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between text-[9pt] py-0.5 border-b border-border/20">
-                  <span className="text-muted-foreground">Dough Status</span>
-                  <span className={`font-semibold ${calc.doughShortCases > 0 ? "text-red-600" : "text-green-700"}`}>
-                    {calc.doughShortCases > 0
-                      ? `SHORT ${fmtNum(calc.doughShortCases, 1)} cases`
-                      : calc.buffer > 0
-                      ? `+${fmtNum(calc.buffer, 1)} cases ahead`
-                      : "Balanced"}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Timing */}
-            <div>
-              <h2 className="text-[8pt] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border/50 pb-1 mb-2">Timing</h2>
-              <div className="space-y-0.5">
-                {[
-                  ["Total Time Left", fmtTime(calc.totalTimeSec)],
-                  ["Time for Dough to Clear", fmtTime(calc.doughMadeTimeSec)],
-                  ["Dough Runs Out In", calc.doughDepletionSec > 0 ? fmtTime(calc.doughDepletionSec) : "—"],
-                  ["Time / Press Cycle", fmtNum(calc.timePressHzSec, 2) + "s"],
-                  ["Time / Tray", fmtTime(calc.timePerTraySec)],
-                  ["Time / Batch", fmtTime(calc.timePerBatchSec)],
-                  ["Time / Skid", fmtTime(calc.timePerSkidSec)],
-                ].map(([label, val]) => (
-                  <div key={String(label)} className="flex justify-between text-[9pt] py-0.5 border-b border-border/20">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="font-mono font-semibold">{val}</span>
-                  </div>
-                ))}
-                {calc.rackTimes.map(({ trays, sec }) => (
-                  <div key={trays} className="flex justify-between text-[9pt] py-0.5 border-b border-border/20">
-                    <span className="text-muted-foreground">{trays}-Tray Rack</span>
-                    <span className="font-mono font-semibold">{fmtTime(sec)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Frontline */}
-          <div>
-            <h2 className="text-[8pt] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border/50 pb-1 mb-2">Frontline Batches</h2>
-            <div className="grid grid-cols-3 gap-x-6">
-              {[
-                ["Sauce", fmtNum(calc.sauceBatches, 2) + " batches"],
-                ["Applicator 1", fmtNum(calc.app1Batches, 2) + " batches"],
-                ["Applicator 2", fmtNum(calc.app2Batches, 2) + " batches"],
-                ["Applicator 3", fmtNum(calc.app3Batches, 2) + " batches"],
-                ["Applicator 4", fmtNum(calc.app4Batches, 2) + " batches"],
-                ["Pepperoni", fmtNum(calc.pepLbs, 2) + " lbs"],
-              ].map(([label, val]) => (
-                <div key={String(label)} className="flex justify-between text-[9pt] py-0.5 border-b border-border/20">
-                  <span className="text-muted-foreground">{label}</span>
-                  <span className="font-mono font-semibold">{val}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
       </div>
     </div>
