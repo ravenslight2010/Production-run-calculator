@@ -11,6 +11,7 @@ import {
   ClipboardList,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Plus,
   Pencil,
   Check,
@@ -62,6 +63,11 @@ const formSchema = z.object({
   app4OzPerPizza: z.coerce.number().min(0).default(4),
   app4BatchLbs: z.coerce.number().min(0.1).default(55),
   pepOzPerPizza: z.coerce.number().min(0).default(0),
+  // Applicator ingredient labels
+  app1Type: z.string().default(""),
+  app2Type: z.string().default(""),
+  app3Type: z.string().default(""),
+  app4Type: z.string().default(""),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -112,6 +118,86 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
       {children}
     </p>
+  );
+}
+
+function TypeDropdown({
+  label,
+  value,
+  onChange,
+  options,
+  onAddOption,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  onAddOption: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [inputVal, setInputVal] = useState("");
+  const filtered = options.filter(o =>
+    o.toLowerCase().includes(inputVal.toLowerCase())
+  );
+  return (
+    <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
+      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        {label}
+      </p>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => { setInputVal(""); setOpen(true); }}
+          className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
+        >
+          <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
+            {value || "Select…"}
+          </span>
+          <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+        </button>
+        {open && (
+          <div className="absolute z-50 top-full mt-1 right-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1">
+            <input
+              autoFocus
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && inputVal.trim()) {
+                  onAddOption(inputVal.trim());
+                  onChange(inputVal.trim());
+                  setOpen(false);
+                }
+                if (e.key === "Escape") setOpen(false);
+              }}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              placeholder="Search or add…"
+              className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
+            />
+            <div className="max-h-48 overflow-y-auto">
+              {filtered.map(opt => (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
+                  onMouseDown={() => { onChange(opt); setOpen(false); }}
+                >
+                  {opt}
+                </button>
+              ))}
+              {inputVal.trim() && !options.includes(inputVal.trim()) && (
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                  onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
+                >
+                  <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -214,6 +300,11 @@ function StepperField({
 }
 
 const DAY_KEY = "run-calc-day";
+const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
+const DEFAULT_INGREDIENT_TYPES = [
+  "Cheese", "Mozzarella", "Cheddar", "Pepperoni", "Sausage",
+  "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
+];
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
@@ -283,6 +374,10 @@ const DEFAULT_VALUES: FormValues = {
   app4OzPerPizza: 4,
   app4BatchLbs: 55,
   pepOzPerPizza: 0,
+  app1Type: "",
+  app2Type: "",
+  app3Type: "",
+  app4Type: "",
 };
 
 function genId(): string {
@@ -355,6 +450,17 @@ export default function Home() {
   const [flavors, setFlavors] = useState<string[]>(() =>
     loadList(FLAVORS_KEY, ["Cheese"])
   );
+  const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
+    loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)
+  );
+
+  function addIngredientType(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || ingredientTypes.includes(trimmed)) return;
+    const updated = [...ingredientTypes, trimmed];
+    setIngredientTypes(updated);
+    saveList(INGREDIENT_TYPES_KEY, updated);
+  }
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -1439,7 +1545,13 @@ export default function Home() {
                         />
                       </div>
 
-                      <SectionLabel>Applicator 1</SectionLabel>
+                      <TypeDropdown
+                        label="Applicator 1"
+                        value={v.app1Type}
+                        onChange={val => form.setValue("app1Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
@@ -1453,7 +1565,13 @@ export default function Home() {
                         />
                       </div>
 
-                      <SectionLabel>Applicator 2</SectionLabel>
+                      <TypeDropdown
+                        label="Applicator 2"
+                        value={v.app2Type}
+                        onChange={val => form.setValue("app2Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
@@ -1467,7 +1585,13 @@ export default function Home() {
                         />
                       </div>
 
-                      <SectionLabel>Applicator 3</SectionLabel>
+                      <TypeDropdown
+                        label="Applicator 3"
+                        value={v.app3Type}
+                        onChange={val => form.setValue("app3Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
@@ -1481,7 +1605,13 @@ export default function Home() {
                         />
                       </div>
 
-                      <SectionLabel>Applicator 4</SectionLabel>
+                      <TypeDropdown
+                        label="Applicator 4"
+                        value={v.app4Type}
+                        onChange={val => form.setValue("app4Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
@@ -1530,25 +1660,25 @@ export default function Home() {
                         highlight={calc.sauceBatches > 0}
                       />
                       <StatRow
-                        label="Applicator 1"
+                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
                         value={fmtNum(calc.app1Batches, 2) + " batches"}
                         testId="output-app1-batches"
                         highlight={calc.app1Batches > 0}
                       />
                       <StatRow
-                        label="Applicator 2"
+                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
                         value={fmtNum(calc.app2Batches, 2) + " batches"}
                         testId="output-app2-batches"
                         highlight={calc.app2Batches > 0}
                       />
                       <StatRow
-                        label="Applicator 3"
+                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
                         value={fmtNum(calc.app3Batches, 2) + " batches"}
                         testId="output-app3-batches"
                         highlight={calc.app3Batches > 0}
                       />
                       <StatRow
-                        label="Applicator 4"
+                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
                         value={fmtNum(calc.app4Batches, 2) + " batches"}
                         testId="output-app4-batches"
                         highlight={calc.app4Batches > 0}
