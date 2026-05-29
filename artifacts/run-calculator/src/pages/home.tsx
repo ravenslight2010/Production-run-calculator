@@ -146,6 +146,7 @@ function IngredientSelect({
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const confirmDeleteRef = useRef<string | null>(null);
   const filtered = (options ?? []).filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -153,7 +154,7 @@ function IngredientSelect({
     <div className="relative w-full">
       <button
         type="button"
-        onClick={() => { setInputVal(""); setConfirmDelete(null); setOpen(true); }}
+        onClick={() => { setInputVal(""); setConfirmDelete(null); confirmDeleteRef.current = null; setOpen(true); }}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
@@ -175,7 +176,7 @@ function IngredientSelect({
               }
               if (e.key === "Escape") setOpen(false);
             }}
-            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
             placeholder="Search or add…"
             className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
           />
@@ -185,8 +186,8 @@ function IngredientSelect({
                 <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                   <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                   <span className="flex gap-1 shrink-0">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); setConfirmDelete(null); }}>Yes</button>
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => setConfirmDelete(null)}>No</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
                   </span>
                 </div>
               ) : (
@@ -202,7 +203,7 @@ function IngredientSelect({
                     type="button"
                     tabIndex={-1}
                     className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                    onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
+                    onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -363,6 +364,7 @@ function TypeDropdown({
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const confirmDeleteRef = useRef<string | null>(null);
   const filtered = options.filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -374,7 +376,7 @@ function TypeDropdown({
       <div className="relative">
         <button
           type="button"
-          onClick={() => { setInputVal(""); setConfirmDelete(null); setOpen(true); }}
+          onClick={() => { setInputVal(""); setConfirmDelete(null); confirmDeleteRef.current = null; setOpen(true); }}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
@@ -396,7 +398,7 @@ function TypeDropdown({
                 }
                 if (e.key === "Escape") setOpen(false);
               }}
-              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              onBlur={() => setTimeout(() => { if (!confirmDeleteRef.current) setOpen(false); }, 150)}
               placeholder="Search or add…"
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
@@ -406,8 +408,8 @@ function TypeDropdown({
                   <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                     <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                     <span className="flex gap-1 shrink-0">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); setConfirmDelete(null); }}>Yes</button>
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => setConfirmDelete(null)}>No</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
                     </span>
                   </div>
                 ) : (
@@ -423,7 +425,7 @@ function TypeDropdown({
                       type="button"
                       tabIndex={-1}
                       className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                      onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
+                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
                     >
                       <X className="w-3 h-3" />
                     </button>
