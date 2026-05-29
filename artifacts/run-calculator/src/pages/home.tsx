@@ -1332,22 +1332,6 @@ export default function Home() {
                 <div className="w-16" />
               )}
 
-              {/* Count + New Run */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  <Plus className="w-3 h-3" />
-                  New Run
-                </Button>
-              </div>
-
               {/* Upcoming */}
               {dayState.currentIndex < dayState.runs.length - 1 ? (
                 <button
@@ -1364,6 +1348,22 @@ export default function Home() {
               ) : (
                 <div className="w-16" />
               )}
+
+              {/* Count + New Run */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Plus className="w-3 h-3" />
+                  New Run
+                </Button>
+              </div>
             </div>
           </div>
         </div>
