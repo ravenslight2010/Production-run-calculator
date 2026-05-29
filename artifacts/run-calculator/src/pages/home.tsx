@@ -449,12 +449,21 @@ export default function Home() {
   }
 
   function endRun() {
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex ? { ...r, endedAt: Date.now() } : r
     );
-    const newDs = { ...dayState, runs: newRuns };
+    const nextIndex = dayState.currentIndex + 1 < dayState.runs.length
+      ? dayState.currentIndex + 1
+      : dayState.currentIndex;
+    const newDs = { ...dayState, runs: newRuns, currentIndex: nextIndex };
     setDayState(newDs);
     saveDayState(newDs);
+    if (nextIndex !== dayState.currentIndex) {
+      form.reset(loadRunValues(dayState.runs[nextIndex].id));
+    }
   }
 
   const runStatus: "pending" | "running" | "ended" =
@@ -780,7 +789,7 @@ export default function Home() {
                     onClick={endRun}
                     className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
                   >
-                    <Square className="w-3 h-3 fill-current" /> End Run
+                    <Square className="w-3 h-3 fill-current" /> Stop Run
                   </button>
                 </>
               )}
