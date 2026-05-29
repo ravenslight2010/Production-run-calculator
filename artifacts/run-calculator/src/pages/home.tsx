@@ -222,7 +222,7 @@ const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
 
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number };
-type DayState = { runs: RunMeta[]; currentIndex: number };
+type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 
 function runLabel(r: RunMeta) {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
@@ -288,25 +288,40 @@ function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function freshDayState(): DayState {
+  return { runs: [{ id: genId(), brand: "Lucia's", flavor: "Cheese" }], currentIndex: 0, date: todayStr() };
+}
+
 function loadDayState(): DayState {
   try {
     const raw = localStorage.getItem(DAY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DayState;
+      // Reset if stored date doesn't match today
+      if (parsed.date && parsed.date !== todayStr()) {
+        return freshDayState();
+      }
       // Migrate old shape { id, label } → { id, brand, flavor }
       const runs = parsed.runs.map((r: any) => ({
         id: r.id,
         brand: r.brand ?? (r.label ?? ""),
         flavor: r.flavor ?? "",
+        startedAt: r.startedAt,
+        endedAt: r.endedAt,
       }));
-      return { ...parsed, runs };
+      return { ...parsed, runs, date: parsed.date ?? todayStr() };
     }
   } catch {}
-  return { runs: [{ id: genId(), brand: "Lucia's", flavor: "Cheese" }], currentIndex: 0 };
+  return freshDayState();
 }
 
 function saveDayState(ds: DayState): void {
-  try { localStorage.setItem(DAY_KEY, JSON.stringify(ds)); } catch {}
+  try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...ds, date: todayStr() })); } catch {}
 }
 
 function loadRunValues(id: string): FormValues {
@@ -483,6 +498,28 @@ export default function Home() {
   useEffect(() => {
     const id = setInterval(() => setNowTime(new Date()), 10_000);
     return () => clearInterval(id);
+  }, []);
+
+  // Reset all runs at midnight
+  useEffect(() => {
+    function msUntilMidnight() {
+      const now = new Date();
+      const midnight = new Date(now);
+      midnight.setHours(24, 0, 0, 0);
+      return midnight.getTime() - now.getTime();
+    }
+    let timeout: ReturnType<typeof setTimeout>;
+    function scheduleReset() {
+      timeout = setTimeout(() => {
+        const fresh = freshDayState();
+        setDayState(fresh);
+        saveDayState(fresh);
+        form.reset(DEFAULT_VALUES);
+        scheduleReset();
+      }, msUntilMidnight());
+    }
+    scheduleReset();
+    return () => clearTimeout(timeout);
   }, []);
 
   const calc = useMemo(() => {
