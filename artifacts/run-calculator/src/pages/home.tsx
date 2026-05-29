@@ -550,8 +550,12 @@ function StepperField({
 const DAY_KEY = "run-calc-day";
 const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
 const DEFAULT_INGREDIENT_TYPES = [
-  "Cheese", "Mozzarella", "Cheddar", "Pepperoni", "Sausage",
+  "Cheese", "Pepperoni", "Sausage",
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
+];
+const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
+const DEFAULT_CHEESE_INGREDIENTS = [
+  "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
 ];
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
@@ -719,6 +723,24 @@ export default function Home() {
     const updated = ingredientTypes.filter(t => t !== name);
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+  }
+
+  const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
+    loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)
+  );
+
+  function addCheeseIngredient(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || cheeseIngredients.includes(trimmed)) return;
+    const updated = [...cheeseIngredients, trimmed];
+    setCheeseIngredients(updated);
+    saveList(CHEESE_INGREDIENTS_KEY, updated);
+  }
+
+  function removeCheeseIngredient(name: string) {
+    const updated = cheeseIngredients.filter(t => t !== name);
+    setCheeseIngredients(updated);
+    saveList(CHEESE_INGREDIENTS_KEY, updated);
   }
 
   const form = useForm<FormValues>({
@@ -2043,9 +2065,9 @@ export default function Home() {
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={ingredientTypes}
-                    onAddIngredient={addIngredientType}
-                    onRemoveIngredient={removeIngredientType}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese1}
@@ -2059,9 +2081,9 @@ export default function Home() {
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={ingredientTypes}
-                    onAddIngredient={addIngredientType}
-                    onRemoveIngredient={removeIngredientType}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese2}
@@ -2075,9 +2097,9 @@ export default function Home() {
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={ingredientTypes}
-                    onAddIngredient={addIngredientType}
-                    onRemoveIngredient={removeIngredientType}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese3}
@@ -2091,9 +2113,9 @@ export default function Home() {
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={ingredientTypes}
-                    onAddIngredient={addIngredientType}
-                    onRemoveIngredient={removeIngredientType}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese4}
