@@ -212,10 +212,46 @@ function StepperField({
 
 const DAY_KEY = "run-calc-day";
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+const PROFILE_KEY = (brand: string, flavor: string) =>
+  `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+const BRANDS_KEY = "run-calc-brands";
+const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; label: string };
+type RunMeta = { id: string; brand: string; flavor: string };
 type DayState = { runs: RunMeta[]; currentIndex: number };
+
+function runLabel(r: RunMeta) {
+  if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
+  if (r.brand) return r.brand;
+  if (r.flavor) return r.flavor;
+  return "Unnamed Run";
+}
+
+function loadList(key: string, fallback: string[]): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as string[];
+  } catch {}
+  return fallback;
+}
+
+function saveList(key: string, list: string[]): void {
+  try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+}
+
+function loadProfile(brand: string, flavor: string): FormValues | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
+  } catch {}
+  return null;
+}
+
+function saveProfile(brand: string, flavor: string, values: FormValues): void {
+  if (!brand && !flavor) return;
+  try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(values)); } catch {}
+}
 
 const DEFAULT_VALUES: FormValues = {
   casesNeeded: 384,
@@ -252,9 +288,18 @@ function genId(): string {
 function loadDayState(): DayState {
   try {
     const raw = localStorage.getItem(DAY_KEY);
-    if (raw) return JSON.parse(raw) as DayState;
+    if (raw) {
+      const parsed = JSON.parse(raw) as DayState;
+      // Migrate old shape { id, label } → { id, brand, flavor }
+      const runs = parsed.runs.map((r: any) => ({
+        id: r.id,
+        brand: r.brand ?? (r.label ?? ""),
+        flavor: r.flavor ?? "",
+      }));
+      return { ...parsed, runs };
+    }
   } catch {}
-  return { runs: [{ id: genId(), label: "Run 1" }], currentIndex: 0 };
+  return { runs: [{ id: genId(), brand: "Lucia's", flavor: "Cheese" }], currentIndex: 0 };
 }
 
 function saveDayState(ds: DayState): void {
@@ -285,6 +330,13 @@ export default function Home() {
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
 
+  const [brands, setBrands] = useState<string[]>(() =>
+    loadList(BRANDS_KEY, ["Lucia's"])
+  );
+  const [flavors, setFlavors] = useState<string[]>(() =>
+    loadList(FLAVORS_KEY, ["Cheese"])
+  );
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: (() => {
@@ -304,47 +356,85 @@ export default function Home() {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
   const [batchMixMinutes, setBatchMixMinutes] = useState(10);
-  const [editingLabel, setEditingLabel] = useState(false);
-  const [labelDraft, setLabelDraft] = useState("");
+
+  // Brand/flavor picker state
+  const [brandInput, setBrandInput] = useState("");
+  const [flavorInput, setFlavorInput] = useState("");
+  const [showBrandDrop, setShowBrandDrop] = useState(false);
+  const [showFlavorDrop, setShowFlavorDrop] = useState(false);
 
   useEffect(() => {
-    if (currentRunId) saveRunValues(currentRunId, v);
+    if (currentRunId) {
+      saveRunValues(currentRunId, v);
+      if (currentRun?.brand || currentRun?.flavor) {
+        saveProfile(currentRun.brand, currentRun.flavor, v);
+      }
+    }
   }, [v, currentRunId]);
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
-    saveRunValues(currentRunId, form.getValues());
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
     const newId = dayState.runs[newIndex].id;
     const newDs = { ...dayState, currentIndex: newIndex };
     setDayState(newDs);
     saveDayState(newDs);
     form.reset(loadRunValues(newId));
-    setEditingLabel(false);
   }
 
   function addRun() {
     if (dayState.runs.length >= MAX_RUNS) return;
-    saveRunValues(currentRunId, form.getValues());
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
     const newId = genId();
     const newIndex = dayState.runs.length;
     const newDs = {
-      runs: [...dayState.runs, { id: newId, label: `Run ${newIndex + 1}` }],
+      runs: [...dayState.runs, { id: newId, brand: "", flavor: "" }],
       currentIndex: newIndex,
     };
     setDayState(newDs);
     saveDayState(newDs);
     form.reset(DEFAULT_VALUES);
-    setEditingLabel(false);
   }
 
-  function renameCurrentRun(newLabel: string) {
-    if (!newLabel.trim()) return;
+  function setRunBrandFlavor(brand: string, flavor: string) {
+    // Save current values to old profile
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+
+    // Update run meta
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, label: newLabel.trim() } : r
+      i === dayState.currentIndex ? { ...r, brand, flavor } : r
     );
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
     saveDayState(newDs);
+
+    // Load profile for new brand+flavor if it exists
+    const profile = loadProfile(brand, flavor);
+    if (profile) form.reset(profile);
+  }
+
+  function addBrand(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || brands.includes(trimmed)) return trimmed ? trimmed : brands[0];
+    const updated = [...brands, trimmed];
+    setBrands(updated);
+    saveList(BRANDS_KEY, updated);
+    return trimmed;
+  }
+
+  function addFlavor(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || flavors.includes(trimmed)) return trimmed ? trimmed : flavors[0];
+    const updated = [...flavors, trimmed];
+    setFlavors(updated);
+    saveList(FLAVORS_KEY, updated);
+    return trimmed;
   }
 
   useEffect(() => {
@@ -488,56 +578,155 @@ export default function Home() {
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto space-y-5">
         {/* ─── RUN SELECTOR ─── */}
-        <div className="flex items-center gap-3 print:hidden bg-card/40 border border-border/50 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 print:hidden bg-card/40 border border-border/50 rounded-lg px-3 py-2.5">
+
           {/* Previous run */}
           <div className="flex-1 flex justify-end min-w-0">
             {dayState.currentIndex > 0 ? (
               <button
                 type="button"
                 onClick={() => switchToRun(dayState.currentIndex - 1)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[160px] w-full justify-end"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[180px] w-full justify-end"
               >
                 <ChevronLeft className="w-4 h-4 shrink-0" />
                 <div className="text-right min-w-0">
                   <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Previous</div>
-                  <div className="font-medium text-xs truncate">{dayState.runs[dayState.currentIndex - 1].label}</div>
+                  <div className="font-medium text-xs truncate">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
                 </div>
               </button>
             ) : (
-              <div className="w-full max-w-[160px]" />
+              <div className="w-full max-w-[180px]" />
             )}
           </div>
 
-          {/* Current run */}
-          <div className="flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-md bg-primary/15 border border-primary/30 shrink-0 min-w-[140px]">
-            <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current</div>
-            {editingLabel ? (
-              <div className="flex items-center gap-1">
-                <input
-                  autoFocus
-                  value={labelDraft}
-                  onChange={(e) => setLabelDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { renameCurrentRun(labelDraft); setEditingLabel(false); }
-                    if (e.key === "Escape") setEditingLabel(false);
-                  }}
-                  onBlur={() => { renameCurrentRun(labelDraft); setEditingLabel(false); }}
-                  className="bg-transparent border-b border-primary text-sm font-semibold text-center outline-none w-24"
-                />
-                <button type="button" onMouseDown={(e) => { e.preventDefault(); renameCurrentRun(labelDraft); setEditingLabel(false); }}>
-                  <Check className="w-3.5 h-3.5 text-primary" />
-                </button>
+          {/* Current run — brand + flavor pickers */}
+          <div className="flex flex-col items-center gap-2 px-4 py-2 rounded-md bg-primary/15 border border-primary/30 shrink-0">
+            <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current Run</div>
+            <div className="flex items-center gap-2">
+
+              {/* Brand picker */}
+              <div className="relative">
+                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Brand</div>
+                <div className="relative">
+                  <input
+                    value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
+                    placeholder="Brand…"
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showBrandDrop}
+                    onClick={() => {
+                      setBrandInput(currentRun?.brand ?? "");
+                      setShowBrandDrop(true);
+                      setShowFlavorDrop(false);
+                    }}
+                    onChange={(e) => setBrandInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const b = addBrand(brandInput);
+                        setRunBrandFlavor(b, currentRun?.flavor ?? "");
+                        setShowBrandDrop(false);
+                      }
+                      if (e.key === "Escape") setShowBrandDrop(false);
+                    }}
+                    onBlur={() => setTimeout(() => setShowBrandDrop(false), 150)}
+                  />
+                  {showBrandDrop && (
+                    <div className="absolute z-50 top-full mt-1 left-0 w-40 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                      {brands
+                        .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
+                        .map((b) => (
+                          <button
+                            key={b}
+                            type="button"
+                            className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
+                            onMouseDown={() => {
+                              setRunBrandFlavor(b, currentRun?.flavor ?? "");
+                              setShowBrandDrop(false);
+                            }}
+                          >
+                            {b}
+                          </button>
+                        ))}
+                      {brandInput.trim() && !brands.includes(brandInput.trim()) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                          onMouseDown={() => {
+                            const b = addBrand(brandInput);
+                            setRunBrandFlavor(b, currentRun?.flavor ?? "");
+                            setShowBrandDrop(false);
+                          }}
+                        >
+                          <Plus className="w-3 h-3" /> Add "{brandInput.trim()}"
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            ) : (
-              <button
-                type="button"
-                className="flex items-center gap-1 text-sm font-semibold hover:text-primary transition-colors"
-                onClick={() => { setLabelDraft(currentRun.label); setEditingLabel(true); }}
-              >
-                <span>{currentRun.label}</span>
-                <Pencil className="w-2.5 h-2.5 text-muted-foreground/50" />
-              </button>
-            )}
+
+              <div className="text-muted-foreground/40 text-lg font-light">–</div>
+
+              {/* Flavor picker */}
+              <div className="relative">
+                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Flavor</div>
+                <div className="relative">
+                  <input
+                    value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
+                    placeholder="Flavor…"
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showFlavorDrop}
+                    onClick={() => {
+                      setFlavorInput(currentRun?.flavor ?? "");
+                      setShowFlavorDrop(true);
+                      setShowBrandDrop(false);
+                    }}
+                    onChange={(e) => setFlavorInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const f = addFlavor(flavorInput);
+                        setRunBrandFlavor(currentRun?.brand ?? "", f);
+                        setShowFlavorDrop(false);
+                      }
+                      if (e.key === "Escape") setShowFlavorDrop(false);
+                    }}
+                    onBlur={() => setTimeout(() => setShowFlavorDrop(false), 150)}
+                  />
+                  {showFlavorDrop && (
+                    <div className="absolute z-50 top-full mt-1 left-0 w-40 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                      {flavors
+                        .filter((f) => f.toLowerCase().includes(flavorInput.toLowerCase()))
+                        .map((f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            className={`w-full text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
+                            onMouseDown={() => {
+                              setRunBrandFlavor(currentRun?.brand ?? "", f);
+                              setShowFlavorDrop(false);
+                            }}
+                          >
+                            {f}
+                          </button>
+                        ))}
+                      {flavorInput.trim() && !flavors.includes(flavorInput.trim()) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                          onMouseDown={() => {
+                            const f = addFlavor(flavorInput);
+                            setRunBrandFlavor(currentRun?.brand ?? "", f);
+                            setShowFlavorDrop(false);
+                          }}
+                        >
+                          <Plus className="w-3 h-3" /> Add "{flavorInput.trim()}"
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
           </div>
 
           {/* Upcoming run */}
@@ -546,16 +735,16 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => switchToRun(dayState.currentIndex + 1)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[160px] w-full"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[180px] w-full"
               >
                 <div className="text-left min-w-0">
                   <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Upcoming</div>
-                  <div className="font-medium text-xs truncate">{dayState.runs[dayState.currentIndex + 1].label}</div>
+                  <div className="font-medium text-xs truncate">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
                 </div>
                 <ChevronRight className="w-4 h-4 shrink-0" />
               </button>
             ) : (
-              <div className="w-full max-w-[160px]" />
+              <div className="w-full max-w-[180px]" />
             )}
           </div>
 
