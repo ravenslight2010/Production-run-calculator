@@ -205,36 +205,48 @@ function StepperField({
   );
 }
 
+const STORAGE_KEY = "run-calc-v1";
+
+const DEFAULT_VALUES: FormValues = {
+  casesNeeded: 384,
+  crustsPerCycle: 5,
+  cycleSpeed: 7.8,
+  speedAdjustment: 1.0,
+  freezerTime: 15,
+  pizzasPerCase: 12,
+  casesPerSkid: 48,
+  casesPerLayer: 6,
+  doughballsPerTray: 24,
+  doughBatchYield: 620,
+  skidsCompleted: 5,
+  casesOnCurrentSkid: 6,
+  traysOnLine: 43,
+  batchesReady: 0,
+  sauceOzPerPizza: 4,
+  sauceBarrelLbs: 450,
+  app1OzPerPizza: 0,
+  app1BatchLbs: 30,
+  app2OzPerPizza: 4,
+  app2BatchLbs: 55,
+  app3OzPerPizza: 0,
+  app3BatchLbs: 45,
+  app4OzPerPizza: 4,
+  app4BatchLbs: 55,
+  pepOzPerPizza: 0,
+};
+
+function loadSavedValues(): FormValues {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_VALUES;
+}
+
 export default function Home() {
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      casesNeeded: 384,
-      crustsPerCycle: 5,
-      cycleSpeed: 7.8,
-      speedAdjustment: 1.0,
-      freezerTime: 15,
-      pizzasPerCase: 12,
-      casesPerSkid: 48,
-      casesPerLayer: 6,
-      doughballsPerTray: 24,
-      doughBatchYield: 620,
-      skidsCompleted: 5,
-      casesOnCurrentSkid: 6,
-      traysOnLine: 43,
-      batchesReady: 0,
-      sauceOzPerPizza: 4,
-      sauceBarrelLbs: 450,
-      app1OzPerPizza: 0,
-      app1BatchLbs: 30,
-      app2OzPerPizza: 4,
-      app2BatchLbs: 55,
-      app3OzPerPizza: 0,
-      app3BatchLbs: 45,
-      app4OzPerPizza: 4,
-      app4BatchLbs: 55,
-      pepOzPerPizza: 0,
-    },
+    defaultValues: loadSavedValues(),
     mode: "onChange",
   });
 
@@ -248,6 +260,10 @@ export default function Home() {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
   const [batchMixMinutes, setBatchMixMinutes] = useState(10);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch {}
+  }, [v]);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
