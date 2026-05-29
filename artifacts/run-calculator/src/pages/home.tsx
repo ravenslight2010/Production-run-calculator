@@ -14,6 +14,9 @@ import {
   Plus,
   Pencil,
   Check,
+  Play,
+  Square,
+  Timer,
 } from "lucide-react";
 
 import {
@@ -218,7 +221,7 @@ const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number };
 type DayState = { runs: RunMeta[]; currentIndex: number };
 
 function runLabel(r: RunMeta) {
@@ -436,12 +439,40 @@ export default function Home() {
     return trimmed;
   }
 
+  function startRun() {
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? { ...r, startedAt: Date.now(), endedAt: undefined } : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+  }
+
+  function endRun() {
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? { ...r, endedAt: Date.now() } : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+  }
+
+  const runStatus: "pending" | "running" | "ended" =
+    currentRun?.endedAt ? "ended" : currentRun?.startedAt ? "running" : "pending";
+
+  const liveFreezerMin = (() => {
+    if (!currentRun?.startedAt) return 0;
+    if (currentRun.endedAt) return Number(v.freezerTime);
+    const elapsed = (nowTime.getTime() - currentRun.startedAt) / 60000;
+    return Math.min(elapsed, Number(v.freezerTime));
+  })();
+
   useEffect(() => {
     document.documentElement.classList.add("dark");
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setNowTime(new Date()), 30_000);
+    const id = setInterval(() => setNowTime(new Date()), 10_000);
     return () => clearInterval(id);
   }, []);
 
@@ -455,7 +486,7 @@ export default function Home() {
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
     // Spreadsheet: casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase * speedAdj, 0)
-    const freezerTime = Number(v.freezerTime);
+    const freezerTime = liveFreezerMin;
     const casesOnLine =
       ppm > 0
         ? Math.floor((ppm * freezerTime) / v.pizzasPerCase * v.speedAdjustment)
@@ -571,7 +602,7 @@ export default function Home() {
       app4Batches,
       pepLbs,
     };
-  }, [v]);
+  }, [v, liveFreezerMin]);
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
@@ -725,6 +756,40 @@ export default function Home() {
                 </div>
               </div>
 
+            </div>
+
+            {/* Run status + Start/End buttons */}
+            <div className="flex items-center gap-2 pt-1">
+              {runStatus === "pending" && (
+                <button
+                  type="button"
+                  onClick={startRun}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
+                >
+                  <Play className="w-3 h-3 fill-current" /> Start Run
+                </button>
+              )}
+              {runStatus === "running" && (
+                <>
+                  <span className="flex items-center gap-1.5 text-xs text-green-400 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse shrink-0" />
+                    Running
+                  </span>
+                  <button
+                    type="button"
+                    onClick={endRun}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
+                  >
+                    <Square className="w-3 h-3 fill-current" /> End Run
+                  </button>
+                </>
+              )}
+              {runStatus === "ended" && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                  Ended
+                </span>
+              )}
             </div>
           </div>
 
@@ -1164,8 +1229,12 @@ export default function Home() {
                           testId="output-timing-ppm"
                         />
                         <StatRow
-                          label="Freezer Time"
-                          value={fmtNum(Number(v.freezerTime), 1) + " min"}
+                          label={
+                            runStatus === "running"
+                              ? `Freezer Time (${fmtNum(liveFreezerMin, 1)} / ${fmtNum(Number(v.freezerTime), 1)} min)`
+                              : "Freezer Time"
+                          }
+                          value={fmtNum(liveFreezerMin, 1) + " min"}
                           testId="output-freezer-time"
                         />
                       </CardContent>
