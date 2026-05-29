@@ -1117,29 +1117,9 @@ export default function Home() {
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto space-y-5">
         {/* ─── RUN SELECTOR ─── */}
-        <div className="flex items-center gap-2 print:hidden bg-card/40 border border-border/50 rounded-lg px-3 py-2.5">
-
-          {/* Previous run */}
-          <div className="flex-1 flex justify-end min-w-0">
-            {dayState.currentIndex > 0 ? (
-              <button
-                type="button"
-                onClick={() => switchToRun(dayState.currentIndex - 1)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[180px] w-full justify-end"
-              >
-                <ChevronLeft className="w-4 h-4 shrink-0" />
-                <div className="text-right min-w-0">
-                  <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Previous</div>
-                  <div className="font-medium text-xs truncate">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
-                </div>
-              </button>
-            ) : (
-              <div className="w-full max-w-[180px]" />
-            )}
-          </div>
-
+        <div className="print:hidden flex justify-center">
           {/* Current run — brand + flavor pickers */}
-          <div className="flex flex-col items-center gap-2 px-4 py-2 rounded-md bg-primary/15 border border-primary/30 shrink-0">
+          <div className="flex flex-col items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 border border-primary/30 w-full max-w-lg">
             <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current Run</div>
             <div className="flex items-center gap-2">
 
@@ -1300,7 +1280,7 @@ export default function Home() {
             </div>
 
             {/* Run status + Start/End buttons */}
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2">
               {runStatus === "pending" && (
                 <button
                   type="button"
@@ -1332,41 +1312,59 @@ export default function Home() {
                 </span>
               )}
             </div>
-          </div>
 
-          {/* Upcoming run */}
-          <div className="flex-1 flex justify-start min-w-0">
-            {dayState.currentIndex < dayState.runs.length - 1 ? (
-              <button
-                type="button"
-                onClick={() => switchToRun(dayState.currentIndex + 1)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[180px] w-full"
-              >
-                <div className="text-left min-w-0">
-                  <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Upcoming</div>
-                  <div className="font-medium text-xs truncate">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
-                </div>
-                <ChevronRight className="w-4 h-4 shrink-0" />
-              </button>
-            ) : (
-              <div className="w-full max-w-[180px]" />
-            )}
-          </div>
+            {/* Navigation row: Previous · count · New Run · Upcoming */}
+            <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
+              {/* Previous */}
+              {dayState.currentIndex > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => switchToRun(dayState.currentIndex - 1)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
+                  <div className="text-left min-w-0">
+                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Prev</div>
+                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
+                  </div>
+                </button>
+              ) : (
+                <div className="w-16" />
+              )}
 
-          {/* Run count + Add */}
-          <div className="flex items-center gap-2 shrink-0 pl-3 border-l border-border/40">
-            <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={addRun}
-              disabled={dayState.runs.length >= MAX_RUNS}
-              className="h-7 px-2 gap-1 text-xs"
-            >
-              <Plus className="w-3 h-3" />
-              New Run
-            </Button>
+              {/* Count + New Run */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Plus className="w-3 h-3" />
+                  New Run
+                </Button>
+              </div>
+
+              {/* Upcoming */}
+              {dayState.currentIndex < dayState.runs.length - 1 ? (
+                <button
+                  type="button"
+                  onClick={() => switchToRun(dayState.currentIndex + 1)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
+                >
+                  <div className="text-right min-w-0">
+                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Next</div>
+                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                </button>
+              ) : (
+                <div className="w-16" />
+              )}
+            </div>
           </div>
         </div>
 
