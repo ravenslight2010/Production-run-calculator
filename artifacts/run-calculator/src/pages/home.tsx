@@ -1062,7 +1062,15 @@ export default function Home() {
                   const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
                   const doughballsPossible = batchesPossible * Number(v.doughBatchYield);
                   const casesCovered = Number(v.pizzasPerCase) > 0 ? doughballsPossible / Number(v.pizzasPerCase) : 0;
-                  const nowLabel = `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`;
+                  const to12hr = (hhmm: string) => {
+                    const [h, m] = hhmm.split(":").map(Number);
+                    const ampm = h >= 12 ? "PM" : "AM";
+                    const h12 = h % 12 || 12;
+                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+                  };
+                  const nowLabel = to12hr(
+                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
+                  );
                   return (
                     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-0">
                       <div className="h-1 bg-amber-500 w-full" />
@@ -1086,6 +1094,7 @@ export default function Home() {
                               onChange={(e) => setRunToTime(e.target.value)}
                               className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             />
+                            <p className="text-xs text-muted-foreground mt-1 font-mono">{to12hr(runToTime)}</p>
                           </div>
                           <div>
                             <label className="text-xs text-muted-foreground block mb-1">Min / Batch</label>
