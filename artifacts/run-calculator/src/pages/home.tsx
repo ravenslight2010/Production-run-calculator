@@ -19,6 +19,7 @@ import {
   Square,
   Timer,
   Trash2,
+  X,
 } from "lucide-react";
 
 import {
@@ -134,14 +135,17 @@ function IngredientSelect({
   onChange,
   options,
   onAddOption,
+  onRemoveOption,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: string[];
   onAddOption: (v: string) => void;
+  onRemoveOption: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const filtered = (options ?? []).filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -149,7 +153,7 @@ function IngredientSelect({
     <div className="relative w-full">
       <button
         type="button"
-        onClick={() => { setInputVal(""); setOpen(true); }}
+        onClick={() => { setInputVal(""); setConfirmDelete(null); setOpen(true); }}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
@@ -176,16 +180,35 @@ function IngredientSelect({
             className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
           />
           <div className="max-h-48 overflow-y-auto">
-            {filtered.map(opt => (
-              <button
-                key={opt}
-                type="button"
-                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                onMouseDown={() => { onChange(opt); setOpen(false); }}
-              >
-                {opt}
-              </button>
-            ))}
+            {filtered.map(opt =>
+              confirmDelete === opt ? (
+                <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                  <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
+                  <span className="flex gap-1 shrink-0">
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); setConfirmDelete(null); }}>Yes</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => setConfirmDelete(null)}>No</button>
+                  </span>
+                </div>
+              ) : (
+                <div key={opt} className="flex items-center group">
+                  <button
+                    type="button"
+                    className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
+                    onMouseDown={() => { onChange(opt); setOpen(false); }}
+                  >
+                    {opt}
+                  </button>
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    className="px-2 py-1.5 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                    onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )
+            )}
             {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && (
               <button
                 type="button"
@@ -211,6 +234,7 @@ function CheeseRecipeCard({
   register,
   ingredientOptions,
   onAddIngredient,
+  onRemoveIngredient,
   onSetIngredient,
   onAppend,
   onRemove,
@@ -223,6 +247,7 @@ function CheeseRecipeCard({
   register: any;
   ingredientOptions: string[];
   onAddIngredient: (v: string) => void;
+  onRemoveIngredient: (v: string) => void;
   onSetIngredient: (idx: number, val: string) => void;
   onAppend: () => void;
   onRemove: (idx: number) => void;
@@ -264,6 +289,7 @@ function CheeseRecipeCard({
                       onChange={val => onSetIngredient(idx, val)}
                       options={ingredientOptions}
                       onAddOption={onAddIngredient}
+                      onRemoveOption={onRemoveIngredient}
                     />
                     <input
                       {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })}
@@ -325,15 +351,18 @@ function TypeDropdown({
   onChange,
   options,
   onAddOption,
+  onRemoveOption,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: string[];
   onAddOption: (v: string) => void;
+  onRemoveOption: (v: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const filtered = options.filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -345,7 +374,7 @@ function TypeDropdown({
       <div className="relative">
         <button
           type="button"
-          onClick={() => { setInputVal(""); setOpen(true); }}
+          onClick={() => { setInputVal(""); setConfirmDelete(null); setOpen(true); }}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
@@ -372,16 +401,35 @@ function TypeDropdown({
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
             <div className="max-h-48 overflow-y-auto">
-              {filtered.map(opt => (
-                <button
-                  key={opt}
-                  type="button"
-                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
-                  onMouseDown={() => { onChange(opt); setOpen(false); }}
-                >
-                  {opt}
-                </button>
-              ))}
+              {filtered.map(opt =>
+                confirmDelete === opt ? (
+                  <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                    <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
+                    <span className="flex gap-1 shrink-0">
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); setConfirmDelete(null); }}>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => setConfirmDelete(null)}>No</button>
+                    </span>
+                  </div>
+                ) : (
+                  <div key={opt} className="flex items-center group">
+                    <button
+                      type="button"
+                      className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
+                      onMouseDown={() => { onChange(opt); setOpen(false); }}
+                    >
+                      {opt}
+                    </button>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="px-2 py-1.5 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                      onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )
+              )}
               {inputVal.trim() && !options.includes(inputVal.trim()) && (
                 <button
                   type="button"
@@ -660,6 +708,12 @@ export default function Home() {
     const trimmed = name.trim();
     if (!trimmed || ingredientTypes.includes(trimmed)) return;
     const updated = [...ingredientTypes, trimmed];
+    setIngredientTypes(updated);
+    saveList(INGREDIENT_TYPES_KEY, updated);
+  }
+
+  function removeIngredientType(name: string) {
+    const updated = ingredientTypes.filter(t => t !== name);
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
   }
@@ -1759,6 +1813,7 @@ export default function Home() {
                         onChange={val => form.setValue("app1Type", val, { shouldDirty: true })}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -1779,6 +1834,7 @@ export default function Home() {
                         onChange={val => form.setValue("app2Type", val, { shouldDirty: true })}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -1799,6 +1855,7 @@ export default function Home() {
                         onChange={val => form.setValue("app3Type", val, { shouldDirty: true })}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -1819,6 +1876,7 @@ export default function Home() {
                         onChange={val => form.setValue("app4Type", val, { shouldDirty: true })}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
                       />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -1913,6 +1971,7 @@ export default function Home() {
                     register={form.register}
                     ingredientOptions={ingredientTypes}
                     onAddIngredient={addIngredientType}
+                    onRemoveIngredient={removeIngredientType}
                     onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese1}
@@ -1928,6 +1987,7 @@ export default function Home() {
                     register={form.register}
                     ingredientOptions={ingredientTypes}
                     onAddIngredient={addIngredientType}
+                    onRemoveIngredient={removeIngredientType}
                     onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese2}
@@ -1943,6 +2003,7 @@ export default function Home() {
                     register={form.register}
                     ingredientOptions={ingredientTypes}
                     onAddIngredient={addIngredientType}
+                    onRemoveIngredient={removeIngredientType}
                     onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese3}
@@ -1958,6 +2019,7 @@ export default function Home() {
                     register={form.register}
                     ingredientOptions={ingredientTypes}
                     onAddIngredient={addIngredientType}
+                    onRemoveIngredient={removeIngredientType}
                     onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese4}
