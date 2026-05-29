@@ -355,7 +355,6 @@ export default function Home() {
     d.setHours(d.getHours() + 2);
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
-  const [batchMixMinutes, setBatchMixMinutes] = useState(10);
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");
@@ -1059,6 +1058,7 @@ export default function Home() {
                   target.setHours(hrs, mins, 0, 0);
                   if (target <= nowTime) target.setDate(target.getDate() + 1);
                   const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const batchMixMinutes = calc.timePerBatchSec / 60;
                   const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
                   const doughballsPossible = batchesPossible * Number(v.doughBatchYield);
                   const casesCovered = Number(v.pizzasPerCase) > 0 ? doughballsPossible / Number(v.pizzasPerCase) : 0;
@@ -1098,13 +1098,7 @@ export default function Home() {
                           </div>
                           <div>
                             <label className="text-xs text-muted-foreground block mb-1">Min / Batch</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={batchMixMinutes}
-                              onChange={(e) => setBatchMixMinutes(Math.max(1, Number(e.target.value)))}
-                              className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            />
+                            <p className="font-mono text-lg font-bold">{fmtNum(batchMixMinutes, 1)}</p>
                           </div>
                         </div>
                         <Separator className="mb-4 opacity-30" />
