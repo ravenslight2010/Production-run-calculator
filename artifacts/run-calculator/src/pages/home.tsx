@@ -960,7 +960,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setNowTime(new Date()), 10_000);
+    const id = setInterval(() => setNowTime(new Date()), 1_000);
     return () => clearInterval(id);
   }, []);
 
@@ -1460,11 +1460,37 @@ export default function Home() {
                           name="speedAdjustment"
                           label="Speed Adjustment"
                         />
-                        <NumField
-                          control={form.control}
-                          name="freezerTime"
-                          label="Freezer Time (min)"
-                        />
+                        <div>
+                          <NumField
+                            control={form.control}
+                            name="freezerTime"
+                            label="Freezer Time (min)"
+                          />
+                          {runStatus === "running" && (() => {
+                            const totalSecs = Number(v.freezerTime) * 60;
+                            const elapsedSecs = liveFreezerMin * 60;
+                            const remainSecs = Math.max(0, totalSecs - elapsedSecs);
+                            const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
+                            const mm = Math.floor(remainSecs / 60);
+                            const ss = Math.floor(remainSecs % 60);
+                            const done = remainSecs === 0;
+                            return (
+                              <div className="mt-1.5 space-y-1">
+                                <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary"}`}
+                                    style={{ width: `${pct * 100}%` }}
+                                  />
+                                </div>
+                                <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-green-400" : "text-muted-foreground"}`}>
+                                  {done
+                                    ? "✓ Freezer time complete"
+                                    : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`}
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-2 gap-3">
