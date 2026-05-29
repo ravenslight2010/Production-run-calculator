@@ -129,6 +129,79 @@ function StatRow({
 
 type RecipeRow = { ingredient: string; lbs: number };
 
+function IngredientSelect({
+  value,
+  onChange,
+  options,
+  onAddOption,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  onAddOption: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [inputVal, setInputVal] = useState("");
+  const filtered = (options ?? []).filter(o =>
+    o.toLowerCase().includes(inputVal.toLowerCase())
+  );
+  return (
+    <div className="relative w-full">
+      <button
+        type="button"
+        onClick={() => { setInputVal(""); setOpen(true); }}
+        className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
+      >
+        <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
+          {value || "Select…"}
+        </span>
+        <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 w-48 bg-popover border border-border rounded-md shadow-lg py-1">
+          <input
+            autoFocus
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && inputVal.trim()) {
+                onAddOption(inputVal.trim());
+                onChange(inputVal.trim());
+                setOpen(false);
+              }
+              if (e.key === "Escape") setOpen(false);
+            }}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            placeholder="Search or add…"
+            className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
+          />
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.map(opt => (
+              <button
+                key={opt}
+                type="button"
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
+                onMouseDown={() => { onChange(opt); setOpen(false); }}
+              >
+                {opt}
+              </button>
+            ))}
+            {inputVal.trim() && !options.includes(inputVal.trim()) && (
+              <button
+                type="button"
+                className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                onMouseDown={() => { onAddOption(inputVal.trim()); onChange(inputVal.trim()); setOpen(false); }}
+              >
+                <Plus className="w-3 h-3" /> Add "{inputVal.trim()}"
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CheeseRecipeCard({
   label,
   batches,
@@ -136,6 +209,9 @@ function CheeseRecipeCard({
   recipe,
   fieldPrefix,
   register,
+  ingredientOptions,
+  onAddIngredient,
+  onSetIngredient,
   onAppend,
   onRemove,
 }: {
@@ -145,6 +221,9 @@ function CheeseRecipeCard({
   recipe: RecipeRow[];
   fieldPrefix: string;
   register: any;
+  ingredientOptions: string[];
+  onAddIngredient: (v: string) => void;
+  onSetIngredient: (idx: number, val: string) => void;
   onAppend: () => void;
   onRemove: (idx: number) => void;
 }) {
@@ -180,10 +259,11 @@ function CheeseRecipeCard({
                 const rowLbs = Number(recipe[idx]?.lbs ?? 0);
                 return (
                   <div key={field.id} className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 items-center">
-                    <input
-                      {...register(`${fieldPrefix}.${idx}.ingredient`)}
-                      placeholder="e.g. Mozzarella"
-                      className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 w-full"
+                    <IngredientSelect
+                      value={recipe[idx]?.ingredient ?? ""}
+                      onChange={val => onSetIngredient(idx, val)}
+                      options={ingredientOptions}
+                      onAddOption={onAddIngredient}
                     />
                     <input
                       {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })}
@@ -1831,6 +1911,9 @@ export default function Home() {
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
                     register={form.register}
+                    ingredientOptions={ingredientTypes}
+                    onAddIngredient={addIngredientType}
+                    onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese1}
                   />
@@ -1843,6 +1926,9 @@ export default function Home() {
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
                     register={form.register}
+                    ingredientOptions={ingredientTypes}
+                    onAddIngredient={addIngredientType}
+                    onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese2}
                   />
@@ -1855,6 +1941,9 @@ export default function Home() {
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
                     register={form.register}
+                    ingredientOptions={ingredientTypes}
+                    onAddIngredient={addIngredientType}
+                    onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese3}
                   />
@@ -1867,6 +1956,9 @@ export default function Home() {
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
                     register={form.register}
+                    ingredientOptions={ingredientTypes}
+                    onAddIngredient={addIngredientType}
+                    onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese4}
                   />
