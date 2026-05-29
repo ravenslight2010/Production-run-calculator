@@ -65,6 +65,7 @@ const formSchema = z.object({
   app4OzPerPizza: z.coerce.number().min(0).default(4),
   app4BatchLbs: z.coerce.number().min(0.1).default(55),
   pepOzPerPizza: z.coerce.number().min(0).default(0),
+  pepType: z.enum(["Natural", "Cured"]).default("Natural"),
   // Applicator ingredient labels
   app1Type: z.string().default(""),
   app2Type: z.string().default(""),
@@ -622,6 +623,7 @@ const DEFAULT_VALUES: FormValues = {
   app4OzPerPizza: 4,
   app4BatchLbs: 55,
   pepOzPerPizza: 0,
+  pepType: "Natural",
   app1Type: "",
   app2Type: "",
   app3Type: "",
@@ -1894,6 +1896,21 @@ export default function Home() {
                       </div>
 
                       <SectionLabel>Pepperoni</SectionLabel>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Type</p>
+                        <div className="flex rounded overflow-hidden border border-border/40">
+                          {(["Natural", "Cured"] as const).map(opt => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onMouseDown={() => form.setValue("pepType", opt, { shouldDirty: true })}
+                              className={`px-3 py-0.5 text-xs font-semibold transition-colors ${v.pepType === opt ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted/70"}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <NumField
                         control={form.control}
                         name="pepOzPerPizza"
