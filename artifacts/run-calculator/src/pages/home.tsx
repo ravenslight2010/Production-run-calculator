@@ -9,6 +9,11 @@ import {
   Clock,
   Droplets,
   ClipboardList,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Pencil,
+  Check,
 } from "lucide-react";
 
 import {
@@ -205,7 +210,12 @@ function StepperField({
   );
 }
 
-const STORAGE_KEY = "run-calc-v1";
+const DAY_KEY = "run-calc-day";
+const RUN_KEY = (id: string) => `run-calc-run-${id}`;
+const MAX_RUNS = 30;
+
+type RunMeta = { id: string; label: string };
+type DayState = { runs: RunMeta[]; currentIndex: number };
 
 const DEFAULT_VALUES: FormValues = {
   casesNeeded: 384,
@@ -235,18 +245,52 @@ const DEFAULT_VALUES: FormValues = {
   pepOzPerPizza: 0,
 };
 
-function loadSavedValues(): FormValues {
+function genId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function loadDayState(): DayState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(DAY_KEY);
+    if (raw) return JSON.parse(raw) as DayState;
+  } catch {}
+  return { runs: [{ id: genId(), label: "Run 1" }], currentIndex: 0 };
+}
+
+function saveDayState(ds: DayState): void {
+  try { localStorage.setItem(DAY_KEY, JSON.stringify(ds)); } catch {}
+}
+
+function loadRunValues(id: string): FormValues {
+  try {
+    const raw = localStorage.getItem(RUN_KEY(id));
     if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
+    // Migrate legacy single-run data to this run slot
+    const legacy = localStorage.getItem("run-calc-v1");
+    if (legacy) {
+      const vals = { ...DEFAULT_VALUES, ...JSON.parse(legacy) };
+      localStorage.setItem(RUN_KEY(id), JSON.stringify(vals));
+      return vals;
+    }
   } catch {}
   return DEFAULT_VALUES;
 }
 
+function saveRunValues(id: string, values: FormValues): void {
+  try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
+}
+
 export default function Home() {
+  const [dayState, setDayState] = useState<DayState>(() => loadDayState());
+  const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
+  const currentRunId = currentRun?.id ?? "";
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: loadSavedValues(),
+    defaultValues: (() => {
+      const ds = loadDayState();
+      return loadRunValues(ds.runs[ds.currentIndex]?.id ?? "");
+    })(),
     mode: "onChange",
   });
 
@@ -260,10 +304,48 @@ export default function Home() {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   });
   const [batchMixMinutes, setBatchMixMinutes] = useState(10);
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
 
   useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch {}
-  }, [v]);
+    if (currentRunId) saveRunValues(currentRunId, v);
+  }, [v, currentRunId]);
+
+  function switchToRun(newIndex: number) {
+    if (newIndex < 0 || newIndex >= dayState.runs.length) return;
+    saveRunValues(currentRunId, form.getValues());
+    const newId = dayState.runs[newIndex].id;
+    const newDs = { ...dayState, currentIndex: newIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    form.reset(loadRunValues(newId));
+    setEditingLabel(false);
+  }
+
+  function addRun() {
+    if (dayState.runs.length >= MAX_RUNS) return;
+    saveRunValues(currentRunId, form.getValues());
+    const newId = genId();
+    const newIndex = dayState.runs.length;
+    const newDs = {
+      runs: [...dayState.runs, { id: newId, label: `Run ${newIndex + 1}` }],
+      currentIndex: newIndex,
+    };
+    setDayState(newDs);
+    saveDayState(newDs);
+    form.reset(DEFAULT_VALUES);
+    setEditingLabel(false);
+  }
+
+  function renameCurrentRun(newLabel: string) {
+    if (!newLabel.trim()) return;
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? { ...r, label: newLabel.trim() } : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+  }
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
@@ -405,6 +487,95 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
       <div className="max-w-5xl mx-auto space-y-5">
+        {/* ─── RUN SELECTOR ─── */}
+        <div className="flex items-center gap-3 print:hidden bg-card/40 border border-border/50 rounded-lg px-3 py-2">
+          {/* Previous run */}
+          <div className="flex-1 flex justify-end min-w-0">
+            {dayState.currentIndex > 0 ? (
+              <button
+                type="button"
+                onClick={() => switchToRun(dayState.currentIndex - 1)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[160px] w-full justify-end"
+              >
+                <ChevronLeft className="w-4 h-4 shrink-0" />
+                <div className="text-right min-w-0">
+                  <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Previous</div>
+                  <div className="font-medium text-xs truncate">{dayState.runs[dayState.currentIndex - 1].label}</div>
+                </div>
+              </button>
+            ) : (
+              <div className="w-full max-w-[160px]" />
+            )}
+          </div>
+
+          {/* Current run */}
+          <div className="flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-md bg-primary/15 border border-primary/30 shrink-0 min-w-[140px]">
+            <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current</div>
+            {editingLabel ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={labelDraft}
+                  onChange={(e) => setLabelDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { renameCurrentRun(labelDraft); setEditingLabel(false); }
+                    if (e.key === "Escape") setEditingLabel(false);
+                  }}
+                  onBlur={() => { renameCurrentRun(labelDraft); setEditingLabel(false); }}
+                  className="bg-transparent border-b border-primary text-sm font-semibold text-center outline-none w-24"
+                />
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); renameCurrentRun(labelDraft); setEditingLabel(false); }}>
+                  <Check className="w-3.5 h-3.5 text-primary" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="flex items-center gap-1 text-sm font-semibold hover:text-primary transition-colors"
+                onClick={() => { setLabelDraft(currentRun.label); setEditingLabel(true); }}
+              >
+                <span>{currentRun.label}</span>
+                <Pencil className="w-2.5 h-2.5 text-muted-foreground/50" />
+              </button>
+            )}
+          </div>
+
+          {/* Upcoming run */}
+          <div className="flex-1 flex justify-start min-w-0">
+            {dayState.currentIndex < dayState.runs.length - 1 ? (
+              <button
+                type="button"
+                onClick={() => switchToRun(dayState.currentIndex + 1)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors max-w-[160px] w-full"
+              >
+                <div className="text-left min-w-0">
+                  <div className="text-[9px] uppercase tracking-widest opacity-50 font-semibold">Upcoming</div>
+                  <div className="font-medium text-xs truncate">{dayState.runs[dayState.currentIndex + 1].label}</div>
+                </div>
+                <ChevronRight className="w-4 h-4 shrink-0" />
+              </button>
+            ) : (
+              <div className="w-full max-w-[160px]" />
+            )}
+          </div>
+
+          {/* Run count + Add */}
+          <div className="flex items-center gap-2 shrink-0 pl-3 border-l border-border/40">
+            <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addRun}
+              disabled={dayState.runs.length >= MAX_RUNS}
+              className="h-7 px-2 gap-1 text-xs"
+            >
+              <Plus className="w-3 h-3" />
+              New Run
+            </Button>
+          </div>
+        </div>
+
         {/* Header */}
         <header className="flex items-center justify-between print:mb-4">
           <div className="flex items-center gap-3">
