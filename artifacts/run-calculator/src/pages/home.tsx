@@ -190,7 +190,7 @@ function IngredientSelect({
                   </span>
                 </div>
               ) : (
-                <div key={opt} className="flex items-center group">
+                <div key={opt} className="flex items-center">
                   <button
                     type="button"
                     className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
@@ -201,7 +201,7 @@ function IngredientSelect({
                   <button
                     type="button"
                     tabIndex={-1}
-                    className="px-2 py-1.5 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                    className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
                     onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
                   >
                     <X className="w-3 h-3" />
@@ -411,7 +411,7 @@ function TypeDropdown({
                     </span>
                   </div>
                 ) : (
-                  <div key={opt} className="flex items-center group">
+                  <div key={opt} className="flex items-center">
                     <button
                       type="button"
                       className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${value === opt ? "text-primary font-semibold" : ""}`}
@@ -422,7 +422,7 @@ function TypeDropdown({
                     <button
                       type="button"
                       tabIndex={-1}
-                      className="px-2 py-1.5 text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
                       onMouseDown={e => { e.stopPropagation(); setConfirmDelete(opt); }}
                     >
                       <X className="w-3 h-3" />
