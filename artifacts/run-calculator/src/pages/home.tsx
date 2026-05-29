@@ -1102,8 +1102,10 @@ export default function Home() {
                         <Separator className="mb-4 opacity-30" />
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                           <div className="bg-muted/30 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold text-amber-400">{Math.round(minutesAvailable)}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Minutes available</p>
+                            <p className="text-2xl font-mono font-bold text-amber-400">
+                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">Time available</p>
                           </div>
                           <div className="bg-muted/30 rounded-lg p-3 text-center">
                             <p className="text-2xl font-mono font-bold text-primary">{batchesPossible}</p>
