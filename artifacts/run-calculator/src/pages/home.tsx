@@ -1060,8 +1060,6 @@ export default function Home() {
                   const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
                   const batchMixMinutes = calc.timePerBatchSec / 60;
                   const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
-                  const doughballsPossible = batchesPossible * Number(v.doughBatchYield);
-                  const casesCovered = Number(v.pizzasPerCase) > 0 ? doughballsPossible / Number(v.pizzasPerCase) : 0;
                   const to12hr = (hhmm: string) => {
                     const [h, m] = hhmm.split(":").map(Number);
                     const ampm = h >= 12 ? "PM" : "AM";
@@ -1110,14 +1108,6 @@ export default function Home() {
                           <div className="bg-muted/30 rounded-lg p-3 text-center">
                             <p className="text-2xl font-mono font-bold text-primary">{batchesPossible}</p>
                             <p className="text-xs text-muted-foreground mt-1">Batches possible</p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold">{fmtNum(doughballsPossible, 0)}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Doughballs made</p>
-                          </div>
-                          <div className="bg-muted/30 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold">{fmtNum(casesCovered, 1)}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Cases covered</p>
                           </div>
                         </div>
                       </CardContent>
