@@ -41,6 +41,7 @@ const formSchema = z.object({
   crustsPerCycle: z.coerce.number().min(1).default(5),
   cycleSpeed: z.coerce.number().min(0.1).default(7.8),
   speedAdjustment: z.coerce.number().min(0.01).default(1.0),
+  approxLineSpeed: z.coerce.number().min(0).default(39),
   freezerTime: z.coerce.number().min(0).default(15),
   pizzasPerCase: z.coerce.number().min(1).default(12),
   casesPerSkid: z.coerce.number().min(1).default(48),
@@ -562,7 +563,7 @@ const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray"] as const;
+const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed"] as const;
 type CrustField = (typeof CRUST_FIELDS)[number];
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
@@ -624,6 +625,7 @@ const DEFAULT_VALUES: FormValues = {
   crustsPerCycle: 5,
   cycleSpeed: 7.8,
   speedAdjustment: 1.0,
+  approxLineSpeed: 39,
   freezerTime: 15,
   pizzasPerCase: 12,
   casesPerSkid: 48,
@@ -1029,7 +1031,9 @@ export default function Home() {
 
   const calc = useMemo(() => {
     const ppm =
-      v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
+      doughSubTab === "crusts"
+        ? v.approxLineSpeed
+        : v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
 
     const traysPerSkid =
       (v.casesPerSkid * v.pizzasPerCase) / v.doughballsPerTray;
@@ -1464,19 +1468,28 @@ export default function Home() {
                         name="casesNeeded"
                         label="Cases Needed"
                       />
-                      <div className="grid grid-cols-2 gap-3">
+                      {doughSubTab === "crusts" ? (
                         <NumField
                           control={form.control}
-                          name="crustsPerCycle"
-                          label="Crusts Per Cycle"
-                          step="1"
+                          name="approxLineSpeed"
+                          label="Approximate Line Speed (ppm)"
+                          step="0.1"
                         />
-                        <NumField
-                          control={form.control}
-                          name="cycleSpeed"
-                          label="Cycle Speed (cyc/min)"
-                        />
-                      </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="crustsPerCycle"
+                            label="Crusts Per Cycle"
+                            step="1"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="cycleSpeed"
+                            label="Cycle Speed (cyc/min)"
+                          />
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
