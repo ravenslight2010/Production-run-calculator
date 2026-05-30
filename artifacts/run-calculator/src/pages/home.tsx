@@ -49,6 +49,7 @@ const formSchema = z.object({
   doughballsPerTray: z.coerce.number().min(1).default(24),
   crustsPerStack: z.coerce.number().min(1).default(24),
   doughBatchYield: z.coerce.number().min(1).default(620),
+  crustsPerCase: z.coerce.number().min(1).default(12),
   // Progress tracking
   skidsCompleted: z.coerce.number().min(0).default(5),
   casesOnCurrentSkid: z.coerce.number().min(0).default(6),
@@ -564,7 +565,7 @@ const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed", "crustsPerStack"] as const;
+const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed", "crustsPerStack", "crustsPerCase"] as const;
 type CrustField = (typeof CRUST_FIELDS)[number];
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
@@ -634,6 +635,7 @@ const DEFAULT_VALUES: FormValues = {
   doughballsPerTray: 24,
   crustsPerStack: 24,
   doughBatchYield: 620,
+  crustsPerCase: 12,
   skidsCompleted: 0,
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
@@ -1041,6 +1043,7 @@ export default function Home() {
 
     const traysPerSkid =
       (v.casesPerSkid * v.pizzasPerCase) / perTray;
+    const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : v.doughBatchYield;
     const traysPerBatch = v.doughBatchYield / perTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
@@ -1088,7 +1091,7 @@ export default function Home() {
     const timePerTraySec =
       ppm > 0 ? (perTray / v.crustsPerCycle) * timePressHzSec : 0;
     const timePerBatchSec =
-      ppm > 0 ? (v.doughBatchYield / ppm) * 60 : 0;
+      ppm > 0 ? (perBatch / ppm) * 60 : 0;
     const timePerSkidSec =
       ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
     const totalTimeSec =
@@ -1570,12 +1573,21 @@ export default function Home() {
                           />
                         )}
                       </div>
-                      <NumField
-                        control={form.control}
-                        name="doughBatchYield"
-                        label="Dough Batch Yield (doughballs)"
-                        step="1"
-                      />
+                      {doughSubTab === "crusts" ? (
+                        <NumField
+                          control={form.control}
+                          name="crustsPerCase"
+                          label="Crusts Per Case"
+                          step="1"
+                        />
+                      ) : (
+                        <NumField
+                          control={form.control}
+                          name="doughBatchYield"
+                          label="Dough Batch Yield (doughballs)"
+                          step="1"
+                        />
+                      )}
                     </CardContent>
                   </Card>
 
