@@ -1910,12 +1910,12 @@ export default function Home() {
                         </div>
                         <Separator className="my-4 opacity-30" />
                         <StatRow
-                          label="Time for Dough to Clear"
+                          label={doughSubTab === "crusts" ? "Time for Crusts to Clear" : "Time for Dough to Clear"}
                           value={fmtTime(calc.doughMadeTimeSec)}
                           testId="output-dough-time"
                         />
                         <div className="flex items-center justify-between py-1.5" data-testid="output-dough-depletion">
-                          <span className="text-sm text-muted-foreground">Dough Runs Out In</span>
+                          <span className="text-sm text-muted-foreground">{doughSubTab === "crusts" ? "Crusts Run Out In" : "Dough Runs Out In"}</span>
                           {calc.doughDepletionSec <= 0 ? (
                             <span className="text-sm font-semibold text-muted-foreground">—</span>
                           ) : calc.doughDepletionSec >= calc.totalTimeSec ? (
