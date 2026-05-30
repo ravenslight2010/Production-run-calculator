@@ -1612,7 +1612,7 @@ export default function Home() {
                       <StepperField
                         control={form.control}
                         name="traysOnLine"
-                        label="Total Trays on Line"
+                        label={doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line"}
                       />
                       <StepperField
                         control={form.control}
