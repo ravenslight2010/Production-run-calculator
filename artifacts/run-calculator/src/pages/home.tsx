@@ -1614,11 +1614,13 @@ export default function Home() {
                         name="traysOnLine"
                         label={doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line"}
                       />
-                      <StepperField
-                        control={form.control}
-                        name="batchesReady"
-                        label="Batches of Dough Ready"
-                      />
+                      {doughSubTab !== "crusts" && (
+                        <StepperField
+                          control={form.control}
+                          name="batchesReady"
+                          label="Batches of Dough Ready"
+                        />
+                      )}
                     </CardContent>
 
                     {/* Quick summary */}
