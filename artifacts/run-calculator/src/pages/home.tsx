@@ -624,33 +624,36 @@ function saveProfile(brand: string, flavor: string, values: FormValues): void {
 }
 
 const DEFAULT_VALUES: FormValues = {
-  casesNeeded: 384,
-  crustsPerCycle: 5,
-  cycleSpeed: 7.8,
+  // Line settings — all blank/zero until the user fills them in
+  casesNeeded: 0,
+  crustsPerCycle: 0,
+  cycleSpeed: 0,
   speedAdjustment: 1.0,
-  approxLineSpeed: 39,
-  freezerTime: 15,
-  pizzasPerCase: 12,
-  casesPerSkid: 48,
-  casesPerLayer: 6,
-  doughballsPerTray: 24,
-  crustsPerStack: 24,
-  doughBatchYield: 620,
-  crustsPerCase: 12,
+  approxLineSpeed: 0,
+  freezerTime: 0,
+  pizzasPerCase: 0,
+  casesPerSkid: 0,
+  casesPerLayer: 0,
+  doughballsPerTray: 0,
+  crustsPerStack: 0,
+  doughBatchYield: 0,
+  crustsPerCase: 0,
+  // Current progress — zero
   skidsCompleted: 0,
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
-  sauceOzPerPizza: 4,
-  sauceBarrelLbs: 450,
+  // Sauce & applicators — zero
+  sauceOzPerPizza: 0,
+  sauceBarrelLbs: 0,
   app1OzPerPizza: 0,
-  app1BatchLbs: 30,
-  app2OzPerPizza: 4,
-  app2BatchLbs: 55,
+  app1BatchLbs: 0,
+  app2OzPerPizza: 0,
+  app2BatchLbs: 0,
   app3OzPerPizza: 0,
-  app3BatchLbs: 45,
-  app4OzPerPizza: 4,
-  app4BatchLbs: 55,
+  app3BatchLbs: 0,
+  app4OzPerPizza: 0,
+  app4BatchLbs: 0,
   pepOzPerPizza: 0,
   pepType: "Natural",
   app1Type: "",
@@ -673,7 +676,7 @@ function todayStr(): string {
 }
 
 function freshDayState(): DayState {
-  return { runs: [{ id: genId(), brand: "Lucia's", flavor: "Cheese" }], currentIndex: 0, date: todayStr() };
+  return { runs: [{ id: genId(), brand: "", flavor: "" }], currentIndex: 0, date: todayStr() };
 }
 
 function loadDayState(): DayState {
@@ -788,11 +791,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("info");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [nowTime, setNowTime] = useState(() => new Date());
-  const [runToTime, setRunToTime] = useState(() => {
-    const d = new Date();
-    d.setHours(d.getHours() + 2);
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  });
+  const [runToTime, setRunToTime] = useState("19:15");
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");
