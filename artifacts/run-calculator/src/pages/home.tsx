@@ -101,8 +101,9 @@ function fmtTime(totalSec: number): string {
 }
 
 function fmtNum(n: number, dec = 2): string {
-  if (!isFinite(n)) return "—";
-  return n.toFixed(dec);
+  const num = Number(n);
+  if (!isFinite(num)) return "—";
+  return num.toFixed(dec);
 }
 
 function StatRow({
