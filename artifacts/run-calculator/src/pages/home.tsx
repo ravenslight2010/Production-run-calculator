@@ -572,7 +572,7 @@ const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number; subTab?: "dough" | "crusts" };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
@@ -836,6 +836,8 @@ export default function Home() {
         return newDs;
       });
       const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+      const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
+      if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
       if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
         form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
       }
@@ -895,6 +897,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     form.reset(loadRunValues(newId));
+    setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
   }
 
   function addRun() {
@@ -1668,14 +1671,26 @@ export default function Home() {
                 <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit mb-5">
                   <button
                     type="button"
-                    onClick={() => setDoughSubTab("dough")}
+                    onClick={() => {
+                      setDoughSubTab("dough");
+                      const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "dough" as const } : r);
+                      const newDs = { ...dayState, runs: newRuns };
+                      setDayState(newDs);
+                      saveDayState(newDs);
+                    }}
                     className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     Dough
                   </button>
                   <button
                     type="button"
-                    onClick={() => setDoughSubTab("crusts")}
+                    onClick={() => {
+                      setDoughSubTab("crusts");
+                      const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "crusts" as const } : r);
+                      const newDs = { ...dayState, runs: newRuns };
+                      setDayState(newDs);
+                      saveDayState(newDs);
+                    }}
                     className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                   >
                     Crust
