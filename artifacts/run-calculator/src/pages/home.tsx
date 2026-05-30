@@ -1683,6 +1683,22 @@ export default function Home() {
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Run Details
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5">
+                        <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} highlight />
+                        <StatRow label="Stacks Needed" value={fmtNum(calc.stacksNeededTotal, 0)} />
+                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
+                        <Separator className="my-3 opacity-30" />
+                        <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                      <div className="h-1 bg-sky-500 w-full" />
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                           Crust Output
                         </CardTitle>
                       </CardHeader>
@@ -1699,22 +1715,6 @@ export default function Home() {
                         <Separator className="my-3 opacity-30" />
                         <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} highlight />
                         <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
-                      </CardContent>
-                    </Card>
-
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
-                      <div className="h-1 bg-sky-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Run Details
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} highlight />
-                        <StatRow label="Stacks Needed" value={fmtNum(calc.stacksNeededTotal, 0)} />
-                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
-                        <Separator className="my-3 opacity-30" />
-                        <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
                       </CardContent>
                     </Card>
                   </div>
