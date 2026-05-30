@@ -1099,6 +1099,8 @@ export default function Home() {
       ppm > 0 ? (perBatch / ppm) * 60 : 0;
     const timePerSkidSec =
       ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
+    const timePerCaseSec =
+      ppm > 0 ? (v.pizzasPerCase / ppm) * 60 : 0;
     const totalTimeSec =
       ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : 0;
     // Spreadsheet: includes batchesReady dough
@@ -1161,6 +1163,7 @@ export default function Home() {
       timePerTraySec,
       timePerBatchSec,
       timePerSkidSec,
+      timePerCaseSec,
       totalTimeSec,
       doughMadeTimeSec,
       rackTimes,
@@ -1927,20 +1930,24 @@ export default function Home() {
                             </span>
                           )}
                         </div>
-                        <StatRow
-                          label="Pizzas Per Minute"
-                          value={fmtNum(calc.ppm, 1)}
-                          testId="output-timing-ppm"
-                        />
-                        <StatRow
-                          label={
-                            runStatus === "running"
-                              ? `Freezer Time (${fmtNum(liveFreezerMin, 1)} / ${fmtNum(Number(v.freezerTime), 1)} min)`
-                              : "Freezer Time"
-                          }
-                          value={fmtNum(liveFreezerMin, 1) + " min"}
-                          testId="output-freezer-time"
-                        />
+                        {doughSubTab !== "crusts" && (
+                          <StatRow
+                            label="Pizzas Per Minute"
+                            value={fmtNum(calc.ppm, 1)}
+                            testId="output-timing-ppm"
+                          />
+                        )}
+                        {doughSubTab !== "crusts" && (
+                          <StatRow
+                            label={
+                              runStatus === "running"
+                                ? `Freezer Time (${fmtNum(liveFreezerMin, 1)} / ${fmtNum(Number(v.freezerTime), 1)} min)`
+                                : "Freezer Time"
+                            }
+                            value={fmtNum(liveFreezerMin, 1) + " min"}
+                            testId="output-freezer-time"
+                          />
+                        )}
                       </CardContent>
                     </Card>
 
@@ -1970,6 +1977,13 @@ export default function Home() {
                             testId="output-time-per-batch"
                           />
                         )}
+                        {doughSubTab === "crusts" && (
+                          <StatRow
+                            label="Time Per Case"
+                            value={fmtTime(calc.timePerCaseSec)}
+                            testId="output-time-per-case"
+                          />
+                        )}
                         <StatRow
                           label="Time Per Skid"
                           value={fmtTime(calc.timePerSkidSec)}
@@ -1980,23 +1994,25 @@ export default function Home() {
                     </Card>
                   </div>
 
-                  <Card className="bg-card/50 border-border/50 shadow-md">
-                    <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Rack Times
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-5 pb-5">
-                      {calc.rackTimes.map(({ trays, sec }) => (
-                        <StatRow
-                          key={trays}
-                          label={`${trays}-Tray Rack`}
-                          value={fmtTime(sec)}
-                          testId={`output-rack-${trays}`}
-                        />
-                      ))}
-                    </CardContent>
-                  </Card>
+                  {doughSubTab !== "crusts" && (
+                    <Card className="bg-card/50 border-border/50 shadow-md">
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Rack Times
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5">
+                        {calc.rackTimes.map(({ trays, sec }) => (
+                          <StatRow
+                            key={trays}
+                            label={`${trays}-Tray Rack`}
+                            value={fmtTime(sec)}
+                            testId={`output-rack-${trays}`}
+                          />
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
               </TabsContent>
 
