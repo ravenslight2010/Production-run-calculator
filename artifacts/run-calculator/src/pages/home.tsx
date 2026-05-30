@@ -1687,9 +1687,11 @@ export default function Home() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-5 pb-5">
-                        <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} highlight />
+                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} highlight />
+                        <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
+                        <Separator className="my-3 opacity-30" />
+                        <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} />
                         <StatRow label="Stacks Needed" value={fmtNum(calc.stacksNeededTotal, 0)} />
-                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
                         <Separator className="my-3 opacity-30" />
                         <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
                       </CardContent>
@@ -1712,9 +1714,6 @@ export default function Home() {
                         <Separator className="my-4 opacity-30" />
                         <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
                         <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
-                        <Separator className="my-3 opacity-30" />
-                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} highlight />
-                        <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
                       </CardContent>
                     </Card>
                   </div>
