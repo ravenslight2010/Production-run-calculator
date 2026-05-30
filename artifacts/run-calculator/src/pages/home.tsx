@@ -728,19 +728,19 @@ export default function Home() {
   const currentRunId = currentRun?.id ?? "";
 
   const [brands, setBrands] = useState<string[]>(() =>
-    loadList(BRANDS_KEY, ["Lucia's"])
+    [...loadList(BRANDS_KEY, ["Lucia's"])].sort((a, b) => a.localeCompare(b))
   );
   const [flavors, setFlavors] = useState<string[]>(() =>
-    loadList(FLAVORS_KEY, ["Cheese"])
+    [...loadList(FLAVORS_KEY, ["Cheese"])].sort((a, b) => a.localeCompare(b))
   );
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
-    loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)
+    [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
 
   function addIngredientType(name: string) {
     const trimmed = name.trim();
     if (!trimmed || ingredientTypes.includes(trimmed)) return;
-    const updated = [...ingredientTypes, trimmed];
+    const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
   }
@@ -940,7 +940,7 @@ export default function Home() {
   function addBrand(name: string) {
     const trimmed = name.trim();
     if (!trimmed || brands.includes(trimmed)) return trimmed ? trimmed : brands[0];
-    const updated = [...brands, trimmed];
+    const updated = [...brands, trimmed].sort((a, b) => a.localeCompare(b));
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
     return trimmed;
@@ -955,7 +955,7 @@ export default function Home() {
   function addFlavor(name: string) {
     const trimmed = name.trim();
     if (!trimmed || flavors.includes(trimmed)) return trimmed ? trimmed : flavors[0];
-    const updated = [...flavors, trimmed];
+    const updated = [...flavors, trimmed].sort((a, b) => a.localeCompare(b));
     setFlavors(updated);
     saveList(FLAVORS_KEY, updated);
     return trimmed;
