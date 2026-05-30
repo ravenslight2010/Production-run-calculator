@@ -760,6 +760,7 @@ export default function Home() {
   const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
 
   const [activeTab, setActiveTab] = useState("info");
+  const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [nowTime, setNowTime] = useState(() => new Date());
   const [runToTime, setRunToTime] = useState(() => {
     const d = new Date();
@@ -1589,9 +1590,70 @@ export default function Home() {
                 </div>
               </TabsContent>
 
-              {/* ─── DOUGH ─── */}
+              {/* ─── DOUGH/CRUSTS ─── */}
               <TabsContent value="dough">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Sub-toggle */}
+                <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit mb-5">
+                  <button
+                    type="button"
+                    onClick={() => setDoughSubTab("dough")}
+                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Dough
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDoughSubTab("crusts")}
+                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    Crusts
+                  </button>
+                </div>
+
+                {/* ── Crusts sub-section ── */}
+                {doughSubTab === "crusts" && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                      <div className="h-1 bg-sky-500 w-full" />
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Press Settings
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5 space-y-3">
+                        <StatRow label="Crusts Per Cycle" value={String(v.crustsPerCycle)} />
+                        <StatRow label="Cycle Speed (cyc/min)" value={String(v.cycleSpeed)} />
+                        <StatRow label="Speed Adjustment" value={String(v.speedAdjustment)} />
+                        <StatRow label="Doughballs Per Tray" value={String(v.doughballsPerTray)} />
+                      </CardContent>
+                    </Card>
+
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+                      <div className="h-1 bg-sky-500 w-full" />
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Crust Output
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-5 pb-5">
+                        <div className="mb-2">
+                          <p className="text-5xl font-mono font-bold text-sky-400">
+                            {fmtNum(calc.ppm, 1)}
+                          </p>
+                          <p className="text-sm text-muted-foreground mt-1">Pizzas per minute</p>
+                        </div>
+                        <Separator className="my-4 opacity-30" />
+                        <StatRow label="Time Per Press Cycle" value={fmtNum(calc.timePressHzSec, 2) + "s"} />
+                        <StatRow label="Time Per Tray" value={fmtTime(calc.timePerTraySec)} />
+                        <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
+                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {/* ── Dough sub-section ── */}
+                {doughSubTab === "dough" && (<><div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
                     <div className="h-1 bg-primary w-full" />
                     <CardHeader className="pb-2 pt-4 px-5">
@@ -1752,6 +1814,7 @@ export default function Home() {
                     </Card>
                   );
                 })()}
+                </>)}
               </TabsContent>
 
               {/* ─── TIMING ─── */}
