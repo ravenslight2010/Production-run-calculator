@@ -1080,6 +1080,7 @@ export default function Home() {
     const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
     const batchesNeeded = doughDeficit / v.doughBatchYield;
     const traysNeeded = doughDeficit / perTray;
+    const stacksNeededTotal = perTray > 0 ? Math.ceil(totalPizzasLeft / perTray) : 0;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
     const doughShortCases = doughDeficit / v.pizzasPerCase;
     const doughDepletionSec = ppm > 0 ? (doughOnHand / ppm) * 60 : 0;
@@ -1148,6 +1149,7 @@ export default function Home() {
       casesOnLine,
       casesLeftToRun,
       casesLeftToOpen,
+      stacksNeededTotal,
       casesForTiming,
       batchesNeeded,
       traysNeeded,
@@ -1709,7 +1711,7 @@ export default function Home() {
                       </CardHeader>
                       <CardContent className="px-5 pb-5">
                         <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} highlight />
-                        <StatRow label="Stacks Needed" value={fmtNum(calc.traysNeeded, 0)} />
+                        <StatRow label="Stacks Needed" value={fmtNum(calc.stacksNeededTotal, 0)} />
                         <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
                         <Separator className="my-3 opacity-30" />
                         <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
