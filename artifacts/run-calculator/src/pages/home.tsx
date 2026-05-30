@@ -1636,21 +1636,6 @@ export default function Home() {
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Press Settings
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-5 pb-5 space-y-3">
-                        <NumField control={form.control} name="crustsPerCycle" label="Crusts Per Cycle" step="1" />
-                        <NumField control={form.control} name="cycleSpeed" label="Cycle Speed (cyc/min)" step="0.1" />
-                        <NumField control={form.control} name="speedAdjustment" label="Speed Adjustment" step="0.01" />
-                        <NumField control={form.control} name="doughballsPerTray" label="Doughballs Per Tray" step="1" />
-                      </CardContent>
-                    </Card>
-
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
-                      <div className="h-1 bg-sky-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                           Crust Output
                         </CardTitle>
                       </CardHeader>
