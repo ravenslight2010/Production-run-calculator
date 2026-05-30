@@ -1048,11 +1048,12 @@ export default function Home() {
     const traysPerBatch = v.doughBatchYield / perTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
-    // Spreadsheet: casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase * speedAdj, 0)
+    // casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase, 0)
+    // ppm already includes speedAdjustment — do not apply it a second time
     const freezerTime = liveFreezerMin;
     const casesOnLine =
       ppm > 0
-        ? Math.floor((ppm * freezerTime) / v.pizzasPerCase * v.speedAdjustment)
+        ? Math.floor((ppm * freezerTime) / v.pizzasPerCase)
         : 0;
 
     // Spreadsheet Dough!B4: casesNeeded - skidsCompleted*casesPerSkid - casesOnCurrentSkid - casesOnLine + casesPerLayer
@@ -1093,8 +1094,10 @@ export default function Home() {
     // Timing — spreadsheet D5 = (60/cycleSpeed)/speedAdjustment
     const timePressHzSec =
       ppm > 0 ? (60 / v.cycleSpeed) / v.speedAdjustment : 0;
+    // Unified formula: perTray / ppm * 60 — equivalent to press-cycle formula in dough
+    // mode, and correct for crust mode where ppm = approxLineSpeed directly
     const timePerTraySec =
-      ppm > 0 ? (perTray / v.crustsPerCycle) * timePressHzSec : 0;
+      ppm > 0 ? (perTray / ppm) * 60 : 0;
     const timePerBatchSec =
       ppm > 0 ? (perBatch / ppm) * 60 : 0;
     const timePerSkidSec =
@@ -1118,9 +1121,9 @@ export default function Home() {
     }));
 
     // Frontline — batches = total_oz_needed / (batch_lbs * 16)
-    // Spreadsheet adds casesPerLayer as a buffer to sauce total only
+    // Spreadsheet adds casesPerLayer as a pizza buffer to sauce total only
     const totalPizzasRun = casesLeftToRun * v.pizzasPerCase;
-    const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer;
+    const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer * v.pizzasPerCase;
     const sauceBatches =
       v.sauceBarrelLbs > 0
         ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
