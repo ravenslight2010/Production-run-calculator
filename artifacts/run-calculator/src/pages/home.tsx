@@ -1715,7 +1715,6 @@ export default function Home() {
                         <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} />
                         <Separator className="my-3 opacity-30" />
                         <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
-                        <StatRow label="Cases Per Skid" value={fmtNum(v.casesPerSkid, 0)} />
                       </CardContent>
                     </Card>
                   </div>
