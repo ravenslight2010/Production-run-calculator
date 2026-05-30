@@ -47,6 +47,7 @@ const formSchema = z.object({
   casesPerSkid: z.coerce.number().min(1).default(48),
   casesPerLayer: z.coerce.number().min(1).default(6),
   doughballsPerTray: z.coerce.number().min(1).default(24),
+  crustsPerStack: z.coerce.number().min(1).default(24),
   doughBatchYield: z.coerce.number().min(1).default(620),
   // Progress tracking
   skidsCompleted: z.coerce.number().min(0).default(5),
@@ -563,7 +564,7 @@ const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed"] as const;
+const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed", "crustsPerStack"] as const;
 type CrustField = (typeof CRUST_FIELDS)[number];
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
@@ -631,6 +632,7 @@ const DEFAULT_VALUES: FormValues = {
   casesPerSkid: 48,
   casesPerLayer: 6,
   doughballsPerTray: 24,
+  crustsPerStack: 24,
   doughBatchYield: 620,
   skidsCompleted: 0,
   casesOnCurrentSkid: 0,
@@ -1035,9 +1037,11 @@ export default function Home() {
         ? v.approxLineSpeed
         : v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
 
+    const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
+
     const traysPerSkid =
-      (v.casesPerSkid * v.pizzasPerCase) / v.doughballsPerTray;
-    const traysPerBatch = v.doughBatchYield / v.doughballsPerTray;
+      (v.casesPerSkid * v.pizzasPerCase) / perTray;
+    const traysPerBatch = v.doughBatchYield / perTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
     // Spreadsheet: casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase * speedAdj, 0)
@@ -1064,11 +1068,11 @@ export default function Home() {
 
     const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
     const doughOnHand =
-      v.traysOnLine * v.doughballsPerTray +
+      v.traysOnLine * perTray +
       v.batchesReady * v.doughBatchYield;
     const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
     const batchesNeeded = doughDeficit / v.doughBatchYield;
-    const traysNeeded = doughDeficit / v.doughballsPerTray;
+    const traysNeeded = doughDeficit / perTray;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
     const doughShortCases = doughDeficit / v.pizzasPerCase;
     const doughDepletionSec = ppm > 0 ? (doughOnHand / ppm) * 60 : 0;
@@ -1082,7 +1086,7 @@ export default function Home() {
     const timePressHzSec =
       ppm > 0 ? (60 / v.cycleSpeed) / v.speedAdjustment : 0;
     const timePerTraySec =
-      ppm > 0 ? (v.doughballsPerTray / v.crustsPerCycle) * timePressHzSec : 0;
+      ppm > 0 ? (perTray / v.crustsPerCycle) * timePressHzSec : 0;
     const timePerBatchSec =
       ppm > 0 ? (v.doughBatchYield / ppm) * 60 : 0;
     const timePerSkidSec =
@@ -1092,7 +1096,7 @@ export default function Home() {
     // Spreadsheet: includes batchesReady dough
     const doughMadeTimeSec =
       ppm > 0
-        ? ((v.traysOnLine * v.doughballsPerTray +
+        ? ((v.traysOnLine * perTray +
             v.batchesReady * v.doughBatchYield) /
             ppm) *
           60
@@ -1100,7 +1104,7 @@ export default function Home() {
 
     const rackTimes = [10, 12, 16, 18, 20, 22].map((n) => ({
       trays: n,
-      sec: ppm > 0 ? (n * v.doughballsPerTray * 60) / ppm : 0,
+      sec: ppm > 0 ? (n * perTray * 60) / ppm : 0,
     }));
 
     // Frontline — batches = total_oz_needed / (batch_lbs * 16)
@@ -1550,12 +1554,21 @@ export default function Home() {
                           label="Cases Per Layer"
                           step="1"
                         />
-                        <NumField
-                          control={form.control}
-                          name="doughballsPerTray"
-                          label="Doughballs Per Tray"
-                          step="1"
-                        />
+                        {doughSubTab === "crusts" ? (
+                          <NumField
+                            control={form.control}
+                            name="crustsPerStack"
+                            label="Crusts Per Stack"
+                            step="1"
+                          />
+                        ) : (
+                          <NumField
+                            control={form.control}
+                            name="doughballsPerTray"
+                            label="Doughballs Per Tray"
+                            step="1"
+                          />
+                        )}
                       </div>
                       <NumField
                         control={form.control}
