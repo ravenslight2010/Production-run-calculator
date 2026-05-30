@@ -1688,10 +1688,8 @@ export default function Home() {
                           <p className="text-sm text-muted-foreground mt-1">Pizzas per minute</p>
                         </div>
                         <Separator className="my-4 opacity-30" />
-                        <StatRow label="Time Per Press Cycle" value={fmtNum(calc.timePressHzSec, 2) + "s"} />
-                        <StatRow label="Time Per Tray" value={fmtTime(calc.timePerTraySec)} />
+                        <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
                         <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
-                        <StatRow label="Time Per Batch" value={fmtTime(calc.timePerBatchSec)} />
                         <Separator className="my-3 opacity-30" />
                         <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} highlight />
                         <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
@@ -1932,21 +1930,25 @@ export default function Home() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="px-5 pb-5">
+                        {doughSubTab !== "crusts" && (
+                          <StatRow
+                            label="Time Per Press Cycle"
+                            value={fmtNum(calc.timePressHzSec, 2) + "s"}
+                            testId="output-time-per-cycle"
+                          />
+                        )}
                         <StatRow
-                          label="Time Per Press Cycle"
-                          value={fmtNum(calc.timePressHzSec, 2) + "s"}
-                          testId="output-time-per-cycle"
-                        />
-                        <StatRow
-                          label="Time Per Tray"
+                          label={doughSubTab === "crusts" ? "Time Per Stack" : "Time Per Tray"}
                           value={fmtTime(calc.timePerTraySec)}
                           testId="output-time-per-tray"
                         />
-                        <StatRow
-                          label="Time Per Batch"
-                          value={fmtTime(calc.timePerBatchSec)}
-                          testId="output-time-per-batch"
-                        />
+                        {doughSubTab !== "crusts" && (
+                          <StatRow
+                            label="Time Per Batch"
+                            value={fmtTime(calc.timePerBatchSec)}
+                            testId="output-time-per-batch"
+                          />
+                        )}
                         <StatRow
                           label="Time Per Skid"
                           value={fmtTime(calc.timePerSkidSec)}
