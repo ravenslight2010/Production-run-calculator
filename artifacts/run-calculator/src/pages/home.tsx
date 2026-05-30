@@ -560,6 +560,10 @@ const DEFAULT_CHEESE_INGREDIENTS = [
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
+  `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray"] as const;
+type CrustField = (typeof CRUST_FIELDS)[number];
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
@@ -590,14 +594,29 @@ function saveList(key: string, list: string[]): void {
 function loadProfile(brand: string, flavor: string): FormValues | null {
   try {
     const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
-    if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
+    if (!raw) return null;
+    const doughVals: Partial<FormValues> = JSON.parse(raw);
+    // Load crust settings from their own independent key
+    let crustVals: Partial<FormValues> = {};
+    try {
+      const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
+      if (crustRaw) crustVals = JSON.parse(crustRaw);
+    } catch {}
+    return { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
   } catch {}
   return null;
 }
 
 function saveProfile(brand: string, flavor: string, values: FormValues): void {
   if (!brand && !flavor) return;
-  try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(values)); } catch {}
+  // Save dough fields (everything except crust-specific fields)
+  const doughVals = { ...values } as Record<string, unknown>;
+  CRUST_FIELDS.forEach((f) => delete doughVals[f]);
+  try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(doughVals)); } catch {}
+  // Save crust fields to their own independent key
+  const crustVals: Partial<Record<CrustField, unknown>> = {};
+  CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
+  try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), JSON.stringify(crustVals)); } catch {}
 }
 
 const DEFAULT_VALUES: FormValues = {
