@@ -1555,7 +1555,7 @@ export default function Home() {
                         <NumField
                           control={form.control}
                           name="casesPerLayer"
-                          label="Cases Per Layer"
+                          label="Extra Case Buffer"
                           step="1"
                         />
                         {doughSubTab === "crusts" ? (
