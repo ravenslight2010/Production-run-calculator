@@ -1417,7 +1417,7 @@ export default function Home() {
                 </TabsTrigger>
                 <TabsTrigger value="dough" data-testid="tab-dough">
                   <Layers className="w-3.5 h-3.5 mr-1.5" />
-                  Dough
+                  Dough/Crusts
                 </TabsTrigger>
                 <TabsTrigger value="timing" data-testid="tab-timing">
                   <Clock className="w-3.5 h-3.5 mr-1.5" />
