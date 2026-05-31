@@ -918,6 +918,8 @@ const DEFAULT_INGREDIENT_TYPES = [
   "Cheese", "Pepperoni", "Sausage",
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
 ];
+const PEP_TYPES_KEY = "run-calc-pep-types";
+const DEFAULT_PEP_TYPES = ["Natural", "Cured"];
 const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
@@ -1135,6 +1137,24 @@ export default function Home() {
     const updated = ingredientTypes.filter(t => t !== name);
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+  }
+
+  const [pepTypes, setPepTypes] = useState<string[]>(() =>
+    [...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES)].sort((a, b) => a.localeCompare(b))
+  );
+
+  function addPepType(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || pepTypes.includes(trimmed)) return;
+    const updated = [...pepTypes, trimmed].sort((a, b) => a.localeCompare(b));
+    setPepTypes(updated);
+    saveList(PEP_TYPES_KEY, updated);
+  }
+
+  function removePepType(name: string) {
+    const updated = pepTypes.filter(t => t !== name);
+    setPepTypes(updated);
+    saveList(PEP_TYPES_KEY, updated);
   }
 
   const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
@@ -2791,9 +2811,9 @@ export default function Home() {
                         label="Pep Applicator 1"
                         value={v.pep1Type}
                         onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } }}
-                        options={ingredientTypes}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
+                        options={pepTypes}
+                        onAddOption={addPepType}
+                        onRemoveOption={removePepType}
                         allowClear
                       />
                       {(v.pep1Type ?? "").trim() && (
@@ -2815,9 +2835,9 @@ export default function Home() {
                         label="Pep Applicator 2"
                         value={v.pep2Type}
                         onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } }}
-                        options={ingredientTypes}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
+                        options={pepTypes}
+                        onAddOption={addPepType}
+                        onRemoveOption={removePepType}
                         allowClear
                       />
                       {(v.pep2Type ?? "").trim() && (
