@@ -2814,7 +2814,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Pep Applicator 1"
                         value={v.pep1Type}
-                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
                         onAddOption={addPepType}
                         onRemoveOption={removePepType}
@@ -2827,25 +2827,33 @@ export default function Home() {
                             name="pep1Sticks"
                             label="Number of Sticks"
                           />
-                          <div className="grid grid-cols-2 gap-3">
+                          {DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? (
                             <NumField
                               control={form.control}
                               name="pep1OzPerPizza"
                               label="Oz Per Pizza"
                             />
-                            <NumField
-                              control={form.control}
-                              name="pep1BatchLbs"
-                              label="Batch Weight (lbs)"
-                            />
-                          </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-3">
+                              <NumField
+                                control={form.control}
+                                name="pep1OzPerPizza"
+                                label="Oz Per Pizza"
+                              />
+                              <NumField
+                                control={form.control}
+                                name="pep1BatchLbs"
+                                label="Batch Weight (lbs)"
+                              />
+                            </div>
+                          )}
                         </>
                       )}
 
                       <TypeDropdown
                         label="Pep Applicator 2"
                         value={v.pep2Type}
-                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
                         onAddOption={addPepType}
                         onRemoveOption={removePepType}
@@ -2858,18 +2866,26 @@ export default function Home() {
                             name="pep2Sticks"
                             label="Number of Sticks"
                           />
-                          <div className="grid grid-cols-2 gap-3">
+                          {DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? (
                             <NumField
                               control={form.control}
                               name="pep2OzPerPizza"
                               label="Oz Per Pizza"
                             />
-                            <NumField
-                              control={form.control}
-                              name="pep2BatchLbs"
-                              label="Batch Weight (lbs)"
-                            />
-                          </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-3">
+                              <NumField
+                                control={form.control}
+                                name="pep2OzPerPizza"
+                                label="Oz Per Pizza"
+                              />
+                              <NumField
+                                control={form.control}
+                                name="pep2BatchLbs"
+                                label="Batch Weight (lbs)"
+                              />
+                            </div>
+                          )}
                         </>
                       )}
                     </CardContent>
