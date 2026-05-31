@@ -921,7 +921,7 @@ const DEFAULT_INGREDIENT_TYPES = [
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
 ];
 const PEP_TYPES_KEY = "run-calc-pep-types";
-const DEFAULT_PEP_TYPES = ["Natural", "Cured"];
+const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
 const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
@@ -1156,6 +1156,7 @@ export default function Home() {
   }
 
   function removePepType(name: string) {
+    if (DEFAULT_PEP_TYPES.includes(name)) return;
     const updated = pepTypes.filter(t => t !== name);
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
