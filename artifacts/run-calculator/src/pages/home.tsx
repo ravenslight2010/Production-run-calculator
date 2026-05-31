@@ -678,6 +678,7 @@ function TypeDropdown({
   options,
   onAddOption,
   onRemoveOption,
+  allowClear,
 }: {
   label: string;
   value: string;
@@ -685,6 +686,7 @@ function TypeDropdown({
   options: string[];
   onAddOption: (v: string) => void;
   onRemoveOption: (v: string) => void;
+  allowClear?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
@@ -728,6 +730,15 @@ function TypeDropdown({
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
             <div className="max-h-48 overflow-y-auto">
+              {allowClear && value && (
+                <button
+                  type="button"
+                  className="w-full text-left px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted transition-colors italic"
+                  onMouseDown={() => { onChange(""); setOpen(false); }}
+                >
+                  — None
+                </button>
+              )}
               {filtered.map(opt =>
                 confirmDelete === opt ? (
                   <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
@@ -2478,6 +2489,7 @@ export default function Home() {
                         options={frontlineRecipeNames}
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
+                        allowClear
                       />
                       {v.frontlineRecipeName.trim() && (
                         <div className="grid grid-cols-2 gap-3">
