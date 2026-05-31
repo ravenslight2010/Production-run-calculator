@@ -1143,9 +1143,12 @@ export default function Home() {
     saveList(INGREDIENT_TYPES_KEY, updated);
   }
 
-  const [pepTypes, setPepTypes] = useState<string[]>(() =>
-    [...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES)].sort((a, b) => a.localeCompare(b))
-  );
+  const [pepTypes, setPepTypes] = useState<string[]>(() => {
+    const LEGACY_PEP_TYPES = ["Natural", "Cured"];
+    const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
+    const merged = [...new Set([...DEFAULT_PEP_TYPES, ...saved.filter(t => !LEGACY_PEP_TYPES.includes(t))])].sort((a, b) => a.localeCompare(b));
+    return merged;
+  });
 
   function addPepType(name: string) {
     const trimmed = name.trim();
