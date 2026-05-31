@@ -2814,7 +2814,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Pep Applicator 1"
                         value={v.pep1Type}
-                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
                         onAddOption={addPepType}
                         onRemoveOption={removePepType}
@@ -2845,7 +2845,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Pep Applicator 2"
                         value={v.pep2Type}
-                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
                         onAddOption={addPepType}
                         onRemoveOption={removePepType}
