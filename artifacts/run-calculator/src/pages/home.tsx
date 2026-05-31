@@ -20,6 +20,8 @@ import {
   Timer,
   Trash2,
   X,
+  BarChart2,
+  CheckCircle2,
 } from "lucide-react";
 
 import {
@@ -121,6 +123,51 @@ function fmtNum(n: number, dec = 2): string {
   const num = Number(n);
   if (!isFinite(num)) return "—";
   return num.toFixed(dec);
+}
+
+function fmtClock(ts: number): string {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function computeSummaryStats(vals: FormValues) {
+  const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
+  const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
+  const sauceBatches =
+    vals.sauceBarrelLbs > 0
+      ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (vals.sauceBarrelLbs * 16)
+      : 0;
+  const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
+  const app1Batches = vals.app1BatchLbs > 0 ? app1Lbs / vals.app1BatchLbs : 0;
+  const app2Lbs = (totalPizzas * vals.app2OzPerPizza) / 16 + 20;
+  const app2Batches = vals.app2BatchLbs > 0 ? app2Lbs / vals.app2BatchLbs : 0;
+  const app3Lbs = (totalPizzas * vals.app3OzPerPizza) / 16 + 20;
+  const app3Batches = vals.app3BatchLbs > 0 ? app3Lbs / vals.app3BatchLbs : 0;
+  const app4Lbs = (totalPizzas * vals.app4OzPerPizza) / 16 + 20;
+  const app4Batches = vals.app4BatchLbs > 0 ? app4Lbs / vals.app4BatchLbs : 0;
+  const pep1Lbs = (totalPizzas * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
+  const pep1Batches =
+    !DEFAULT_PEP_TYPES.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
+      ? pep1Lbs / vals.pep1BatchLbs
+      : 0;
+  const pep2Lbs = (totalPizzas * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
+  const pep2Batches =
+    !DEFAULT_PEP_TYPES.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
+      ? pep2Lbs / vals.pep2BatchLbs
+      : 0;
+  const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
+  const estimatedTimeSec = ppm > 0 ? (totalPizzas * 60) / ppm : 0;
+  return {
+    totalCases: vals.casesNeeded,
+    totalPizzas,
+    estimatedTimeSec,
+    sauceBatches,
+    app1Batches, app1Type: vals.app1Type,
+    app2Batches, app2Type: vals.app2Type,
+    app3Batches, app3Type: vals.app3Type,
+    app4Batches, app4Type: vals.app4Type,
+    pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
+    pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
+  };
 }
 
 function StatRow({
@@ -2082,7 +2129,7 @@ export default function Home() {
         <Form {...form}>
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
-              <TabsList className="grid grid-cols-4 w-full mb-4 print:hidden">
+              <TabsList className="grid grid-cols-5 w-full mb-4 print:hidden">
                 <TabsTrigger value="info" data-testid="tab-info">
                   <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
                   Enter Info
@@ -2098,6 +2145,10 @@ export default function Home() {
                 <TabsTrigger value="frontline" data-testid="tab-frontline">
                   <Droplets className="w-3.5 h-3.5 mr-1.5" />
                   Frontline
+                </TabsTrigger>
+                <TabsTrigger value="summary" data-testid="tab-summary">
+                  <BarChart2 className="w-3.5 h-3.5 mr-1.5" />
+                  Summary
                 </TabsTrigger>
               </TabsList>
 
@@ -3041,6 +3092,118 @@ export default function Home() {
                   />
                 )}
                 </div>
+              </TabsContent>
+
+              {/* ─── SUMMARY ─── */}
+              <TabsContent value="summary">
+                {(() => {
+                  const finishedRuns = dayState.runs.filter(r => !!r.endedAt);
+                  const upcomingRuns = dayState.runs.filter((r, i) => !r.endedAt && i !== dayState.currentIndex);
+
+                  function SummaryCard({ run, isCurrent }: { run: typeof dayState.runs[0]; isCurrent?: boolean }) {
+                    const vals = isCurrent ? v : loadRunValues(run.id);
+                    const s = computeSummaryStats(vals);
+                    const isFinished = !!run.endedAt;
+                    const actualDurationSec = run.startedAt && run.endedAt
+                      ? (run.endedAt - run.startedAt) / 1000
+                      : null;
+                    const frontlineItems: { label: string; value: string }[] = [];
+                    if (s.sauceBatches > 0) frontlineItems.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+                    if (s.app1Type && s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: fmtNum(s.app1Batches, 2) + " batches" });
+                    if (s.app2Type && s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: fmtNum(s.app2Batches, 2) + " batches" });
+                    if (s.app3Type && s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: fmtNum(s.app3Batches, 2) + " batches" });
+                    if (s.app4Type && s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: fmtNum(s.app4Batches, 2) + " batches" });
+                    if (s.pep1Type) frontlineItems.push({ label: `Pep 1 — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+                    if (s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+
+                    return (
+                      <Card
+                        className={`border-border/50 shadow-md cursor-pointer transition-colors hover:bg-accent/30 ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/50"}`}
+                        onClick={() => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("info"); } }}
+                      >
+                        <CardHeader className="pb-2 pt-4 px-5">
+                          <div className="flex items-center justify-between gap-2">
+                            <CardTitle className="text-base font-semibold">{runLabel(run)}</CardTitle>
+                            <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${isCurrent ? "bg-primary/20 text-primary" : isFinished ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                              {isCurrent ? "Current" : isFinished ? "Finished" : "Upcoming"}
+                            </span>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="px-5 pb-4 space-y-3">
+                          {/* Time & cases row */}
+                          <div className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-background/40 rounded-lg py-2 px-1">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Cases</div>
+                              <div className="text-lg font-bold">{s.totalCases}</div>
+                            </div>
+                            <div className="bg-background/40 rounded-lg py-2 px-1">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Pizzas</div>
+                              <div className="text-lg font-bold">{s.totalPizzas.toLocaleString()}</div>
+                            </div>
+                            <div className="bg-background/40 rounded-lg py-2 px-1">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{isFinished ? "Duration" : "Est. Time"}</div>
+                              <div className="text-lg font-bold">{isFinished && actualDurationSec !== null ? fmtTime(actualDurationSec) : fmtTime(s.estimatedTimeSec)}</div>
+                            </div>
+                          </div>
+                          {/* Start / end times for started runs */}
+                          {run.startedAt && (
+                            <div className="flex gap-3 text-xs text-muted-foreground">
+                              <span>Started: <span className="text-foreground font-medium">{fmtClock(run.startedAt)}</span></span>
+                              {run.endedAt && <span>Ended: <span className="text-foreground font-medium">{fmtClock(run.endedAt)}</span></span>}
+                            </div>
+                          )}
+                          {/* Frontline totals */}
+                          {frontlineItems.length > 0 && (
+                            <div className="pt-1 border-t border-border/30">
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1.5">Frontline Totals</div>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                                {frontlineItems.map(item => (
+                                  <div key={item.label} className="flex justify-between text-xs py-0.5">
+                                    <span className="text-muted-foreground truncate mr-2">{item.label}</span>
+                                    <span className="font-medium tabular-nums shrink-0">{item.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Finished */}
+                      {finishedRuns.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Finished ({finishedRuns.length})
+                          </div>
+                          {finishedRuns.map(run => <SummaryCard key={run.id} run={run} />)}
+                        </div>
+                      )}
+                      {/* Current */}
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+                          <Timer className="w-4 h-4" />
+                          Current Run
+                        </div>
+                        <SummaryCard run={currentRun} isCurrent />
+                      </div>
+                      {/* Upcoming */}
+                      {upcomingRuns.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                            <Clock className="w-4 h-4" />
+                            Upcoming ({upcomingRuns.length})
+                          </div>
+                          {upcomingRuns.map(run => <SummaryCard key={run.id} run={run} />)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </TabsContent>
 
             </Tabs>
