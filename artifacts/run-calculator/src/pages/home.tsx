@@ -1703,13 +1703,15 @@ export default function Home() {
       v.app4BatchLbs > 0
         ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
         : 0;
+    const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16;
     const pep1Batches =
-      v.pep1BatchLbs > 0
-        ? (totalPizzasRun * v.pep1OzPerPizza) / (v.pep1BatchLbs * 16)
+      !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
+        ? pep1Lbs / v.pep1BatchLbs
         : 0;
+    const pep2Lbs = (totalPizzasRun * v.pep2OzPerPizza) / 16;
     const pep2Batches =
-      v.pep2BatchLbs > 0
-        ? (totalPizzasRun * v.pep2OzPerPizza) / (v.pep2BatchLbs * 16)
+      !DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
+        ? pep2Lbs / v.pep2BatchLbs
         : 0;
 
     return {
@@ -1741,7 +1743,9 @@ export default function Home() {
       app2Batches,
       app3Batches,
       app4Batches,
+      pep1Lbs,
       pep1Batches,
+      pep2Lbs,
       pep2Batches,
     };
   }, [v, liveFreezerMin]);
@@ -2947,15 +2951,15 @@ export default function Home() {
                       <Separator className="my-3 opacity-30" />
                       <StatRow
                         label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
-                        value={fmtNum(calc.pep1Batches, 2) + " batches"}
+                        value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
                         testId="output-pep1-batches"
-                        highlight={calc.pep1Batches > 0}
+                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
                       />
                       <StatRow
                         label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                        value={fmtNum(calc.pep2Batches, 2) + " batches"}
+                        value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
                         testId="output-pep2-batches"
-                        highlight={calc.pep2Batches > 0}
+                        highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
                       />
                     </CardContent>
                   </Card>
