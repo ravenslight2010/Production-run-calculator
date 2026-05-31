@@ -599,7 +599,7 @@ function FrontlineRecipeCard({
       <div className="h-1 bg-red-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Frontline Recipe
+          Sauce Recipe
         </CardTitle>
       </CardHeader>
       <CardContent className="px-5 pb-5">
