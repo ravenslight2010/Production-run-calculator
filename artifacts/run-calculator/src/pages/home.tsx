@@ -1243,6 +1243,7 @@ export default function Home() {
   const [confirmDeleteFlavor, setConfirmDeleteFlavor] = useState<string | null>(null);
   const confirmDeleteBrandRef = useRef<string | null>(null);
   const confirmDeleteFlavorRef = useRef<string | null>(null);
+  const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
@@ -1376,6 +1377,21 @@ export default function Home() {
     saveDayState(newDs);
     form.reset(DEFAULT_VALUES);
     schedulePush(newDs, 0);
+  }
+
+  function removeRun() {
+    const idx = dayState.currentIndex;
+    const run = dayState.runs[idx];
+    if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
+    const newRuns = dayState.runs.filter((_, i) => i !== idx);
+    if (newRuns.length === 0) return; // always keep at least one run
+    const newIndex = Math.max(0, idx - 1);
+    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    form.reset(loadRunValues(newRuns[newIndex].id));
+    schedulePush(newDs, 0);
+    setConfirmRemoveRun(false);
   }
 
   function setRunBrandFlavor(brand: string, flavor: string) {
@@ -1879,9 +1895,36 @@ export default function Home() {
                 <div className="w-16" />
               )}
 
-              {/* Count + New Run */}
+              {/* Count + Run actions */}
               <div className="flex items-center gap-1.5 shrink-0">
                 <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
+                {/* Remove run — only for upcoming (pending) runs when more than one exists */}
+                {!currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
+                  confirmRemoveRun ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-destructive font-semibold">Remove?</span>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
+                        onClick={removeRun}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
+                        onClick={() => setConfirmRemoveRun(false)}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemoveRun(true)}
+                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      title="Remove this run"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )
+                )}
                 <Button
                   type="button"
                   variant="outline"
