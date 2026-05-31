@@ -74,6 +74,7 @@ const formSchema = z.object({
   app3Type: z.string().default(""),
   app4Type: z.string().default(""),
   // Dough recipe
+  doughRecipeName: z.string().default(""),
   targetDoughballWeight: z.coerce.number().min(0).default(0),
   doughRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
@@ -361,6 +362,11 @@ function DoughRecipeCard({
   onAppend,
   onRemove,
   onTargetWeightChange,
+  recipeName,
+  recipeNameOptions,
+  onAddRecipeName,
+  onRemoveRecipeName,
+  onRecipeNameChange,
 }: {
   batchesNeeded: number;
   fields: { id: string }[];
@@ -375,6 +381,11 @@ function DoughRecipeCard({
   onAppend: () => void;
   onRemove: (idx: number) => void;
   onTargetWeightChange: (v: number) => void;
+  recipeName: string;
+  recipeNameOptions: string[];
+  onAddRecipeName: (v: string) => void;
+  onRemoveRecipeName: (v: string) => void;
+  onRecipeNameChange: (v: string) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
@@ -388,11 +399,21 @@ function DoughRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-orange-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-3 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
             Dough Recipe
           </CardTitle>
-          <span className="text-xs text-muted-foreground">
+          <div className="flex-1 max-w-xs">
+            <IngredientSelect
+              value={recipeName}
+              onChange={onRecipeNameChange}
+              options={recipeNameOptions}
+              onAddOption={onAddRecipeName}
+              onRemoveOption={onRemoveRecipeName}
+              placeholder="Recipe name…"
+            />
+          </div>
+          <span className="text-xs text-muted-foreground shrink-0">
             <span className="font-mono text-foreground">{fmtNum(batchesNeeded, 2)}</span> batches needed
           </span>
         </div>
@@ -734,6 +755,8 @@ const DOUGH_INGREDIENTS_KEY = "run-calc-dough-ingredients";
 const DEFAULT_DOUGH_INGREDIENTS = [
   "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
 ];
+const DOUGH_RECIPE_NAMES_KEY = "run-calc-dough-recipe-names";
+const DEFAULT_DOUGH_RECIPE_NAMES: string[] = [];
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
@@ -833,6 +856,7 @@ const DEFAULT_VALUES: FormValues = {
   app2Type: "",
   app3Type: "",
   app4Type: "",
+  doughRecipeName: "",
   targetDoughballWeight: 0,
   doughRecipe: [],
   app1CheeseRecipe: [],
@@ -963,6 +987,24 @@ export default function Home() {
     const updated = doughIngredients.filter(t => t !== name);
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+  }
+
+  const [doughRecipeNames, setDoughRecipeNames] = useState<string[]>(() =>
+    [...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b))
+  );
+
+  function addDoughRecipeName(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || doughRecipeNames.includes(trimmed)) return;
+    const updated = [...doughRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
+    setDoughRecipeNames(updated);
+    saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+  }
+
+  function removeDoughRecipeName(name: string) {
+    const updated = doughRecipeNames.filter(t => t !== name);
+    setDoughRecipeNames(updated);
+    saveList(DOUGH_RECIPE_NAMES_KEY, updated);
   }
 
   const form = useForm<FormValues>({
@@ -2112,6 +2154,11 @@ export default function Home() {
                   onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
                   onRemove={removeDough}
                   onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
+                  recipeName={v.doughRecipeName ?? ""}
+                  recipeNameOptions={doughRecipeNames}
+                  onAddRecipeName={addDoughRecipeName}
+                  onRemoveRecipeName={removeDoughRecipeName}
+                  onRecipeNameChange={val => form.setValue("doughRecipeName", val, { shouldDirty: true })}
                 />
                   </>
                 )}
