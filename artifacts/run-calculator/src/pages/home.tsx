@@ -3141,8 +3141,16 @@ export default function Home() {
                               <div className="text-lg font-bold">{s.totalPizzas.toLocaleString()}</div>
                             </div>
                             <div className="bg-background/40 rounded-lg py-2 px-1">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{isFinished ? "Duration" : "Est. Time"}</div>
-                              <div className="text-lg font-bold">{isFinished && actualDurationSec !== null ? fmtTime(actualDurationSec) : fmtTime(s.estimatedTimeSec)}</div>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                                {isFinished ? "Duration" : isCurrent ? "Time Left" : "Est. Time"}
+                              </div>
+                              <div className="text-lg font-bold">
+                                {isFinished && actualDurationSec !== null
+                                  ? fmtTime(actualDurationSec)
+                                  : isCurrent
+                                    ? fmtTime(calc.totalTimeSec)
+                                    : fmtTime(s.estimatedTimeSec)}
+                              </div>
                             </div>
                           </div>
                           {/* Expected cases by now — only for running current run */}
