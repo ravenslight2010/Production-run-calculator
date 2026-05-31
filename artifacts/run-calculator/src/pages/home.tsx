@@ -1031,8 +1031,8 @@ function loadDayState(): DayState {
     const raw = localStorage.getItem(DAY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as DayState;
-      // Reset if stored date doesn't match today
-      if (parsed.date && parsed.date !== todayStr()) {
+      // Reset if stored date is missing or doesn't match today
+      if (!parsed.date || parsed.date !== todayStr()) {
         return freshDayState();
       }
       // Migrate old shape { id, label } → { id, brand, flavor }
@@ -1271,6 +1271,27 @@ export default function Home() {
       } catch {}
     };
     return () => es.close();
+  }, []);
+
+  // Detect day change while the tab is open (visibility change + periodic check)
+  useEffect(() => {
+    function checkDateRollover() {
+      const stored = (() => {
+        try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
+      })();
+      if (stored.date && stored.date !== todayStr()) {
+        const fresh = freshDayState();
+        saveDayState(fresh);
+        setDayState(fresh);
+        form.reset(DEFAULT_VALUES);
+      }
+    }
+    const interval = setInterval(checkDateRollover, 60_000);
+    document.addEventListener("visibilitychange", checkDateRollover);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", checkDateRollover);
+    };
   }, []);
 
   function schedulePush(ds: DayState, delay = 600) {
