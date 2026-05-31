@@ -304,6 +304,7 @@ function CheeseRecipeCard({
   onRemove: (idx: number) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
   return (
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
@@ -334,7 +335,7 @@ function CheeseRecipeCard({
               {fields.map((field, idx) => {
                 const rowLbs = Number(recipe[idx]?.lbs ?? 0);
                 return (
-                  <div key={field.id} className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 items-center">
+                  <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_120px_auto]" : "grid-cols-[1fr_120px_120px_32px]"}`}>
                     <IngredientSelect
                       value={recipe[idx]?.ingredient ?? ""}
                       onChange={val => onSetIngredient(idx, val)}
@@ -353,13 +354,20 @@ function CheeseRecipeCard({
                     <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
                       {fmtNum(rowLbs * batches, 1)}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onRemove(idx)}
-                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {confirmIdx === idx ? (
+                      <div className="flex items-center gap-1">
+                        <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
+                        <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmIdx(idx)}
+                        className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -429,6 +437,7 @@ function DoughRecipeCard({
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
   // Recipe yield: how many doughballs does the batch make at the target weight?
   const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
   // Run yield: what the line actually produced (from doughBatchYield field)
@@ -515,7 +524,7 @@ function DoughRecipeCard({
             </div>
             <div className="space-y-1.5">
               {fields.map((field, idx) => (
-                <div key={field.id} className="grid grid-cols-[1fr_120px_32px] gap-x-2 items-center">
+                <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_auto]" : "grid-cols-[1fr_120px_32px]"}`}>
                   <IngredientSelect
                     value={recipe[idx]?.ingredient ?? ""}
                     onChange={val => onSetIngredient(idx, val)}
@@ -531,13 +540,20 @@ function DoughRecipeCard({
                     placeholder="0"
                     className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
-                  <button
-                    type="button"
-                    onClick={() => onRemove(idx)}
-                    className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {confirmIdx === idx ? (
+                    <div className="flex items-center gap-1">
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmIdx(idx)}
+                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -594,6 +610,7 @@ function FrontlineRecipeCard({
   onRecipeNameChange: (v: string) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
   return (
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-red-500/70 w-full" />
@@ -616,7 +633,7 @@ function FrontlineRecipeCard({
             </div>
             <div className="space-y-1.5">
               {fields.map((field, idx) => (
-                <div key={field.id} className="grid grid-cols-[1fr_120px_32px] gap-x-2 items-center">
+                <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_auto]" : "grid-cols-[1fr_120px_32px]"}`}>
                   <IngredientSelect
                     value={recipe[idx]?.ingredient ?? ""}
                     onChange={val => onSetIngredient(idx, val)}
@@ -632,13 +649,20 @@ function FrontlineRecipeCard({
                     placeholder="0"
                     className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
-                  <button
-                    type="button"
-                    onClick={() => onRemove(idx)}
-                    className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {confirmIdx === idx ? (
+                    <div className="flex items-center gap-1">
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmIdx(idx)}
+                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
