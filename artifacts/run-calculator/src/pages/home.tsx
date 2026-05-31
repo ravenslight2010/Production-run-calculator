@@ -2694,7 +2694,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 1"
                         value={v.app1Type}
-                        onChange={val => form.setValue("app1Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -2718,7 +2718,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 2"
                         value={v.app2Type}
-                        onChange={val => form.setValue("app2Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -2742,7 +2742,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 3"
                         value={v.app3Type}
-                        onChange={val => form.setValue("app3Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -2766,7 +2766,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 4"
                         value={v.app4Type}
-                        onChange={val => form.setValue("app4Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -2790,7 +2790,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Pep Applicator 1"
                         value={v.pep1Type}
-                        onChange={val => form.setValue("pep1Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -2814,7 +2814,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Pep Applicator 2"
                         value={v.pep2Type}
-                        onChange={val => form.setValue("pep2Type", val, { shouldDirty: true })}
+                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val) { form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
