@@ -67,13 +67,17 @@ const formSchema = z.object({
   app3BatchLbs: z.coerce.number().min(0.1).default(45),
   app4OzPerPizza: z.coerce.number().min(0).default(4),
   app4BatchLbs: z.coerce.number().min(0.1).default(55),
-  pepOzPerPizza: z.coerce.number().min(0).default(0),
-  pepType: z.enum(["Natural", "Cured"]).default("Natural"),
+  pep1OzPerPizza: z.coerce.number().min(0).default(0),
+  pep1BatchLbs: z.coerce.number().min(0.1).default(25),
+  pep2OzPerPizza: z.coerce.number().min(0).default(0),
+  pep2BatchLbs: z.coerce.number().min(0.1).default(25),
   // Applicator ingredient labels
   app1Type: z.string().default(""),
   app2Type: z.string().default(""),
   app3Type: z.string().default(""),
   app4Type: z.string().default(""),
+  pep1Type: z.string().default(""),
+  pep2Type: z.string().default(""),
   // Dough recipe
   doughRecipeName: z.string().default(""),
   targetDoughballWeight: z.coerce.number().min(0).default(0),
@@ -1023,12 +1027,16 @@ const DEFAULT_VALUES: FormValues = {
   app3BatchLbs: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
-  pepOzPerPizza: 0,
-  pepType: "Natural",
+  pep1OzPerPizza: 0,
+  pep1BatchLbs: 25,
+  pep2OzPerPizza: 0,
+  pep2BatchLbs: 25,
   app1Type: "",
   app2Type: "",
   app3Type: "",
   app4Type: "",
+  pep1Type: "",
+  pep2Type: "",
   doughRecipeName: "",
   targetDoughballWeight: 0,
   doughRecipe: [],
@@ -1667,7 +1675,14 @@ export default function Home() {
       v.app4BatchLbs > 0
         ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
         : 0;
-    const pepLbs = (totalPizzasRun * v.pepOzPerPizza) / 16;
+    const pep1Batches =
+      v.pep1BatchLbs > 0
+        ? (totalPizzasRun * v.pep1OzPerPizza) / (v.pep1BatchLbs * 16)
+        : 0;
+    const pep2Batches =
+      v.pep2BatchLbs > 0
+        ? (totalPizzasRun * v.pep2OzPerPizza) / (v.pep2BatchLbs * 16)
+        : 0;
 
     return {
       ppm,
@@ -1698,7 +1713,8 @@ export default function Home() {
       app2Batches,
       app3Batches,
       app4Batches,
-      pepLbs,
+      pep1Batches,
+      pep2Batches,
     };
   }, [v, liveFreezerMin]);
 
@@ -2759,27 +2775,49 @@ export default function Home() {
                         />
                       </div>
 
-                      <SectionLabel>Pepperoni</SectionLabel>
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Type</p>
-                        <div className="flex rounded overflow-hidden border border-border/40">
-                          {(["Natural", "Cured"] as const).map(opt => (
-                            <button
-                              key={opt}
-                              type="button"
-                              onMouseDown={() => form.setValue("pepType", opt, { shouldDirty: true })}
-                              className={`px-3 py-0.5 text-xs font-semibold transition-colors ${v.pepType === opt ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted/70"}`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <NumField
-                        control={form.control}
-                        name="pepOzPerPizza"
-                        label="Oz Per Pizza"
+                      <TypeDropdown
+                        label="Pep Applicator 1"
+                        value={v.pep1Type}
+                        onChange={val => form.setValue("pep1Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
+                        allowClear
                       />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="pep1OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="pep1BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
+
+                      <TypeDropdown
+                        label="Pep Applicator 2"
+                        value={v.pep2Type}
+                        onChange={val => form.setValue("pep2Type", val, { shouldDirty: true })}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
+                        allowClear
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="pep2OzPerPizza"
+                          label="Oz Per Pizza"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="pep2BatchLbs"
+                          label="Batch Weight (lbs)"
+                        />
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -2834,10 +2872,16 @@ export default function Home() {
                       />
                       <Separator className="my-3 opacity-30" />
                       <StatRow
-                        label="Pepperoni"
-                        value={fmtNum(calc.pepLbs, 2) + " lbs"}
-                        testId="output-pep-lbs"
-                        highlight={calc.pepLbs > 0}
+                        label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
+                        value={fmtNum(calc.pep1Batches, 2) + " batches"}
+                        testId="output-pep1-batches"
+                        highlight={calc.pep1Batches > 0}
+                      />
+                      <StatRow
+                        label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
+                        value={fmtNum(calc.pep2Batches, 2) + " batches"}
+                        testId="output-pep2-batches"
+                        highlight={calc.pep2Batches > 0}
                       />
                     </CardContent>
                   </Card>
