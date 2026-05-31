@@ -146,34 +146,70 @@ function IngredientSelect({
   options,
   onAddOption,
   onRemoveOption,
+  placeholder,
 }: {
   value: string;
   onChange: (v: string) => void;
   options: string[];
   onAddOption: (v: string) => void;
   onRemoveOption: (v: string) => void;
+  placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [dropUp, setDropUp] = useState(false);
+  const [rect, setRect] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
   const confirmDeleteRef = useRef<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const filtered = (options ?? []).filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
+
+  function openDropdown() {
+    setInputVal("");
+    setConfirmDelete(null);
+    confirmDeleteRef.current = null;
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r.bottom;
+      const dropdownH = Math.min(filtered.length * 32 + 80, 280);
+      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
+      setRect({ top: r.top, bottom: r.bottom, left: r.left, width: r.width });
+    }
+    setOpen(true);
+  }
+
+  const dropStyle: React.CSSProperties = rect
+    ? {
+        position: "fixed",
+        left: rect.left,
+        width: Math.max(rect.width, 192),
+        zIndex: 9999,
+        ...(dropUp
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+      }
+    : {};
+
   return (
     <div className="relative w-full">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => { setInputVal(""); setConfirmDelete(null); confirmDeleteRef.current = null; setOpen(true); }}
+        onClick={openDropdown}
         className="flex items-center gap-1 h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm hover:bg-muted/70 transition-colors w-full justify-between"
       >
         <span className={`truncate ${value ? "text-foreground" : "text-muted-foreground/50"}`}>
-          {value || "Select…"}
+          {value || placeholder || "Select…"}
         </span>
         <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
       </button>
       {open && (
-        <div className="absolute z-50 top-full mt-1 left-0 w-48 bg-popover border border-border rounded-md shadow-lg py-1">
+        <div
+          style={dropStyle}
+          className="bg-popover border border-border rounded-md shadow-xl py-1"
+        >
           <input
             autoFocus
             value={inputVal}
@@ -190,7 +226,7 @@ function IngredientSelect({
             placeholder="Search or add…"
             className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
           />
-          <div className="max-h-48 overflow-y-auto">
+          <div className="max-h-60 overflow-y-auto overscroll-contain">
             {filtered.map(opt =>
               confirmDelete === opt ? (
                 <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
