@@ -3158,6 +3158,27 @@ export default function Home() {
                               </div>
                             );
                           })()}
+                          {/* Actual vs expected duration — only for finished runs */}
+                          {isFinished && actualDurationSec !== null && s.estimatedTimeSec > 0 && (() => {
+                            const diffSec = actualDurationSec - s.estimatedTimeSec;
+                            const ahead = diffSec < 0;
+                            const absDiff = Math.abs(diffSec);
+                            return (
+                              <div className={`flex items-center justify-between rounded-lg px-4 py-2 border ${ahead ? "bg-emerald-950/30 border-emerald-700/30" : "bg-amber-950/30 border-amber-700/30"}`}>
+                                <div className="space-y-0.5">
+                                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Time Comparison</div>
+                                  <div className="flex gap-3 text-xs">
+                                    <span className="text-muted-foreground">Actual: <span className="text-foreground font-medium">{fmtTime(actualDurationSec)}</span></span>
+                                    <span className="text-muted-foreground">Expected: <span className="text-foreground font-medium">{fmtTime(s.estimatedTimeSec)}</span></span>
+                                  </div>
+                                </div>
+                                <div className={`text-right text-sm font-bold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
+                                  {ahead ? `−${fmtTime(absDiff)}` : `+${fmtTime(absDiff)}`}
+                                  <div className="text-[10px] font-normal">{ahead ? "ahead" : "over"}</div>
+                                </div>
+                              </div>
+                            );
+                          })()}
                           {/* Start / end times for started runs */}
                           {run.startedAt && (
                             <div className="flex gap-3 text-xs text-muted-foreground">
