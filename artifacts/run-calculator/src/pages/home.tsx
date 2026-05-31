@@ -2479,18 +2479,20 @@ export default function Home() {
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="sauceOzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="sauceBarrelLbs"
-                          label="Barrel Weight (lbs)"
-                        />
-                      </div>
+                      {v.frontlineRecipeName.trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="sauceOzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="sauceBarrelLbs"
+                            label="Barrel Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Applicator 1"
@@ -2725,22 +2727,24 @@ export default function Home() {
                     onRemove={removeCheese4}
                   />
                 )}
-                <FrontlineRecipeCard
-                  fields={frontlineFields}
-                  recipe={v.frontlineRecipe ?? []}
-                  register={form.register}
-                  ingredientOptions={frontlineIngredients}
-                  onAddIngredient={addFrontlineIngredient}
-                  onRemoveIngredient={removeFrontlineIngredient}
-                  onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                  onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
-                  onRemove={removeFrontline}
-                  recipeName={v.frontlineRecipeName ?? ""}
-                  recipeNameOptions={frontlineRecipeNames}
-                  onAddRecipeName={addFrontlineRecipeName}
-                  onRemoveRecipeName={removeFrontlineRecipeName}
-                  onRecipeNameChange={val => form.setValue("frontlineRecipeName", val, { shouldDirty: true })}
-                />
+                {v.frontlineRecipeName.trim() && (
+                  <FrontlineRecipeCard
+                    fields={frontlineFields}
+                    recipe={v.frontlineRecipe ?? []}
+                    register={form.register}
+                    ingredientOptions={frontlineIngredients}
+                    onAddIngredient={addFrontlineIngredient}
+                    onRemoveIngredient={removeFrontlineIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
+                    onRemove={removeFrontline}
+                    recipeName={v.frontlineRecipeName ?? ""}
+                    recipeNameOptions={frontlineRecipeNames}
+                    onAddRecipeName={addFrontlineRecipeName}
+                    onRemoveRecipeName={removeFrontlineRecipeName}
+                    onRecipeNameChange={val => form.setValue("frontlineRecipeName", val, { shouldDirty: true })}
+                  />
+                )}
                 </div>
               </TabsContent>
 
