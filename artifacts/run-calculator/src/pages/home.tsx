@@ -59,12 +59,16 @@ const formSchema = z.object({
   // Frontline weights (oz per pizza application rate)
   sauceOzPerPizza: z.coerce.number().min(0).default(4),
   sauceBarrelLbs: z.coerce.number().min(0.1).default(450),
+  app1Sticks: z.coerce.number().min(0).default(0),
   app1OzPerPizza: z.coerce.number().min(0).default(0),
   app1BatchLbs: z.coerce.number().min(0.1).default(30),
+  app2Sticks: z.coerce.number().min(0).default(0),
   app2OzPerPizza: z.coerce.number().min(0).default(4),
   app2BatchLbs: z.coerce.number().min(0.1).default(55),
+  app3Sticks: z.coerce.number().min(0).default(0),
   app3OzPerPizza: z.coerce.number().min(0).default(0),
   app3BatchLbs: z.coerce.number().min(0.1).default(45),
+  app4Sticks: z.coerce.number().min(0).default(0),
   app4OzPerPizza: z.coerce.number().min(0).default(4),
   app4BatchLbs: z.coerce.number().min(0.1).default(55),
   pep1Sticks: z.coerce.number().min(0).default(0),
@@ -1023,12 +1027,16 @@ const DEFAULT_VALUES: FormValues = {
   // Sauce & applicators — zero
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
+  app1Sticks: 0,
   app1OzPerPizza: 0,
   app1BatchLbs: 0,
+  app2Sticks: 0,
   app2OzPerPizza: 0,
   app2BatchLbs: 0,
+  app3Sticks: 0,
   app3OzPerPizza: 0,
   app3BatchLbs: 0,
+  app4Sticks: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
   pep1Sticks: 0,
@@ -1687,22 +1695,14 @@ export default function Home() {
       v.sauceBarrelLbs > 0
         ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
         : 0;
-    const app1Batches =
-      v.app1BatchLbs > 0
-        ? (totalPizzasRun * v.app1OzPerPizza) / (v.app1BatchLbs * 16)
-        : 0;
-    const app2Batches =
-      v.app2BatchLbs > 0
-        ? (totalPizzasRun * v.app2OzPerPizza) / (v.app2BatchLbs * 16)
-        : 0;
-    const app3Batches =
-      v.app3BatchLbs > 0
-        ? (totalPizzasRun * v.app3OzPerPizza) / (v.app3BatchLbs * 16)
-        : 0;
-    const app4Batches =
-      v.app4BatchLbs > 0
-        ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
-        : 0;
+    const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + v.app1Sticks;
+    const app1Batches = v.app1BatchLbs > 0 ? app1Lbs / v.app1BatchLbs : 0;
+    const app2Lbs = (totalPizzasRun * v.app2OzPerPizza) / 16 + v.app2Sticks;
+    const app2Batches = v.app2BatchLbs > 0 ? app2Lbs / v.app2BatchLbs : 0;
+    const app3Lbs = (totalPizzasRun * v.app3OzPerPizza) / 16 + v.app3Sticks;
+    const app3Batches = v.app3BatchLbs > 0 ? app3Lbs / v.app3BatchLbs : 0;
+    const app4Lbs = (totalPizzasRun * v.app4OzPerPizza) / 16 + v.app4Sticks;
+    const app4Batches = v.app4BatchLbs > 0 ? app4Lbs / v.app4BatchLbs : 0;
     const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
@@ -2726,14 +2726,19 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 1"
                         value={v.app1Type}
-                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1Sticks", 0, { shouldDirty: true }); form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
                       {v.app1Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app1Sticks"
+                            label="# of Sticks"
+                          />
                           <NumField
                             control={form.control}
                             name="app1OzPerPizza"
@@ -2750,14 +2755,19 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 2"
                         value={v.app2Type}
-                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2Sticks", 0, { shouldDirty: true }); form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
                       {v.app2Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app2Sticks"
+                            label="# of Sticks"
+                          />
                           <NumField
                             control={form.control}
                             name="app2OzPerPizza"
@@ -2774,14 +2784,19 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 3"
                         value={v.app3Type}
-                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3Sticks", 0, { shouldDirty: true }); form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
                       {v.app3Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app3Sticks"
+                            label="# of Sticks"
+                          />
                           <NumField
                             control={form.control}
                             name="app3OzPerPizza"
@@ -2798,14 +2813,19 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 4"
                         value={v.app4Type}
-                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4Sticks", 0, { shouldDirty: true }); form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
                       {v.app4Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app4Sticks"
+                            label="# of Sticks"
+                          />
                           <NumField
                             control={form.control}
                             name="app4OzPerPizza"
