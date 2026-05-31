@@ -15,6 +15,7 @@ import {
   Pencil,
   Check,
   Play,
+  Pause,
   Square,
   Timer,
   Trash2,
@@ -939,7 +940,7 @@ const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; endedAt?: number; subTab?: "dough" | "crusts" };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts" };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
@@ -1067,6 +1068,7 @@ function loadDayState(): DayState {
         brand: r.brand ?? (r.label ?? ""),
         flavor: r.flavor ?? "",
         startedAt: r.startedAt,
+        pausedAt: r.pausedAt,
         endedAt: r.endedAt,
       }));
       return { ...parsed, runs, date: parsed.date ?? todayStr() };
@@ -1246,6 +1248,7 @@ export default function Home() {
   const confirmDeleteBrandRef = useRef<string | null>(null);
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
+  const [resumeDialog, setResumeDialog] = useState(false);
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
@@ -1456,12 +1459,45 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
+  function pauseRun() {
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? { ...r, pausedAt: Date.now() } : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs, 0);
+  }
+
+  function resumeRun(freezerEmpty: boolean) {
+    const run = dayState.runs[dayState.currentIndex];
+    if (!run?.pausedAt) return;
+    let newStartedAt = run.startedAt!;
+    if (freezerEmpty) {
+      // Restart freezer from zero
+      newStartedAt = Date.now();
+    } else {
+      // Shift startedAt forward by pause duration so elapsed time is preserved
+      const pauseDuration = Date.now() - run.pausedAt;
+      newStartedAt = run.startedAt! + pauseDuration;
+    }
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex
+        ? { ...r, startedAt: newStartedAt, pausedAt: undefined }
+        : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs, 0);
+  }
+
   function endRun() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, endedAt: Date.now() } : r
+      i === dayState.currentIndex ? { ...r, pausedAt: undefined, endedAt: Date.now() } : r
     );
     const nextIndex = dayState.currentIndex + 1 < dayState.runs.length
       ? dayState.currentIndex + 1
@@ -1475,13 +1511,18 @@ export default function Home() {
     schedulePush(newDs, 0);
   }
 
-  const runStatus: "pending" | "running" | "ended" =
-    currentRun?.endedAt ? "ended" : currentRun?.startedAt ? "running" : "pending";
+  const runStatus: "pending" | "running" | "paused" | "ended" =
+    currentRun?.endedAt ? "ended"
+    : currentRun?.pausedAt ? "paused"
+    : currentRun?.startedAt ? "running"
+    : "pending";
 
   const liveFreezerMin = (() => {
     if (!currentRun?.startedAt) return 0;
     if (currentRun.endedAt) return Number(v.freezerTime);
-    const elapsed = (nowTime.getTime() - currentRun.startedAt) / 60000;
+    // When paused, freeze the timer at the moment of pause
+    const refTime = currentRun.pausedAt ?? nowTime.getTime();
+    const elapsed = (refTime - currentRun.startedAt) / 60000;
     return Math.min(elapsed, Number(v.freezerTime));
   })();
 
@@ -1846,12 +1887,50 @@ export default function Home() {
                   </span>
                   <button
                     type="button"
+                    onClick={pauseRun}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors"
+                  >
+                    <Pause className="w-3 h-3 fill-current" /> Pause
+                  </button>
+                  <button
+                    type="button"
                     onClick={endRun}
                     className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
                   >
                     <Square className="w-3 h-3 fill-current" /> Stop Run
                   </button>
                 </>
+              )}
+              {runStatus === "paused" && (
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                    Paused
+                  </span>
+                  {resumeDialog ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-muted-foreground font-medium">Freezer empty?</span>
+                      <button
+                        type="button"
+                        className="px-2 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
+                        onClick={() => { resumeRun(true); setResumeDialog(false); }}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-2 py-0.5 rounded bg-muted hover:bg-muted/70 text-muted-foreground text-xs font-semibold transition-colors"
+                        onClick={() => { resumeRun(false); setResumeDialog(false); }}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setResumeDialog(true)}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
+                    >
+                      <Play className="w-3 h-3 fill-current" /> Resume
+                    </button>
+                  )}
+                </div>
               )}
               {runStatus === "ended" && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
