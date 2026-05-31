@@ -504,53 +504,43 @@ function DoughRecipeCard({
           </p>
         ) : (
           <div className="w-full mb-3">
-            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
+            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mb-1 px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
               <span />
             </div>
             <div className="space-y-1.5">
-              {fields.map((field, idx) => {
-                const rowLbs = Number(recipe[idx]?.lbs ?? 0);
-                return (
-                  <div key={field.id} className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 items-center">
-                    <IngredientSelect
-                      value={recipe[idx]?.ingredient ?? ""}
-                      onChange={val => onSetIngredient(idx, val)}
-                      options={ingredientOptions}
-                      onAddOption={onAddIngredient}
-                      onRemoveOption={onRemoveIngredient}
-                    />
-                    <input
-                      {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      placeholder="0"
-                      className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
-                    />
-                    <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
-                      {fmtNum(rowLbs * Math.max(1, batchesNeeded), 1)}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onRemove(idx)}
-                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
+              {fields.map((field, idx) => (
+                <div key={field.id} className="grid grid-cols-[1fr_120px_32px] gap-x-2 items-center">
+                  <IngredientSelect
+                    value={recipe[idx]?.ingredient ?? ""}
+                    onChange={val => onSetIngredient(idx, val)}
+                    options={ingredientOptions}
+                    onAddOption={onAddIngredient}
+                    onRemoveOption={onRemoveIngredient}
+                  />
+                  <input
+                    {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="0"
+                    className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onRemove(idx)}
+                    className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
-            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
-              <span className="text-xs font-semibold text-muted-foreground">Total Batch Weight</span>
-              <span className="text-xs font-mono text-right text-muted-foreground">
-                {fmtNum(totalLbsPerBatch, 1)} lbs/batch
-              </span>
+            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+              <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalBatchWeight, 1)} lbs
+                {fmtNum(totalLbsPerBatch, 1)} lbs
               </span>
               <span />
             </div>
