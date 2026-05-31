@@ -1687,22 +1687,14 @@ export default function Home() {
       v.sauceBarrelLbs > 0
         ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
         : 0;
-    const app1Batches =
-      v.app1BatchLbs > 0
-        ? (totalPizzasRun * v.app1OzPerPizza) / (v.app1BatchLbs * 16)
-        : 0;
-    const app2Batches =
-      v.app2BatchLbs > 0
-        ? (totalPizzasRun * v.app2OzPerPizza) / (v.app2BatchLbs * 16)
-        : 0;
-    const app3Batches =
-      v.app3BatchLbs > 0
-        ? (totalPizzasRun * v.app3OzPerPizza) / (v.app3BatchLbs * 16)
-        : 0;
-    const app4Batches =
-      v.app4BatchLbs > 0
-        ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
-        : 0;
+    const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
+    const app1Batches = v.app1BatchLbs > 0 ? app1Lbs / v.app1BatchLbs : 0;
+    const app2Lbs = (totalPizzasRun * v.app2OzPerPizza) / 16 + 20;
+    const app2Batches = v.app2BatchLbs > 0 ? app2Lbs / v.app2BatchLbs : 0;
+    const app3Lbs = (totalPizzasRun * v.app3OzPerPizza) / 16 + 20;
+    const app3Batches = v.app3BatchLbs > 0 ? app3Lbs / v.app3BatchLbs : 0;
+    const app4Lbs = (totalPizzasRun * v.app4OzPerPizza) / 16 + 20;
+    const app4Batches = v.app4BatchLbs > 0 ? app4Lbs / v.app4BatchLbs : 0;
     const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
