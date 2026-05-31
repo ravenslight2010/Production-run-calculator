@@ -73,6 +73,11 @@ const formSchema = z.object({
   app2Type: z.string().default(""),
   app3Type: z.string().default(""),
   app4Type: z.string().default(""),
+  // Dough recipe
+  targetDoughballWeight: z.coerce.number().min(0).default(0),
+  doughRecipe: z.array(
+    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
+  ).default([]),
   // Per-applicator cheese blend recipe rows
   app1CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
@@ -342,6 +347,158 @@ function CheeseRecipeCard({
   );
 }
 
+function DoughRecipeCard({
+  batchesNeeded,
+  fields,
+  recipe,
+  register,
+  targetWeight,
+  doughBatchYield,
+  ingredientOptions,
+  onAddIngredient,
+  onRemoveIngredient,
+  onSetIngredient,
+  onAppend,
+  onRemove,
+  onTargetWeightChange,
+}: {
+  batchesNeeded: number;
+  fields: { id: string }[];
+  recipe: RecipeRow[];
+  register: any;
+  targetWeight: number;
+  doughBatchYield: number;
+  ingredientOptions: string[];
+  onAddIngredient: (v: string) => void;
+  onRemoveIngredient: (v: string) => void;
+  onSetIngredient: (idx: number, val: string) => void;
+  onAppend: () => void;
+  onRemove: (idx: number) => void;
+  onTargetWeightChange: (v: number) => void;
+}) {
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
+  const actualDoughballOz = doughBatchYield > 0 ? (totalLbsPerBatch * 16) / doughBatchYield : 0;
+  const weightDiff = actualDoughballOz - Number(targetWeight);
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+      <div className="h-1 bg-orange-500/70 w-full" />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Dough Recipe
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">
+            <span className="font-mono text-foreground">{fmtNum(batchesNeeded, 2)}</span> batches needed
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        {/* Target & actual doughball weight */}
+        <div className="flex items-center gap-4 mb-4 p-3 rounded-lg bg-muted/30">
+          <div className="flex-1">
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
+              Target Doughball Weight (oz)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={targetWeight || ""}
+              onChange={e => onTargetWeightChange(Number(e.target.value))}
+              placeholder="0.00"
+              className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
+            />
+          </div>
+          <div className="flex-1 text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Actual (from recipe)</p>
+            <p className={`text-lg font-mono font-bold ${
+              targetWeight > 0 && Math.abs(weightDiff) > 0.05
+                ? weightDiff > 0 ? "text-amber-400" : "text-red-400"
+                : "text-green-400"
+            }`}>
+              {actualDoughballOz > 0 ? fmtNum(actualDoughballOz, 2) + " oz" : "—"}
+            </p>
+            {targetWeight > 0 && actualDoughballOz > 0 && (
+              <p className="text-[10px] text-muted-foreground font-mono">
+                {weightDiff > 0 ? "+" : ""}{fmtNum(weightDiff, 2)} oz vs target
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Ingredient rows */}
+        {fields.length === 0 ? (
+          <p className="text-xs text-muted-foreground mb-3">
+            No ingredients yet. Add rows to build the recipe.
+          </p>
+        ) : (
+          <div className="w-full mb-3">
+            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
+              <span />
+            </div>
+            <div className="space-y-1.5">
+              {fields.map((field, idx) => {
+                const rowLbs = Number(recipe[idx]?.lbs ?? 0);
+                return (
+                  <div key={field.id} className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 items-center">
+                    <IngredientSelect
+                      value={recipe[idx]?.ingredient ?? ""}
+                      onChange={val => onSetIngredient(idx, val)}
+                      options={ingredientOptions}
+                      onAddOption={onAddIngredient}
+                      onRemoveOption={onRemoveIngredient}
+                    />
+                    <input
+                      {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="0"
+                      className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                    />
+                    <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+                      {fmtNum(rowLbs * Math.max(1, batchesNeeded), 1)}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onRemove(idx)}
+                      className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+              <span className="text-xs font-semibold text-muted-foreground">Total Batch Weight</span>
+              <span className="text-xs font-mono text-right text-muted-foreground">
+                {fmtNum(totalLbsPerBatch, 1)} lbs/batch
+              </span>
+              <span className="text-xs font-mono text-right font-semibold text-foreground">
+                {fmtNum(totalBatchWeight, 1)} lbs
+              </span>
+              <span />
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAppend}
+          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Ingredient
+        </button>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
@@ -561,6 +718,10 @@ const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
 ];
+const DOUGH_INGREDIENTS_KEY = "run-calc-dough-ingredients";
+const DEFAULT_DOUGH_INGREDIENTS = [
+  "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
+];
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
@@ -660,6 +821,8 @@ const DEFAULT_VALUES: FormValues = {
   app2Type: "",
   app3Type: "",
   app4Type: "",
+  targetDoughballWeight: 0,
+  doughRecipe: [],
   app1CheeseRecipe: [],
   app2CheeseRecipe: [],
   app3CheeseRecipe: [],
@@ -772,6 +935,24 @@ export default function Home() {
     saveList(CHEESE_INGREDIENTS_KEY, updated);
   }
 
+  const [doughIngredients, setDoughIngredients] = useState<string[]>(() =>
+    [...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b))
+  );
+
+  function addDoughIngredient(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || doughIngredients.includes(trimmed)) return;
+    const updated = [...doughIngredients, trimmed].sort((a, b) => a.localeCompare(b));
+    setDoughIngredients(updated);
+    saveList(DOUGH_INGREDIENTS_KEY, updated);
+  }
+
+  function removeDoughIngredient(name: string) {
+    const updated = doughIngredients.filter(t => t !== name);
+    setDoughIngredients(updated);
+    saveList(DOUGH_INGREDIENTS_KEY, updated);
+  }
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: (() => {
@@ -787,6 +968,7 @@ export default function Home() {
   const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
   const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
   const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
+  const { fields: doughFields, append: appendDough, remove: removeDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
 
   const [activeTab, setActiveTab] = useState("info");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
@@ -1903,6 +2085,22 @@ export default function Home() {
                     </Card>
                   );
                 })()}
+
+                <DoughRecipeCard
+                  batchesNeeded={calc.batchesNeeded}
+                  fields={doughFields}
+                  recipe={v.doughRecipe ?? []}
+                  register={form.register}
+                  targetWeight={Number(v.targetDoughballWeight ?? 0)}
+                  doughBatchYield={Number(v.doughBatchYield)}
+                  ingredientOptions={doughIngredients}
+                  onAddIngredient={addDoughIngredient}
+                  onRemoveIngredient={removeDoughIngredient}
+                  onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                  onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
+                  onRemove={removeDough}
+                  onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
+                />
                   </>
                 )}
               </TabsContent>
