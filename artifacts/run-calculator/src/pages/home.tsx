@@ -92,6 +92,10 @@ const formSchema = z.object({
   app4CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  frontlineRecipeName: z.string().default(""),
+  frontlineRecipe: z.array(
+    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
+  ).default([]),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -558,6 +562,119 @@ function DoughRecipeCard({
   );
 }
 
+function FrontlineRecipeCard({
+  fields,
+  recipe,
+  register,
+  ingredientOptions,
+  onAddIngredient,
+  onRemoveIngredient,
+  onSetIngredient,
+  onAppend,
+  onRemove,
+  recipeName,
+  recipeNameOptions,
+  onAddRecipeName,
+  onRemoveRecipeName,
+  onRecipeNameChange,
+}: {
+  fields: { id: string }[];
+  recipe: RecipeRow[];
+  register: any;
+  ingredientOptions: string[];
+  onAddIngredient: (v: string) => void;
+  onRemoveIngredient: (v: string) => void;
+  onSetIngredient: (idx: number, val: string) => void;
+  onAppend: () => void;
+  onRemove: (idx: number) => void;
+  recipeName: string;
+  recipeNameOptions: string[];
+  onAddRecipeName: (v: string) => void;
+  onRemoveRecipeName: (v: string) => void;
+  onRecipeNameChange: (v: string) => void;
+}) {
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+      <div className="h-1 bg-red-500/70 w-full" />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center gap-3 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+            Frontline Recipe
+          </CardTitle>
+          <div className="flex-1 max-w-xs">
+            <IngredientSelect
+              value={recipeName}
+              onChange={onRecipeNameChange}
+              options={recipeNameOptions}
+              onAddOption={onAddRecipeName}
+              onRemoveOption={onRemoveRecipeName}
+              placeholder="Recipe name…"
+            />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        {fields.length === 0 ? (
+          <p className="text-xs text-muted-foreground mb-3">
+            No ingredients yet. Add rows to build the recipe.
+          </p>
+        ) : (
+          <div className="w-full mb-3">
+            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mb-1 px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+              <span />
+            </div>
+            <div className="space-y-1.5">
+              {fields.map((field, idx) => (
+                <div key={field.id} className="grid grid-cols-[1fr_120px_32px] gap-x-2 items-center">
+                  <IngredientSelect
+                    value={recipe[idx]?.ingredient ?? ""}
+                    onChange={val => onSetIngredient(idx, val)}
+                    options={ingredientOptions}
+                    onAddOption={onAddIngredient}
+                    onRemoveOption={onRemoveIngredient}
+                  />
+                  <input
+                    {...register(`frontlineRecipe.${idx}.lbs`, { valueAsNumber: true })}
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    placeholder="0"
+                    className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onRemove(idx)}
+                    className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+              <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
+              <span className="text-xs font-mono text-right font-semibold text-foreground">
+                {fmtNum(totalLbsPerBatch, 1)} lbs
+              </span>
+              <span />
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAppend}
+          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Ingredient
+        </button>
+      </CardContent>
+    </Card>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
@@ -783,6 +900,10 @@ const DEFAULT_DOUGH_INGREDIENTS = [
 ];
 const DOUGH_RECIPE_NAMES_KEY = "run-calc-dough-recipe-names";
 const DEFAULT_DOUGH_RECIPE_NAMES: string[] = [];
+const FRONTLINE_INGREDIENTS_KEY = "run-calc-frontline-ingredients";
+const DEFAULT_FRONTLINE_INGREDIENTS = ["Flour", "Water", "Salt", "Sugar", "Oil", "Yeast"];
+const FRONTLINE_RECIPE_NAMES_KEY = "run-calc-frontline-recipe-names";
+const DEFAULT_FRONTLINE_RECIPE_NAMES: string[] = [];
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
@@ -889,6 +1010,8 @@ const DEFAULT_VALUES: FormValues = {
   app2CheeseRecipe: [],
   app3CheeseRecipe: [],
   app4CheeseRecipe: [],
+  frontlineRecipeName: "",
+  frontlineRecipe: [],
 };
 
 function genId(): string {
@@ -1033,6 +1156,38 @@ export default function Home() {
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
   }
 
+  const [frontlineIngredients, setFrontlineIngredients] = useState<string[]>(() =>
+    [...loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)].sort((a, b) => a.localeCompare(b))
+  );
+  function addFrontlineIngredient(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || frontlineIngredients.includes(trimmed)) return;
+    const updated = [...frontlineIngredients, trimmed].sort((a, b) => a.localeCompare(b));
+    setFrontlineIngredients(updated);
+    saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+  }
+  function removeFrontlineIngredient(name: string) {
+    const updated = frontlineIngredients.filter(t => t !== name);
+    setFrontlineIngredients(updated);
+    saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+  }
+
+  const [frontlineRecipeNames, setFrontlineRecipeNames] = useState<string[]>(() =>
+    [...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b))
+  );
+  function addFrontlineRecipeName(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || frontlineRecipeNames.includes(trimmed)) return;
+    const updated = [...frontlineRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
+    setFrontlineRecipeNames(updated);
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+  }
+  function removeFrontlineRecipeName(name: string) {
+    const updated = frontlineRecipeNames.filter(t => t !== name);
+    setFrontlineRecipeNames(updated);
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+  }
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: (() => {
@@ -1049,6 +1204,7 @@ export default function Home() {
   const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
   const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
   const { fields: doughFields, append: appendDough, remove: removeDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
+  const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
   const [activeTab, setActiveTab] = useState("info");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
@@ -2574,6 +2730,22 @@ export default function Home() {
                     onRemove={removeCheese4}
                   />
                 )}
+                <FrontlineRecipeCard
+                  fields={frontlineFields}
+                  recipe={v.frontlineRecipe ?? []}
+                  register={form.register}
+                  ingredientOptions={frontlineIngredients}
+                  onAddIngredient={addFrontlineIngredient}
+                  onRemoveIngredient={removeFrontlineIngredient}
+                  onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                  onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
+                  onRemove={removeFrontline}
+                  recipeName={v.frontlineRecipeName ?? ""}
+                  recipeNameOptions={frontlineRecipeNames}
+                  onAddRecipeName={addFrontlineRecipeName}
+                  onRemoveRecipeName={removeFrontlineRecipeName}
+                  onRecipeNameChange={val => form.setValue("frontlineRecipeName", val, { shouldDirty: true })}
+                />
                 </div>
               </TabsContent>
 
