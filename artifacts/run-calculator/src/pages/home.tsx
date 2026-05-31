@@ -2698,19 +2698,22 @@ export default function Home() {
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
+                        allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="app1OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="app1BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {v.app1Type.trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app1OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="app1BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Applicator 2"
@@ -2719,19 +2722,22 @@ export default function Home() {
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
+                        allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="app2OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="app2BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {v.app2Type.trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app2OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="app2BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Applicator 3"
@@ -2740,19 +2746,22 @@ export default function Home() {
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
+                        allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="app3OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="app3BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {v.app3Type.trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app3OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="app3BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Applicator 4"
@@ -2761,19 +2770,22 @@ export default function Home() {
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
+                        allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="app4OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="app4BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {v.app4Type.trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="app4OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="app4BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Pep Applicator 1"
@@ -2784,18 +2796,20 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="pep1OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="pep1BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {(v.pep1Type ?? "").trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="pep1OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="pep1BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
 
                       <TypeDropdown
                         label="Pep Applicator 2"
@@ -2806,18 +2820,20 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="pep2OzPerPizza"
-                          label="Oz Per Pizza"
-                        />
-                        <NumField
-                          control={form.control}
-                          name="pep2BatchLbs"
-                          label="Batch Weight (lbs)"
-                        />
-                      </div>
+                      {(v.pep2Type ?? "").trim() && (
+                        <div className="grid grid-cols-2 gap-3">
+                          <NumField
+                            control={form.control}
+                            name="pep2OzPerPizza"
+                            label="Oz Per Pizza"
+                          />
+                          <NumField
+                            control={form.control}
+                            name="pep2BatchLbs"
+                            label="Batch Weight (lbs)"
+                          />
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
