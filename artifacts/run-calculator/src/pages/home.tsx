@@ -1703,12 +1703,12 @@ export default function Home() {
       v.app4BatchLbs > 0
         ? (totalPizzasRun * v.app4OzPerPizza) / (v.app4BatchLbs * 16)
         : 0;
-    const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16;
+    const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
         ? pep1Lbs / v.pep1BatchLbs
         : 0;
-    const pep2Lbs = (totalPizzasRun * v.pep2OzPerPizza) / 16;
+    const pep2Lbs = (totalPizzasRun * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
     const pep2Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
         ? pep2Lbs / v.pep2BatchLbs
