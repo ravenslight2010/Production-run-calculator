@@ -67,8 +67,10 @@ const formSchema = z.object({
   app3BatchLbs: z.coerce.number().min(0.1).default(45),
   app4OzPerPizza: z.coerce.number().min(0).default(4),
   app4BatchLbs: z.coerce.number().min(0.1).default(55),
+  pep1Sticks: z.coerce.number().min(0).default(0),
   pep1OzPerPizza: z.coerce.number().min(0).default(0),
   pep1BatchLbs: z.coerce.number().min(0.1).default(25),
+  pep2Sticks: z.coerce.number().min(0).default(0),
   pep2OzPerPizza: z.coerce.number().min(0).default(0),
   pep2BatchLbs: z.coerce.number().min(0.1).default(25),
   // Applicator ingredient labels
@@ -1029,8 +1031,10 @@ const DEFAULT_VALUES: FormValues = {
   app3BatchLbs: 0,
   app4OzPerPizza: 0,
   app4BatchLbs: 0,
+  pep1Sticks: 0,
   pep1OzPerPizza: 0,
   pep1BatchLbs: 25,
+  pep2Sticks: 0,
   pep2OzPerPizza: 0,
   pep2BatchLbs: 25,
   app1Type: "",
@@ -2817,18 +2821,25 @@ export default function Home() {
                         allowClear
                       />
                       {(v.pep1Type ?? "").trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <>
                           <NumField
                             control={form.control}
-                            name="pep1OzPerPizza"
-                            label="Oz Per Pizza"
+                            name="pep1Sticks"
+                            label="Number of Sticks"
                           />
-                          <NumField
-                            control={form.control}
-                            name="pep1BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
-                        </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <NumField
+                              control={form.control}
+                              name="pep1OzPerPizza"
+                              label="Oz Per Pizza"
+                            />
+                            <NumField
+                              control={form.control}
+                              name="pep1BatchLbs"
+                              label="Batch Weight (lbs)"
+                            />
+                          </div>
+                        </>
                       )}
 
                       <TypeDropdown
@@ -2841,18 +2852,25 @@ export default function Home() {
                         allowClear
                       />
                       {(v.pep2Type ?? "").trim() && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <>
                           <NumField
                             control={form.control}
-                            name="pep2OzPerPizza"
-                            label="Oz Per Pizza"
+                            name="pep2Sticks"
+                            label="Number of Sticks"
                           />
-                          <NumField
-                            control={form.control}
-                            name="pep2BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
-                        </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <NumField
+                              control={form.control}
+                              name="pep2OzPerPizza"
+                              label="Oz Per Pizza"
+                            />
+                            <NumField
+                              control={form.control}
+                              name="pep2BatchLbs"
+                              label="Batch Weight (lbs)"
+                            />
+                          </div>
+                        </>
                       )}
                     </CardContent>
                   </Card>
