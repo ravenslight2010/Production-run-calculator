@@ -598,21 +598,9 @@ function FrontlineRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-red-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center gap-3 justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
-            Frontline Recipe
-          </CardTitle>
-          <div className="flex-1 max-w-xs">
-            <IngredientSelect
-              value={recipeName}
-              onChange={onRecipeNameChange}
-              options={recipeNameOptions}
-              onAddOption={onAddRecipeName}
-              onRemoveOption={onRemoveRecipeName}
-              placeholder="Recipe name…"
-            />
-          </div>
-        </div>
+        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+          Frontline Recipe
+        </CardTitle>
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {fields.length === 0 ? (
@@ -2483,7 +2471,14 @@ export default function Home() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-5 pb-5 space-y-4">
-                      <SectionLabel>Sauce</SectionLabel>
+                      <TypeDropdown
+                        label="Sauce"
+                        value={v.frontlineRecipeName}
+                        onChange={val => form.setValue("frontlineRecipeName", val, { shouldDirty: true })}
+                        options={frontlineRecipeNames}
+                        onAddOption={addFrontlineRecipeName}
+                        onRemoveOption={removeFrontlineRecipeName}
+                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
