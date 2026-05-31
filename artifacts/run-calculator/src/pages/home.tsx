@@ -934,6 +934,7 @@ const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed", "crustsPerStack", "crustsPerCase"] as const;
 type CrustField = (typeof CRUST_FIELDS)[number];
+const PROGRESS_FIELDS = ["skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady"] as const;
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
 const MAX_RUNS = 30;
@@ -979,11 +980,12 @@ function loadProfile(brand: string, flavor: string): FormValues | null {
 
 function saveProfile(brand: string, flavor: string, values: FormValues): void {
   if (!brand && !flavor) return;
-  // Save dough fields (everything except crust-specific fields)
+  // Save dough fields (everything except crust-specific and progress fields)
   const doughVals = { ...values } as Record<string, unknown>;
   CRUST_FIELDS.forEach((f) => delete doughVals[f]);
+  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
   try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(doughVals)); } catch {}
-  // Save crust fields to their own independent key
+  // Save crust fields to their own independent key (also strip progress)
   const crustVals: Partial<Record<CrustField, unknown>> = {};
   CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
   try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), JSON.stringify(crustVals)); } catch {}
