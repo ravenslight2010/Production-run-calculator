@@ -378,8 +378,11 @@ function DoughRecipeCard({
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
-  const actualDoughballOz = doughBatchYield > 0 ? (totalLbsPerBatch * 16) / doughBatchYield : 0;
-  const weightDiff = actualDoughballOz - Number(targetWeight);
+  // Recipe yield: how many doughballs does the batch make at the target weight?
+  const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
+  // Run yield: what the line actually produced (from doughBatchYield field)
+  const runYield = Number(doughBatchYield);
+  const yieldDiff = runYield - recipeYield;
 
   return (
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
@@ -395,11 +398,11 @@ function DoughRecipeCard({
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        {/* Target & actual doughball weight */}
-        <div className="flex items-center gap-4 mb-4 p-3 rounded-lg bg-muted/30">
-          <div className="flex-1">
+        {/* Target weight + yield comparison */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="p-3 rounded-lg bg-muted/30">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
-              Target Doughball Weight (oz)
+              Target Weight (oz)
             </label>
             <input
               type="number"
@@ -411,18 +414,27 @@ function DoughRecipeCard({
               className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
             />
           </div>
-          <div className="flex-1 text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Actual (from recipe)</p>
-            <p className={`text-lg font-mono font-bold ${
-              targetWeight > 0 && Math.abs(weightDiff) > 0.05
-                ? weightDiff > 0 ? "text-amber-400" : "text-red-400"
-                : "text-green-400"
-            }`}>
-              {actualDoughballOz > 0 ? fmtNum(actualDoughballOz, 2) + " oz" : "—"}
+          <div className="p-3 rounded-lg bg-muted/30 text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Recipe Yield</p>
+            <p className="text-xl font-mono font-bold text-foreground">
+              {recipeYield > 0 ? fmtNum(recipeYield, 1) : "—"}
             </p>
-            {targetWeight > 0 && actualDoughballOz > 0 && (
+            <p className="text-[10px] text-muted-foreground">doughballs / batch</p>
+          </div>
+          <div className="p-3 rounded-lg bg-muted/30 text-center">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
+            <p className={`text-xl font-mono font-bold ${
+              recipeYield > 0 && runYield > 0
+                ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
+                  : yieldDiff < 0 ? "text-red-400"
+                  : "text-amber-400"
+                : "text-foreground"
+            }`}>
+              {runYield > 0 ? fmtNum(runYield, 1) : "—"}
+            </p>
+            {recipeYield > 0 && runYield > 0 && (
               <p className="text-[10px] text-muted-foreground font-mono">
-                {weightDiff > 0 ? "+" : ""}{fmtNum(weightDiff, 2)} oz vs target
+                {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
               </p>
             )}
           </div>
