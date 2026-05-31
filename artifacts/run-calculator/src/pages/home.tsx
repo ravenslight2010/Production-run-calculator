@@ -3145,6 +3145,19 @@ export default function Home() {
                               <div className="text-lg font-bold">{isFinished && actualDurationSec !== null ? fmtTime(actualDurationSec) : fmtTime(s.estimatedTimeSec)}</div>
                             </div>
                           </div>
+                          {/* Expected cases by now — only for running current run */}
+                          {isCurrent && run.startedAt && !run.endedAt && (() => {
+                            const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
+                            const expectedCases = ppm > 0 && vals.pizzasPerCase > 0
+                              ? Math.floor(ppm * liveFreezerMin / vals.pizzasPerCase)
+                              : 0;
+                            return (
+                              <div className="flex items-center justify-between bg-primary/10 border border-primary/25 rounded-lg px-4 py-2">
+                                <span className="text-xs text-primary/80 font-medium">Expected cases by now</span>
+                                <span className="text-xl font-bold text-primary tabular-nums">{expectedCases}</span>
+                              </div>
+                            );
+                          })()}
                           {/* Start / end times for started runs */}
                           {run.startedAt && (
                             <div className="flex gap-3 text-xs text-muted-foreground">
