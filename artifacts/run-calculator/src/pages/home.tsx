@@ -1711,16 +1711,19 @@ export default function Home() {
       casesOnLine;
 
     const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
-    const casesLeftToOpen = v.crustsPerCase > 0
-      ? Math.ceil(totalPizzasLeft / v.crustsPerCase)
-      : 0;
+    // Staged supply: trays/stacks already ready × units per tray, plus mixed batches ready
     const doughOnHand =
       v.traysOnLine * perTray +
       v.batchesReady * v.doughBatchYield;
     const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
     const batchesNeeded = doughDeficit / v.doughBatchYield;
     const traysNeeded = doughDeficit / perTray;
-    const stacksNeededTotal = perTray > 0 ? Math.ceil(totalPizzasLeft / perTray) : 0;
+    // Net pizzas after deducting already-staged trays/stacks (same logic as doughDeficit)
+    const pizzasNetOfStaged = Math.max(0, totalPizzasLeft - v.traysOnLine * perTray);
+    const casesLeftToOpen = v.crustsPerCase > 0
+      ? Math.ceil(pizzasNetOfStaged / v.crustsPerCase)
+      : 0;
+    const stacksNeededTotal = perTray > 0 ? Math.ceil(pizzasNetOfStaged / perTray) : 0;
     const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
     const doughShortCases = doughDeficit / v.pizzasPerCase;
     const doughDepletionSec = ppm > 0 ? (doughOnHand / ppm) * 60 : 0;
