@@ -1470,13 +1470,13 @@ export default function Home() {
   }
 
   const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
-    loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)
+    [...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b))
   );
 
   function addCheeseIngredient(name: string) {
     const trimmed = name.trim();
     if (!trimmed || cheeseIngredients.includes(trimmed)) return;
-    const updated = [...cheeseIngredients, trimmed];
+    const updated = [...cheeseIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
   }
@@ -1488,13 +1488,13 @@ export default function Home() {
   }
 
   const [mixIngredients, setMixIngredients] = useState<string[]>(() =>
-    loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)
+    [...loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)].sort((a, b) => a.localeCompare(b))
   );
 
   function addMixIngredient(name: string) {
     const trimmed = name.trim();
     if (!trimmed || mixIngredients.includes(trimmed)) return;
-    const updated = [...mixIngredients, trimmed];
+    const updated = [...mixIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
   }
