@@ -2674,6 +2674,130 @@ export default function Home() {
     );
   }
 
+  if (screenMode === "backline") {
+    const freezerMs = Number(v.freezerTime) * 60000;
+    const freezerRemainMs = runStatus === "ended" && currentRun?.endedAt && freezerMs > 0
+      ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
+      : 0;
+    const freezerDraining = freezerRemainMs > 0;
+    const freezerPct = freezerMs > 0 ? Math.max(0, 1 - freezerRemainMs / freezerMs) : 1;
+    const fmm = Math.floor(freezerRemainMs / 60000);
+    const fss = Math.floor((freezerRemainMs % 60000) / 1000);
+    const upcomingRuns = dayState.runs.filter((_, i) => i > dayState.currentIndex);
+
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Clock className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Backline Station</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        {/* Current run block */}
+        <div className={`rounded-3xl border p-8 flex flex-col gap-5 ${
+          runStatus === "ended" && freezerDraining ? "bg-amber-950/30 border-amber-600/40"
+          : runStatus === "ended" ? "bg-emerald-950/20 border-emerald-700/30"
+          : runStatus === "running" ? "bg-primary/5 border-primary/30"
+          : "bg-card border-border"
+        }`}>
+          <div className="flex items-center gap-4 flex-wrap">
+            <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+            {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
+            {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
+            {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
+            {runStatus === "ended" && !freezerDraining && <span className="px-3 py-1 rounded-full bg-emerald-700/30 text-emerald-400 text-sm font-bold uppercase">Complete</span>}
+          </div>
+
+          {/* Cases progress while running */}
+          {(runStatus === "running" || runStatus === "paused") && v.casesNeeded > 0 && (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-end gap-4">
+                <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
+                <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
+              </div>
+              <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
+                <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+              </div>
+              {calc.adjustedTimeSec > 0 && (
+                <div className="flex gap-8 mt-1">
+                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
+                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Freezer countdown */}
+          {runStatus === "ended" && freezerMs > 0 && (
+            <div className="flex flex-col gap-4">
+              <p className={`text-sm font-bold uppercase tracking-widest ${freezerDraining ? "text-amber-400" : "text-emerald-400"}`}>
+                {freezerDraining ? "❄️ Freezer Draining" : "✅ Freezer Empty — Ready"}
+              </p>
+              {freezerDraining && (
+                <>
+                  <p className="text-[8rem] font-black tabular-nums leading-none text-amber-400">
+                    {String(fmm).padStart(2, "0")}:{String(fss).padStart(2, "0")}
+                  </p>
+                  <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
+                    <div className="h-full rounded-full bg-amber-500 transition-all duration-1000" style={{ width: `${freezerPct * 100}%` }} />
+                  </div>
+                  <p className="text-lg text-muted-foreground">{fmtNum(Number(v.freezerTime), 0)} min total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
+                </>
+              )}
+              {!freezerDraining && (
+                <p className="text-5xl font-black text-emerald-400">CLEAR</p>
+              )}
+            </div>
+          )}
+
+          {/* Ended with no freezer */}
+          {runStatus === "ended" && freezerMs === 0 && (
+            <p className="text-5xl font-black text-emerald-400">Run Complete</p>
+          )}
+        </div>
+
+        {/* Upcoming runs */}
+        {upcomingRuns.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Up Next — {upcomingRuns.length} run{upcomingRuns.length > 1 ? "s" : ""}</p>
+            <div className="grid grid-cols-3 gap-4">
+              {upcomingRuns.map((run, i) => {
+                const vals = loadRunValues(run.id);
+                const s = computeSummaryStats(vals);
+                const estSec = s.estimatedTimeSec;
+                const dieChange = vals.dieType && v.dieType && vals.dieType !== (i === 0 ? v.dieType : loadRunValues(upcomingRuns[i - 1].id).dieType);
+                return (
+                  <div key={run.id} className="rounded-2xl bg-card border border-border p-5 flex flex-col gap-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">#{dayState.currentIndex + i + 2}</span>
+                      {dieChange && <span className="text-xs font-bold text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Die change</span>}
+                    </div>
+                    <p className="text-2xl font-black leading-tight">{runLabel(run)}</p>
+                    {vals.dieType && <span className="self-start px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border/50 text-muted-foreground">{vals.dieType}</span>}
+                    <div className="flex gap-4 mt-auto">
+                      {s.totalCases > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cases</p><p className="text-xl font-black tabular-nums">{fmtComma(s.totalCases)}</p></div>}
+                      {estSec > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Est. Time</p><p className="text-xl font-black tabular-nums">{fmtTime(estSec)}</p></div>}
+                      {vals.freezerTime && Number(vals.freezerTime) > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Freezer</p><p className="text-xl font-black tabular-nums">{fmtNum(Number(vals.freezerTime), 0)}m</p></div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {upcomingRuns.length === 0 && runStatus === "ended" && !freezerDraining && (
+          <div className="flex items-center justify-center rounded-2xl border border-border bg-card py-10">
+            <p className="text-2xl text-muted-foreground">No more runs scheduled for this shift</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (screenMode === "summary") {
     const finished = dayState.runs.filter(r => !!r.endedAt);
     const totalCases = finished.reduce((s, r) => s + (computeSummaryStats(loadRunValues(r.id)).totalCases), 0);
@@ -2826,6 +2950,13 @@ export default function Home() {
             title: "Frontline Station",
             desc: "Topping line display — sauce, cheese, applicators, pep amounts",
             url: `${base}?screen=frontline`,
+          },
+          {
+            key: "backline",
+            icon: <Clock className="w-5 h-5 text-blue-400" />,
+            title: "Backline Station",
+            desc: "Freezer & packaging display — current run, freezer countdown, upcoming runs",
+            url: `${base}?screen=backline`,
           },
           {
             key: "summary",
