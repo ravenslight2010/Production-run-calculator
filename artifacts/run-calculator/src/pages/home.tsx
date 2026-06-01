@@ -40,6 +40,10 @@ import {
   MessageSquare,
   Monitor,
   ExternalLink,
+  Bookmark,
+  BookmarkCheck,
+  OctagonX,
+  CircleDot,
 } from "lucide-react";
 
 import {
@@ -1171,13 +1175,29 @@ const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string };
+type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string; stoppages?: Stoppage[] };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
 type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
 const HISTORY_KEY = "run-calc-history";
 const MAX_HISTORY_DAYS = 14;
+
+type RunTemplate = { id: string; name: string; values: FormValues; brand?: string; flavor?: string; createdAt: string };
+const TEMPLATES_KEY = "run-calc-templates";
+const MAX_TEMPLATES = 20;
+
+function loadTemplates(): RunTemplate[] {
+  try {
+    const raw = localStorage.getItem(TEMPLATES_KEY);
+    if (raw) return JSON.parse(raw) as RunTemplate[];
+  } catch {}
+  return [];
+}
+function saveTemplates(t: RunTemplate[]): void {
+  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t)); } catch {}
+}
 
 function runLabel(r: RunMeta) {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
@@ -1626,6 +1646,18 @@ export default function Home() {
   // ── Carry-over dismiss tracking ────────────────────────────────────────────
   const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
 
+  // ── Templates ─────────────────────────────────────────────────────────────
+  const [templates, setTemplates] = useState<RunTemplate[]>(() => loadTemplates());
+  const [showTemplatesDialog, setShowTemplatesDialog] = useState(false);
+  const [templateNameInput, setTemplateNameInput] = useState("");
+  const [templateSaveMode, setTemplateSaveMode] = useState(false);
+
+  // ── Downtime / stoppage log ───────────────────────────────────────────────
+  const [showStopDialog, setShowStopDialog] = useState(false);
+  const [stopReason, setStopReason] = useState("");
+  const [stopNotes, setStopNotes] = useState("");
+  const [activeStopId, setActiveStopId] = useState<string | null>(null);
+
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
@@ -1980,6 +2012,79 @@ export default function Home() {
     savedFlashTimer.current = setTimeout(() => { if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"; }, 1800);
   }
 
+  // ── Downtime log ──────────────────────────────────────────────────────────
+  function logStop(reason: string, notes: string) {
+    const id = genId();
+    const newStop: Stoppage = { id, reason, startedAt: Date.now(), notes: notes.trim() || undefined };
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex
+        ? { ...r, stoppages: [...(r.stoppages ?? []), newStop] }
+        : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    setActiveStopId(id);
+    schedulePush(newDs, 0);
+  }
+
+  function endStop() {
+    if (!activeStopId) return;
+    const endedAt = Date.now();
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex
+        ? { ...r, stoppages: (r.stoppages ?? []).map(s => s.id === activeStopId ? { ...s, endedAt } : s) }
+        : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    setActiveStopId(null);
+    schedulePush(newDs, 0);
+  }
+
+  function deleteStop(stopId: string) {
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex
+        ? { ...r, stoppages: (r.stoppages ?? []).filter(s => s.id !== stopId) }
+        : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    if (activeStopId === stopId) setActiveStopId(null);
+    schedulePush(newDs, 0);
+  }
+
+  // ── Templates ─────────────────────────────────────────────────────────────
+  function saveAsTemplate(name: string) {
+    const cur = form.getValues();
+    const template: RunTemplate = {
+      id: genId(),
+      name: name.trim(),
+      values: cur,
+      brand: currentRun?.brand,
+      flavor: currentRun?.flavor,
+      createdAt: todayStr(),
+    };
+    const updated = [template, ...templates].slice(0, MAX_TEMPLATES);
+    setTemplates(updated);
+    saveTemplates(updated);
+  }
+
+  function deleteTemplate(id: string) {
+    const updated = templates.filter(t => t.id !== id);
+    setTemplates(updated);
+    saveTemplates(updated);
+  }
+
+  function applyTemplate(t: RunTemplate) {
+    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    form.reset(clean);
+    saveRunValues(currentRunId, clean);
+    setShowTemplatesDialog(false);
+  }
+
   function copyRun() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
@@ -2006,22 +2111,34 @@ export default function Home() {
     schedulePush(newDs, 600);
   }
 
+  function buildRunCsvRow(date: string, run: RunMeta, vals: FormValues): string[] {
+    const s = computeSummaryStats(vals);
+    const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
+    const grossDurSec = run.startedAt && run.endedAt ? (run.endedAt - run.startedAt) / 1000 : 0;
+    const downtimeSec = (run.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt) / 1000, 0);
+    const netDurSec = Math.max(0, grossDurSec - downtimeSec);
+    const netCph = netDurSec > 0 && s.totalCases > 0 ? Math.round((run.actualCases ?? s.totalCases) / (netDurSec / 3600)) : 0;
+    const stopReasons = (run.stoppages ?? []).map(s => `${s.reason}(${s.endedAt ? fmtTime((s.endedAt - s.startedAt) / 1000) : "open"})`).join("; ");
+    return [
+      date, run.brand, run.flavor, status,
+      String(s.totalCases), String(run.actualCases ?? ""),
+      String(run.wasteLbs ?? ""),
+      run.startedAt ? fmtClock(run.startedAt) : "",
+      run.endedAt ? fmtClock(run.endedAt) : "",
+      grossDurSec > 0 ? fmtTime(grossDurSec) : "",
+      downtimeSec > 0 ? fmtTime(downtimeSec) : "0",
+      netCph > 0 ? String(netCph) : "",
+      (run.notes ?? "").replace(/"/g, '""'),
+      stopReasons,
+    ];
+  }
+
   function exportCSV() {
-    const rows: string[][] = [["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Notes"]];
+    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual CPH", "Notes", "Stoppages"];
+    const rows: string[][] = [header];
     for (const run of dayState.runs) {
       const vals = run.id === currentRunId ? v : loadRunValues(run.id);
-      const s = computeSummaryStats(vals);
-      const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
-      const dur = run.startedAt && run.endedAt ? fmtTime((run.endedAt - run.startedAt) / 1000) : "";
-      rows.push([
-        todayStr(), run.brand, run.flavor, status,
-        String(s.totalCases), String(run.actualCases ?? ""),
-        String(run.wasteLbs ?? ""),
-        run.startedAt ? fmtClock(run.startedAt) : "",
-        run.endedAt ? fmtClock(run.endedAt) : "",
-        dur,
-        (run.notes ?? "").replace(/"/g, '""'),
-      ]);
+      rows.push(buildRunCsvRow(todayStr(), run, vals));
     }
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -2032,21 +2149,11 @@ export default function Home() {
   }
 
   function exportHistoryCSV(day: HistoryDay) {
-    const rows: string[][] = [["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Notes"]];
+    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual CPH", "Notes", "Stoppages"];
+    const rows: string[][] = [header];
     for (const run of day.runs) {
       const vals = day.runValues[run.id] ?? DEFAULT_VALUES;
-      const s = computeSummaryStats(vals as FormValues);
-      const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
-      const dur = run.startedAt && run.endedAt ? fmtTime((run.endedAt - run.startedAt) / 1000) : "";
-      rows.push([
-        day.date, run.brand, run.flavor, status,
-        String(s.totalCases), String(run.actualCases ?? ""),
-        String(run.wasteLbs ?? ""),
-        run.startedAt ? fmtClock(run.startedAt) : "",
-        run.endedAt ? fmtClock(run.endedAt) : "",
-        dur,
-        (run.notes ?? "").replace(/"/g, '""'),
-      ]);
+      rows.push(buildRunCsvRow(day.date, run, vals as FormValues));
     }
     const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -2239,7 +2346,8 @@ export default function Home() {
     let paceDelta = 0; // positive = ahead, negative = behind (in cases)
     if (currentRun?.startedAt && !currentRun?.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
       const refTime = currentRun.pausedAt ?? Date.now();
-      const elapsedMin = (refTime - currentRun.startedAt) / 60000;
+      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+      const elapsedMin = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 60000;
       const expectedCases = Math.floor((ppm * elapsedMin) / v.pizzasPerCase);
       paceDelta = casesCompleted - expectedCases;
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
@@ -2406,7 +2514,8 @@ export default function Home() {
   // ── Screen casting views (early returns) ──────────────────────────────────
   const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
-  const elapsedBatchSec = currentRun?.startedAt ? (nowTime.getTime() - currentRun.startedAt) / 1000 : 0;
+  const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+  const elapsedBatchSec = currentRun?.startedAt ? Math.max(0, (nowTime.getTime() - currentRun.startedAt - currentRunDowntimeMs)) / 1000 : 0;
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
     ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec)
@@ -3514,26 +3623,43 @@ export default function Home() {
                 <>
                   <span className="flex items-center gap-1.5 text-xs text-green-400 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse shrink-0" />
-                    Running
+                    <span className="hidden sm:inline">Running</span>
                     {currentRun?.startedAt ? (
-                      <span className="text-green-400/70 font-normal">
+                      <span className="text-green-400/70 font-normal hidden sm:inline">
                         · {fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}
                       </span>
                     ) : null}
                   </span>
+                  {activeStopId ? (
+                    <button
+                      type="button"
+                      onClick={endStop}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
+                    >
+                      <CircleDot className="w-3 h-3" /> End Stop
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                    >
+                      <OctagonX className="w-3 h-3" /> <span className="hidden sm:inline">Log Stop</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={pauseRun}
                     className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors"
                   >
-                    <Pause className="w-3 h-3 fill-current" /> Pause
+                    <Pause className="w-3 h-3 fill-current" /> <span className="hidden sm:inline">Pause</span>
                   </button>
                   <button
                     type="button"
                     onClick={endRun}
                     className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
                   >
-                    <Square className="w-3 h-3 fill-current" /> Stop Run
+                    <Square className="w-3 h-3 fill-current" /> <span className="hidden sm:inline">Stop Run</span>
                   </button>
                 </>
               )}
@@ -3744,6 +3870,17 @@ export default function Home() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  onClick={() => { setTemplateSaveMode(false); setTemplateNameInput(""); setShowTemplatesDialog(true); }}
+                  title="Run templates — save or load run settings"
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Bookmark className="w-3 h-3" />
+                  <span className="hidden sm:inline">Templates</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={copyRun}
                   disabled={dayState.runs.length >= MAX_RUNS}
                   title="Duplicate this run's settings into a new run"
@@ -3760,7 +3897,7 @@ export default function Home() {
                   className="h-6 px-2 gap-1 text-xs"
                 >
                   <Plus className="w-3 h-3" />
-                  New Run
+                  <span className="hidden sm:inline">New Run</span>
                 </Button>
               </div>
             </div>
@@ -3851,25 +3988,25 @@ export default function Home() {
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               <TabsList className="grid grid-cols-5 w-full mb-4 print:hidden">
-                <TabsTrigger value="info" data-testid="tab-info">
-                  <ClipboardList className="w-3.5 h-3.5 mr-1.5" />
-                  Enter Info
+                <TabsTrigger value="info" data-testid="tab-info" className="flex items-center gap-1 px-1 sm:px-3">
+                  <ClipboardList className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Enter Info</span>
                 </TabsTrigger>
-                <TabsTrigger value="dough" data-testid="tab-dough">
-                  <Layers className="w-3.5 h-3.5 mr-1.5" />
-                  Dough/Crusts
+                <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
+                  <Layers className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Dough/Crusts</span>
                 </TabsTrigger>
-                <TabsTrigger value="timing" data-testid="tab-timing">
-                  <Clock className="w-3.5 h-3.5 mr-1.5" />
-                  Timing
+                <TabsTrigger value="timing" data-testid="tab-timing" className="flex items-center gap-1 px-1 sm:px-3">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Timing</span>
                 </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline">
-                  <Droplets className="w-3.5 h-3.5 mr-1.5" />
-                  Frontline
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex items-center gap-1 px-1 sm:px-3">
+                  <Droplets className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Frontline</span>
                 </TabsTrigger>
-                <TabsTrigger value="summary" data-testid="tab-summary">
-                  <BarChart2 className="w-3.5 h-3.5 mr-1.5" />
-                  Summary
+                <TabsTrigger value="summary" data-testid="tab-summary" className="flex items-center gap-1 px-1 sm:px-3">
+                  <BarChart2 className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Summary</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -4831,6 +4968,82 @@ export default function Home() {
                     </Card>
                   )}
                 </div>
+
+                {/* ── Downtime / Stoppage log ── */}
+                {(() => {
+                  const stoppages = currentRun?.stoppages ?? [];
+                  if (stoppages.length === 0 && runStatus !== "running") return null;
+                  const totalMs = stoppages.filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+                  return (
+                    <div className="mt-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
+                        <div className="flex items-center gap-2">
+                          <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
+                          <span className="text-sm font-semibold">Stoppage Log</span>
+                          {stoppages.length > 0 && <span className="text-xs text-muted-foreground">{stoppages.length} event{stoppages.length !== 1 ? "s" : ""}</span>}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {totalMs > 0 && (
+                            <span className="text-xs text-orange-400 font-semibold">
+                              Total downtime: {fmtTime(totalMs / 1000)}
+                            </span>
+                          )}
+                          {runStatus === "running" && (
+                            activeStopId ? (
+                              <button
+                                type="button"
+                                onClick={endStop}
+                                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
+                              >
+                                <CircleDot className="w-3 h-3" /> End Stop
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                                className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                              >
+                                <Plus className="w-3 h-3" /> Log Stop
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </div>
+                      {stoppages.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">No stoppages recorded yet for this run.</p>
+                      ) : (
+                        <div className="divide-y divide-border/20">
+                          {[...stoppages].reverse().map(stop => {
+                            const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
+                            const isActive = !stop.endedAt;
+                            return (
+                              <div key={stop.id} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${isActive ? "bg-orange-950/20" : ""}`}>
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${isActive ? "bg-orange-400 animate-pulse" : "bg-muted-foreground/40"}`} />
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-medium">{stop.reason}</span>
+                                  {stop.notes && <span className="ml-2 text-xs text-muted-foreground">— {stop.notes}</span>}
+                                  <span className="ml-2 text-xs text-muted-foreground">
+                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
+                                  </span>
+                                </div>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 ${isActive ? "text-orange-400" : "text-muted-foreground"}`}>
+                                  {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteStop(stop.id)}
+                                  className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
                 </fieldset>
               </TabsContent>
 
@@ -5737,16 +5950,30 @@ export default function Home() {
                             <History className="w-4 h-4" />
                             History ({history.length} {history.length === 1 ? "day" : "days"})
                           </div>
-                          {history.map(day => (
+                          {history.map(day => {
+                            const finishedRuns = day.runs.filter(r => r.endedAt && r.startedAt);
+                            const totalHistCases = finishedRuns.reduce((acc, r) => {
+                              const vals = day.runValues[r.id] ?? DEFAULT_VALUES;
+                              return acc + (r.actualCases ?? computeSummaryStats(vals as FormValues).totalCases);
+                            }, 0);
+                            const totalHistNetSec = finishedRuns.reduce((acc, r) => {
+                              const gross = (r.endedAt! - r.startedAt!) / 1000;
+                              const dt = (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                              return acc + Math.max(0, gross - dt);
+                            }, 0);
+                            const histCph = totalHistNetSec > 0 && totalHistCases > 0 ? Math.round(totalHistCases / (totalHistNetSec / 3600)) : 0;
+                            return (
                             <div key={day.date} className="rounded-lg border border-border/30 bg-card/30 overflow-hidden">
                               <button
                                 type="button"
                                 className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-accent/20 transition-colors"
                                 onClick={() => setExpandedHistoryDay(expandedHistoryDay === day.date ? null : day.date)}
                               >
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold">{day.date}</span>
-                                  <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {day.runs.filter(r => r.endedAt).length} finished</span>
+                                  <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {finishedRuns.length} finished</span>
+                                  {totalHistCases > 0 && <span className="text-xs font-semibold text-foreground/70">{fmtComma(totalHistCases)} cases</span>}
+                                  {histCph > 0 && <span className="text-xs font-semibold text-primary/70">{histCph} CPH</span>}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
@@ -5772,7 +5999,8 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
-                          ))}
+                          );
+                          })}
                         </div>
                       )}
                     </div>
@@ -5784,6 +6012,144 @@ export default function Home() {
           </form>
         </Form>
 
+        {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
+        {showStopDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowStopDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <OctagonX className="w-5 h-5 text-orange-400 shrink-0" />
+                <h2 className="text-base font-bold">Log Line Stop</h2>
+                <button type="button" onClick={() => setShowStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-destructive">*</span></label>
+                <div className="grid grid-cols-2 gap-2">
+                  {["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough", "Other"].map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setStopReason(r)}
+                      className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${stopReason === r ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {!["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough", "Other"].includes(stopReason) && (
+                  <input
+                    type="text"
+                    value={stopReason}
+                    onChange={e => setStopReason(e.target.value)}
+                    placeholder="Custom reason…"
+                    className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    autoFocus
+                  />
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes (optional)</label>
+                <input
+                  type="text"
+                  value={stopNotes}
+                  onChange={e => setStopNotes(e.target.value)}
+                  placeholder="Brief description…"
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setShowStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                <button
+                  type="button"
+                  disabled={!stopReason.trim()}
+                  onClick={() => { logStop(stopReason.trim(), stopNotes.trim()); setShowStopDialog(false); }}
+                  className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
+                >
+                  Start Timer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Templates Dialog ──────────────────────────────────────────────── */}
+        {showTemplatesDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatesDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-base font-bold">Run Templates</h2>
+                <button type="button" onClick={() => setShowTemplatesDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+
+              {/* Save current as template */}
+              {templateSaveMode ? (
+                <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wider">Save current run settings as template</p>
+                  <input
+                    type="text"
+                    value={templateNameInput}
+                    onChange={e => setTemplateNameInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && templateNameInput.trim()) { saveAsTemplate(templateNameInput); setTemplateSaveMode(false); setTemplateNameInput(""); } }}
+                    placeholder="Template name…"
+                    autoFocus
+                    className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setTemplateSaveMode(false)} className="flex-1 px-3 py-1.5 rounded-md border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                    <button
+                      type="button"
+                      disabled={!templateNameInput.trim()}
+                      onClick={() => { saveAsTemplate(templateNameInput); setTemplateSaveMode(false); setTemplateNameInput(""); }}
+                      className="flex-1 px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors disabled:opacity-40"
+                    >
+                      <BookmarkCheck className="w-3.5 h-3.5 inline mr-1" />Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setTemplateSaveMode(true); setTemplateNameInput(currentRun?.brand && currentRun?.flavor ? `${currentRun.brand} – ${currentRun.flavor}` : ""); }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border border-dashed border-border hover:border-primary/50 hover:bg-primary/5 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Save current run as template
+                </button>
+              )}
+
+              {templates.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No templates saved yet. Save the current run's settings to reuse them later.</p>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{templates.length} saved template{templates.length !== 1 ? "s" : ""}</p>
+                  {templates.map(t => (
+                    <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm truncate">{t.name}</p>
+                        <p className="text-xs text-muted-foreground">{t.brand && t.flavor ? `${t.brand} – ${t.flavor}` : t.brand || t.flavor || "—"} · saved {t.createdAt}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => applyTemplate(t)}
+                          className="px-3 py-1.5 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteTemplate(t.id)}
+                          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
