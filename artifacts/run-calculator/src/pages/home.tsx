@@ -38,6 +38,8 @@ import {
   Minimize2,
   TrendingUp,
   MessageSquare,
+  Monitor,
+  ExternalLink,
 } from "lucide-react";
 
 import {
@@ -1624,6 +1626,10 @@ export default function Home() {
   // ── Carry-over dismiss tracking ────────────────────────────────────────────
   const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
 
+  // ── Screen casting mode ────────────────────────────────────────────────────
+  const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
+  const [showScreensDialog, setShowScreensDialog] = useState(false);
+
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
@@ -2397,6 +2403,217 @@ export default function Home() {
     }
   }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
 
+  // ── Screen casting views (early returns) ──────────────────────────────────
+  const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
+  const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
+  const elapsedBatchSec = currentRun?.startedAt ? (nowTime.getTime() - currentRun.startedAt) / 1000 : 0;
+  const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
+  const secUntilNextBatch = calc.timePerBatchSec > 0
+    ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec)
+    : 0;
+  const totalBatchesNeeded = calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
+    ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
+    : 0;
+
+  if (screenMode === "dashboard") {
+    const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
+    const paceLabel = calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE";
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-6 gap-6 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+              <Factory className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Production Dashboard</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        {/* Run name + status */}
+        <div className="flex items-center gap-4">
+          <h1 className="text-5xl font-black tracking-tight">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
+          {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
+          {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
+          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
+        </div>
+
+        {/* Main stats row */}
+        <div className="grid grid-cols-3 gap-6 flex-1">
+          {/* CPH */}
+          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
+            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Cases / Hour</p>
+            <p className="text-8xl font-black tabular-nums text-primary">{cph > 0 ? fmtComma(cph) : "—"}</p>
+          </div>
+
+          {/* Cases progress */}
+          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
+            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Cases Done</p>
+            <p className="text-7xl font-black tabular-nums">
+              {fmtComma(calc.casesCompleted)}
+              <span className="text-3xl text-muted-foreground"> / {fmtComma(v.casesNeeded)}</span>
+            </p>
+            <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
+              <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+            </div>
+            <p className="text-lg font-semibold text-muted-foreground">{Math.round(casesPct * 100)}% complete</p>
+          </div>
+
+          {/* Pace + time */}
+          <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center gap-4">
+            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground">Pace</p>
+            <p className={`text-6xl font-black ${paceColor}`}>{paceLabel}</p>
+            {calc.paceDelta !== 0 && (
+              <p className="text-2xl font-bold text-muted-foreground">
+                {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
+              </p>
+            )}
+            {calc.adjustedTimeSec > 0 && (
+              <div className="mt-2 pt-4 border-t border-border">
+                <p className="text-sm text-muted-foreground uppercase tracking-wider font-semibold mb-1">Est. Finish</p>
+                <p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p>
+                <p className="text-lg text-muted-foreground">{fmtTime(calc.adjustedTimeSec)} remaining</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Next run footer */}
+        {dayState.runs[dayState.currentIndex + 1] && (
+          <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-muted/20 border border-border/50 text-muted-foreground">
+            <ArrowRight className="w-4 h-4 shrink-0" />
+            <span className="text-sm font-semibold">Next: {runLabel(dayState.runs[dayState.currentIndex + 1])}</span>
+            {nextRunDieType && nextRunDieType !== v.dieType && (
+              <span className="ml-2 text-xs font-bold text-amber-400">⚠ Die change → {nextRunDieType}</span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (screenMode === "dough") {
+    const batchUrgent = secUntilNextBatch > 0 && secUntilNextBatch < 120;
+    const batchDue = secUntilNextBatch <= 0 || (elapsedBatchSec > 0 && secUntilNextBatch < 5);
+    const mm = Math.floor(secUntilNextBatch / 60);
+    const ss = Math.floor(secUntilNextBatch % 60);
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Droplets className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Dough Station</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+
+        {/* Big countdown */}
+        {runStatus === "running" && calc.timePerBatchSec > 0 ? (
+          <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
+            <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
+              {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
+            </p>
+            <p className={`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
+              {batchDue ? "GO" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`}
+            </p>
+            <div className="flex items-center gap-8 text-center mt-4">
+              <div>
+                <p className="text-sm text-muted-foreground uppercase tracking-wider">Current Batch</p>
+                <p className="text-5xl font-black tabular-nums">{currentBatchNum + 1}</p>
+              </div>
+              {totalBatchesNeeded > 0 && (
+                <>
+                  <p className="text-4xl text-muted-foreground font-light">of</p>
+                  <div>
+                    <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Batches</p>
+                    <p className="text-5xl font-black tabular-nums">{totalBatchesNeeded}</p>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-6 text-muted-foreground">
+              <div className="text-center">
+                <p className="text-xs uppercase tracking-wider mb-1">Time Per Batch</p>
+                <p className="text-2xl font-bold">{fmtTime(calc.timePerBatchSec)}</p>
+              </div>
+              {v.doughBatchYield > 0 && (
+                <div className="text-center">
+                  <p className="text-xs uppercase tracking-wider mb-1">Yield / Batch</p>
+                  <p className="text-2xl font-bold">{fmtComma(v.doughBatchYield)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
+            <p className="text-2xl text-muted-foreground">
+              {runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (screenMode === "summary") {
+    const finished = dayState.runs.filter(r => !!r.endedAt);
+    const totalCases = finished.reduce((s, r) => s + (computeSummaryStats(loadRunValues(r.id)).totalCases), 0);
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <BarChart2 className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Shift Summary</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-4 flex-1">
+          {dayState.runs.map((run, i) => {
+            const vals = i === dayState.currentIndex ? v : loadRunValues(run.id);
+            const s = computeSummaryStats(vals);
+            const isCurr = i === dayState.currentIndex;
+            const isDone = !!run.endedAt;
+            return (
+              <div key={run.id} className={`rounded-2xl border p-6 flex flex-col gap-3 ${isCurr ? "bg-primary/10 border-primary/40" : isDone ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card border-border/50"}`}>
+                <div className="flex items-center gap-3">
+                  <p className="text-2xl font-black">{runLabel(run)}</p>
+                  {vals.dieType && <span className="px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border text-muted-foreground">{vals.dieType}</span>}
+                  <span className={`ml-auto text-xs font-bold uppercase px-2 py-0.5 rounded-full ${isCurr ? "bg-primary/20 text-primary" : isDone ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                    {isCurr ? "Current" : isDone ? "Done" : "Upcoming"}
+                  </span>
+                </div>
+                <div className="flex gap-6">
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wider">Cases</p>
+                    <p className="text-3xl font-black tabular-nums">{fmtComma(isDone && run.actualCases != null ? run.actualCases : isCurr ? calc.casesCompleted : 0)}<span className="text-lg text-muted-foreground"> / {fmtComma(s.totalCases)}</span></p>
+                  </div>
+                  {isCurr && cph > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">CPH</p>
+                      <p className="text-3xl font-black tabular-nums">{fmtComma(cph)}</p>
+                    </div>
+                  )}
+                </div>
+                {run.startedAt && <p className="text-xs text-muted-foreground">Started {fmtClock(run.startedAt)}{run.endedAt ? ` · Ended ${fmtClock(run.endedAt)}` : ""}</p>}
+              </div>
+            );
+          })}
+        </div>
+        {finished.length > 0 && (
+          <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-card border border-border">
+            <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Runs Finished</p><p className="text-4xl font-black">{finished.length}</p></div>
+            <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Total Cases</p><p className="text-4xl font-black tabular-nums">{fmtComma(totalCases)}</p></div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans"
@@ -2470,6 +2687,87 @@ export default function Home() {
       })()}
 
 
+
+      {/* ── Screens / Cast Dialog ───────────────────────────────────────── */}
+      {showScreensDialog && (() => {
+        const base = window.location.origin + window.location.pathname;
+        const screens = [
+          {
+            key: "dashboard",
+            icon: <BarChart2 className="w-5 h-5 text-primary" />,
+            title: "Dashboard",
+            desc: "Wall TV / floor display — large CPH, pace, cases progress",
+            url: `${base}?screen=dashboard`,
+          },
+          {
+            key: "dough",
+            icon: <Droplets className="w-5 h-5 text-blue-400" />,
+            title: "Dough Station",
+            desc: "Mixer display — next batch countdown, batch number, yield",
+            url: `${base}?screen=dough`,
+          },
+          {
+            key: "summary",
+            icon: <ClipboardList className="w-5 h-5 text-emerald-400" />,
+            title: "Shift Summary",
+            desc: "Supervisor screen — all runs, status, and day totals",
+            url: `${base}?screen=summary`,
+          },
+        ];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
+            <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
+                <button type="button" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <p className="text-xs text-muted-foreground">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
+              <div className="space-y-3">
+                {screens.map(s => (
+                  <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
+                    {/* QR code */}
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(s.url)}&size=80x80&bgcolor=1a1a1a&color=ffffff&margin=4`}
+                      alt={`QR for ${s.title}`}
+                      className="w-20 h-20 rounded-lg shrink-0 border border-border/40"
+                    />
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-2">
+                        {s.icon}
+                        <span className="font-semibold text-sm">{s.title}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{s.desc}</p>
+                      <div className="flex items-center gap-2">
+                        <input
+                          readOnly
+                          value={s.url}
+                          className="flex-1 text-xs bg-background border border-border/60 rounded px-2 py-1 font-mono text-muted-foreground truncate"
+                          onFocus={e => e.target.select()}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { navigator.clipboard?.writeText(s.url); }}
+                          className="px-2 py-1 rounded text-xs font-semibold bg-muted/40 border border-border hover:bg-muted/70 transition-colors shrink-0"
+                        >
+                          Copy
+                        </button>
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-primary/20 border border-primary/40 text-primary hover:bg-primary/30 transition-colors shrink-0"
+                        >
+                          <ExternalLink className="w-3 h-3" /> Open
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
@@ -3254,6 +3552,15 @@ export default function Home() {
                 Manage
               </button>
             )}
+            {/* Screens / cast button */}
+            <button
+              type="button"
+              onClick={() => setShowScreensDialog(true)}
+              title="Cast to other screens"
+              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <Monitor className="w-4 h-4" />
+            </button>
             {/* Fullscreen / kiosk toggle */}
             <button
               type="button"
