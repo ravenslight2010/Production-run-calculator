@@ -1550,6 +1550,9 @@ export default function Home() {
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [resumeDialog, setResumeDialog] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const swipeTouchStart = useRef<{ x: number; y: number } | null>(null);
 
   // ── Role / Access ──────────────────────────────────────────────────────────
   const [role, setRole] = useState<"operator" | "supervisor">("operator");
@@ -1672,6 +1675,7 @@ export default function Home() {
       }
       lastLocalEditRef.current = Date.now();
       schedulePush(dayStateRef.current);
+      flashSaved();
     }
   }, [v, currentRunId]);
 
@@ -1847,6 +1851,30 @@ export default function Home() {
     if (nextIndex !== dayState.currentIndex) {
       form.reset(loadRunValues(dayState.runs[nextIndex].id));
     }
+    schedulePush(newDs, 0);
+  }
+
+  function flashSaved() {
+    setSavedFlash(true);
+    if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current);
+    savedFlashTimer.current = setTimeout(() => setSavedFlash(false), 1800);
+  }
+
+  function copyRun() {
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    const newId = genId();
+    const newIndex = dayState.runs.length;
+    // Copy meta (brand/flavor) but clear timing
+    const newMeta: RunMeta = { id: newId, brand: currentRun?.brand ?? "", flavor: currentRun?.flavor ?? "" };
+    const newDs = { ...dayState, runs: [...dayState.runs, newMeta], currentIndex: newIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    // Copy all form values except progress fields
+    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    saveRunValues(newId, copied);
+    form.reset(copied);
     schedulePush(newDs, 0);
   }
 
@@ -2078,6 +2106,22 @@ export default function Home() {
         ? pep2Lbs / v.pep2BatchLbs
         : 0;
 
+    // ── Pace gauge ──────────────────────────────────────────────────────────
+    // casesCompleted = skids done + cases on current skid
+    const casesCompleted = v.skidsCompleted * v.casesPerSkid + v.casesOnCurrentSkid;
+    // Adjusted remaining time: based on cases still left rather than full run
+    const adjustedTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : totalTimeSec;
+    // Pace: expected cases completed by now vs actual
+    let paceStatus: "on-pace" | "ahead" | "behind" | null = null;
+    let paceDelta = 0; // positive = ahead, negative = behind (in cases)
+    if (currentRun?.startedAt && !currentRun?.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
+      const refTime = currentRun.pausedAt ?? Date.now();
+      const elapsedMin = (refTime - currentRun.startedAt) / 60000;
+      const expectedCases = Math.floor((ppm * elapsedMin) / v.pizzasPerCase);
+      paceDelta = casesCompleted - expectedCases;
+      paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
+    }
+
     return {
       ppm,
       traysPerSkid,
@@ -2100,6 +2144,7 @@ export default function Home() {
       timePerSkidSec,
       timePerCaseSec,
       totalTimeSec,
+      adjustedTimeSec,
       doughMadeTimeSec,
       rackTimes,
       sauceBatches,
@@ -2115,11 +2160,29 @@ export default function Home() {
       pep1Batches,
       pep2Lbs,
       pep2Batches,
+      casesCompleted,
+      paceStatus,
+      paceDelta,
     };
-  }, [v, liveFreezerMin]);
+  }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
+    <div
+      className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans"
+      onTouchStart={e => { swipeTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
+      onTouchEnd={e => {
+        if (!swipeTouchStart.current) return;
+        const dx = e.changedTouches[0].clientX - swipeTouchStart.current.x;
+        const dy = e.changedTouches[0].clientY - swipeTouchStart.current.y;
+        swipeTouchStart.current = null;
+        // Only register horizontal swipes (dx > 50, and more horizontal than vertical)
+        if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        // Don't swipe if user is interacting with an input
+        if ((e.target as HTMLElement).closest("input, textarea, select, button")) return;
+        if (dx < 0) { if (dayState.currentIndex < dayState.runs.length - 1) switchToRun(dayState.currentIndex + 1); }
+        else { if (dayState.currentIndex > 0) switchToRun(dayState.currentIndex - 1); }
+      }}
+    >
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
       {showManageDialog && (() => {
         type Category = {
@@ -2600,9 +2663,9 @@ export default function Home() {
                   <div className="flex items-center gap-2">
                     <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span className="text-xs text-muted-foreground">Est. finish in</span>
-                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.totalTimeSec)}</span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.adjustedTimeSec)}</span>
                     <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtClock(projectedFinish)}</span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</span>
                   </div>
                   {showDrift && (
                     <div className={`flex items-center gap-1.5 text-xs font-semibold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
@@ -2613,6 +2676,17 @@ export default function Home() {
                 </div>
               );
             })()}
+
+            {/* Pace gauge */}
+            {calc.paceStatus !== null && (
+              <div className={`flex items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
+                calc.paceStatus === "on-pace" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
+                : calc.paceStatus === "ahead" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
+                : "bg-amber-950/40 border border-amber-700/30 text-amber-400"
+              }`}>
+                <span>{calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}</span>
+              </div>
+            )}
 
             {/* Navigation row: Previous · count · New Run · Upcoming */}
             <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
@@ -2684,6 +2758,17 @@ export default function Home() {
                   type="button"
                   variant="outline"
                   size="sm"
+                  onClick={copyRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  title="Duplicate this run's settings into a new run"
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  Copy
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={addRun}
                   disabled={dayState.runs.length >= MAX_RUNS}
                   className="h-6 px-2 gap-1 text-xs"
@@ -2712,6 +2797,10 @@ export default function Home() {
             </div>
           </div>
           <div className="print:hidden flex items-center gap-2">
+            {/* Auto-save badge */}
+            <span className={`text-[10px] font-semibold flex items-center gap-1 transition-opacity duration-500 ${savedFlash ? "opacity-100 text-emerald-400" : "opacity-0"}`}>
+              <Check className="w-3 h-3" /> Saved
+            </span>
             {/* Manage Lists button — supervisor only */}
             {isSupervisor && (
               <button
@@ -3981,6 +4070,58 @@ export default function Home() {
                     );
                   }
 
+                  // ── Day Totals ──────────────────────────────────────────
+                  const allRunStats = dayState.runs.map(run => {
+                    const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
+                    return computeSummaryStats(vals);
+                  });
+                  const dayTotalCases = allRunStats.reduce((sum, s) => sum + s.totalCases, 0);
+                  const dayTotalPizzas = allRunStats.reduce((sum, s) => sum + s.totalPizzas, 0);
+                  const dayActualCases = dayState.runs.reduce((sum, r) => sum + (r.actualCases ?? 0), 0);
+
+                  // ── Shopping List ─────────────────────────────────────────
+                  // Aggregate ingredient quantities across all runs for today
+                  type ShopItem = { name: string; totalQty: number; unit: string };
+                  const shopMap = new Map<string, ShopItem>();
+                  function shopAdd(name: string, qty: number, unit: string) {
+                    if (!name || qty <= 0) return;
+                    const key = `${name}__${unit}`;
+                    const existing = shopMap.get(key);
+                    if (existing) existing.totalQty += qty;
+                    else shopMap.set(key, { name, totalQty: qty, unit });
+                  }
+                  for (const run of dayState.runs) {
+                    const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
+                    const s = computeSummaryStats(vals);
+                    // Dough batches needed (calc inline from vals)
+                    const totalPizzas = s.totalPizzas;
+                    const doughBatches = vals.doughBatchYield > 0
+                      ? Math.ceil((totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield)
+                      : 0;
+                    // Sauce
+                    if (s.sauceBatches > 0) shopAdd("Sauce", s.sauceBatches, "barrels");
+                    // Dough ingredients
+                    for (const row of (vals.doughRecipe ?? [])) {
+                      if (row.ingredient && row.lbs > 0 && doughBatches > 0) {
+                        shopAdd(row.ingredient, row.lbs * doughBatches, "lbs");
+                      }
+                    }
+                    // Per-applicator cheese/mix recipe
+                    const allRecipes = [
+                      ...(vals.app1CheeseRecipe ?? []),
+                      ...(vals.app2CheeseRecipe ?? []),
+                      ...(vals.app3CheeseRecipe ?? []),
+                      ...(vals.app4CheeseRecipe ?? []),
+                    ];
+                    for (const row of allRecipes) {
+                      if (row.ingredient && row.lbs > 0) shopAdd(row.ingredient, row.lbs, "lbs");
+                    }
+                    // Pep
+                    if (s.pep1Type && s.pep1Lbs > 0) shopAdd(`Pep — ${s.pep1Type}`, s.pep1Lbs, "lbs");
+                    if (s.pep2Type && s.pep2Lbs > 0) shopAdd(`Pep — ${s.pep2Type}`, s.pep2Lbs, "lbs");
+                  }
+                  const shopList = [...shopMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+
                   return (
                     <div className="space-y-6">
                       {/* Export buttons */}
@@ -4000,6 +4141,51 @@ export default function Home() {
                           <Download className="w-3.5 h-3.5" /> Export CSV
                         </button>
                       </div>
+
+                      {/* Day Totals banner */}
+                      {dayState.runs.length > 1 && (
+                        <div className="rounded-xl border border-primary/20 bg-primary/5 px-5 py-4">
+                          <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-primary">
+                            <FileText className="w-4 h-4" />
+                            Day Totals — {dayState.runs.length} runs
+                          </div>
+                          <div className="grid grid-cols-3 gap-4">
+                            <div className="flex flex-col items-center">
+                              <span className="text-2xl font-bold tabular-nums">{fmtComma(dayTotalCases)}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Cases (est.)</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <span className="text-2xl font-bold tabular-nums">{fmtComma(dayTotalPizzas)}</span>
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Pizzas</span>
+                            </div>
+                            <div className="flex flex-col items-center">
+                              <span className={`text-2xl font-bold tabular-nums ${dayActualCases > 0 ? (dayActualCases >= dayTotalCases ? "text-emerald-400" : "text-amber-400") : "text-muted-foreground"}`}>
+                                {dayActualCases > 0 ? fmtComma(dayActualCases) : "—"}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Cases (actual)</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Shopping List */}
+                      {shopList.length > 0 && (
+                        <div className="rounded-xl border border-border/40 bg-card/40 px-5 py-4">
+                          <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-muted-foreground">
+                            <AlertTriangle className="w-4 h-4" />
+                            Ingredient Totals (all runs today)
+                          </div>
+                          <div className="space-y-1.5">
+                            {shopList.map(item => (
+                              <div key={`${item.name}__${item.unit}`} className="flex justify-between text-sm">
+                                <span className="text-foreground/80">{item.name}</span>
+                                <span className="font-semibold tabular-nums">{fmtNum(item.totalQty, 1)} {item.unit}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Finished */}
                       {finishedRuns.length > 0 && (
                         <div className="space-y-3">
