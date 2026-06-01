@@ -1550,7 +1550,7 @@ export default function Home() {
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [resumeDialog, setResumeDialog] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const swipeTouchStart = useRef<{ x: number; y: number } | null>(null);
 
@@ -1855,9 +1855,11 @@ export default function Home() {
   }
 
   function flashSaved() {
-    setSavedFlash(true);
+    const el = savedFlashRef.current;
+    if (!el) return;
+    el.style.opacity = "1";
     if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current);
-    savedFlashTimer.current = setTimeout(() => setSavedFlash(false), 1800);
+    savedFlashTimer.current = setTimeout(() => { if (savedFlashRef.current) savedFlashRef.current.style.opacity = "0"; }, 1800);
   }
 
   function copyRun() {
@@ -2798,7 +2800,7 @@ export default function Home() {
           </div>
           <div className="print:hidden flex items-center gap-2">
             {/* Auto-save badge */}
-            <span className={`text-[10px] font-semibold flex items-center gap-1 transition-opacity duration-500 ${savedFlash ? "opacity-100 text-emerald-400" : "opacity-0"}`}>
+            <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="text-[10px] font-semibold flex items-center gap-1 text-emerald-400 pointer-events-none">
               <Check className="w-3 h-3" /> Saved
             </span>
             {/* Manage Lists button — supervisor only */}
