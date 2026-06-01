@@ -1161,7 +1161,7 @@ const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break" };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
@@ -4590,34 +4590,71 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* Finished */}
-                      {finishedRuns.length > 0 && (
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
-                            <CheckCircle2 className="w-4 h-4" />
-                            Finished ({finishedRuns.length})
+                      {/* All runs in order with gap connectors */}
+                      {dayState.runs.map((run, idx) => {
+                        const isCurrentRun = idx === dayState.currentIndex;
+                        const prevRun = idx > 0 ? dayState.runs[idx - 1] : null;
+                        const isUpcoming = !run.endedAt && !isCurrentRun;
+
+                        // Gap connector between this run and the previous one
+                        const gapMs = prevRun?.endedAt && run.startedAt
+                          ? run.startedAt - prevRun.endedAt
+                          : null;
+                        const gapType = run.gapType ?? "switchover";
+                        const BREAK_THRESHOLD_MS = 30 * 60 * 1000;
+                        const displayMs = gapType === "switchover"
+                          ? gapMs
+                          : gapMs !== null ? Math.max(0, gapMs - BREAK_THRESHOLD_MS) : null;
+
+                        return (
+                          <div key={run.id} className="space-y-2">
+                            {/* Gap connector — only between two runs where the previous ended */}
+                            {prevRun && (
+                              <div className="flex items-center gap-3 px-2 py-1">
+                                <div className="flex flex-col items-center gap-0.5 shrink-0">
+                                  <div className="w-px h-3 bg-border/50" />
+                                  <div className="w-1.5 h-1.5 rounded-full bg-border/50" />
+                                  <div className="w-px h-3 bg-border/50" />
+                                </div>
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {/* Type toggle */}
+                                  <div className="flex rounded-md border border-border/40 overflow-hidden shrink-0 text-[10px] font-semibold">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRunMeta(run.id, { gapType: "switchover" })}
+                                      className={`px-2 py-1 transition-colors ${gapType === "switchover" ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-muted/40"}`}
+                                    >Switchover</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateRunMeta(run.id, { gapType: "break" })}
+                                      className={`px-2 py-1 border-l border-border/40 transition-colors ${gapType === "break" ? "bg-amber-500/20 text-amber-400" : "text-muted-foreground hover:bg-muted/40"}`}
+                                    >Break</button>
+                                  </div>
+                                  {/* Gap time */}
+                                  {gapMs !== null ? (
+                                    <span className="text-xs text-muted-foreground tabular-nums">
+                                      {gapType === "switchover" ? (
+                                        <span>{fmtElapsed(gapMs)}</span>
+                                      ) : displayMs! > 0 ? (
+                                        <span className="text-amber-400">+{fmtElapsed(displayMs!)} <span className="text-muted-foreground">over 30 min</span></span>
+                                      ) : (
+                                        <span className="text-emerald-400/70">within 30 min</span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground/50 italic">gap unknown</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {/* Run card */}
+                            {isCurrentRun
+                              ? <SummaryCard run={run} isCurrent />
+                              : <SummaryCard run={run} readOnly={isUpcoming ? false : undefined} />
+                            }
                           </div>
-                          {finishedRuns.map(run => <SummaryCard key={run.id} run={run} />)}
-                        </div>
-                      )}
-                      {/* Current */}
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-                          <Timer className="w-4 h-4" />
-                          Current Run
-                        </div>
-                        <SummaryCard run={currentRun} isCurrent />
-                      </div>
-                      {/* Upcoming */}
-                      {upcomingRuns.length > 0 && (
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-                            <Clock className="w-4 h-4" />
-                            Upcoming ({upcomingRuns.length})
-                          </div>
-                          {upcomingRuns.map(run => <SummaryCard key={run.id} run={run} />)}
-                        </div>
-                      )}
+                        );
+                      })}
                       {/* History */}
                       {history.length > 0 && (
                         <div className="space-y-3 pt-2 border-t border-border/30">
