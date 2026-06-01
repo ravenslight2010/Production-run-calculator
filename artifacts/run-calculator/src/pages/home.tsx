@@ -1601,6 +1601,20 @@ export default function Home() {
   // ── Carry-over dismiss tracking ────────────────────────────────────────────
   const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
 
+  // ── Countdown timer ────────────────────────────────────────────────────────
+  const [timerEndAt, setTimerEndAt] = useState<number | null>(null);
+  const [timerFired, setTimerFired] = useState(false);
+  const [showTimerModal, setShowTimerModal] = useState(false);
+  const [timerMinutes, setTimerMinutes] = useState("5");
+  function startCountdownTimer() {
+    const mins = parseFloat(timerMinutes);
+    if (!mins || mins <= 0) return;
+    setTimerEndAt(Date.now() + mins * 60 * 1000);
+    setTimerFired(false);
+    setShowTimerModal(false);
+    if (Notification.permission === "default") Notification.requestPermission();
+  }
+
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
@@ -2257,6 +2271,39 @@ export default function Home() {
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
+  // ── Countdown timer notification ─────────────────────────────────────────
+  useEffect(() => {
+    if (!timerEndAt || timerFired) return;
+    if (nowTime.getTime() >= timerEndAt) {
+      setTimerFired(true);
+      setTimerEndAt(null);
+      navigator.vibrate?.([200, 100, 200, 100, 200]);
+      if (Notification.permission === "granted") {
+        new Notification("⏱ Timer done!", { body: "Your countdown timer has finished.", silent: false });
+      }
+    }
+  }, [timerEndAt, timerFired, nowTime]);
+
+  // ── Last-run recall (same brand+flavor from history) ──────────────────────
+  const lastRunRecall = useMemo(() => {
+    if (!currentRun?.brand || !currentRun?.flavor) return null;
+    const history = loadHistory();
+    for (const day of history) {
+      for (const run of [...day.runs].reverse()) {
+        if (run.brand === currentRun.brand && run.flavor === currentRun.flavor && run.endedAt) {
+          const vals = (day as HistoryDay & { runValues?: Record<string, FormValues> }).runValues?.[run.id];
+          return {
+            date: day.date,
+            actualCases: run.actualCases,
+            wasteLbs: run.wasteLbs,
+            casesNeeded: vals?.casesNeeded,
+          };
+        }
+      }
+    }
+    return null;
+  }, [currentRun?.brand, currentRun?.flavor]);
+
   // ── 15-minute end-of-run notification (placed after calc is defined) ───────
   useEffect(() => {
     if (!currentRun?.startedAt || currentRun?.endedAt) return;
@@ -2352,6 +2399,74 @@ export default function Home() {
           </div>
         );
       })()}
+
+      {/* ── Countdown Timer Modal ────────────────────────────────────────── */}
+      {showTimerModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowTimerModal(false)}
+        >
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold flex items-center gap-2"><Timer className="w-4 h-4 text-primary" /> Countdown Timer</h3>
+            {timerEndAt ? (
+              <>
+                <div className="text-center py-2">
+                  <p className="text-6xl font-black tabular-nums text-primary">
+                    {fmtTime(Math.max(0, Math.ceil((timerEndAt - nowTime.getTime()) / 1000)))}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">remaining</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setTimerEndAt(null); setTimerFired(false); setShowTimerModal(false); }}
+                  className="w-full py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted/30 transition-colors"
+                >
+                  Cancel Timer
+                </button>
+              </>
+            ) : (
+              <>
+                {timerFired && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600/20 border border-red-600/40 text-red-400 text-sm font-semibold">
+                    <Timer className="w-4 h-4" /> Time&apos;s up!
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider block mb-1.5">Duration (minutes)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    step="1"
+                    inputMode="numeric"
+                    value={timerMinutes}
+                    onChange={e => setTimerMinutes(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") startCountdownTimer(); }}
+                    className="w-full h-10 px-3 rounded-lg bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60"
+                    autoFocus
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={startCountdownTimer}
+                    className="flex-1 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                  >
+                    Start
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setTimerFired(false); setShowTimerModal(false); }}
+                    className="px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted/30 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
@@ -2817,6 +2932,19 @@ export default function Home() {
 
             </div>
 
+            {/* Last-run recall hint */}
+            {lastRunRecall && (
+              <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70 -mt-1">
+                <History className="w-3 h-3 shrink-0" />
+                <span>
+                  Last ran {lastRunRecall.date}
+                  {lastRunRecall.actualCases != null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.actualCases)} cases</span></span>}
+                  {lastRunRecall.casesNeeded != null && lastRunRecall.actualCases == null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.casesNeeded)} planned</span></span>}
+                  {lastRunRecall.wasteLbs != null && lastRunRecall.wasteLbs > 0 && <span> · <span className="text-amber-400/80">{fmtNum(lastRunRecall.wasteLbs, 1)} lbs waste</span></span>}
+                </span>
+              </div>
+            )}
+
             {/* Run status + Start/End buttons */}
             <div className="flex items-center gap-2">
               {runStatus === "pending" && (
@@ -3116,6 +3244,26 @@ export default function Home() {
                 Manage
               </button>
             )}
+            {/* Countdown timer button */}
+            <button
+              type="button"
+              onClick={() => setShowTimerModal(true)}
+              title="Countdown timer"
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                timerFired
+                  ? "bg-red-600/20 border border-red-600/40 text-red-400 animate-pulse"
+                  : timerEndAt
+                    ? "bg-primary/20 border border-primary/40 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+              }`}
+            >
+              <Timer className="w-3.5 h-3.5 shrink-0" />
+              {timerFired ? (
+                <span>Done!</span>
+              ) : timerEndAt ? (
+                <span className="tabular-nums">{fmtTime(Math.max(0, Math.ceil((timerEndAt - nowTime.getTime()) / 1000)))}</span>
+              ) : null}
+            </button>
             {/* Fullscreen / kiosk toggle */}
             <button
               type="button"
@@ -3420,6 +3568,15 @@ export default function Home() {
                         name="casesOnCurrentSkid"
                         label="Cases on Current Skid"
                       />
+                      {/* Skid nearly full nudge */}
+                      {v.casesPerSkid > 0 && v.casesOnCurrentSkid > 0 &&
+                        v.casesOnCurrentSkid >= v.casesPerSkid - 3 &&
+                        v.casesOnCurrentSkid < v.casesPerSkid && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                          Skid nearly full — {v.casesPerSkid - v.casesOnCurrentSkid} case{v.casesPerSkid - v.casesOnCurrentSkid !== 1 ? "s" : ""} to go
+                        </div>
+                      )}
                       {/* Skid Done quick action */}
                       {runStatus === "running" && (
                         <button
@@ -4565,6 +4722,11 @@ export default function Home() {
                                     <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                                   )}
                                 </div>
+                                {run.wasteLbs != null && run.wasteLbs > 0 && (run.actualCases ?? s.totalCases) > 0 && (
+                                  <p className="text-[10px] text-muted-foreground/60 mt-0.5 tabular-nums">
+                                    {fmtNum(run.wasteLbs / (run.actualCases ?? s.totalCases), 2)} lbs/case
+                                  </p>
+                                )}
                               </div>
                             </div>
                           )}
