@@ -2803,12 +2803,26 @@ export default function Home() {
                   )}
                 </div>
               )}
-              {runStatus === "ended" && (
-                <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
-                  <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                  Ended
-                </span>
-              )}
+              {runStatus === "ended" && (() => {
+                const freezerMs = Number(v.freezerTime) * 60000;
+                const remainMs = currentRun?.endedAt
+                  ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
+                  : 0;
+                const draining = freezerMs > 0 && remainMs > 0;
+                const mm = Math.floor(remainMs / 60000);
+                const ss = Math.floor((remainMs % 60000) / 1000);
+                return draining ? (
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                    Freezer draining · {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                    Ended{freezerMs > 0 ? " · Freezer empty" : ""}
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Estimated time to finish — shown while running or paused */}
@@ -3058,12 +3072,43 @@ export default function Home() {
               {/* ─── ENTER INFO ─── */}
               <TabsContent value="info">
                 {/* Ended-run banner */}
-                {currentRun?.endedAt && (
-                  <div className="mb-4 flex items-center gap-2.5 px-4 py-3 rounded-lg bg-emerald-950/40 border border-emerald-700/30 text-emerald-400 text-sm font-semibold">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    This run ended at {fmtClock(currentRun.endedAt)} — switch to another run to continue.
-                  </div>
-                )}
+                {currentRun?.endedAt && (() => {
+                  const freezerMs = Number(v.freezerTime) * 60000;
+                  const remainMs = freezerMs > 0
+                    ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
+                    : 0;
+                  const draining = remainMs > 0;
+                  const mm = Math.floor(remainMs / 60000);
+                  const ss = Math.floor((remainMs % 60000) / 1000);
+                  const pct = freezerMs > 0 ? Math.max(0, 1 - remainMs / freezerMs) : 1;
+                  return (
+                    <div className="mb-4 rounded-lg border overflow-hidden">
+                      <div className={`flex items-start gap-2.5 px-4 py-3 ${draining ? "bg-amber-950/30 border-amber-700/30" : "bg-emerald-950/40 border-emerald-700/30"}`}>
+                        {draining
+                          ? <Timer className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                          : <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />}
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
+                            {draining
+                              ? `Freezer draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`
+                              : freezerMs > 0 ? "Freezer empty — run complete." : "Run ended."}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Run stopped at {fmtClock(currentRun.endedAt)}{freezerMs > 0 ? ` · ${fmtNum(Number(v.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
+                          </p>
+                          {freezerMs > 0 && (
+                            <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-1000 ${draining ? "bg-amber-500" : "bg-emerald-500"}`}
+                                style={{ width: `${pct * 100}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Case completion progress bar */}
                 {v.casesNeeded > 0 && calc.casesCompleted > 0 && (
@@ -3158,6 +3203,29 @@ export default function Home() {
                                   {done
                                     ? "✓ Freezer time complete"
                                     : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`}
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        {runStatus === "ended" && Number(v.freezerTime) > 0 && currentRun?.endedAt && (() => {
+                            const freezerMs = Number(v.freezerTime) * 60000;
+                            const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
+                            const pct = Math.min(1 - remainMs / freezerMs, 1);
+                            const mm = Math.floor(remainMs / 60000);
+                            const ss = Math.floor((remainMs % 60000) / 1000);
+                            const done = remainMs === 0;
+                            return (
+                              <div className="mt-1.5 space-y-1">
+                                <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
+                                    style={{ width: `${pct * 100}%` }}
+                                  />
+                                </div>
+                                <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-emerald-400" : "text-amber-400"}`}>
+                                  {done
+                                    ? "✓ Freezer empty"
+                                    : `Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
                                 </p>
                               </div>
                             );
