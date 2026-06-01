@@ -1881,10 +1881,9 @@ export default function Home() {
                   <input
                     value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
                     placeholder="Brand…"
-                    className={`w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary ${isSupervisor ? "cursor-pointer" : "cursor-default opacity-70"}`}
-                    readOnly={!showBrandDrop || !isSupervisor}
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showBrandDrop}
                     onClick={() => {
-                      if (!isSupervisor) return;
                       setBrandInput(currentRun?.brand ?? "");
                       setShowBrandDrop(true);
                       setShowFlavorDrop(false);
@@ -1960,10 +1959,9 @@ export default function Home() {
                   <input
                     value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
                     placeholder="Flavor…"
-                    className={`w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary ${isSupervisor ? "cursor-pointer" : "cursor-default opacity-70"}`}
-                    readOnly={!showFlavorDrop || !isSupervisor}
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showFlavorDrop}
                     onClick={() => {
-                      if (!isSupervisor) return;
                       setFlavorInput(currentRun?.flavor ?? "");
                       setShowFlavorDrop(true);
                       setShowBrandDrop(false);
@@ -2198,19 +2196,17 @@ export default function Home() {
                     </button>
                   )
                 )}
-                {isSupervisor && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={addRun}
-                    disabled={dayState.runs.length >= MAX_RUNS}
-                    className="h-6 px-2 gap-1 text-xs"
-                  >
-                    <Plus className="w-3 h-3" />
-                    New Run
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Plus className="w-3 h-3" />
+                  New Run
+                </Button>
               </div>
             </div>
           </div>
