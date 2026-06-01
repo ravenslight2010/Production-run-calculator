@@ -1106,6 +1106,8 @@ const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
 ];
+const MIX_INGREDIENTS_KEY = "run-calc-mix-ingredients";
+const DEFAULT_MIX_INGREDIENTS: string[] = [];
 const DOUGH_INGREDIENTS_KEY = "run-calc-dough-ingredients";
 const DEFAULT_DOUGH_INGREDIENTS = [
   "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
@@ -1382,6 +1384,24 @@ export default function Home() {
     const updated = cheeseIngredients.filter(t => t !== name);
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+  }
+
+  const [mixIngredients, setMixIngredients] = useState<string[]>(() =>
+    loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)
+  );
+
+  function addMixIngredient(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || mixIngredients.includes(trimmed)) return;
+    const updated = [...mixIngredients, trimmed];
+    setMixIngredients(updated);
+    saveList(MIX_INGREDIENTS_KEY, updated);
+  }
+
+  function removeMixIngredient(name: string) {
+    const updated = mixIngredients.filter(t => t !== name);
+    setMixIngredients(updated);
+    saveList(MIX_INGREDIENTS_KEY, updated);
   }
 
   const [doughIngredients, setDoughIngredients] = useState<string[]>(() =>
@@ -2003,6 +2023,7 @@ export default function Home() {
           { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
           { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
+          { key: "mixIngredients", label: "Mix Ingredients", items: mixIngredients, onAdd: addMixIngredient, onRemove: removeMixIngredient },
           { key: "doughIngredients", label: "Dough Ingredients", items: doughIngredients, onAdd: addDoughIngredient, onRemove: removeDoughIngredient },
           { key: "doughRecipeNames", label: "Dough Recipe Names", items: doughRecipeNames, onAdd: addDoughRecipeName, onRemove: removeDoughRecipeName },
           { key: "frontlineIngredients", label: "Sauce Ingredients", items: frontlineIngredients, onAdd: addFrontlineIngredient, onRemove: removeFrontlineIngredient },
@@ -3578,9 +3599,9 @@ export default function Home() {
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={cheeseIngredients}
-                    onAddIngredient={addCheeseIngredient}
-                    onRemoveIngredient={removeCheeseIngredient}
+                    ingredientOptions={mixIngredients}
+                    onAddIngredient={addMixIngredient}
+                    onRemoveIngredient={removeMixIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese1}
@@ -3594,9 +3615,9 @@ export default function Home() {
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={cheeseIngredients}
-                    onAddIngredient={addCheeseIngredient}
-                    onRemoveIngredient={removeCheeseIngredient}
+                    ingredientOptions={mixIngredients}
+                    onAddIngredient={addMixIngredient}
+                    onRemoveIngredient={removeMixIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese2}
@@ -3610,9 +3631,9 @@ export default function Home() {
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={cheeseIngredients}
-                    onAddIngredient={addCheeseIngredient}
-                    onRemoveIngredient={removeCheeseIngredient}
+                    ingredientOptions={mixIngredients}
+                    onAddIngredient={addMixIngredient}
+                    onRemoveIngredient={removeMixIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese3}
@@ -3626,9 +3647,9 @@ export default function Home() {
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
                     register={form.register}
-                    ingredientOptions={cheeseIngredients}
-                    onAddIngredient={addCheeseIngredient}
-                    onRemoveIngredient={removeCheeseIngredient}
+                    ingredientOptions={mixIngredients}
+                    onAddIngredient={addMixIngredient}
+                    onRemoveIngredient={removeMixIngredient}
                     onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese4}
