@@ -22,6 +22,8 @@ import {
   X,
   BarChart2,
   CheckCircle2,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 
 import {
@@ -869,12 +871,14 @@ function NumField({
   label,
   step,
   testId,
+  disabled,
 }: {
   control: any;
   name: keyof FormValues;
   label: string;
   step?: string;
   testId?: string;
+  disabled?: boolean;
 }) {
   return (
     <FormField
@@ -889,6 +893,7 @@ function NumField({
               step={step ?? "any"}
               className="font-mono bg-background/50 h-9 text-sm"
               data-testid={testId ?? `input-${name}`}
+              disabled={disabled}
               {...field}
               onChange={(e) =>
                 field.onChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -908,12 +913,14 @@ function StepperField({
   label,
   min = 0,
   step = 1,
+  disabled,
 }: {
   control: any;
   name: keyof FormValues;
   label: string;
   min?: number;
   step?: number;
+  disabled?: boolean;
 }) {
   return (
     <FormField
@@ -925,12 +932,13 @@ function StepperField({
           <FormItem>
             <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
             <FormControl>
-              <div className="flex items-stretch">
+              <div className={`flex items-stretch${disabled ? " opacity-50 pointer-events-none" : ""}`}>
                 <button
                   type="button"
                   onClick={() => field.onChange(Math.max(min, current - step))}
                   className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
                   data-testid={`btn-dec-${name}`}
+                  disabled={disabled}
                 >
                   −
                 </button>
@@ -942,12 +950,14 @@ function StepperField({
                   }
                   className="h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0"
                   data-testid={`input-${name}`}
+                  disabled={disabled}
                 />
                 <button
                   type="button"
                   onClick={() => field.onChange(current + step)}
                   className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
                   data-testid={`btn-inc-${name}`}
+                  disabled={disabled}
                 >
                   +
                 </button>
@@ -993,6 +1003,8 @@ type CrustField = (typeof CRUST_FIELDS)[number];
 const PROGRESS_FIELDS = ["skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady"] as const;
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors";
+const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
+const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts" };
@@ -1333,6 +1345,13 @@ export default function Home() {
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
   const [resumeDialog, setResumeDialog] = useState(false);
 
+  // ── Role / Access ──────────────────────────────────────────────────────────
+  const [role, setRole] = useState<"operator" | "supervisor">("operator");
+  const [showPinDialog, setShowPinDialog] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const isSupervisor = role === "supervisor";
+
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
     (() => {
@@ -1531,6 +1550,18 @@ export default function Home() {
     const updated = flavors.filter(f => f !== name);
     setFlavors(updated);
     saveList(FLAVORS_KEY, updated);
+  }
+
+  function checkPin() {
+    const stored = localStorage.getItem(SUPERVISOR_PIN_KEY) ?? DEFAULT_SUPERVISOR_PIN;
+    if (pinInput === stored) {
+      setRole("supervisor");
+      setShowPinDialog(false);
+      setPinInput("");
+      setPinError("");
+    } else {
+      setPinError("Incorrect PIN. Try again.");
+    }
   }
 
   function startRun() {
@@ -1793,6 +1824,48 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
+      {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
+      {showPinDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+        >
+          <div
+            className="bg-card border border-border rounded-xl p-6 w-80 space-y-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-center">
+              <ShieldCheck className="w-9 h-9 mx-auto mb-2 text-primary" />
+              <h2 className="font-bold text-lg">Supervisor Access</h2>
+              <p className="text-xs text-muted-foreground mt-1">Enter the supervisor PIN to unlock all settings</p>
+            </div>
+            <input
+              type="password"
+              value={pinInput}
+              onChange={e => { setPinInput(e.target.value); setPinError(""); }}
+              onKeyDown={e => e.key === "Enter" && checkPin()}
+              className="w-full text-center font-mono text-2xl tracking-[0.4em] border border-input rounded-md h-12 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="••••"
+              autoFocus
+              maxLength={8}
+            />
+            {pinError && <p className="text-xs text-destructive text-center font-medium">{pinError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
+                className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted transition-colors"
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={checkPin}
+                className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >Unlock</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-5xl mx-auto space-y-5">
         {/* ─── RUN SELECTOR ─── */}
         <div className="print:hidden flex justify-center">
@@ -1808,9 +1881,10 @@ export default function Home() {
                   <input
                     value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
                     placeholder="Brand…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
-                    readOnly={!showBrandDrop}
+                    className={`w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary ${isSupervisor ? "cursor-pointer" : "cursor-default opacity-70"}`}
+                    readOnly={!showBrandDrop || !isSupervisor}
                     onClick={() => {
+                      if (!isSupervisor) return;
                       setBrandInput(currentRun?.brand ?? "");
                       setShowBrandDrop(true);
                       setShowFlavorDrop(false);
@@ -1886,9 +1960,10 @@ export default function Home() {
                   <input
                     value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
                     placeholder="Flavor…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
-                    readOnly={!showFlavorDrop}
+                    className={`w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary ${isSupervisor ? "cursor-pointer" : "cursor-default opacity-70"}`}
+                    readOnly={!showFlavorDrop || !isSupervisor}
                     onClick={() => {
+                      if (!isSupervisor) return;
                       setFlavorInput(currentRun?.flavor ?? "");
                       setShowFlavorDrop(true);
                       setShowBrandDrop(false);
@@ -2096,8 +2171,8 @@ export default function Home() {
               {/* Count + Run actions */}
               <div className="flex items-center gap-1.5 shrink-0">
                 <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-                {/* Remove run — only for upcoming (pending) runs when more than one exists */}
-                {!currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
+                {/* Remove run — only for upcoming (pending) runs when more than one exists, supervisors only */}
+                {isSupervisor && !currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
                   confirmRemoveRun ? (
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-destructive font-semibold">Remove?</span>
@@ -2123,17 +2198,19 @@ export default function Home() {
                     </button>
                   )
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  <Plus className="w-3 h-3" />
-                  New Run
-                </Button>
+                {isSupervisor && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addRun}
+                    disabled={dayState.runs.length >= MAX_RUNS}
+                    className="h-6 px-2 gap-1 text-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New Run
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -2154,6 +2231,28 @@ export default function Home() {
               </p>
             </div>
           </div>
+          {/* Role badge */}
+          <button
+            type="button"
+            onClick={() => {
+              if (isSupervisor) {
+                setRole("operator");
+              } else {
+                setPinInput("");
+                setPinError("");
+                setShowPinDialog(true);
+              }
+            }}
+            title={isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
+            className={`print:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              isSupervisor
+                ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
+                : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
+            }`}
+          >
+            {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+            {isSupervisor ? "Supervisor" : "Operator"}
+          </button>
         </header>
 
         <Form {...form}>
@@ -2185,12 +2284,14 @@ export default function Home() {
               {/* ─── ENTER INFO ─── */}
               <TabsContent value="info">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <Card className="bg-card/50 border-border/50 shadow-md">
+                  <Card className={`bg-card/50 border-border/50 shadow-md${!isSupervisor ? " opacity-60" : ""}`}>
                     <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
                         Line Settings
+                        {!isSupervisor && <Lock className="w-3.5 h-3.5 text-muted-foreground/50" />}
                       </CardTitle>
                     </CardHeader>
+                    <fieldset disabled={!isSupervisor} className="contents">
                     <CardContent className="px-5 pb-5 space-y-3">
                       <NumField
                         control={form.control}
@@ -2311,6 +2412,7 @@ export default function Home() {
                         />
                       )}
                     </CardContent>
+                    </fieldset>
                   </Card>
 
                   <Card className="bg-card/50 border-border/50 shadow-md">
@@ -2373,6 +2475,13 @@ export default function Home() {
 
               {/* ─── DOUGH ─── */}
               <TabsContent value="dough">
+                {!isSupervisor && (
+                  <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                    Supervisor access required to edit these settings
+                  </div>
+                )}
+                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 {/* Sub-toggle */}
                 <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit mb-5">
                   <button
@@ -2633,10 +2742,18 @@ export default function Home() {
                 />
                   </>
                 )}
+                </fieldset>
               </TabsContent>
 
               {/* ─── TIMING ─── */}
               <TabsContent value="timing">
+                {!isSupervisor && (
+                  <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                    Supervisor access required to edit these settings
+                  </div>
+                )}
+                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <div className="space-y-5">
                     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
@@ -2759,10 +2876,18 @@ export default function Home() {
                     </Card>
                   )}
                 </div>
+                </fieldset>
               </TabsContent>
 
               {/* ─── FRONTLINE ─── */}
               <TabsContent value="frontline">
+                {!isSupervisor && (
+                  <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                    Supervisor access required to edit these settings
+                  </div>
+                )}
+                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 <div className="space-y-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <Card className="bg-card/50 border-border/50 shadow-md">
@@ -3122,6 +3247,7 @@ export default function Home() {
                   />
                 )}
                 </div>
+                </fieldset>
               </TabsContent>
 
               {/* ─── SUMMARY ─── */}
