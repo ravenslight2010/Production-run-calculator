@@ -1073,7 +1073,7 @@ function StepperField({
               <div className={`flex items-stretch${disabled ? " opacity-50 pointer-events-none" : ""}`}>
                 <button
                   type="button"
-                  onClick={() => field.onChange(Math.max(min, current - step))}
+                  onClick={() => { navigator.vibrate?.(8); field.onChange(Math.max(min, current - step)); }}
                   className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
                   data-testid={`btn-dec-${name}`}
                   disabled={disabled}
@@ -1092,7 +1092,7 @@ function StepperField({
                 />
                 <button
                   type="button"
-                  onClick={() => field.onChange(current + step)}
+                  onClick={() => { navigator.vibrate?.(8); field.onChange(current + step); }}
                   className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
                   data-testid={`btn-inc-${name}`}
                   disabled={disabled}
@@ -2709,6 +2709,20 @@ export default function Home() {
               </div>
             )}
 
+            {/* Run position dots */}
+            {dayState.runs.length > 1 && (
+              <div className="flex items-center justify-center gap-1.5 py-1">
+                {dayState.runs.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => switchToRun(i)}
+                    className={`rounded-full transition-all ${i === dayState.currentIndex ? "w-4 h-2 bg-primary" : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                  />
+                ))}
+              </div>
+            )}
+
             {/* Navigation row: Previous · count · New Run · Upcoming */}
             <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
               {/* Previous */}
@@ -2887,6 +2901,38 @@ export default function Home() {
 
               {/* ─── ENTER INFO ─── */}
               <TabsContent value="info">
+                {/* Ended-run banner */}
+                {currentRun?.endedAt && (
+                  <div className="mb-4 flex items-center gap-2.5 px-4 py-3 rounded-lg bg-emerald-950/40 border border-emerald-700/30 text-emerald-400 text-sm font-semibold">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    This run ended at {fmtClock(currentRun.endedAt)} — switch to another run to continue.
+                  </div>
+                )}
+
+                {/* Case completion progress bar */}
+                {v.casesNeeded > 0 && calc.casesCompleted > 0 && (
+                  <div className="mb-4 space-y-1.5">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span>Cases completed</span>
+                      <span className="font-semibold tabular-nums text-foreground">
+                        {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)}
+                        {" "}
+                        <span className="text-muted-foreground">({Math.min(100, Math.round(calc.casesCompleted / v.casesNeeded * 100))}%)</span>
+                      </span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          calc.casesCompleted >= v.casesNeeded ? "bg-emerald-500" :
+                          calc.casesCompleted / v.casesNeeded >= 0.75 ? "bg-primary" :
+                          "bg-primary/70"
+                        }`}
+                        style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <Card className={`bg-card/50 border-border/50 shadow-md${!isSupervisor ? " opacity-60" : ""}`}>
                     <CardHeader className="pb-2 pt-4 px-5">
@@ -4236,7 +4282,30 @@ export default function Home() {
                   return (
                     <div className="space-y-6">
                       {/* Export buttons */}
-                      <div className="flex gap-2 justify-end print:hidden">
+                      <div className="flex gap-2 justify-end print:hidden flex-wrap">
+                        {"share" in navigator && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const lines: string[] = [`Production Run Summary — ${todayStr()}`, ""];
+                              for (const run of dayState.runs) {
+                                const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
+                                const s = computeSummaryStats(vals);
+                                lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
+                                if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
+                                if (s.sauceBatches > 0) lines.push(`  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
+                                if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
+                                if (run.notes) lines.push(`  Notes: ${run.notes}`);
+                                lines.push("");
+                              }
+                              navigator.share({ title: "Run Summary", text: lines.join("\n") }).catch(() => {});
+                            }}
+                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <FileText className="w-3.5 h-3.5" /> Share
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={printSummary}
