@@ -98,6 +98,7 @@ const formSchema = z.object({
   app4Type: z.string().default(""),
   pep1Type: z.string().default(""),
   pep2Type: z.string().default(""),
+  dieType: z.string().default(""),
   // Dough recipe
   doughRecipeName: z.string().default(""),
   targetDoughballWeight: z.coerce.number().min(0).default(0),
@@ -1135,6 +1136,8 @@ const DEFAULT_INGREDIENT_TYPES = [
 ];
 const PEP_TYPES_KEY = "run-calc-pep-types";
 const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
+const DIE_TYPES_KEY = "run-calc-die-types";
+const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
 const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
@@ -1285,6 +1288,7 @@ const DEFAULT_VALUES: FormValues = {
   app4Type: "",
   pep1Type: "",
   pep2Type: "",
+  dieType: "",
   doughRecipeName: "",
   targetDoughballWeight: 0,
   doughRecipe: [],
@@ -1444,6 +1448,25 @@ export default function Home() {
     const updated = pepTypes.filter(t => t !== name);
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+  }
+
+  const [dieTypes, setDieTypes] = useState<string[]>(() =>
+    [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])].sort((a, b) => a.localeCompare(b))
+  );
+
+  function addDieType(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || dieTypes.includes(trimmed)) return;
+    const updated = [...dieTypes, trimmed].sort((a, b) => a.localeCompare(b));
+    setDieTypes(updated);
+    saveList(DIE_TYPES_KEY, updated);
+  }
+
+  function removeDieType(name: string) {
+    if (DEFAULT_DIE_TYPES.includes(name)) return;
+    const updated = dieTypes.filter(t => t !== name);
+    setDieTypes(updated);
+    saveList(DIE_TYPES_KEY, updated);
   }
 
   const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
@@ -2284,6 +2307,13 @@ export default function Home() {
     }
   }, [timerEndAt, timerFired, nowTime]);
 
+  // ── Next-run die type (for change warning) ────────────────────────────────
+  const nextRunDieType = useMemo(() => {
+    const nextRun = dayState.runs[dayState.currentIndex + 1];
+    if (!nextRun) return "";
+    return loadRunValues(nextRun.id).dieType ?? "";
+  }, [dayState.runs, dayState.currentIndex]);
+
   // ── Last-run recall (same brand+flavor from history) ──────────────────────
   const lastRunRecall = useMemo(() => {
     if (!currentRun?.brand || !currentRun?.flavor) return null;
@@ -2553,6 +2583,7 @@ export default function Home() {
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter) },
           { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
+          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType },
           { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
           { key: "mixIngredients", label: "Mix Ingredients", items: mixIngredients, onAdd: addMixIngredient, onRemove: removeMixIngredient },
           { key: "doughIngredients", label: "Dough Ingredients", items: doughIngredients, onAdd: addDoughIngredient, onRemove: removeDoughIngredient },
@@ -3351,6 +3382,12 @@ export default function Home() {
                           <p className="text-xs text-muted-foreground mt-0.5">
                             Run stopped at {fmtClock(currentRun.endedAt)}{freezerMs > 0 ? ` · ${fmtNum(Number(v.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
                           </p>
+                          {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
+                            <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              Die change: <span className="font-bold">{v.dieType}</span> → <span className="font-bold">{nextRunDieType}</span>
+                            </div>
+                          )}
                           {freezerMs > 0 && (
                             <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
                               <div
@@ -3364,6 +3401,22 @@ export default function Home() {
                     </div>
                   );
                 })()}
+
+                {/* Die change warning — before run ends */}
+                {(runStatus === "running" || runStatus === "paused") && v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
+                  <div className="mb-4 flex items-start gap-2.5 px-4 py-3 rounded-lg bg-amber-950/30 border border-amber-600/40">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-amber-400">Die change required for next run</p>
+                      <p className="text-xs text-amber-300/80 mt-0.5">
+                        Current: <span className="font-semibold">{v.dieType}</span>
+                        {" → "}
+                        Next: <span className="font-semibold">{nextRunDieType}</span>
+                        {" — prepare changeover before ending this run."}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Case completion progress bar */}
                 {v.casesNeeded > 0 && calc.casesCompleted > 0 && (
@@ -3406,6 +3459,36 @@ export default function Home() {
                     </CardHeader>
                     <fieldset disabled={!isSupervisor} className="contents">
                     <CardContent className="px-5 pb-5 space-y-3">
+                      {/* Die type selector */}
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Die Type</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {dieTypes.map(dt => (
+                            <button
+                              key={dt}
+                              type="button"
+                              onClick={() => form.setValue("dieType", v.dieType === dt ? "" : dt, { shouldDirty: true })}
+                              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                                v.dieType === dt
+                                  ? "bg-primary text-primary-foreground border-primary"
+                                  : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
+                              }`}
+                            >
+                              {dt}
+                            </button>
+                          ))}
+                          {isSupervisor && (
+                            <button
+                              type="button"
+                              onClick={() => { setManageCategory("dieTypes"); setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
+                              className="px-2 py-1 rounded-md text-xs border border-dashed border-border/50 text-muted-foreground/60 hover:text-muted-foreground hover:border-border transition-colors"
+                              title="Add / remove die types"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <NumField
                         control={form.control}
                         name="casesNeeded"
