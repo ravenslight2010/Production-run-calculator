@@ -3074,6 +3074,98 @@ export default function Home() {
                       />
                     </div>
                   </Card>
+
+                  {/* ── Ingredient Needs ─────────────────────────────── */}
+                  {(() => {
+                    type NeedRow = { label: string; value: string; sub?: string };
+                    function buildNeeds(vals: FormValues): NeedRow[] {
+                      const s = computeSummaryStats(vals);
+                      const rows: NeedRow[] = [];
+                      // Dough
+                      if (vals.doughBatchYield > 0 && vals.targetDoughballWeight > 0) {
+                        const batches = Math.ceil((s.totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield);
+                        if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
+                      }
+                      // Sauce
+                      if (s.sauceBatches > 0) rows.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+                      // Applicators
+                      const apps = [
+                        { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
+                        { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
+                        { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
+                        { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
+                      ];
+                      for (const a of apps) {
+                        if (!a.type) continue;
+                        const isMix = a.type.trim().toLowerCase().includes("mix");
+                        if (isMix && a.lbs > 0) rows.push({ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" });
+                        else if (!isMix && a.batches > 0) rows.push({ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" });
+                      }
+                      // Pep
+                      if (s.pep1Type && s.pep1Lbs > 0) rows.push({ label: s.pep1Type, value: fmtNum(s.pep1Lbs, 1), sub: "lbs" });
+                      if (s.pep2Type && s.pep2Lbs > 0) rows.push({ label: s.pep2Type, value: fmtNum(s.pep2Lbs, 1), sub: "lbs" });
+                      return rows;
+                    }
+
+                    const curNeeds = buildNeeds(v);
+                    const nextRun = dayState.runs[dayState.currentIndex + 1];
+                    const nextVals = nextRun ? loadRunValues(nextRun.id) : null;
+                    const nextNeeds = nextVals ? buildNeeds(nextVals) : null;
+
+                    if (curNeeds.length === 0 && !nextNeeds) return null;
+
+                    function NeedsColumn({ title, color, needs, brand, flavor }: { title: string; color: string; needs: NeedRow[]; brand?: string; flavor?: string }) {
+                      return (
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${color}`}>{title}</div>
+                          {(brand || flavor) && (
+                            <div className="text-xs font-semibold text-foreground/70 truncate mb-2">{[brand, flavor].filter(Boolean).join(" – ")}</div>
+                          )}
+                          {needs.length === 0 ? (
+                            <p className="text-xs text-muted-foreground italic">No data</p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {needs.map((row, i) => (
+                                <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
+                                  <span className="text-muted-foreground truncate">{row.label}</span>
+                                  <span className="font-bold tabular-nums text-foreground whitespace-nowrap">{row.value} <span className="font-normal text-muted-foreground">{row.sub}</span></span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="mt-4 rounded-xl border border-border/40 bg-card/50 p-4">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                          <AlertTriangle className="w-3 h-3" /> Ingredient Needs
+                        </p>
+                        <div className="flex gap-5">
+                          <NeedsColumn
+                            title="This Run"
+                            color="text-primary"
+                            needs={curNeeds}
+                            brand={currentRun?.brand}
+                            flavor={currentRun?.flavor}
+                          />
+                          {nextNeeds && (
+                            <>
+                              <div className="w-px bg-border/40 shrink-0" />
+                              <NeedsColumn
+                                title="Up Next"
+                                color="text-amber-400"
+                                needs={nextNeeds}
+                                brand={nextRun?.brand}
+                                flavor={nextRun?.flavor}
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </TabsContent>
 
