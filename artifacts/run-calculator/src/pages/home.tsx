@@ -453,6 +453,127 @@ function CheeseRecipeCard({
   );
 }
 
+function MixRecipeCard({
+  label,
+  batches,
+  fields,
+  recipe,
+  fieldPrefix,
+  register,
+  ingredientOptions,
+  onAddIngredient,
+  onRemoveIngredient,
+  onSetIngredient,
+  onAppend,
+  onRemove,
+}: {
+  label: string;
+  batches: number;
+  fields: { id: string }[];
+  recipe: RecipeRow[];
+  fieldPrefix: string;
+  register: any;
+  ingredientOptions: string[];
+  onAddIngredient: (v: string) => void;
+  onRemoveIngredient: (v: string) => void;
+  onSetIngredient: (idx: number, val: string) => void;
+  onAppend: () => void;
+  onRemove: (idx: number) => void;
+}) {
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const totalLbs = totalLbsPerBatch * batches;
+  const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+      <div className="h-1 bg-purple-500/70 w-full" />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            {label} — Mix Recipe
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">
+            <span className="font-mono text-foreground">{fmtNum(totalLbs, 1)}</span> lbs needed
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        {fields.length === 0 ? (
+          <p className="text-xs text-muted-foreground mb-3">
+            No ingredients yet. Add rows to build the mix.
+          </p>
+        ) : (
+          <div className="w-full mb-3">
+            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
+              <span />
+            </div>
+            <div className="space-y-1.5">
+              {fields.map((field, idx) => {
+                const rowLbs = Number(recipe[idx]?.lbs ?? 0);
+                return (
+                  <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_120px_auto]" : "grid-cols-[1fr_120px_120px_32px]"}`}>
+                    <IngredientSelect
+                      value={recipe[idx]?.ingredient ?? ""}
+                      onChange={val => onSetIngredient(idx, val)}
+                      options={ingredientOptions}
+                      onAddOption={onAddIngredient}
+                      onRemoveOption={onRemoveIngredient}
+                    />
+                    <input
+                      {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })}
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="0"
+                      className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                    />
+                    <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
+                      {fmtNum(rowLbs * batches, 1)}
+                    </div>
+                    {confirmIdx === idx ? (
+                      <div className="flex items-center gap-1">
+                        <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
+                        <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmIdx(idx)}
+                        className="h-8 w-8 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+              <span className="text-xs font-semibold text-muted-foreground">Total</span>
+              <span className="text-xs font-mono text-right text-muted-foreground">
+                {fmtNum(totalLbsPerBatch, 1)} lbs/batch
+              </span>
+              <span className="text-xs font-mono text-right font-semibold text-foreground">
+                {fmtNum(totalLbs, 1)} lbs
+              </span>
+              <span />
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={onAppend}
+          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" /> Add Ingredient
+        </button>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DoughRecipeCard({
   batchesNeeded,
   fields,
@@ -3452,6 +3573,72 @@ export default function Home() {
                 )}
                 {v.app4Type.trim().toLowerCase() === "cheese" && (
                   <CheeseRecipeCard
+                    label={v.app4Type || "Applicator 4"}
+                    batches={calc.app4Batches}
+                    fields={cheese4Fields}
+                    recipe={v.app4CheeseRecipe ?? []}
+                    fieldPrefix="app4CheeseRecipe"
+                    register={form.register}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
+                    onRemove={removeCheese4}
+                  />
+                )}
+
+                {/* ─── MIX RECIPES (any applicator whose name contains "mix") ─── */}
+                {v.app1Type.trim().toLowerCase().includes("mix") && (
+                  <MixRecipeCard
+                    label={v.app1Type || "Applicator 1"}
+                    batches={calc.app1Batches}
+                    fields={cheese1Fields}
+                    recipe={v.app1CheeseRecipe ?? []}
+                    fieldPrefix="app1CheeseRecipe"
+                    register={form.register}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
+                    onRemove={removeCheese1}
+                  />
+                )}
+                {v.app2Type.trim().toLowerCase().includes("mix") && (
+                  <MixRecipeCard
+                    label={v.app2Type || "Applicator 2"}
+                    batches={calc.app2Batches}
+                    fields={cheese2Fields}
+                    recipe={v.app2CheeseRecipe ?? []}
+                    fieldPrefix="app2CheeseRecipe"
+                    register={form.register}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
+                    onRemove={removeCheese2}
+                  />
+                )}
+                {v.app3Type.trim().toLowerCase().includes("mix") && (
+                  <MixRecipeCard
+                    label={v.app3Type || "Applicator 3"}
+                    batches={calc.app3Batches}
+                    fields={cheese3Fields}
+                    recipe={v.app3CheeseRecipe ?? []}
+                    fieldPrefix="app3CheeseRecipe"
+                    register={form.register}
+                    ingredientOptions={cheeseIngredients}
+                    onAddIngredient={addCheeseIngredient}
+                    onRemoveIngredient={removeCheeseIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
+                    onRemove={removeCheese3}
+                  />
+                )}
+                {v.app4Type.trim().toLowerCase().includes("mix") && (
+                  <MixRecipeCard
                     label={v.app4Type || "Applicator 4"}
                     batches={calc.app4Batches}
                     fields={cheese4Fields}
