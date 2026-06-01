@@ -1651,6 +1651,11 @@ export default function Home() {
 
   // ── End-of-run notification ────────────────────────────────────────────────
   const notifiedRunRef = useRef<string | null>(null);
+  const batchNotifRef = useRef<string>("");
+  const runCompleteNotifRef = useRef<string>("");
+  const freezerDoneNotifRef = useRef<string>("");
+  const [showBatchDue, setShowBatchDue] = useState(false);
+  const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
   const [showReorderDialog, setShowReorderDialog] = useState(false);
@@ -2330,6 +2335,67 @@ export default function Home() {
       }
     }
   }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec]);
+
+  // ── Batch cycle alert ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (runStatus !== "running" || !currentRun?.startedAt || calc.timePerBatchSec <= 0) return;
+    const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
+    const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
+    if (batchNum < 1) return;
+    const key = `${currentRun.id}-${batchNum}`;
+    if (batchNotifRef.current === key) return;
+    batchNotifRef.current = key;
+    navigator.vibrate?.([100, 50, 100]);
+    setShowBatchDue(true);
+    if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
+    batchDismissRef.current = setTimeout(() => setShowBatchDue(false), 10000);
+    if (Notification.permission === "granted") {
+      new Notification("🍕 Start next dough batch", {
+        body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
+        icon: "/icons/icon-192.png",
+        tag: `batch-${currentRun.id}-${batchNum}`,
+      });
+    } else if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime]);
+
+  // ── Run time complete alert ────────────────────────────────────────────────
+  useEffect(() => {
+    if (runStatus !== "running" || !currentRun?.startedAt) return;
+    if (calc.adjustedTimeSec > 0) return;
+    const runId = currentRun.id;
+    if (runCompleteNotifRef.current === runId) return;
+    runCompleteNotifRef.current = runId;
+    navigator.vibrate?.([300, 100, 300, 100, 300]);
+    if (Notification.permission === "granted") {
+      new Notification("✅ Run time complete", {
+        body: `${runLabel(currentRun)} — time's up, end the run.`,
+        icon: "/icons/icon-192.png",
+        tag: `run-complete-${runId}`,
+      });
+    }
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec]);
+
+  // ── Freezer drain complete alert ───────────────────────────────────────────
+  useEffect(() => {
+    if (runStatus !== "ended" || !currentRun?.endedAt) return;
+    const freezerMs = Number(v.freezerTime) * 60000;
+    if (freezerMs <= 0) return;
+    const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
+    if (remainMs > 0) return;
+    const runId = currentRun.id;
+    if (freezerDoneNotifRef.current === runId) return;
+    freezerDoneNotifRef.current = runId;
+    navigator.vibrate?.([200, 100, 200]);
+    if (Notification.permission === "granted") {
+      new Notification("❄️ Freezer empty", {
+        body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
+        icon: "/icons/icon-192.png",
+        tag: `freezer-done-${runId}`,
+      });
+    }
+  }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
 
   return (
     <div
@@ -3304,6 +3370,26 @@ export default function Home() {
                     </div>
                   );
                 })()}
+
+                {/* Batch due alert */}
+                {showBatchDue && runStatus === "running" && (
+                  <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-orange-950/40 border border-orange-500/50 animate-pulse">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-lg">🍕</span>
+                      <div>
+                        <p className="text-sm font-bold text-orange-400">Start next dough batch now</p>
+                        <p className="text-xs text-orange-300/70 mt-0.5">Time per batch: {fmtTime(calc.timePerBatchSec)}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowBatchDue(false)}
+                      className="text-orange-400/60 hover:text-orange-400 transition-colors shrink-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Die change warning — before run ends */}
                 {(runStatus === "running" || runStatus === "paused") && v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
