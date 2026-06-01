@@ -44,6 +44,7 @@ import {
   BookmarkCheck,
   OctagonX,
   CircleDot,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -1074,15 +1075,21 @@ function StepperField({
   name,
   label,
   min = 0,
+  max,
   step = 1,
   disabled,
+  suggestion,
+  onSuggest,
 }: {
   control: any;
   name: keyof FormValues;
   label: string;
   min?: number;
+  max?: number;
   step?: number;
   disabled?: boolean;
+  suggestion?: number | null;
+  onSuggest?: () => void;
 }) {
   return (
     <FormField
@@ -1090,9 +1097,23 @@ function StepperField({
       name={name}
       render={({ field }) => {
         const current = Number(field.value) || 0;
+        const atMax = max !== undefined && current >= max;
         return (
           <FormItem>
-            <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+            <div className="flex items-center justify-between gap-2">
+              <FormLabel className="text-xs text-muted-foreground">{label}</FormLabel>
+              {suggestion !== null && suggestion !== undefined && suggestion !== current && onSuggest && (
+                <button
+                  type="button"
+                  onClick={() => { navigator.vibrate?.(8); onSuggest(); }}
+                  className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors shrink-0"
+                  title={`Set to expected value: ${suggestion}`}
+                >
+                  <Sparkles className="w-2.5 h-2.5" />
+                  Expected: {suggestion}
+                </button>
+              )}
+            </div>
             <FormControl>
               <div className={`flex items-stretch${disabled ? " opacity-50 pointer-events-none" : ""}`}>
                 <button
@@ -1108,19 +1129,20 @@ function StepperField({
                   type="number"
                   inputMode="numeric"
                   {...field}
-                  onChange={(e) =>
-                    field.onChange(e.target.value === "" ? "" : Number(e.target.value))
-                  }
-                  className="h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0"
+                  onChange={(e) => {
+                    const val = e.target.value === "" ? "" : Number(e.target.value);
+                    field.onChange(max !== undefined && typeof val === "number" ? Math.min(max, val) : val);
+                  }}
+                  className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
                   data-testid={`input-${name}`}
                   disabled={disabled}
                 />
                 <button
                   type="button"
-                  onClick={() => { navigator.vibrate?.(8); field.onChange(current + step); }}
-                  className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
+                  onClick={() => { if (max !== undefined && current >= max) return; navigator.vibrate?.(8); field.onChange(max !== undefined ? Math.min(max, current + step) : current + step); }}
+                  className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80${max !== undefined && current >= max ? " opacity-30 cursor-not-allowed" : ""}`}
                   data-testid={`btn-inc-${name}`}
-                  disabled={disabled}
+                  disabled={disabled || (max !== undefined && current >= max)}
                 >
                   +
                 </button>
@@ -4420,18 +4442,46 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                      <StepperField
-                        control={form.control}
-                        name="traysOnLine"
-                        label={doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line"}
-                      />
-                      {doughSubTab !== "crusts" && (
-                        <StepperField
-                          control={form.control}
-                          name="batchesReady"
-                          label="Batches of Dough Ready"
-                        />
-                      )}
+                      {(() => {
+                        const suggestedTrays = calc.traysNeeded > 0
+                          ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
+                          : null;
+                        const suggestedBatches = calc.batchesNeeded > 0
+                          ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
+                          : null;
+                        return (
+                          <>
+                            <StepperField
+                              control={form.control}
+                              name="traysOnLine"
+                              label={doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line"}
+                              max={74}
+                              suggestion={suggestedTrays}
+                              onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
+                            />
+                            {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
+                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
+                              </p>
+                            )}
+                            {doughSubTab !== "crusts" && (
+                              <StepperField
+                                control={form.control}
+                                name="batchesReady"
+                                label="Batches of Dough Ready"
+                                max={3}
+                                suggestion={suggestedBatches}
+                                onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
+                              />
+                            )}
+                            {v.batchesReady >= 3 && doughSubTab !== "crusts" && (
+                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </CardContent>
 
                     {/* Quick summary */}
