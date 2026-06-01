@@ -140,13 +140,17 @@ function computeSummaryStats(vals: FormValues) {
       ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (vals.sauceBarrelLbs * 16)
       : 0;
   const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
-  const app1Batches = vals.app1BatchLbs > 0 ? app1Lbs / vals.app1BatchLbs : 0;
+  const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
+  const app1Batches = !app1IsMix && vals.app1BatchLbs > 0 ? app1Lbs / vals.app1BatchLbs : 0;
   const app2Lbs = (totalPizzas * vals.app2OzPerPizza) / 16 + 20;
-  const app2Batches = vals.app2BatchLbs > 0 ? app2Lbs / vals.app2BatchLbs : 0;
+  const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
+  const app2Batches = !app2IsMix && vals.app2BatchLbs > 0 ? app2Lbs / vals.app2BatchLbs : 0;
   const app3Lbs = (totalPizzas * vals.app3OzPerPizza) / 16 + 20;
-  const app3Batches = vals.app3BatchLbs > 0 ? app3Lbs / vals.app3BatchLbs : 0;
+  const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
+  const app3Batches = !app3IsMix && vals.app3BatchLbs > 0 ? app3Lbs / vals.app3BatchLbs : 0;
   const app4Lbs = (totalPizzas * vals.app4OzPerPizza) / 16 + 20;
-  const app4Batches = vals.app4BatchLbs > 0 ? app4Lbs / vals.app4BatchLbs : 0;
+  const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
+  const app4Batches = !app4IsMix && vals.app4BatchLbs > 0 ? app4Lbs / vals.app4BatchLbs : 0;
   const pep1Lbs = (totalPizzas * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
   const pep1Batches =
     !DEFAULT_PEP_TYPES.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
@@ -1947,13 +1951,17 @@ export default function Home() {
         ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
         : 0;
     const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
-    const app1Batches = v.app1BatchLbs > 0 ? app1Lbs / v.app1BatchLbs : 0;
+    const app1IsMix = v.app1Type.trim().toLowerCase().includes("mix");
+    const app1Batches = !app1IsMix && v.app1BatchLbs > 0 ? app1Lbs / v.app1BatchLbs : 0;
     const app2Lbs = (totalPizzasRun * v.app2OzPerPizza) / 16 + 20;
-    const app2Batches = v.app2BatchLbs > 0 ? app2Lbs / v.app2BatchLbs : 0;
+    const app2IsMix = v.app2Type.trim().toLowerCase().includes("mix");
+    const app2Batches = !app2IsMix && v.app2BatchLbs > 0 ? app2Lbs / v.app2BatchLbs : 0;
     const app3Lbs = (totalPizzasRun * v.app3OzPerPizza) / 16 + 20;
-    const app3Batches = v.app3BatchLbs > 0 ? app3Lbs / v.app3BatchLbs : 0;
+    const app3IsMix = v.app3Type.trim().toLowerCase().includes("mix");
+    const app3Batches = !app3IsMix && v.app3BatchLbs > 0 ? app3Lbs / v.app3BatchLbs : 0;
     const app4Lbs = (totalPizzasRun * v.app4OzPerPizza) / 16 + 20;
-    const app4Batches = v.app4BatchLbs > 0 ? app4Lbs / v.app4BatchLbs : 0;
+    const app4IsMix = v.app4Type.trim().toLowerCase().includes("mix");
+    const app4Batches = !app4IsMix && v.app4BatchLbs > 0 ? app4Lbs / v.app4BatchLbs : 0;
     const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
@@ -3485,27 +3493,27 @@ export default function Home() {
                       />
                       <StatRow
                         label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        value={fmtNum(calc.app1Batches, 2) + " batches"}
+                        value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
                         testId="output-app1-batches"
-                        highlight={calc.app1Batches > 0}
+                        highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
                       />
                       <StatRow
                         label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        value={fmtNum(calc.app2Batches, 2) + " batches"}
+                        value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
                         testId="output-app2-batches"
-                        highlight={calc.app2Batches > 0}
+                        highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
                       />
                       <StatRow
                         label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                        value={fmtNum(calc.app3Batches, 2) + " batches"}
+                        value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
                         testId="output-app3-batches"
-                        highlight={calc.app3Batches > 0}
+                        highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
                       />
                       <StatRow
                         label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                        value={fmtNum(calc.app4Batches, 2) + " batches"}
+                        value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
                         testId="output-app4-batches"
-                        highlight={calc.app4Batches > 0}
+                        highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
                       />
                       <Separator className="my-3 opacity-30" />
                       <StatRow
@@ -3692,10 +3700,10 @@ export default function Home() {
                       : null;
                     const frontlineItems: { label: string; value: string }[] = [];
                     if (s.sauceBatches > 0) frontlineItems.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
-                    if (s.app1Type && s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: fmtNum(s.app1Batches, 2) + " batches" });
-                    if (s.app2Type && s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: fmtNum(s.app2Batches, 2) + " batches" });
-                    if (s.app3Type && s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: fmtNum(s.app3Batches, 2) + " batches" });
-                    if (s.app4Type && s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: fmtNum(s.app4Batches, 2) + " batches" });
+                    if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
+                    if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
+                    if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
+                    if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
                     if (s.pep1Type) frontlineItems.push({ label: `Pep 1 — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
                     if (s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
 
