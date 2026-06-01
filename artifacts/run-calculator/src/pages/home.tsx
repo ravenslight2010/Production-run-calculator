@@ -1360,6 +1360,22 @@ function saveRunValues(id: string, values: FormValues): void {
   try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
 }
 
+function NotesTextarea({ initialValue, onCommit, className }: { initialValue: string; onCommit: (v: string) => void; className?: string }) {
+  const [local, setLocal] = useState(initialValue);
+  const committed = useRef(initialValue);
+  useEffect(() => { setLocal(initialValue); committed.current = initialValue; }, [initialValue]);
+  return (
+    <textarea
+      rows={2}
+      value={local}
+      placeholder="Shift notes, line issues, observations…"
+      className={className}
+      onChange={e => setLocal(e.target.value)}
+      onBlur={() => { if (local !== committed.current) { committed.current = local; onCommit(local); } }}
+    />
+  );
+}
+
 export default function Home() {
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
@@ -4057,11 +4073,9 @@ export default function Home() {
                               <FileText className="w-3 h-3" /> Notes
                             </label>
                             {canEdit ? (
-                              <textarea
-                                rows={2}
-                                value={run.notes ?? ""}
-                                placeholder="Shift notes, line issues, observations…"
-                                onChange={e => updateRunMeta(run.id, { notes: e.target.value })}
+                              <NotesTextarea
+                                initialValue={run.notes ?? ""}
+                                onCommit={text => updateRunMeta(run.id, { notes: text })}
                                 className="w-full px-2 py-1.5 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 resize-none placeholder:text-muted-foreground/50"
                               />
                             ) : (
