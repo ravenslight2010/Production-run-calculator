@@ -4348,16 +4348,38 @@ export default function Home() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-5 pb-5 space-y-3">
-                      <StepperField
-                        control={form.control}
-                        name="skidsCompleted"
-                        label="Total Skids Completed"
-                      />
-                      <StepperField
-                        control={form.control}
-                        name="casesOnCurrentSkid"
-                        label="Cases on Current Skid"
-                      />
+                      {(() => {
+                        const maxSkids = v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined;
+                        const maxCasesOnSkid = v.casesPerSkid > 0 ? v.casesPerSkid : undefined;
+                        const canSuggest = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
+                        const expectedCasesFromElapsed = canSuggest ? Math.floor((elapsedBatchSec / 60) * calc.ppm / v.pizzasPerCase) : null;
+                        const suggestedSkids = expectedCasesFromElapsed !== null
+                          ? Math.min(maxSkids ?? 9999, Math.floor(expectedCasesFromElapsed / v.casesPerSkid))
+                          : null;
+                        const suggestedCasesOnSkid = expectedCasesFromElapsed !== null
+                          ? Math.min(v.casesPerSkid, expectedCasesFromElapsed % v.casesPerSkid)
+                          : null;
+                        return (
+                          <>
+                            <StepperField
+                              control={form.control}
+                              name="skidsCompleted"
+                              label="Total Skids Completed"
+                              max={maxSkids}
+                              suggestion={suggestedSkids !== null && suggestedSkids !== v.skidsCompleted ? suggestedSkids : null}
+                              onSuggest={() => form.setValue("skidsCompleted", suggestedSkids!, { shouldDirty: true })}
+                            />
+                            <StepperField
+                              control={form.control}
+                              name="casesOnCurrentSkid"
+                              label="Cases on Current Skid"
+                              max={maxCasesOnSkid}
+                              suggestion={suggestedCasesOnSkid !== null && suggestedCasesOnSkid !== v.casesOnCurrentSkid ? suggestedCasesOnSkid : null}
+                              onSuggest={() => form.setValue("casesOnCurrentSkid", suggestedCasesOnSkid!, { shouldDirty: true })}
+                            />
+                          </>
+                        );
+                      })()}
                       {/* Skid nearly full nudge */}
                       {v.casesPerSkid > 0 && v.casesOnCurrentSkid > 0 &&
                         v.casesOnCurrentSkid >= v.casesPerSkid - 3 &&
