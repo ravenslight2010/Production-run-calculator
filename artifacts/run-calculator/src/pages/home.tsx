@@ -25,6 +25,11 @@ import {
   Lock,
   ShieldCheck,
   Settings,
+  Download,
+  Printer,
+  History,
+  FileText,
+  AlertTriangle,
 } from "lucide-react";
 
 import {
@@ -126,6 +131,12 @@ function fmtNum(n: number, dec = 2): string {
   const num = Number(n);
   if (!isFinite(num)) return "—";
   return num.toFixed(dec);
+}
+
+function fmtComma(n: number, dec = 0): string {
+  const num = Number(n);
+  if (!isFinite(num)) return "—";
+  return num.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
 }
 
 function fmtClock(ts: number): string {
@@ -1137,9 +1148,13 @@ const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts" };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
+
+type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
+const HISTORY_KEY = "run-calc-history";
+const MAX_HISTORY_DAYS = 14;
 
 function runLabel(r: RunMeta) {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
@@ -1304,6 +1319,28 @@ function saveDayState(ds: DayState): void {
   try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...ds, date: todayStr() })); } catch {}
 }
 
+function loadHistory(): HistoryDay[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (raw) return JSON.parse(raw) as HistoryDay[];
+  } catch {}
+  return [];
+}
+
+function archiveDayToHistory(ds: DayState, date: string): void {
+  try {
+    const history = loadHistory().filter(h => h.date !== date);
+    const runValues: Record<string, FormValues> = {};
+    for (const run of ds.runs) {
+      const raw = localStorage.getItem(RUN_KEY(run.id));
+      if (raw) runValues[run.id] = JSON.parse(raw);
+    }
+    const entry: HistoryDay = { date, runs: ds.runs, runValues };
+    const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
+  } catch {}
+}
+
 function loadRunValues(id: string): FormValues {
   try {
     const raw = localStorage.getItem(RUN_KEY(id));
@@ -1327,6 +1364,9 @@ export default function Home() {
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
+
+  const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
+  const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
 
   const [brands, setBrands] = useState<string[]>(() =>
     [...loadList(BRANDS_KEY, ["Lucia's"])].sort((a, b) => a.localeCompare(b))
@@ -1588,6 +1628,9 @@ export default function Home() {
         try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
       })();
       if (stored.date && stored.date !== todayStr()) {
+        // Archive yesterday before resetting
+        const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
+        if (prevDs && stored.date) archiveDayToHistory(prevDs, stored.date);
         const fresh = freshDayState();
         saveDayState(fresh);
         setDayState(fresh);
@@ -1805,6 +1848,68 @@ export default function Home() {
       form.reset(loadRunValues(dayState.runs[nextIndex].id));
     }
     schedulePush(newDs, 0);
+  }
+
+  function updateRunMeta(id: string, patch: Partial<RunMeta>) {
+    const newRuns = dayState.runs.map(r => r.id === id ? { ...r, ...patch } : r);
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs, 600);
+  }
+
+  function exportCSV() {
+    const rows: string[][] = [["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Notes"]];
+    for (const run of dayState.runs) {
+      const vals = run.id === currentRunId ? v : loadRunValues(run.id);
+      const s = computeSummaryStats(vals);
+      const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
+      const dur = run.startedAt && run.endedAt ? fmtTime((run.endedAt - run.startedAt) / 1000) : "";
+      rows.push([
+        todayStr(), run.brand, run.flavor, status,
+        String(s.totalCases), String(run.actualCases ?? ""),
+        String(run.wasteLbs ?? ""),
+        run.startedAt ? fmtClock(run.startedAt) : "",
+        run.endedAt ? fmtClock(run.endedAt) : "",
+        dur,
+        (run.notes ?? "").replace(/"/g, '""'),
+      ]);
+    }
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `production-run-${todayStr()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportHistoryCSV(day: HistoryDay) {
+    const rows: string[][] = [["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Notes"]];
+    for (const run of day.runs) {
+      const vals = day.runValues[run.id] ?? DEFAULT_VALUES;
+      const s = computeSummaryStats(vals as FormValues);
+      const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
+      const dur = run.startedAt && run.endedAt ? fmtTime((run.endedAt - run.startedAt) / 1000) : "";
+      rows.push([
+        day.date, run.brand, run.flavor, status,
+        String(s.totalCases), String(run.actualCases ?? ""),
+        String(run.wasteLbs ?? ""),
+        run.startedAt ? fmtClock(run.startedAt) : "",
+        run.endedAt ? fmtClock(run.endedAt) : "",
+        dur,
+        (run.notes ?? "").replace(/"/g, '""'),
+      ]);
+    }
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `production-run-${day.date}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function printSummary() {
+    window.print();
   }
 
   const runStatus: "pending" | "running" | "paused" | "ended" =
@@ -3691,8 +3796,8 @@ export default function Home() {
                   const finishedRuns = dayState.runs.filter(r => !!r.endedAt);
                   const upcomingRuns = dayState.runs.filter((r, i) => !r.endedAt && i !== dayState.currentIndex);
 
-                  function SummaryCard({ run, isCurrent }: { run: typeof dayState.runs[0]; isCurrent?: boolean }) {
-                    const vals = isCurrent ? v : loadRunValues(run.id);
+                  function SummaryCard({ run, isCurrent, readOnly, runVals }: { run: RunMeta; isCurrent?: boolean; readOnly?: boolean; runVals?: FormValues }) {
+                    const vals = runVals ?? (isCurrent ? v : loadRunValues(run.id));
                     const s = computeSummaryStats(vals);
                     const isFinished = !!run.endedAt;
                     const actualDurationSec = run.startedAt && run.endedAt
@@ -3706,11 +3811,13 @@ export default function Home() {
                     if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
                     if (s.pep1Type) frontlineItems.push({ label: `Pep 1 — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
                     if (s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+                    const canEdit = !readOnly && (isSupervisor || isCurrent);
+                    const caseDelta = run.actualCases != null ? run.actualCases - s.totalCases : null;
 
                     return (
                       <Card
-                        className={`border-border/50 shadow-md cursor-pointer transition-colors hover:bg-accent/30 ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/50"}`}
-                        onClick={() => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("info"); } }}
+                        className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/50"}`}
+                        onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("info"); } }}
                       >
                         <CardHeader className="pb-2 pt-4 px-5">
                           <div className="flex items-center justify-between gap-2">
@@ -3720,16 +3827,18 @@ export default function Home() {
                             </span>
                           </div>
                         </CardHeader>
-                        <CardContent className="px-5 pb-4 space-y-3">
+                        <CardContent className="px-5 pb-4 space-y-3" onClick={e => e.stopPropagation()}>
                           {/* Time & cases row */}
                           <div className="grid grid-cols-3 gap-2 text-center">
                             <div className="bg-background/40 rounded-lg py-2 px-1">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Cases</div>
-                              <div className="text-lg font-bold">{s.totalCases}</div>
+                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Planned</div>
+                              <div className="text-lg font-bold tabular-nums">{fmtComma(s.totalCases)}</div>
+                              <div className="text-[10px] text-muted-foreground">cases</div>
                             </div>
                             <div className="bg-background/40 rounded-lg py-2 px-1">
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Pizzas</div>
-                              <div className="text-lg font-bold">{s.totalPizzas.toLocaleString()}</div>
+                              <div className="text-lg font-bold tabular-nums">{fmtComma(s.totalPizzas)}</div>
+                              <div className="text-[10px] text-muted-foreground">&nbsp;</div>
                             </div>
                             <div className="bg-background/40 rounded-lg py-2 px-1">
                               <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
@@ -3742,8 +3851,57 @@ export default function Home() {
                                     ? fmtTime(calc.totalTimeSec)
                                     : fmtTime(s.estimatedTimeSec)}
                               </div>
+                              <div className="text-[10px] text-muted-foreground">&nbsp;</div>
                             </div>
                           </div>
+
+                          {/* Waste tracking — actual cases + waste lbs (finished or supervisor) */}
+                          {(isFinished || isSupervisor) && !readOnly && (
+                            <div className="grid grid-cols-2 gap-2 pt-1">
+                              <div>
+                                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1">Actual Cases</label>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number" min="0" step="1"
+                                    value={run.actualCases ?? ""}
+                                    placeholder={String(s.totalCases)}
+                                    disabled={!canEdit}
+                                    onChange={e => updateRunMeta(run.id, { actualCases: e.target.value === "" ? undefined : Number(e.target.value) })}
+                                    className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
+                                  />
+                                  {caseDelta !== null && (
+                                    <span className={`text-xs font-semibold tabular-nums shrink-0 ${caseDelta >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
+                                      {caseDelta >= 0 ? `+${caseDelta}` : caseDelta}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1">Waste (lbs)</label>
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="number" min="0" step="0.1"
+                                    value={run.wasteLbs ?? ""}
+                                    placeholder="0"
+                                    disabled={!canEdit}
+                                    onChange={e => updateRunMeta(run.id, { wasteLbs: e.target.value === "" ? undefined : Number(e.target.value) })}
+                                    className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
+                                  />
+                                  {(run.wasteLbs ?? 0) > 0 && (
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {/* Read-only waste display for history */}
+                          {readOnly && (run.actualCases != null || run.wasteLbs != null) && (
+                            <div className="flex gap-4 text-xs">
+                              {run.actualCases != null && <span className="text-muted-foreground">Actual: <span className="text-foreground font-semibold tabular-nums">{fmtComma(run.actualCases)} cases</span></span>}
+                              {run.wasteLbs != null && run.wasteLbs > 0 && <span className="text-amber-400/80">Waste: <span className="font-semibold tabular-nums">{fmtNum(run.wasteLbs, 1)} lbs</span></span>}
+                            </div>
+                          )}
+
                           {/* Expected cases by now — only for running current run */}
                           {isCurrent && run.startedAt && !run.endedAt && (() => {
                             const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
@@ -3753,7 +3911,7 @@ export default function Home() {
                             return (
                               <div className="flex items-center justify-between bg-primary/10 border border-primary/25 rounded-lg px-4 py-2">
                                 <span className="text-xs text-primary/80 font-medium">Expected cases by now</span>
-                                <span className="text-xl font-bold text-primary tabular-nums">{expectedCases}</span>
+                                <span className="text-xl font-bold text-primary tabular-nums">{fmtComma(expectedCases)}</span>
                               </div>
                             );
                           })()}
@@ -3799,6 +3957,25 @@ export default function Home() {
                               </div>
                             </div>
                           )}
+                          {/* Notes / shift log */}
+                          <div className="pt-1 border-t border-border/30">
+                            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1 mb-1.5">
+                              <FileText className="w-3 h-3" /> Notes
+                            </label>
+                            {canEdit ? (
+                              <textarea
+                                rows={2}
+                                value={run.notes ?? ""}
+                                placeholder="Shift notes, line issues, observations…"
+                                onChange={e => updateRunMeta(run.id, { notes: e.target.value })}
+                                className="w-full px-2 py-1.5 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 resize-none placeholder:text-muted-foreground/50"
+                              />
+                            ) : (
+                              <p className="text-sm text-muted-foreground italic min-h-[2rem]">
+                                {run.notes || "—"}
+                              </p>
+                            )}
+                          </div>
                         </CardContent>
                       </Card>
                     );
@@ -3806,6 +3983,23 @@ export default function Home() {
 
                   return (
                     <div className="space-y-6">
+                      {/* Export buttons */}
+                      <div className="flex gap-2 justify-end print:hidden">
+                        <button
+                          type="button"
+                          onClick={printSummary}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Printer className="w-3.5 h-3.5" /> Print
+                        </button>
+                        <button
+                          type="button"
+                          onClick={exportCSV}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Export CSV
+                        </button>
+                      </div>
                       {/* Finished */}
                       {finishedRuns.length > 0 && (
                         <div className="space-y-3">
@@ -3832,6 +4026,51 @@ export default function Home() {
                             Upcoming ({upcomingRuns.length})
                           </div>
                           {upcomingRuns.map(run => <SummaryCard key={run.id} run={run} />)}
+                        </div>
+                      )}
+                      {/* History */}
+                      {history.length > 0 && (
+                        <div className="space-y-3 pt-2 border-t border-border/30">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+                            <History className="w-4 h-4" />
+                            History ({history.length} {history.length === 1 ? "day" : "days"})
+                          </div>
+                          {history.map(day => (
+                            <div key={day.date} className="rounded-lg border border-border/30 bg-card/30 overflow-hidden">
+                              <button
+                                type="button"
+                                className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium hover:bg-accent/20 transition-colors"
+                                onClick={() => setExpandedHistoryDay(expandedHistoryDay === day.date ? null : day.date)}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold">{day.date}</span>
+                                  <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {day.runs.filter(r => r.endedAt).length} finished</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); exportHistoryCSV(day); }}
+                                    className="text-[10px] flex items-center gap-1 px-2 py-0.5 rounded border border-border/40 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                                  >
+                                    <Download className="w-3 h-3" /> CSV
+                                  </button>
+                                  <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${expandedHistoryDay === day.date ? "rotate-180" : ""}`} />
+                                </div>
+                              </button>
+                              {expandedHistoryDay === day.date && (
+                                <div className="px-4 pb-4 space-y-3 border-t border-border/20 pt-3">
+                                  {day.runs.map(run => (
+                                    <SummaryCard
+                                      key={run.id}
+                                      run={run}
+                                      readOnly
+                                      runVals={day.runValues[run.id] as FormValues | undefined}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
