@@ -1962,7 +1962,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setNowTime(new Date()), 1_000);
+    const id = setInterval(() => {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA") setNowTime(new Date());
+    }, 1_000);
     return () => clearInterval(id);
   }, []);
 
