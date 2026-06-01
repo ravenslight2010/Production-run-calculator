@@ -33,6 +33,10 @@ import {
   ArrowUp,
   ArrowDown,
   GripVertical,
+  Maximize2,
+  Minimize2,
+  TrendingUp,
+  MessageSquare,
 } from "lucide-react";
 
 import {
@@ -1161,7 +1165,7 @@ const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break" };
+type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
@@ -1589,6 +1593,21 @@ export default function Home() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const isSupervisor = role === "supervisor";
+
+  // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handler);
+    return () => document.removeEventListener("fullscreenchange", handler);
+  }, []);
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
 
   // ── Online / offline ───────────────────────────────────────────────────────
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
@@ -3018,6 +3037,15 @@ export default function Home() {
                 Manage
               </button>
             )}
+            {/* Fullscreen / kiosk toggle */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen / kiosk mode"}
+              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
             {/* Role badge */}
             <button
               type="button"
@@ -4298,6 +4326,19 @@ export default function Home() {
                               {isCurrent ? "Current" : isFinished ? "Finished" : "Upcoming"}
                             </span>
                           </div>
+                          {(run.startedAt || run.endedAt) && (
+                            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-1">
+                              {run.startedAt && <span>{fmtClock(run.startedAt)}</span>}
+                              {run.startedAt && run.endedAt && <ChevronRight className="w-3 h-3 shrink-0" />}
+                              {run.endedAt && <span>{fmtClock(run.endedAt)}</span>}
+                              {run.startedAt && run.endedAt && (
+                                <span className="text-muted-foreground/50 ml-1">· {fmtTime((run.endedAt - run.startedAt) / 1000)}</span>
+                              )}
+                              {run.startedAt && !run.endedAt && (
+                                <span className="text-primary/60 font-medium">→ running</span>
+                              )}
+                            </div>
+                          )}
                         </CardHeader>
                         <CardContent className="px-5 pb-4 space-y-3" onClick={e => e.stopPropagation()}>
                           {/* Time & cases row */}
@@ -4572,6 +4613,45 @@ export default function Home() {
                         </div>
                       )}
 
+                      {/* Shift efficiency stats */}
+                      {(() => {
+                        const runs = dayState.runs;
+                        const productiveMs = runs.reduce((sum, r) => sum + (r.startedAt && r.endedAt ? r.endedAt - r.startedAt : 0), 0);
+                        const gapMs = runs.reduce((sum, r, i) => {
+                          if (i === 0) return sum;
+                          const prev = runs[i - 1];
+                          return sum + (prev.endedAt && r.startedAt ? r.startedAt - prev.endedAt : 0);
+                        }, 0);
+                        const totalMs = productiveMs + gapMs;
+                        if (productiveMs === 0) return null;
+                        const utilPct = totalMs > 0 ? Math.round(productiveMs / totalMs * 100) : 100;
+                        return (
+                          <div className="rounded-xl border border-border/40 bg-card/40 px-5 py-4">
+                            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-muted-foreground">
+                              <TrendingUp className="w-4 h-4" />
+                              Shift Efficiency
+                            </div>
+                            <div className="grid grid-cols-3 gap-3 text-center">
+                              <div>
+                                <div className="text-lg font-bold tabular-nums text-emerald-400">{fmtElapsed(productiveMs)}</div>
+                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Productive</div>
+                              </div>
+                              <div>
+                                <div className="text-lg font-bold tabular-nums text-amber-400/80">{gapMs > 0 ? fmtElapsed(gapMs) : "—"}</div>
+                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Gap / Down</div>
+                              </div>
+                              <div>
+                                <div className={`text-lg font-bold tabular-nums ${utilPct >= 80 ? "text-emerald-400" : utilPct >= 60 ? "text-amber-400" : "text-red-400"}`}>{utilPct}%</div>
+                                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mt-0.5">Utilization</div>
+                              </div>
+                            </div>
+                            <div className="mt-3 h-1.5 rounded-full bg-muted/30 overflow-hidden">
+                              <div className={`h-full rounded-full transition-all duration-500 ${utilPct >= 80 ? "bg-emerald-500" : utilPct >= 60 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${utilPct}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Shopping List */}
                       {shopList.length > 0 && (
                         <div className="rounded-xl border border-border/40 bg-card/40 px-5 py-4">
@@ -4644,6 +4724,17 @@ export default function Home() {
                                   ) : (
                                     <span className="text-[10px] text-muted-foreground/50 italic">gap unknown</span>
                                   )}
+                                  {/* Gap note */}
+                                  <div className="flex items-center gap-1 ml-auto shrink-0">
+                                    <MessageSquare className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                                    <input
+                                      type="text"
+                                      value={run.gapNote ?? ""}
+                                      onChange={e => updateRunMeta(run.id, { gapNote: e.target.value || undefined })}
+                                      placeholder="note…"
+                                      className="w-24 text-[10px] bg-transparent border-b border-border/30 focus:border-primary/50 outline-none text-muted-foreground placeholder:text-muted-foreground/30 py-0.5 transition-colors"
+                                    />
+                                  </div>
                                 </div>
                               </div>
                             )}
