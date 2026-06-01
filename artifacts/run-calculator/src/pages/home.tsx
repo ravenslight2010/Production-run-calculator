@@ -1170,7 +1170,7 @@ const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string };
-type DayState = { runs: RunMeta[]; currentIndex: number; date?: string };
+type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string };
 type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
 
 type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
@@ -3065,6 +3065,12 @@ export default function Home() {
                   </span>
                 );
               })()}
+              {/* Die type badge in run header */}
+              {v.dieType && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/40 border border-border/50 text-muted-foreground tabular-nums">
+                  {v.dieType}
+                </span>
+              )}
             </div>
 
             {/* Estimated time to finish — shown while running or paused */}
@@ -3395,6 +3401,16 @@ export default function Home() {
                                 style={{ width: `${pct * 100}%` }}
                               />
                             </div>
+                          )}
+                          {/* Auto-advance to next run */}
+                          {!draining && dayState.runs[dayState.currentIndex + 1] && (
+                            <button
+                              type="button"
+                              onClick={() => switchToRun(dayState.currentIndex + 1)}
+                              className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                            >
+                              Switch to {runLabel(dayState.runs[dayState.currentIndex + 1])} →
+                            </button>
                           )}
                         </div>
                       </div>
@@ -4234,7 +4250,11 @@ export default function Home() {
                         {doughSubTab !== "crusts" && (
                           <StatRow
                             label="Time Per Batch"
-                            value={fmtTime(calc.timePerBatchSec)}
+                            value={calc.timePerBatchSec > 0
+                              ? fmtTime(calc.timePerBatchSec) + (currentRun?.startedAt && !currentRun?.endedAt
+                                  ? ` · next at ${fmtClock(Date.now() + calc.timePerBatchSec * 1000)}`
+                                  : "")
+                              : "—"}
                             testId="output-time-per-batch"
                           />
                         )}
@@ -4267,7 +4287,11 @@ export default function Home() {
                           <StatRow
                             key={trays}
                             label={`${trays}-Tray Rack`}
-                            value={fmtTime(sec)}
+                            value={sec > 0
+                              ? fmtTime(sec) + (currentRun?.startedAt && !currentRun?.endedAt
+                                  ? ` · at ${fmtClock(Date.now() + sec * 1000)}`
+                                  : "")
+                              : "—"}
                             testId={`output-rack-${trays}`}
                           />
                         ))}
@@ -4693,6 +4717,21 @@ export default function Home() {
 
               {/* ─── SUMMARY ─── */}
               <TabsContent value="summary">
+                {/* Shift notes */}
+                <div className="mb-4">
+                  <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>
+                  <textarea
+                    value={dayState.shiftNotes ?? ""}
+                    onChange={e => {
+                      const updated = { ...dayState, shiftNotes: e.target.value };
+                      setDayState(updated);
+                      saveDayState(updated);
+                    }}
+                    placeholder="Handoff notes, issues, observations for this shift…"
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
+                  />
+                </div>
                 {(() => {
                   const finishedRuns = dayState.runs.filter(r => !!r.endedAt);
                   const upcomingRuns = dayState.runs.filter((r, i) => !r.endedAt && i !== dayState.currentIndex);
@@ -4722,7 +4761,14 @@ export default function Home() {
                       >
                         <CardHeader className="pb-2 pt-4 px-5">
                           <div className="flex items-center justify-between gap-2">
-                            <CardTitle className="text-base font-semibold">{runLabel(run)}</CardTitle>
+                            <div className="flex items-center gap-2 flex-wrap">
+                          <CardTitle className="text-base font-semibold">{runLabel(run)}</CardTitle>
+                          {vals.dieType && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-muted/50 border border-border/50 text-muted-foreground">
+                              {vals.dieType}
+                            </span>
+                          )}
+                        </div>
                             <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${isCurrent ? "bg-primary/20 text-primary" : isFinished ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
                               {isCurrent ? "Current" : isFinished ? "Finished" : "Upcoming"}
                             </span>
