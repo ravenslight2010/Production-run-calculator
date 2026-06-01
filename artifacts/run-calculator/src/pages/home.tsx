@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   Lock,
   ShieldCheck,
+  Settings,
 } from "lucide-react";
 
 import {
@@ -1352,6 +1353,14 @@ export default function Home() {
   const [pinError, setPinError] = useState("");
   const isSupervisor = role === "supervisor";
 
+  // ── Manage Lists dialog ────────────────────────────────────────────────────
+  const [showManageDialog, setShowManageDialog] = useState(false);
+  const [manageCategory, setManageCategory] = useState("brands");
+  const [manageInput, setManageInput] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [newPinConfirm, setNewPinConfirm] = useState("");
+  const [pinChangeMsg, setPinChangeMsg] = useState("");
+
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
     (() => {
@@ -1827,6 +1836,174 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans">
+      {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
+      {showManageDialog && (() => {
+        type Category = {
+          key: string;
+          label: string;
+          items: string[];
+          protected?: string[];
+          onAdd: (v: string) => void;
+          onRemove: (v: string) => void;
+        };
+        const categories: Category[] = [
+          { key: "brands", label: "Brands", items: brands, onAdd: (v) => addBrand(v), onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
+          { key: "flavors", label: "Flavors", items: flavors, onAdd: (v) => addFlavor(v), onRemove: (v) => { const u = flavors.filter(f => f !== v); setFlavors(u); saveList(FLAVORS_KEY, u); } },
+          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
+          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
+          { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
+          { key: "doughIngredients", label: "Dough Ingredients", items: doughIngredients, onAdd: addDoughIngredient, onRemove: removeDoughIngredient },
+          { key: "doughRecipeNames", label: "Dough Recipe Names", items: doughRecipeNames, onAdd: addDoughRecipeName, onRemove: removeDoughRecipeName },
+          { key: "frontlineIngredients", label: "Frontline Ingredients", items: frontlineIngredients, onAdd: addFrontlineIngredient, onRemove: removeFrontlineIngredient },
+          { key: "frontlineRecipeNames", label: "Frontline Recipe Names", items: frontlineRecipeNames, onAdd: addFrontlineRecipeName, onRemove: removeFrontlineRecipeName },
+          { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
+        ];
+        const cat = categories.find(c => c.key === manageCategory) ?? categories[0];
+        const handleAdd = () => {
+          const v = manageInput.trim();
+          if (!v) return;
+          cat.onAdd(v);
+          setManageInput("");
+        };
+        const handlePinSave = () => {
+          if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
+          if (newPin !== newPinConfirm) { setPinChangeMsg("PINs don't match."); return; }
+          localStorage.setItem(SUPERVISOR_PIN_KEY, newPin);
+          setNewPin(""); setNewPinConfirm("");
+          setPinChangeMsg("PIN updated successfully.");
+        };
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+            onClick={() => setShowManageDialog(false)}
+          >
+            <div
+              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+                <div className="flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-primary" />
+                  <h2 className="font-bold text-base">Manage Lists & Settings</h2>
+                </div>
+                <button type="button" onClick={() => setShowManageDialog(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Category tabs */}
+              <div className="flex gap-1 flex-wrap px-5 py-3 border-b border-border shrink-0">
+                {categories.map(c => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    onClick={() => { setManageCategory(c.key); setManageInput(""); setPinChangeMsg(""); }}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === c.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {manageCategory === "pin" ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">Set a new supervisor PIN. It must match in both fields.</p>
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">New PIN</label>
+                      <input
+                        type="password"
+                        value={newPin}
+                        onChange={e => { setNewPin(e.target.value); setPinChangeMsg(""); }}
+                        placeholder="New PIN"
+                        maxLength={8}
+                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground">Confirm PIN</label>
+                      <input
+                        type="password"
+                        value={newPinConfirm}
+                        onChange={e => { setNewPinConfirm(e.target.value); setPinChangeMsg(""); }}
+                        placeholder="Confirm PIN"
+                        maxLength={8}
+                        onKeyDown={e => e.key === "Enter" && handlePinSave()}
+                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                    </div>
+                    {pinChangeMsg && (
+                      <p className={`text-xs text-center font-medium ${pinChangeMsg.includes("success") ? "text-green-400" : "text-destructive"}`}>
+                        {pinChangeMsg}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePinSave}
+                      className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      Save PIN
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Add input */}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={manageInput}
+                        onChange={e => setManageInput(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && handleAdd()}
+                        placeholder={`Add to ${cat.label}…`}
+                        className="flex-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAdd}
+                        disabled={!manageInput.trim()}
+                        className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40"
+                      >
+                        Add
+                      </button>
+                    </div>
+
+                    {/* Items list */}
+                    {cat.items.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No items yet. Add one above.</p>
+                    ) : (
+                      <ul className="space-y-1">
+                        {cat.items.map(item => {
+                          const isProtected = cat.protected?.includes(item);
+                          return (
+                            <li key={item} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
+                              <span className="text-sm">{item}</span>
+                              {isProtected ? (
+                                <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wide">default</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => cat.onRemove(item)}
+                                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                                  title={`Remove ${item}`}
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── PIN Dialog ─────────────────────────────────────────────────── */}
       {showPinDialog && (
         <div
@@ -2230,28 +2407,42 @@ export default function Home() {
               </p>
             </div>
           </div>
-          {/* Role badge */}
-          <button
-            type="button"
-            onClick={() => {
-              if (isSupervisor) {
-                setRole("operator");
-              } else {
-                setPinInput("");
-                setPinError("");
-                setShowPinDialog(true);
-              }
-            }}
-            title={isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
-            className={`print:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
-              isSupervisor
-                ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
-                : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
-            }`}
-          >
-            {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-            {isSupervisor ? "Supervisor" : "Operator"}
-          </button>
+          <div className="print:hidden flex items-center gap-2">
+            {/* Manage Lists button — supervisor only */}
+            {isSupervisor && (
+              <button
+                type="button"
+                onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
+                title="Manage lists & settings"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                Manage
+              </button>
+            )}
+            {/* Role badge */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isSupervisor) {
+                  setRole("operator");
+                } else {
+                  setPinInput("");
+                  setPinError("");
+                  setShowPinDialog(true);
+                }
+              }}
+              title={isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                isSupervisor
+                  ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
+                  : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
+              }`}
+            >
+              {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+              {isSupervisor ? "Supervisor" : "Operator"}
+            </button>
+          </div>
         </header>
 
         <Form {...form}>
