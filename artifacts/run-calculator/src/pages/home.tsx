@@ -164,10 +164,10 @@ function computeSummaryStats(vals: FormValues) {
     totalPizzas,
     estimatedTimeSec,
     sauceBatches,
-    app1Batches, app1Type: vals.app1Type,
-    app2Batches, app2Type: vals.app2Type,
-    app3Batches, app3Type: vals.app3Type,
-    app4Batches, app4Type: vals.app4Type,
+    app1Lbs, app1Batches, app1Type: vals.app1Type,
+    app2Lbs, app2Batches, app2Type: vals.app2Type,
+    app3Lbs, app3Batches, app3Type: vals.app3Type,
+    app4Lbs, app4Batches, app4Type: vals.app4Type,
     pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
     pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
   };
@@ -455,7 +455,7 @@ function CheeseRecipeCard({
 
 function MixRecipeCard({
   label,
-  batches,
+  totalRunLbs,
   fields,
   recipe,
   fieldPrefix,
@@ -468,7 +468,7 @@ function MixRecipeCard({
   onRemove,
 }: {
   label: string;
-  batches: number;
+  totalRunLbs: number;
   fields: { id: string }[];
   recipe: RecipeRow[];
   fieldPrefix: string;
@@ -481,8 +481,9 @@ function MixRecipeCard({
   onRemove: (idx: number) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const totalLbs = totalLbsPerBatch * batches;
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+  const rowTotal = (rowLbs: number) =>
+    totalLbsPerBatch > 0 ? (rowLbs / totalLbsPerBatch) * totalRunLbs : 0;
   return (
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-purple-500/70 w-full" />
@@ -492,7 +493,7 @@ function MixRecipeCard({
             {label} — Mix Recipe
           </CardTitle>
           <span className="text-xs text-muted-foreground">
-            <span className="font-mono text-foreground">{fmtNum(totalLbs, 1)}</span> lbs needed
+            <span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed
           </span>
         </div>
       </CardHeader>
@@ -530,7 +531,7 @@ function MixRecipeCard({
                       className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                     />
                     <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
-                      {fmtNum(rowLbs * batches, 1)}
+                      {fmtNum(rowTotal(rowLbs), 1)}
                     </div>
                     {confirmIdx === idx ? (
                       <div className="flex items-center gap-1">
@@ -556,7 +557,7 @@ function MixRecipeCard({
                 {fmtNum(totalLbsPerBatch, 1)} lbs/batch
               </span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalLbs, 1)} lbs
+                {fmtNum(totalRunLbs, 1)} lbs
               </span>
               <span />
             </div>
@@ -1969,9 +1970,13 @@ export default function Home() {
       doughMadeTimeSec,
       rackTimes,
       sauceBatches,
+      app1Lbs,
       app1Batches,
+      app2Lbs,
       app2Batches,
+      app3Lbs,
       app3Batches,
+      app4Lbs,
       app4Batches,
       pep1Lbs,
       pep1Batches,
@@ -3290,17 +3295,11 @@ export default function Home() {
                         allowClear
                       />
                       {v.app1Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="app1OzPerPizza"
-                            label="Oz Per Pizza"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="app1BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
+                        <div className={v.app1Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                          <NumField control={form.control} name="app1OzPerPizza" label="Oz Per Pizza" />
+                          {!v.app1Type.trim().toLowerCase().includes("mix") && (
+                            <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" />
+                          )}
                         </div>
                       )}
 
@@ -3314,17 +3313,11 @@ export default function Home() {
                         allowClear
                       />
                       {v.app2Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="app2OzPerPizza"
-                            label="Oz Per Pizza"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="app2BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
+                        <div className={v.app2Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                          <NumField control={form.control} name="app2OzPerPizza" label="Oz Per Pizza" />
+                          {!v.app2Type.trim().toLowerCase().includes("mix") && (
+                            <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" />
+                          )}
                         </div>
                       )}
 
@@ -3338,17 +3331,11 @@ export default function Home() {
                         allowClear
                       />
                       {v.app3Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="app3OzPerPizza"
-                            label="Oz Per Pizza"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="app3BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
+                        <div className={v.app3Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                          <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
+                          {!v.app3Type.trim().toLowerCase().includes("mix") && (
+                            <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
+                          )}
                         </div>
                       )}
 
@@ -3362,17 +3349,11 @@ export default function Home() {
                         allowClear
                       />
                       {v.app4Type.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="app4OzPerPizza"
-                            label="Oz Per Pizza"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="app4BatchLbs"
-                            label="Batch Weight (lbs)"
-                          />
+                        <div className={v.app4Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                          <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
+                          {!v.app4Type.trim().toLowerCase().includes("mix") && (
+                            <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
+                          )}
                         </div>
                       )}
 
@@ -3592,7 +3573,7 @@ export default function Home() {
                 {v.app1Type.trim().toLowerCase().includes("mix") && (
                   <MixRecipeCard
                     label={v.app1Type || "Applicator 1"}
-                    batches={calc.app1Batches}
+                    totalRunLbs={calc.app1Lbs}
                     fields={cheese1Fields}
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
@@ -3608,7 +3589,7 @@ export default function Home() {
                 {v.app2Type.trim().toLowerCase().includes("mix") && (
                   <MixRecipeCard
                     label={v.app2Type || "Applicator 2"}
-                    batches={calc.app2Batches}
+                    totalRunLbs={calc.app2Lbs}
                     fields={cheese2Fields}
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
@@ -3624,7 +3605,7 @@ export default function Home() {
                 {v.app3Type.trim().toLowerCase().includes("mix") && (
                   <MixRecipeCard
                     label={v.app3Type || "Applicator 3"}
-                    batches={calc.app3Batches}
+                    totalRunLbs={calc.app3Lbs}
                     fields={cheese3Fields}
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
@@ -3640,7 +3621,7 @@ export default function Home() {
                 {v.app4Type.trim().toLowerCase().includes("mix") && (
                   <MixRecipeCard
                     label={v.app4Type || "Applicator 4"}
-                    batches={calc.app4Batches}
+                    totalRunLbs={calc.app4Lbs}
                     fields={cheese4Fields}
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
