@@ -2652,9 +2652,12 @@ export default function Home() {
                     </CardContent>
                   </Card>
                 </div>
+                  </>
+                )}
+                </fieldset>
 
-                {/* Run to Time card */}
-                {(() => {
+                {/* Run to Time card — available to all roles */}
+                {doughSubTab === "dough" && (() => {
                   const target = new Date(nowTime);
                   const [hrs, mins] = runToTime.split(":").map(Number);
                   target.setHours(hrs, mins, 0, 0);
@@ -2719,6 +2722,8 @@ export default function Home() {
                   );
                 })()}
 
+                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
+                {doughSubTab === "dough" && (
                 <DoughRecipeCard
                   batchesNeeded={calc.batchesNeeded}
                   fields={doughFields}
@@ -2739,7 +2744,6 @@ export default function Home() {
                   onRemoveRecipeName={removeDoughRecipeName}
                   onRecipeNameChange={val => form.setValue("doughRecipeName", val, { shouldDirty: true })}
                 />
-                  </>
                 )}
                 </fieldset>
               </TabsContent>
