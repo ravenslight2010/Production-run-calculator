@@ -2033,6 +2033,10 @@ export default function Home() {
                 <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 <span className="text-xs text-muted-foreground">Est. finish in</span>
                 <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.totalTimeSec)}</span>
+                <span className="text-xs text-muted-foreground">·</span>
+                <span className="text-sm font-bold tabular-nums text-foreground">
+                  {fmtClock(Date.now() + calc.totalTimeSec * 1000)}
+                </span>
               </div>
             )}
 
