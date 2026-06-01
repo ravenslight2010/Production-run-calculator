@@ -1874,13 +1874,13 @@ export default function Home() {
         const categories: Category[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: (v) => addBrand(v), onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter) },
-          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
+          { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
           { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
           { key: "doughIngredients", label: "Dough Ingredients", items: doughIngredients, onAdd: addDoughIngredient, onRemove: removeDoughIngredient },
           { key: "doughRecipeNames", label: "Dough Recipe Names", items: doughRecipeNames, onAdd: addDoughRecipeName, onRemove: removeDoughRecipeName },
-          { key: "frontlineIngredients", label: "Frontline Ingredients", items: frontlineIngredients, onAdd: addFrontlineIngredient, onRemove: removeFrontlineIngredient },
-          { key: "frontlineRecipeNames", label: "Frontline Recipe Names", items: frontlineRecipeNames, onAdd: addFrontlineRecipeName, onRemove: removeFrontlineRecipeName },
+          { key: "frontlineIngredients", label: "Sauce Ingredients", items: frontlineIngredients, onAdd: addFrontlineIngredient, onRemove: removeFrontlineIngredient },
+          { key: "frontlineRecipeNames", label: "Sauce Recipe Names", items: frontlineRecipeNames, onAdd: addFrontlineRecipeName, onRemove: removeFrontlineRecipeName },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
         const cat = categories.find(c => c.key === manageCategory) ?? categories[0];
