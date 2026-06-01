@@ -1450,6 +1450,25 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
 
+  // ── Historical CPH benchmark (average of finished runs across all days) ───
+  const histBenchmarkCph = useMemo(() => {
+    const cphs: number[] = [];
+    for (const day of history) {
+      for (const run of day.runs) {
+        if (!run.startedAt || !run.endedAt) continue;
+        const grossSec = (run.endedAt - run.startedAt) / 1000;
+        const dtSec = (run.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+        const netSec = Math.max(0, grossSec - dtSec);
+        if (netSec < 60) continue;
+        const vals = day.runValues[run.id] as FormValues | undefined;
+        const cases = run.actualCases ?? (vals ? computeSummaryStats(vals).totalCases : 0);
+        if (cases > 0) cphs.push(Math.round(cases / (netSec / 3600)));
+      }
+    }
+    if (cphs.length === 0) return null;
+    return Math.round(cphs.reduce((a, b) => a + b, 0) / cphs.length);
+  }, [history]);
+
   const [brands, setBrands] = useState<string[]>(() =>
     [...loadList(BRANDS_KEY, ["Lucia's"])].sort((a, b) => a.localeCompare(b))
   );
@@ -2375,6 +2394,28 @@ export default function Home() {
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
     }
 
+    // ── Catch-up CPH: if behind, what CPH is needed to finish on time? ──────
+    let catchUpCph: number | null = null;
+    if (
+      paceStatus === "behind" &&
+      currentRun?.startedAt &&
+      !currentRun?.endedAt &&
+      ppm > 0 &&
+      v.pizzasPerCase > 0 &&
+      v.casesNeeded > 0
+    ) {
+      const refTime = currentRun.pausedAt ?? Date.now();
+      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+      const elapsedSec = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 1000;
+      const remainingCases = v.casesNeeded - casesCompleted;
+      // Time already spent on run (sec), remaining cases must be done in the remaining estimated time
+      const originalTotalSec = ppm > 0 ? (v.casesNeeded * v.pizzasPerCase * 60) / ppm : 0;
+      const remainingSec = Math.max(60, originalTotalSec - elapsedSec);
+      if (remainingSec > 0 && remainingCases > 0) {
+        catchUpCph = Math.round((remainingCases / remainingSec) * 3600);
+      }
+    }
+
     return {
       ppm,
       traysPerSkid,
@@ -2416,6 +2457,7 @@ export default function Home() {
       casesCompleted,
       paceStatus,
       paceDelta,
+      catchUpCph,
       perTray,
       perBatch: v.doughBatchYield,
     };
@@ -3774,15 +3816,20 @@ export default function Home() {
 
             {/* Pace gauge + CPH */}
             {calc.paceStatus !== null && (
-              <div className={`flex items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
+              <div className={`flex flex-wrap items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
                 calc.paceStatus === "on-pace" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
                 : calc.paceStatus === "ahead" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
-                : "bg-amber-950/40 border border-amber-700/30 text-amber-400"
+                : "bg-red-950/40 border border-red-700/30 text-red-400"
               }`}>
                 <span>{calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}</span>
                 {calc.ppm > 0 && v.pizzasPerCase > 0 && (
                   <span className="opacity-60 border-l border-current/30 pl-2 ml-0.5">
                     {Math.round(calc.ppm * 60 / v.pizzasPerCase)} CPH
+                  </span>
+                )}
+                {calc.catchUpCph !== null && (
+                  <span className="border-l border-current/30 pl-2 ml-0.5 text-red-300 font-bold">
+                    Need {calc.catchUpCph} CPH to finish on time
                   </span>
                 )}
               </div>
@@ -5549,6 +5596,70 @@ export default function Home() {
                     className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
                   />
                 </div>
+                {/* ── Today's Shift Totals + Benchmark ── */}
+                {(() => {
+                  const todayFinished = dayState.runs.filter(r => r.startedAt && r.endedAt);
+                  if (todayFinished.length === 0 && histBenchmarkCph === null) return null;
+                  const todayTotalCases = todayFinished.reduce((acc, r) => {
+                    const vals = loadRunValues(r.id);
+                    return acc + (r.actualCases ?? computeSummaryStats(vals).totalCases);
+                  }, 0);
+                  const todayNetSec = todayFinished.reduce((acc, r) => {
+                    const gross = (r.endedAt! - r.startedAt!) / 1000;
+                    const dt = (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                    return acc + Math.max(0, gross - dt);
+                  }, 0);
+                  const todayDowntimeSec = todayFinished.reduce((acc, r) => {
+                    return acc + (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                  }, 0);
+                  const todayCph = todayNetSec > 0 && todayTotalCases > 0 ? Math.round(todayTotalCases / (todayNetSec / 3600)) : null;
+                  const benchDiff = todayCph !== null && histBenchmarkCph !== null ? todayCph - histBenchmarkCph : null;
+                  return (
+                    <div className="mb-5 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
+                      <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-primary shrink-0" />
+                        <span className="text-sm font-bold">Today's Shift</span>
+                        {todayFinished.length > 0 && <span className="text-xs text-muted-foreground">{todayFinished.length} run{todayFinished.length !== 1 ? "s" : ""} finished</span>}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border/30">
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Cases Made</div>
+                          <div className="text-2xl font-black tabular-nums">{todayTotalCases > 0 ? fmtComma(todayTotalCases) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Net Run Time</div>
+                          <div className="text-2xl font-black tabular-nums">{todayNetSec > 0 ? fmtTime(todayNetSec) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Downtime</div>
+                          <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's CPH</div>
+                          <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {todayCph !== null ? todayCph : "—"}
+                          </div>
+                          {histBenchmarkCph !== null && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              avg {histBenchmarkCph} CPH
+                              {benchDiff !== null && (
+                                <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                  {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {histBenchmarkCph !== null && todayCph === null && (
+                        <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
+                          Historical average: <span className="font-bold text-foreground">{histBenchmarkCph} CPH</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {(() => {
                   const finishedRuns = dayState.runs.filter(r => !!r.endedAt);
                   const upcomingRuns = dayState.runs.filter((r, i) => !r.endedAt && i !== dayState.currentIndex);
