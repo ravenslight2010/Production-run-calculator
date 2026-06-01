@@ -32,6 +32,7 @@ import {
   AlertTriangle,
   ArrowUp,
   ArrowDown,
+  ArrowRight,
   GripVertical,
   Maximize2,
   Minimize2,
@@ -1597,6 +1598,9 @@ export default function Home() {
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
 
+  // ── Carry-over dismiss tracking ────────────────────────────────────────────
+  const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
+
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
@@ -2248,6 +2252,8 @@ export default function Home() {
       casesCompleted,
       paceStatus,
       paceDelta,
+      perTray,
+      perBatch: v.doughBatchYield,
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
@@ -3429,6 +3435,66 @@ export default function Home() {
                           Skid Done — log &amp; reset
                         </button>
                       )}
+                      {/* Carry-over surplus to next run */}
+                      {(() => {
+                        const nextRun = dayState.runs[dayState.currentIndex + 1];
+                        if (!nextRun) return null;
+                        if (carryOverDismissedFor === currentRun?.id) return null;
+                        const excessPizzas = calc.buffer * v.pizzasPerCase;
+                        if (excessPizzas < 1 || calc.perTray <= 0) return null;
+                        const excessTrays = Math.floor(excessPizzas / calc.perTray);
+                        const remainingPizzas = excessPizzas - excessTrays * calc.perTray;
+                        const excessBatches = calc.perBatch > 0 ? Math.floor(remainingPizzas / calc.perBatch) : 0;
+                        if (excessTrays === 0 && excessBatches === 0) return null;
+                        const nextLabel = `${nextRun.brand ?? ""}${nextRun.flavor ? ` – ${nextRun.flavor}` : ""}`.trim() || `Run ${dayState.currentIndex + 2}`;
+                        return (
+                          <div className="rounded-lg border border-amber-600/40 bg-amber-950/20 px-3 py-2.5 space-y-2">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2">
+                                <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+                                <p className="text-xs text-amber-300 leading-snug">
+                                  <span className="font-semibold">Surplus dough</span> exceeds this run
+                                  {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} tray{excessTrays !== 1 ? "s" : ""}</span></span>}
+                                  {excessBatches > 0 && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
+                                  . Carry to <span className="font-semibold">{nextLabel}</span>?
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setCarryOverDismissedFor(currentRun?.id ?? "")}
+                                className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 mt-0.5"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const existing = loadRunValues(nextRun.id);
+                                  saveRunValues(nextRun.id, {
+                                    ...existing,
+                                    traysOnLine: excessTrays,
+                                    batchesReady: excessBatches,
+                                  });
+                                  setCarryOverDismissedFor(currentRun?.id ?? "");
+                                  navigator.vibrate?.(15);
+                                }}
+                                className="flex-1 py-1.5 rounded-md bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 text-xs font-semibold transition-colors"
+                              >
+                                Carry over →
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCarryOverDismissedFor(currentRun?.id ?? "")}
+                                className="px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground text-xs transition-colors hover:bg-muted/30"
+                              >
+                                Skip
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
                       <StepperField
                         control={form.control}
                         name="traysOnLine"
