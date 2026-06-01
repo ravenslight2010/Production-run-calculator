@@ -1624,20 +1624,6 @@ export default function Home() {
   // ── Carry-over dismiss tracking ────────────────────────────────────────────
   const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
 
-  // ── Countdown timer ────────────────────────────────────────────────────────
-  const [timerEndAt, setTimerEndAt] = useState<number | null>(null);
-  const [timerFired, setTimerFired] = useState(false);
-  const [showTimerModal, setShowTimerModal] = useState(false);
-  const [timerMinutes, setTimerMinutes] = useState("5");
-  function startCountdownTimer() {
-    const mins = parseFloat(timerMinutes);
-    if (!mins || mins <= 0) return;
-    setTimerEndAt(Date.now() + mins * 60 * 1000);
-    setTimerFired(false);
-    setShowTimerModal(false);
-    if (Notification.permission === "default") Notification.requestPermission();
-  }
-
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
@@ -2294,19 +2280,6 @@ export default function Home() {
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
-  // ── Countdown timer notification ─────────────────────────────────────────
-  useEffect(() => {
-    if (!timerEndAt || timerFired) return;
-    if (nowTime.getTime() >= timerEndAt) {
-      setTimerFired(true);
-      setTimerEndAt(null);
-      navigator.vibrate?.([200, 100, 200, 100, 200]);
-      if (Notification.permission === "granted") {
-        new Notification("⏱ Timer done!", { body: "Your countdown timer has finished.", silent: false });
-      }
-    }
-  }, [timerEndAt, timerFired, nowTime]);
-
   // ── Next-run die type (for change warning) ────────────────────────────────
   const nextRunDieType = useMemo(() => {
     const nextRun = dayState.runs[dayState.currentIndex + 1];
@@ -2430,73 +2403,7 @@ export default function Home() {
         );
       })()}
 
-      {/* ── Countdown Timer Modal ────────────────────────────────────────── */}
-      {showTimerModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setShowTimerModal(false)}
-        >
-          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-base font-bold flex items-center gap-2"><Timer className="w-4 h-4 text-primary" /> Countdown Timer</h3>
-            {timerEndAt ? (
-              <>
-                <div className="text-center py-2">
-                  <p className="text-6xl font-black tabular-nums text-primary">
-                    {fmtTime(Math.max(0, Math.ceil((timerEndAt - nowTime.getTime()) / 1000)))}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">remaining</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setTimerEndAt(null); setTimerFired(false); setShowTimerModal(false); }}
-                  className="w-full py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted/30 transition-colors"
-                >
-                  Cancel Timer
-                </button>
-              </>
-            ) : (
-              <>
-                {timerFired && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600/20 border border-red-600/40 text-red-400 text-sm font-semibold">
-                    <Timer className="w-4 h-4" /> Time&apos;s up!
-                  </div>
-                )}
-                <div>
-                  <label className="text-xs text-muted-foreground font-semibold uppercase tracking-wider block mb-1.5">Duration (minutes)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="999"
-                    step="1"
-                    inputMode="numeric"
-                    value={timerMinutes}
-                    onChange={e => setTimerMinutes(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") startCountdownTimer(); }}
-                    className="w-full h-10 px-3 rounded-lg bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60"
-                    autoFocus
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={startCountdownTimer}
-                    className="flex-1 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-                  >
-                    Start
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setTimerFired(false); setShowTimerModal(false); }}
-                    className="px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted/30 transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+
 
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
@@ -3281,26 +3188,6 @@ export default function Home() {
                 Manage
               </button>
             )}
-            {/* Countdown timer button */}
-            <button
-              type="button"
-              onClick={() => setShowTimerModal(true)}
-              title="Countdown timer"
-              className={`flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                timerFired
-                  ? "bg-red-600/20 border border-red-600/40 text-red-400 animate-pulse"
-                  : timerEndAt
-                    ? "bg-primary/20 border border-primary/40 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-              }`}
-            >
-              <Timer className="w-3.5 h-3.5 shrink-0" />
-              {timerFired ? (
-                <span>Done!</span>
-              ) : timerEndAt ? (
-                <span className="tabular-nums">{fmtTime(Math.max(0, Math.ceil((timerEndAt - nowTime.getTime()) / 1000)))}</span>
-              ) : null}
-            </button>
             {/* Fullscreen / kiosk toggle */}
             <button
               type="button"
