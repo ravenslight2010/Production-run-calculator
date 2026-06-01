@@ -510,7 +510,7 @@ function MixRecipeCard({
           <div className="w-full mb-3">
             <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz / Pizza</span>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
               <span />
             </div>
@@ -558,7 +558,7 @@ function MixRecipeCard({
             <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
               <span className="text-xs font-semibold text-muted-foreground">Total</span>
               <span className="text-xs font-mono text-right text-muted-foreground">
-                {fmtNum(totalLbsPerBatch, 1)} lbs/batch
+                {fmtNum(totalLbsPerBatch, 2)} oz/pizza
               </span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
                 {fmtNum(totalRunLbs, 1)} lbs
