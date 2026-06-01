@@ -30,6 +30,9 @@ import {
   History,
   FileText,
   AlertTriangle,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
 } from "lucide-react";
 
 import {
@@ -1577,6 +1580,9 @@ export default function Home() {
   const [pinError, setPinError] = useState("");
   const isSupervisor = role === "supervisor";
 
+  // ── Reorder runs dialog ────────────────────────────────────────────────────
+  const [showReorderDialog, setShowReorderDialog] = useState(false);
+
   // ── Manage Lists dialog ────────────────────────────────────────────────────
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [manageCategory, setManageCategory] = useState("brands");
@@ -1868,6 +1874,19 @@ export default function Home() {
       form.reset(loadRunValues(dayState.runs[nextIndex].id));
     }
     schedulePush(newDs, 0);
+  }
+
+  function moveRun(fromIdx: number, toIdx: number) {
+    if (toIdx < 0 || toIdx >= dayState.runs.length) return;
+    const runs = [...dayState.runs];
+    const [moved] = runs.splice(fromIdx, 1);
+    runs.splice(toIdx, 0, moved);
+    // Keep currentIndex pointing at the same run after the move
+    const newCurrentIndex = runs.indexOf(dayState.runs[dayState.currentIndex]);
+    const newDs = { ...dayState, runs, currentIndex: newCurrentIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs);
   }
 
   function flashSaved() {
@@ -2205,6 +2224,76 @@ export default function Home() {
       }}
     >
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
+      {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
+      {showReorderDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowReorderDialog(false)}
+        >
+          <div
+            className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <div className="flex items-center gap-2">
+                <GripVertical className="w-4 h-4 text-primary" />
+                <h2 className="font-bold text-base">Reorder Runs</h2>
+              </div>
+              <button type="button" onClick={() => setShowReorderDialog(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-3 space-y-2">
+              {dayState.runs.map((run, idx) => {
+                const isCur = idx === dayState.currentIndex;
+                const statusDot = run.endedAt ? "bg-emerald-400" : run.startedAt ? "bg-primary animate-pulse" : "bg-muted-foreground/40";
+                return (
+                  <div
+                    key={run.id}
+                    className={`flex items-center gap-3 px-3 py-3 rounded-lg border ${isCur ? "border-primary/40 bg-primary/10" : "border-border/40 bg-card/60"}`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${statusDot}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold truncate">{runLabel(run)}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {run.endedAt ? "Ended" : run.startedAt ? "In progress" : "Upcoming"} · #{idx + 1}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => moveRun(idx, idx - 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === dayState.runs.length - 1}
+                        onClick={() => moveRun(idx, idx + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-3 border-t border-border shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowReorderDialog(false)}
+                className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showManageDialog && (() => {
         type Category = {
           key: string;
@@ -2788,6 +2877,16 @@ export default function Home() {
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )
+                )}
+                {dayState.runs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowReorderDialog(true)}
+                    title="Reorder runs"
+                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </button>
                 )}
                 <Button
                   type="button"
