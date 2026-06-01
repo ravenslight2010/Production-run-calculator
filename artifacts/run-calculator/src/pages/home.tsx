@@ -2027,6 +2027,15 @@ export default function Home() {
               )}
             </div>
 
+            {/* Estimated time to finish — shown while running or paused */}
+            {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
+              <div className="flex items-center justify-center gap-2 py-1.5">
+                <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="text-xs text-muted-foreground">Est. finish in</span>
+                <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.totalTimeSec)}</span>
+              </div>
+            )}
+
             {/* Navigation row: Previous · count · New Run · Upcoming */}
             <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
               {/* Previous */}
