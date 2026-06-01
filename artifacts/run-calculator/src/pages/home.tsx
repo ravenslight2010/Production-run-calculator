@@ -1594,6 +1594,9 @@ export default function Home() {
   const [pinError, setPinError] = useState("");
   const isSupervisor = role === "supervisor";
 
+  // ── Glance overlay ────────────────────────────────────────────────────────
+  const [showGlance, setShowGlance] = useState(false);
+
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
   useEffect(() => {
@@ -2289,6 +2292,61 @@ export default function Home() {
         else { if (dayState.currentIndex > 0) switchToRun(dayState.currentIndex - 1); }
       }}
     >
+      {/* ── Glance overlay ──────────────────────────────────────────────── */}
+      {showGlance && (() => {
+        const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
+        const pct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
+        return (
+          <div
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm p-8 cursor-pointer select-none"
+            onClick={() => setShowGlance(false)}
+          >
+            <div className="text-center space-y-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+              {/* Run name */}
+              <div>
+                <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Current Run</p>
+                <p className="text-2xl font-bold">{runLabel(currentRun)}</p>
+              </div>
+              {/* Cases */}
+              {v.casesNeeded > 0 ? (
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Cases</p>
+                  <p className="text-7xl font-black tabular-nums leading-none">{fmtComma(calc.casesCompleted)}</p>
+                  <p className="text-xl text-muted-foreground mt-1">of {fmtComma(v.casesNeeded)}</p>
+                  {v.casesNeeded > 0 && (
+                    <div className="mt-3 h-3 rounded-full bg-muted/30 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all duration-500 ${pct >= 1 ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${pct * 100}%` }} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Cases Done</p>
+                  <p className="text-7xl font-black tabular-nums leading-none">{fmtComma(calc.casesCompleted)}</p>
+                </div>
+              )}
+              {/* Time left */}
+              {(runStatus === "running" || runStatus === "paused") && calc.adjustedTimeSec > 0 && (
+                <div>
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Time Remaining</p>
+                  <p className="text-5xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p>
+                </div>
+              )}
+              {/* Pace + CPH */}
+              <div className="flex items-center justify-center gap-4">
+                {calc.paceStatus !== null && (
+                  <span className={`text-base font-bold ${calc.paceStatus === "behind" ? "text-amber-400" : "text-emerald-400"}`}>
+                    {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
+                  </span>
+                )}
+                {cph > 0 && <span className="text-base font-bold text-muted-foreground">{cph} CPH</span>}
+              </div>
+            </div>
+            <p className="absolute bottom-6 text-xs text-muted-foreground/50">Tap anywhere to dismiss</p>
+          </div>
+        );
+      })()}
+
       {/* ── Manage Lists Dialog ─────────────────────────────────────────── */}
       {/* ── Reorder Runs Dialog ─────────────────────────────────────────── */}
       {showReorderDialog && (
@@ -2872,7 +2930,7 @@ export default function Home() {
               );
             })()}
 
-            {/* Pace gauge */}
+            {/* Pace gauge + CPH */}
             {calc.paceStatus !== null && (
               <div className={`flex items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
                 calc.paceStatus === "on-pace" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
@@ -2880,6 +2938,11 @@ export default function Home() {
                 : "bg-amber-950/40 border border-amber-700/30 text-amber-400"
               }`}>
                 <span>{calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}</span>
+                {calc.ppm > 0 && v.pizzasPerCase > 0 && (
+                  <span className="opacity-60 border-l border-current/30 pl-2 ml-0.5">
+                    {Math.round(calc.ppm * 60 / v.pizzasPerCase)} CPH
+                  </span>
+                )}
               </div>
             )}
 
@@ -2971,6 +3034,16 @@ export default function Home() {
                     className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <GripVertical className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <button
+                    type="button"
+                    onClick={() => setShowGlance(true)}
+                    title="Glance view — large numbers for distance viewing"
+                    className="h-6 w-6 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Maximize2 className="w-3 h-3" />
                   </button>
                 )}
                 <Button
@@ -3141,24 +3214,31 @@ export default function Home() {
                 {/* Case completion progress bar */}
                 {v.casesNeeded > 0 && calc.casesCompleted > 0 && (
                   <div className="mb-4 space-y-1.5">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Cases completed</span>
-                      <span className="font-semibold tabular-nums text-foreground">
-                        {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)}
-                        {" "}
-                        <span className="text-muted-foreground">({Math.min(100, Math.round(calc.casesCompleted / v.casesNeeded * 100))}%)</span>
-                      </span>
-                    </div>
-                    <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          calc.casesCompleted >= v.casesNeeded ? "bg-emerald-500" :
-                          calc.casesCompleted / v.casesNeeded >= 0.75 ? "bg-primary" :
-                          "bg-primary/70"
-                        }`}
-                        style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
-                      />
-                    </div>
+                    {calc.casesCompleted >= v.casesNeeded ? (
+                      <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-400">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span className="text-sm font-bold">Target reached! {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)} cases</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>Cases completed</span>
+                          <span className="font-semibold tabular-nums text-foreground">
+                            {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)}
+                            {" "}
+                            <span className="text-muted-foreground">({Math.round(calc.casesCompleted / v.casesNeeded * 100)}%)</span>
+                          </span>
+                        </div>
+                        <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              calc.casesCompleted / v.casesNeeded >= 0.75 ? "bg-primary" : "bg-primary/70"
+                            }`}
+                            style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -3334,6 +3414,21 @@ export default function Home() {
                         name="casesOnCurrentSkid"
                         label="Cases on Current Skid"
                       />
+                      {/* Skid Done quick action */}
+                      {runStatus === "running" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.vibrate?.(15);
+                            form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
+                            form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/40 text-emerald-400 text-sm font-semibold transition-colors active:scale-[0.98]"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          Skid Done — log &amp; reset
+                        </button>
+                      )}
                       <StepperField
                         control={form.control}
                         name="traysOnLine"
