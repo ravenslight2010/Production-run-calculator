@@ -2560,6 +2560,120 @@ export default function Home() {
     );
   }
 
+  if (screenMode === "frontline") {
+    const s = computeSummaryStats(v);
+    const items: { label: string; value: string; sub?: string }[] = [];
+    if (s.sauceBatches > 0) items.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+    if (s.app1Type) {
+      const isMix = s.app1Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
+        items.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app1Lbs, 1) + " lbs total" });
+    }
+    if (s.app2Type) {
+      const isMix = s.app2Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0)
+        items.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app2Lbs, 1) + " lbs total" });
+    }
+    if (s.app3Type) {
+      const isMix = s.app3Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0)
+        items.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app3Lbs, 1) + " lbs total" });
+    }
+    if (s.app4Type) {
+      const isMix = s.app4Type.trim().toLowerCase().includes("mix");
+      if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
+        items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
+    }
+    if (s.pep1Type) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
+      if ((isPepStd ? s.pep1Lbs : s.pep1Batches) > 0)
+        items.push({ label: `Pep 1 — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+    }
+    if (s.pep2Type) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
+      if ((isPepStd ? s.pep2Lbs : s.pep2Batches) > 0)
+        items.push({ label: `Pep 2 — ${s.pep2Type}`, value: isPepStd ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+    }
+    const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
+    if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter(r => r.ingredient && Number(r.lbs) > 0).map(r => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
+    if ((v.app2CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 2 Cheese Recipe`, rows: v.app2CheeseRecipe.filter(r => r.ingredient && Number(r.lbs) > 0).map(r => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
+
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Layers className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Frontline Station</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        {/* Run name + status */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
+          {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
+          {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
+          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
+          {v.casesNeeded > 0 && (
+            <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
+              {fmtComma(calc.casesCompleted)} <span className="text-lg">/ {fmtComma(v.casesNeeded)} cases</span>
+            </span>
+          )}
+        </div>
+
+        {/* Progress bar */}
+        {v.casesNeeded > 0 && (
+          <div className="h-3 rounded-full bg-muted/30 overflow-hidden -mt-2">
+            <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+          </div>
+        )}
+
+        {/* Ingredient grid */}
+        {items.length > 0 ? (
+          <div className="grid grid-cols-2 gap-4 flex-1">
+            {items.map((item, i) => (
+              <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
+                <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{item.label}</p>
+                <p className="text-5xl font-black tabular-nums text-foreground">{item.value}</p>
+                {item.sub && <p className="text-base text-muted-foreground font-semibold">{item.sub}</p>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center rounded-2xl border border-border bg-card">
+            <p className="text-2xl text-muted-foreground">No frontline ingredients configured</p>
+          </div>
+        )}
+
+        {/* Cheese recipe breakdown */}
+        {cheeseRecipes.filter(r => r.rows.length > 0).map((recipe, i) => (
+          <div key={i} className="rounded-2xl bg-card border border-border p-6">
+            <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{recipe.label}</p>
+            <div className="grid grid-cols-3 gap-4">
+              {recipe.rows.map((row, j) => (
+                <div key={j} className="flex items-center justify-between gap-3">
+                  <span className="text-xl font-semibold">{row.ingredient}</span>
+                  <span className="text-2xl font-black tabular-nums text-primary">{fmtNum(row.lbs, 1)} lbs</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {/* Time remaining footer */}
+        {(runStatus === "running" || runStatus === "paused") && calc.adjustedTimeSec > 0 && (
+          <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-muted/20 border border-border/50 text-muted-foreground">
+            <div><p className="text-xs uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
+            <div><p className="text-xs uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
+            {cph > 0 && <div><p className="text-xs uppercase tracking-wider">CPH</p><p className="text-3xl font-black tabular-nums">{fmtComma(cph)}</p></div>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (screenMode === "summary") {
     const finished = dayState.runs.filter(r => !!r.endedAt);
     const totalCases = finished.reduce((s, r) => s + (computeSummaryStats(loadRunValues(r.id)).totalCases), 0);
@@ -2705,6 +2819,13 @@ export default function Home() {
             title: "Dough Station",
             desc: "Mixer display — next batch countdown, batch number, yield",
             url: `${base}?screen=dough`,
+          },
+          {
+            key: "frontline",
+            icon: <Layers className="w-5 h-5 text-orange-400" />,
+            title: "Frontline Station",
+            desc: "Topping line display — sauce, cheese, applicators, pep amounts",
+            url: `${base}?screen=frontline`,
           },
           {
             key: "summary",
