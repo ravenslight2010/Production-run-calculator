@@ -1346,6 +1346,7 @@ export default function Home() {
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isSyncApplyingRef = useRef(false);
   const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
+  const initialFinishTimestampRef = useRef<number>(0);
 
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
@@ -1533,6 +1534,7 @@ export default function Home() {
   }
 
   function startRun() {
+    initialFinishTimestampRef.current = Date.now() + calc.totalTimeSec * 1000;
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex ? { ...r, startedAt: Date.now(), endedAt: undefined } : r
     );
@@ -2028,17 +2030,32 @@ export default function Home() {
             </div>
 
             {/* Estimated time to finish — shown while running or paused */}
-            {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
-              <div className="flex items-center justify-center gap-2 py-1.5">
-                <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground">Est. finish in</span>
-                <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.totalTimeSec)}</span>
-                <span className="text-xs text-muted-foreground">·</span>
-                <span className="text-sm font-bold tabular-nums text-foreground">
-                  {fmtClock(Date.now() + calc.totalTimeSec * 1000)}
-                </span>
-              </div>
-            )}
+            {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
+              const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
+              const driftMs = initialFinishTimestampRef.current > 0
+                ? projectedFinish - initialFinishTimestampRef.current
+                : 0;
+              const driftSec = driftMs / 1000;
+              const showDrift = Math.abs(driftSec) >= 30;
+              const ahead = driftSec < 0;
+              return (
+                <div className="flex flex-col items-center gap-1 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground">Est. finish in</span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.totalTimeSec)}</span>
+                    <span className="text-xs text-muted-foreground">·</span>
+                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtClock(projectedFinish)}</span>
+                  </div>
+                  {showDrift && (
+                    <div className={`flex items-center gap-1.5 text-xs font-semibold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
+                      <span>{ahead ? "▲" : "▼"}</span>
+                      <span>{ahead ? `${fmtTime(Math.abs(driftSec))} ahead of original estimate` : `${fmtTime(Math.abs(driftSec))} behind original estimate`}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Navigation row: Previous · count · New Run · Upcoming */}
             <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
