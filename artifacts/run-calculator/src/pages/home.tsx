@@ -120,6 +120,14 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
+function fmtElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 function fmtTime(totalSec: number): string {
   if (!isFinite(totalSec) || totalSec < 0) return "—";
   const h = Math.floor(totalSec / 3600);
@@ -1031,6 +1039,7 @@ function NumField({
           <FormControl>
             <Input
               type="number"
+              inputMode="decimal"
               step={step ?? "any"}
               className="font-mono bg-background/50 h-9 text-sm"
               data-testid={testId ?? `input-${name}`}
@@ -1085,6 +1094,7 @@ function StepperField({
                 </button>
                 <input
                   type="number"
+                  inputMode="numeric"
                   {...field}
                   onChange={(e) =>
                     field.onChange(e.target.value === "" ? "" : Number(e.target.value))
@@ -1579,6 +1589,19 @@ export default function Home() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const isSupervisor = role === "supervisor";
+
+  // ── Online / offline ───────────────────────────────────────────────────────
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const on = () => setIsOnline(true);
+    const off = () => setIsOnline(false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+
+  // ── End-of-run notification ────────────────────────────────────────────────
+  const notifiedRunRef = useRef<string | null>(null);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
   const [showReorderDialog, setShowReorderDialog] = useState(false);
@@ -2206,6 +2229,30 @@ export default function Home() {
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
+  // ── 15-minute end-of-run notification (placed after calc is defined) ───────
+  useEffect(() => {
+    if (!currentRun?.startedAt || currentRun?.endedAt) return;
+    const runId = currentRun.id;
+    if (notifiedRunRef.current === runId) return;
+    if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) {
+      if ("Notification" in window) {
+        const fire = () => {
+          notifiedRunRef.current = runId;
+          new Notification("⏰ 15 minutes left", {
+            body: `${runLabel(currentRun)} — wrap up and prepare for end of run.`,
+            icon: "/icons/icon-192.png",
+            tag: `run-end-${runId}`,
+          });
+        };
+        if (Notification.permission === "granted") {
+          fire();
+        } else if (Notification.permission === "default") {
+          Notification.requestPermission().then((p) => { if (p === "granted") fire(); });
+        }
+      }
+    }
+  }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec]);
+
   return (
     <div
       className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans"
@@ -2703,6 +2750,11 @@ export default function Home() {
                   <span className="flex items-center gap-1.5 text-xs text-green-400 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse shrink-0" />
                     Running
+                    {currentRun?.startedAt ? (
+                      <span className="text-green-400/70 font-normal">
+                        · {fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}
+                      </span>
+                    ) : null}
                   </span>
                   <button
                     type="button"
@@ -2931,6 +2983,11 @@ export default function Home() {
             </div>
           </div>
           <div className="print:hidden flex items-center gap-2">
+            {/* Online/offline dot */}
+            <span
+              title={isOnline ? "Online" : "Offline — changes saved locally"}
+              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${isOnline ? "bg-emerald-500" : "bg-zinc-500 animate-pulse"}`}
+            />
             {/* Auto-save badge */}
             <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="text-[10px] font-semibold flex items-center gap-1 text-emerald-400 pointer-events-none">
               <Check className="w-3 h-3" /> Saved
