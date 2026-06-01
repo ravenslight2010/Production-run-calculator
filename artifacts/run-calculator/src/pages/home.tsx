@@ -1003,7 +1003,8 @@ const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughb
 type CrustField = (typeof CRUST_FIELDS)[number];
 const PROGRESS_FIELDS = ["skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady"] as const;
 const BRANDS_KEY = "run-calc-brands";
-const FLAVORS_KEY = "run-calc-flavors";
+const FLAVORS_KEY = "run-calc-flavors"; // legacy – kept so old data is not lost
+const BRAND_FLAVORS_KEY = "run-calc-brand-flavors";
 const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
@@ -1029,6 +1030,26 @@ function loadList(key: string, fallback: string[]): string[] {
 
 function saveList(key: string, list: string[]): void {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+}
+
+function loadBrandFlavors(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(BRAND_FLAVORS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, string[]>;
+    // Migrate: seed every existing brand with the old global flavors list
+    const oldFlavors = loadList(FLAVORS_KEY, []);
+    if (oldFlavors.length > 0) {
+      const brands = loadList(BRANDS_KEY, []);
+      const seeded: Record<string, string[]> = {};
+      brands.forEach(b => { seeded[b] = [...oldFlavors]; });
+      return seeded;
+    }
+  } catch {}
+  return {};
+}
+
+function saveBrandFlavors(bf: Record<string, string[]>): void {
+  try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
 }
 
 function loadProfile(brand: string, flavor: string): FormValues | null {
@@ -1182,9 +1203,7 @@ export default function Home() {
   const [brands, setBrands] = useState<string[]>(() =>
     [...loadList(BRANDS_KEY, ["Lucia's"])].sort((a, b) => a.localeCompare(b))
   );
-  const [flavors, setFlavors] = useState<string[]>(() =>
-    [...loadList(FLAVORS_KEY, ["Cheese"])].sort((a, b) => a.localeCompare(b))
-  );
+  const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
@@ -1356,6 +1375,7 @@ export default function Home() {
   // ── Manage Lists dialog ────────────────────────────────────────────────────
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [manageCategory, setManageCategory] = useState("brands");
+  const [manageBrandFilter, setManageBrandFilter] = useState("");
   const [manageInput, setManageInput] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
@@ -1546,19 +1566,24 @@ export default function Home() {
     saveList(BRANDS_KEY, updated);
   }
 
-  function addFlavor(name: string) {
+  function addFlavor(name: string, brand?: string) {
+    const b = (brand ?? currentRun?.brand ?? "").trim();
     const trimmed = name.trim();
-    if (!trimmed || flavors.includes(trimmed)) return trimmed ? trimmed : flavors[0];
-    const updated = [...flavors, trimmed].sort((a, b) => a.localeCompare(b));
-    setFlavors(updated);
-    saveList(FLAVORS_KEY, updated);
+    if (!trimmed || !b) return trimmed;
+    const current = brandFlavors[b] ?? [];
+    if (current.includes(trimmed)) return trimmed;
+    const next = { ...brandFlavors, [b]: [...current, trimmed].sort((a, bv) => a.localeCompare(bv)) };
+    setBrandFlavors(next);
+    saveBrandFlavors(next);
     return trimmed;
   }
 
-  function removeFlavor(name: string) {
-    const updated = flavors.filter(f => f !== name);
-    setFlavors(updated);
-    saveList(FLAVORS_KEY, updated);
+  function removeFlavor(name: string, brand?: string) {
+    const b = (brand ?? currentRun?.brand ?? "").trim();
+    if (!b) return;
+    const next = { ...brandFlavors, [b]: (brandFlavors[b] ?? []).filter(f => f !== name) };
+    setBrandFlavors(next);
+    saveBrandFlavors(next);
   }
 
   function checkPin() {
@@ -1848,7 +1873,7 @@ export default function Home() {
         };
         const categories: Category[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: (v) => addBrand(v), onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
-          { key: "flavors", label: "Flavors", items: flavors, onAdd: (v) => addFlavor(v), onRemove: (v) => { const u = flavors.filter(f => f !== v); setFlavors(u); saveList(FLAVORS_KEY, u); } },
+          { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter) },
           { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
           { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
@@ -1908,6 +1933,20 @@ export default function Home() {
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {manageCategory === "flavors" && (
+                  <div className="space-y-2">
+                    <label className="text-xs text-muted-foreground">Select brand to manage its flavors</label>
+                    <select
+                      value={manageBrandFilter}
+                      onChange={e => { setManageBrandFilter(e.target.value); setManageInput(""); }}
+                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="">— choose a brand —</option>
+                      {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 {manageCategory === "pin" ? (
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Set a new supervisor PIN. It must match in both fields.</p>
@@ -1949,14 +1988,15 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
-                    {/* Add input */}
+                    {/* Add input — for flavors, require a brand to be selected */}
+                    {(manageCategory !== "flavors" || manageBrandFilter) && (
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={manageInput}
                         onChange={e => setManageInput(e.target.value)}
                         onKeyDown={e => e.key === "Enter" && handleAdd()}
-                        placeholder={`Add to ${cat.label}…`}
+                        placeholder={manageCategory === "flavors" ? `Add flavor for ${manageBrandFilter}…` : `Add to ${cat.label}…`}
                         className="flex-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                       />
                       <button
@@ -1968,11 +2008,12 @@ export default function Home() {
                         Add
                       </button>
                     </div>
+                    )}
 
                     {/* Items list */}
-                    {cat.items.length === 0 ? (
+                    {cat.items.length === 0 && (manageCategory !== "flavors" || manageBrandFilter) ? (
                       <p className="text-xs text-muted-foreground text-center py-4">No items yet. Add one above.</p>
-                    ) : (
+                    ) : cat.items.length === 0 && manageCategory === "flavors" && !manageBrandFilter ? null : (
                       <ul className="space-y-1">
                         {cat.items.map(item => {
                           const isProtected = cat.protected?.includes(item);
@@ -2159,7 +2200,10 @@ export default function Home() {
                   />
                   {showFlavorDrop && (
                     <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
-                      {flavors
+                      {!(currentRun?.brand) && (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
+                      )}
+                      {(brandFlavors[currentRun?.brand ?? ""] ?? [])
                         .filter((f) => f.toLowerCase().includes(flavorInput.toLowerCase()))
                         .map((f) =>
                           confirmDeleteFlavor === f ? (
@@ -2190,7 +2234,7 @@ export default function Home() {
                             </div>
                           )
                         )}
-                      {flavorInput.trim() && !flavors.includes(flavorInput.trim()) && (
+                      {currentRun?.brand && flavorInput.trim() && !(brandFlavors[currentRun.brand] ?? []).includes(flavorInput.trim()) && (
                         <button
                           type="button"
                           className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
