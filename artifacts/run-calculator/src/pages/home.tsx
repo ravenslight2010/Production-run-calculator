@@ -1200,7 +1200,15 @@ const MAX_RUNS = 30;
 type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string };
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string; stoppages?: Stoppage[] };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string };
-type SyncPayload = { dayState: { runs: RunMeta[] }; runValues: Record<string, FormValues> };
+type SyncPayload = {
+  dayState: { runs: RunMeta[]; shiftNotes?: string };
+  runValues: Record<string, FormValues>;
+  brands?: string[];
+  brandFlavors?: Record<string, string[]>;
+  ingredientTypes?: string[];
+  templates?: RunTemplate[];
+  history?: HistoryDay[];
+};
 
 type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
 const HISTORY_KEY = "run-calc-history";
@@ -1770,22 +1778,91 @@ export default function Home() {
   useEffect(() => {
     applySyncCallbackRef.current = (payload: SyncPayload) => {
       isSyncApplyingRef.current = true;
+
+      // ── Run values ──
       for (const [id, vals] of Object.entries(payload.runValues)) {
         saveRunValues(id, vals as FormValues);
       }
+
+      // ── Day state (runs + shiftNotes) ──
       setDayState(prev => {
         const newRuns = payload.dayState.runs;
         const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
-        const newDs = { ...prev, runs: newRuns, currentIndex: newIndex };
+        const newDs = {
+          ...prev,
+          runs: newRuns,
+          currentIndex: newIndex,
+          shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
+        };
         saveDayState(newDs);
         return newDs;
       });
+
+      // ── Form reset for current run (if remote edit is newer) ──
       const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
       const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
       if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
       if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
         form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
       }
+
+      // ── Brands ──
+      if (payload.brands && payload.brands.length > 0) {
+        const local = loadList(BRANDS_KEY, []);
+        const merged = [...new Set([...local, ...payload.brands])].sort((a, b) => a.localeCompare(b));
+        saveList(BRANDS_KEY, merged);
+        setBrands(merged);
+      }
+
+      // ── Brand flavors ──
+      if (payload.brandFlavors) {
+        const local = loadBrandFlavors();
+        const merged: Record<string, string[]> = { ...local };
+        for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
+          merged[brand] = [...new Set([...(merged[brand] ?? []), ...flavors])].sort((a, b) => a.localeCompare(b));
+        }
+        saveBrandFlavors(merged);
+        setBrandFlavors(merged);
+      }
+
+      // ── Ingredient types ──
+      if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
+        const local = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+        const merged = [...new Set([...local, ...payload.ingredientTypes])].sort((a, b) => a.localeCompare(b));
+        saveList(INGREDIENT_TYPES_KEY, merged);
+        setIngredientTypes(merged);
+      }
+
+      // ── Templates (remote wins for same id, local-only entries kept) ──
+      if (payload.templates && payload.templates.length > 0) {
+        const local = loadTemplates();
+        const remoteIds = new Set(payload.templates.map(t => t.id));
+        const merged = [...payload.templates, ...local.filter(t => !remoteIds.has(t.id))];
+        saveTemplates(merged);
+        setTemplates(merged);
+      }
+
+      // ── History (merge by date, union of runs per day) ──
+      if (payload.history && payload.history.length > 0) {
+        const local = loadHistory();
+        const byDate = new Map<string, HistoryDay>();
+        for (const day of [...local, ...payload.history]) {
+          const existing = byDate.get(day.date);
+          if (!existing) {
+            byDate.set(day.date, { ...day });
+          } else {
+            // Merge runs (de-dup by id, remote wins for same id)
+            const runMap = new Map<string, RunMeta>();
+            for (const r of [...existing.runs, ...day.runs]) runMap.set(r.id, r);
+            const mergedRunValues = { ...existing.runValues, ...day.runValues };
+            byDate.set(day.date, { date: day.date, runs: [...runMap.values()], runValues: mergedRunValues });
+          }
+        }
+        const merged = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_HISTORY_DAYS);
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
+        setHistory(merged);
+      }
+
       requestAnimationFrame(() => { isSyncApplyingRef.current = false; });
     };
   });
@@ -1835,7 +1912,15 @@ export default function Home() {
       for (const run of ds.runs) {
         runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
       }
-      const payload: SyncPayload = { dayState: { runs: ds.runs }, runValues };
+      const payload: SyncPayload = {
+        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes },
+        runValues,
+        brands: loadList(BRANDS_KEY, []),
+        brandFlavors: loadBrandFlavors(),
+        ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
+        templates: loadTemplates(),
+        history: loadHistory(),
+      };
       fetch("/api/sync/today", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
