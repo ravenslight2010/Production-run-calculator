@@ -2159,9 +2159,7 @@ export default function Home() {
     };
     setDayState(newDs);
     saveDayState(newDs);
-    // Pre-fill casesNeeded from the previous run so the operator doesn't start from zero
-    const prevCasesNeeded = cur.casesNeeded ?? 0;
-    form.reset({ ...DEFAULT_VALUES, casesNeeded: prevCasesNeeded > 0 ? prevCasesNeeded : 0 });
+    form.reset(DEFAULT_VALUES);
     schedulePush(newDs, 0);
   }
 
