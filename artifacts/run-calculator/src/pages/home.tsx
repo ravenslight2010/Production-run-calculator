@@ -1211,7 +1211,7 @@ const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";
 const CHEESE_RECIPE_NAMES_KEY = "run-calc-cheese-recipe-names";
 const CHEESE_RECIPE_PRESETS_KEY = "run-calc-cheese-recipe-presets";
 
-type DoughRecipePreset = { rows: RecipeRow[]; targetWeight: number };
+type DoughRecipePreset = { rows: RecipeRow[] };
 function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
   try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
 }
@@ -1952,9 +1952,9 @@ export default function Home() {
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
-    presets[name] = { rows: v.doughRecipe ?? [], targetWeight: Number(v.targetDoughballWeight ?? 0) };
+    presets[name] = { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+  }, [v.doughRecipeName, v.doughRecipe]);
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
@@ -5136,10 +5136,7 @@ export default function Home() {
                     form.setValue("doughRecipeName", val, { shouldDirty: true });
                     if (val.trim()) {
                       const preset = loadDoughRecipePresets()[val.trim()];
-                      if (preset) {
-                        form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
-                        form.setValue("targetDoughballWeight", preset.targetWeight, { shouldDirty: true });
-                      }
+                      if (preset) form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
                     }
                   }}
                 />
