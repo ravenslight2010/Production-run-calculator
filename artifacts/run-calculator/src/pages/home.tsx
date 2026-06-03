@@ -2204,6 +2204,7 @@ export default function Home() {
     const updated = [...brands, trimmed].sort((a, b) => a.localeCompare(b));
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    schedulePush(dayStateRef.current);
     return trimmed;
   }
 
@@ -2211,6 +2212,7 @@ export default function Home() {
     const updated = brands.filter(b => b !== name);
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function addFlavor(name: string, brand?: string) {
@@ -2222,6 +2224,7 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: [...current, trimmed].sort((a, bv) => a.localeCompare(bv)) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    schedulePush(dayStateRef.current);
     return trimmed;
   }
 
@@ -2231,6 +2234,7 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: (brandFlavors[b] ?? []).filter(f => f !== name) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    schedulePush(dayStateRef.current);
   }
 
   function checkPin() {
