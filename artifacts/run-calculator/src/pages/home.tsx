@@ -2128,7 +2128,7 @@ export default function Home() {
         saveProfile(currentRun.brand, currentRun.flavor, v);
       }
       lastLocalEditRef.current = Date.now();
-      schedulePush(dayStateRef.current);
+      schedulePush(dayStateRef.current, 2000);
       flashSaved();
     }
   }, [v, currentRunId]);
@@ -2159,7 +2159,9 @@ export default function Home() {
     };
     setDayState(newDs);
     saveDayState(newDs);
-    form.reset(DEFAULT_VALUES);
+    // Pre-fill casesNeeded from the previous run so the operator doesn't start from zero
+    const prevCasesNeeded = cur.casesNeeded ?? 0;
+    form.reset({ ...DEFAULT_VALUES, casesNeeded: prevCasesNeeded > 0 ? prevCasesNeeded : 0 });
     schedulePush(newDs, 0);
   }
 
@@ -4519,11 +4521,18 @@ export default function Home() {
                           )}
                         </div>
                       </div>
-                      <NumField
-                        control={form.control}
-                        name="casesNeeded"
-                        label="Cases Needed"
-                      />
+                      <div>
+                        <NumField
+                          control={form.control}
+                          name="casesNeeded"
+                          label="Cases Needed"
+                        />
+                        {Number(v.casesNeeded) === 0 && (
+                          <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
+                            <span>⚠</span> Enter cases needed to enable calculations
+                          </p>
+                        )}
+                      </div>
                       {doughSubTab === "crusts" ? (
                         <NumField
                           control={form.control}
