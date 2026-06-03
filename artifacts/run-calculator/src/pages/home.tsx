@@ -108,7 +108,6 @@ const formSchema = z.object({
   dieType: z.string().default(""),
   // Dough recipe
   doughRecipeName: z.string().default(""),
-  targetDoughballWeight: z.coerce.number().min(0).default(0),
   doughRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
@@ -643,15 +642,12 @@ function DoughRecipeCard({
   fields,
   recipe,
   register,
-  targetWeight,
-  doughBatchYield,
   ingredientOptions,
   onAddIngredient,
   onRemoveIngredient,
   onSetIngredient,
   onAppend,
   onRemove,
-  onTargetWeightChange,
   recipeName,
   recipeNameOptions,
   onAddRecipeName,
@@ -662,15 +658,12 @@ function DoughRecipeCard({
   fields: { id: string }[];
   recipe: RecipeRow[];
   register: any;
-  targetWeight: number;
-  doughBatchYield: number;
   ingredientOptions: string[];
   onAddIngredient: (v: string) => void;
   onRemoveIngredient: (v: string) => void;
   onSetIngredient: (idx: number, val: string) => void;
   onAppend: () => void;
   onRemove: (idx: number) => void;
-  onTargetWeightChange: (v: number) => void;
   recipeName: string;
   recipeNameOptions: string[];
   onAddRecipeName: (v: string) => void;
@@ -680,11 +673,6 @@ function DoughRecipeCard({
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
-  // Recipe yield: how many doughballs does the batch make at the target weight?
-  const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
-  // Run yield: what the line actually produced (from doughBatchYield field)
-  const runYield = Number(doughBatchYield);
-  const yieldDiff = runYield - recipeYield;
 
   return (
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
@@ -710,48 +698,6 @@ function DoughRecipeCard({
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        {/* Target weight + yield comparison */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <div className="p-3 rounded-lg bg-muted/30">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
-              Target Weight (oz)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={targetWeight || ""}
-              onChange={e => onTargetWeightChange(Number(e.target.value))}
-              placeholder="0.00"
-              className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
-            />
-          </div>
-          <div className="p-3 rounded-lg bg-muted/30 text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Recipe Yield</p>
-            <p className="text-xl font-mono font-bold text-foreground">
-              {recipeYield > 0 ? fmtNum(recipeYield, 1) : "—"}
-            </p>
-            <p className="text-[10px] text-muted-foreground">doughballs / batch</p>
-          </div>
-          <div className="p-3 rounded-lg bg-muted/30 text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
-            <p className={`text-xl font-mono font-bold ${
-              recipeYield > 0 && runYield > 0
-                ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
-                  : yieldDiff < 0 ? "text-red-400"
-                  : "text-amber-400"
-                : "text-foreground"
-            }`}>
-              {runYield > 0 ? fmtNum(runYield, 1) : "—"}
-            </p>
-            {recipeYield > 0 && runYield > 0 && (
-              <p className="text-[10px] text-muted-foreground font-mono">
-                {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
-              </p>
-            )}
-          </div>
-        </div>
-
         {/* Ingredient rows */}
         {fields.length === 0 ? (
           <p className="text-xs text-muted-foreground mb-3">
@@ -1211,7 +1157,7 @@ const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";
 const CHEESE_RECIPE_NAMES_KEY = "run-calc-cheese-recipe-names";
 const CHEESE_RECIPE_PRESETS_KEY = "run-calc-cheese-recipe-presets";
 
-type DoughRecipePreset = { rows: RecipeRow[]; targetWeight: number };
+type DoughRecipePreset = { rows: RecipeRow[] };
 function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
   try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
 }
@@ -1390,7 +1336,6 @@ const DEFAULT_VALUES: FormValues = {
   pep2Type: "",
   dieType: "",
   doughRecipeName: "",
-  targetDoughballWeight: 0,
   doughRecipe: [],
   app1CheeseRecipeName: "",
   app1CheeseRecipe: [],
@@ -1952,9 +1897,9 @@ export default function Home() {
     const name = v.doughRecipeName?.trim();
     if (!name || (v.doughRecipe ?? []).length === 0) return;
     const presets = loadDoughRecipePresets();
-    presets[name] = { rows: v.doughRecipe ?? [], targetWeight: Number(v.targetDoughballWeight ?? 0) };
+    presets[name] = { rows: v.doughRecipe ?? [] };
     saveDoughRecipePresets(presets);
-  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+  }, [v.doughRecipeName, v.doughRecipe]);
 
   // Auto-save frontline (sauce) recipe preset
   useEffect(() => {
@@ -4775,10 +4720,6 @@ export default function Home() {
                       const s = computeSummaryStats(vals);
                       const rows: NeedRow[] = [];
                       // Dough
-                      if (vals.doughBatchYield > 0 && vals.targetDoughballWeight > 0) {
-                        const batches = Math.ceil((s.totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield);
-                        if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
-                      }
                       // Sauce
                       if (s.sauceBatches > 0) rows.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
                       // Applicators
@@ -5119,15 +5060,12 @@ export default function Home() {
                   fields={doughFields}
                   recipe={v.doughRecipe ?? []}
                   register={form.register}
-                  targetWeight={Number(v.targetDoughballWeight ?? 0)}
-                  doughBatchYield={Number(v.doughBatchYield)}
                   ingredientOptions={doughIngredients}
                   onAddIngredient={addDoughIngredient}
                   onRemoveIngredient={removeDoughIngredient}
                   onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                   onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
                   onRemove={removeDough}
-                  onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
                   recipeName={v.doughRecipeName ?? ""}
                   recipeNameOptions={doughRecipeNames}
                   onAddRecipeName={addDoughRecipeName}
@@ -5136,10 +5074,7 @@ export default function Home() {
                     form.setValue("doughRecipeName", val, { shouldDirty: true });
                     if (val.trim()) {
                       const preset = loadDoughRecipePresets()[val.trim()];
-                      if (preset) {
-                        form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
-                        form.setValue("targetDoughballWeight", preset.targetWeight, { shouldDirty: true });
-                      }
+                      if (preset) form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
                     }
                   }}
                 />
@@ -6146,9 +6081,7 @@ export default function Home() {
                     const s = computeSummaryStats(vals);
                     // Dough batches needed (calc inline from vals)
                     const totalPizzas = s.totalPizzas;
-                    const doughBatches = vals.doughBatchYield > 0
-                      ? Math.ceil((totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield)
-                      : 0;
+                    const doughBatches = 0;
                     // Sauce
                     if (s.sauceBatches > 0) shopAdd("Sauce", s.sauceBatches, "barrels");
                     // Dough ingredients
