@@ -4276,40 +4276,41 @@ export default function Home() {
         </div>
 
         {/* Header */}
-        <header className="flex items-center justify-between print:mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded bg-primary text-primary-foreground flex items-center justify-center print:hidden">
-              <Factory className="w-5 h-5" />
+        <header className="flex items-center justify-between gap-2 print:mb-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded bg-primary text-primary-foreground flex items-center justify-center shrink-0 print:hidden">
+              <Factory className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">
-                Production Run Calculator
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-bold tracking-tight leading-tight truncate">
+                <span className="hidden sm:inline">Production Run Calculator</span>
+                <span className="sm:hidden">Run Calculator</span>
               </h1>
-              <p className="text-xs text-muted-foreground">
+              <p className="hidden sm:block text-xs text-muted-foreground">
                 Pizza line planning & schedule estimation
               </p>
             </div>
           </div>
-          <div className="print:hidden flex items-center gap-2">
+          <div className="print:hidden flex items-center gap-1.5 shrink-0">
             {/* Online/offline dot */}
             <span
               title={isOnline ? "Online" : "Offline — changes saved locally"}
               className={`h-2 w-2 rounded-full shrink-0 transition-colors ${isOnline ? "bg-emerald-500" : "bg-zinc-500 animate-pulse"}`}
             />
-            {/* Auto-save badge */}
-            <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="text-[10px] font-semibold flex items-center gap-1 text-emerald-400 pointer-events-none">
+            {/* Auto-save badge — hidden on xs to save space */}
+            <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="hidden sm:flex text-[10px] font-semibold items-center gap-1 text-emerald-400 pointer-events-none">
               <Check className="w-3 h-3" /> Saved
             </span>
-            {/* Manage Lists button — supervisor only */}
+            {/* Manage Lists button — supervisor only, icon-only on xs */}
             {isSupervisor && (
               <button
                 type="button"
                 onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
                 title="Manage lists & settings"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
               >
-                <Settings className="w-3.5 h-3.5" />
-                Manage
+                <Settings className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Manage</span>
               </button>
             )}
             {/* Screens / cast button */}
@@ -4330,7 +4331,7 @@ export default function Home() {
             >
               {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
-            {/* Role badge */}
+            {/* Role badge — icon+text on sm+, icon-only on xs */}
             <button
               type="button"
               onClick={() => {
@@ -4343,14 +4344,14 @@ export default function Home() {
                 }
               }}
               title={isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                 isSupervisor
                   ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"
                   : "border-border text-muted-foreground bg-muted/30 hover:bg-muted/60"
               }`}
             >
-              {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-              {isSupervisor ? "Supervisor" : "Operator"}
+              {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
+              <span className="hidden sm:inline">{isSupervisor ? "Supervisor" : "Operator"}</span>
             </button>
           </div>
         </header>
