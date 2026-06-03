@@ -382,7 +382,8 @@ function CheeseRecipeCard({
   fields,
   recipe,
   fieldPrefix,
-  recipeNameField,
+  recipeName,
+  recipeNameOptions,
   register,
   ingredientOptions,
   onAddIngredient,
@@ -390,13 +391,17 @@ function CheeseRecipeCard({
   onSetIngredient,
   onAppend,
   onRemove,
+  onAddRecipeName,
+  onRemoveRecipeName,
+  onRecipeNameChange,
 }: {
   label: string;
   batches: number;
   fields: { id: string }[];
   recipe: RecipeRow[];
   fieldPrefix: string;
-  recipeNameField: string;
+  recipeName: string;
+  recipeNameOptions: string[];
   register: any;
   ingredientOptions: string[];
   onAddIngredient: (v: string) => void;
@@ -404,6 +409,9 @@ function CheeseRecipeCard({
   onSetIngredient: (idx: number, val: string) => void;
   onAppend: () => void;
   onRemove: (idx: number) => void;
+  onAddRecipeName: (v: string) => void;
+  onRemoveRecipeName: (v: string) => void;
+  onRecipeNameChange: (v: string) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -411,20 +419,24 @@ function CheeseRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-amber-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-3 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
             {label} — Cheese Blend Recipe
           </CardTitle>
-          <span className="text-xs text-muted-foreground">
+          <div className="flex-1 max-w-xs">
+            <IngredientSelect
+              value={recipeName}
+              onChange={onRecipeNameChange}
+              options={recipeNameOptions}
+              onAddOption={onAddRecipeName}
+              onRemoveOption={onRemoveRecipeName}
+              placeholder="Recipe name…"
+            />
+          </div>
+          <span className="text-xs text-muted-foreground shrink-0">
             <span className="font-mono text-foreground">{fmtNum(batches, 2)}</span> batches
           </span>
         </div>
-        <input
-          {...register(recipeNameField)}
-          type="text"
-          placeholder="Recipe name (optional)"
-          className="mt-2 h-8 w-full px-3 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 placeholder:text-muted-foreground/50"
-        />
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {fields.length === 0 ? (
@@ -1190,10 +1202,34 @@ const DEFAULT_DOUGH_INGREDIENTS = [
 ];
 const DOUGH_RECIPE_NAMES_KEY = "run-calc-dough-recipe-names";
 const DEFAULT_DOUGH_RECIPE_NAMES: string[] = [];
+const DOUGH_RECIPE_PRESETS_KEY = "run-calc-dough-recipe-presets";
 const FRONTLINE_INGREDIENTS_KEY = "run-calc-frontline-ingredients";
 const DEFAULT_FRONTLINE_INGREDIENTS = ["Flour", "Water", "Salt", "Sugar", "Oil", "Yeast"];
 const FRONTLINE_RECIPE_NAMES_KEY = "run-calc-frontline-recipe-names";
 const DEFAULT_FRONTLINE_RECIPE_NAMES: string[] = [];
+const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";
+const CHEESE_RECIPE_NAMES_KEY = "run-calc-cheese-recipe-names";
+const CHEESE_RECIPE_PRESETS_KEY = "run-calc-cheese-recipe-presets";
+
+type DoughRecipePreset = { rows: RecipeRow[]; targetWeight: number };
+function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
+  try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
+}
+function saveDoughRecipePresets(p: Record<string, DoughRecipePreset>): void {
+  try { localStorage.setItem(DOUGH_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+}
+function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
+  try { return JSON.parse(localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
+}
+function saveFrontlineRecipePresets(p: Record<string, RecipeRow[]>): void {
+  try { localStorage.setItem(FRONTLINE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+}
+function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
+  try { return JSON.parse(localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
+}
+function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
+  try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+}
 const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 const PROFILE_KEY = (brand: string, flavor: string) =>
   `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
@@ -1660,6 +1696,22 @@ export default function Home() {
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
   }
 
+  const [cheeseRecipeNames, setCheeseRecipeNames] = useState<string[]>(() =>
+    [...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b))
+  );
+  function addCheeseRecipeName(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || cheeseRecipeNames.includes(trimmed)) return;
+    const updated = [...cheeseRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
+    setCheeseRecipeNames(updated);
+    saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+  }
+  function removeCheeseRecipeName(name: string) {
+    const updated = cheeseRecipeNames.filter(t => t !== name);
+    setCheeseRecipeNames(updated);
+    saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+  }
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: (() => {
@@ -1894,6 +1946,43 @@ export default function Home() {
     };
     return () => es.close();
   }, []);
+
+  // Auto-save dough recipe preset whenever name + rows are set
+  useEffect(() => {
+    const name = v.doughRecipeName?.trim();
+    if (!name || (v.doughRecipe ?? []).length === 0) return;
+    const presets = loadDoughRecipePresets();
+    presets[name] = { rows: v.doughRecipe ?? [], targetWeight: Number(v.targetDoughballWeight ?? 0) };
+    saveDoughRecipePresets(presets);
+  }, [v.doughRecipeName, v.doughRecipe, v.targetDoughballWeight]);
+
+  // Auto-save frontline (sauce) recipe preset
+  useEffect(() => {
+    const name = v.frontlineRecipeName?.trim();
+    if (!name || (v.frontlineRecipe ?? []).length === 0) return;
+    const presets = loadFrontlineRecipePresets();
+    presets[name] = v.frontlineRecipe ?? [];
+    saveFrontlineRecipePresets(presets);
+  }, [v.frontlineRecipeName, v.frontlineRecipe]);
+
+  // Auto-save cheese blend recipe presets (one per applicator, shared pool by name)
+  useEffect(() => {
+    const saves: [string | undefined, RecipeRow[]][] = [
+      [v.app1CheeseRecipeName, v.app1CheeseRecipe ?? []],
+      [v.app2CheeseRecipeName, v.app2CheeseRecipe ?? []],
+      [v.app3CheeseRecipeName, v.app3CheeseRecipe ?? []],
+      [v.app4CheeseRecipeName, v.app4CheeseRecipe ?? []],
+    ];
+    let changed = false;
+    const presets = loadCheeseRecipePresets();
+    for (const [name, rows] of saves) {
+      const trimmed = name?.trim();
+      if (!trimmed || rows.length === 0) continue;
+      presets[trimmed] = rows;
+      changed = true;
+    }
+    if (changed) saveCheeseRecipePresets(presets);
+  }, [v.app1CheeseRecipeName, v.app1CheeseRecipe, v.app2CheeseRecipeName, v.app2CheeseRecipe, v.app3CheeseRecipeName, v.app3CheeseRecipe, v.app4CheeseRecipeName, v.app4CheeseRecipe]);
 
   // Detect day change while the tab is open (visibility change + periodic check)
   useEffect(() => {
@@ -5043,7 +5132,16 @@ export default function Home() {
                   recipeNameOptions={doughRecipeNames}
                   onAddRecipeName={addDoughRecipeName}
                   onRemoveRecipeName={removeDoughRecipeName}
-                  onRecipeNameChange={val => form.setValue("doughRecipeName", val, { shouldDirty: true })}
+                  onRecipeNameChange={val => {
+                    form.setValue("doughRecipeName", val, { shouldDirty: true });
+                    if (val.trim()) {
+                      const preset = loadDoughRecipePresets()[val.trim()];
+                      if (preset) {
+                        form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
+                        form.setValue("targetDoughballWeight", preset.targetWeight, { shouldDirty: true });
+                      }
+                    }
+                  }}
                 />
                 )}
                 </fieldset>
@@ -5535,7 +5633,8 @@ export default function Home() {
                     fields={cheese1Fields}
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
-                    recipeNameField="app1CheeseRecipeName"
+                    recipeName={v.app1CheeseRecipeName ?? ""}
+                    recipeNameOptions={cheeseRecipeNames}
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5543,6 +5642,15 @@ export default function Home() {
                     onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese1}
+                    onAddRecipeName={addCheeseRecipeName}
+                    onRemoveRecipeName={removeCheeseRecipeName}
+                    onRecipeNameChange={val => {
+                      form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadCheeseRecipePresets()[val.trim()];
+                        if (preset) form.setValue("app1CheeseRecipe", preset, { shouldDirty: true });
+                      }
+                    }}
                   />
                 )}
                 {v.app2Type.trim().toLowerCase() === "cheese" && (
@@ -5552,7 +5660,8 @@ export default function Home() {
                     fields={cheese2Fields}
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
-                    recipeNameField="app2CheeseRecipeName"
+                    recipeName={v.app2CheeseRecipeName ?? ""}
+                    recipeNameOptions={cheeseRecipeNames}
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5560,6 +5669,15 @@ export default function Home() {
                     onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese2}
+                    onAddRecipeName={addCheeseRecipeName}
+                    onRemoveRecipeName={removeCheeseRecipeName}
+                    onRecipeNameChange={val => {
+                      form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadCheeseRecipePresets()[val.trim()];
+                        if (preset) form.setValue("app2CheeseRecipe", preset, { shouldDirty: true });
+                      }
+                    }}
                   />
                 )}
                 {v.app3Type.trim().toLowerCase() === "cheese" && (
@@ -5569,7 +5687,8 @@ export default function Home() {
                     fields={cheese3Fields}
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
-                    recipeNameField="app3CheeseRecipeName"
+                    recipeName={v.app3CheeseRecipeName ?? ""}
+                    recipeNameOptions={cheeseRecipeNames}
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5577,6 +5696,15 @@ export default function Home() {
                     onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese3}
+                    onAddRecipeName={addCheeseRecipeName}
+                    onRemoveRecipeName={removeCheeseRecipeName}
+                    onRecipeNameChange={val => {
+                      form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadCheeseRecipePresets()[val.trim()];
+                        if (preset) form.setValue("app3CheeseRecipe", preset, { shouldDirty: true });
+                      }
+                    }}
                   />
                 )}
                 {v.app4Type.trim().toLowerCase() === "cheese" && (
@@ -5586,7 +5714,8 @@ export default function Home() {
                     fields={cheese4Fields}
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
-                    recipeNameField="app4CheeseRecipeName"
+                    recipeName={v.app4CheeseRecipeName ?? ""}
+                    recipeNameOptions={cheeseRecipeNames}
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5594,6 +5723,15 @@ export default function Home() {
                     onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                     onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                     onRemove={removeCheese4}
+                    onAddRecipeName={addCheeseRecipeName}
+                    onRemoveRecipeName={removeCheeseRecipeName}
+                    onRecipeNameChange={val => {
+                      form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadCheeseRecipePresets()[val.trim()];
+                        if (preset) form.setValue("app4CheeseRecipe", preset, { shouldDirty: true });
+                      }
+                    }}
                   />
                 )}
 
@@ -5677,7 +5815,13 @@ export default function Home() {
                     recipeNameOptions={frontlineRecipeNames}
                     onAddRecipeName={addFrontlineRecipeName}
                     onRemoveRecipeName={removeFrontlineRecipeName}
-                    onRecipeNameChange={val => form.setValue("frontlineRecipeName", val, { shouldDirty: true })}
+                    onRecipeNameChange={val => {
+                      form.setValue("frontlineRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadFrontlineRecipePresets()[val.trim()];
+                        if (preset) form.setValue("frontlineRecipe", preset, { shouldDirty: true });
+                      }
+                    }}
                   />
                 )}
                 </div>
