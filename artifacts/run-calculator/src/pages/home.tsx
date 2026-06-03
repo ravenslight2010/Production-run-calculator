@@ -113,15 +113,19 @@ const formSchema = z.object({
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
   // Per-applicator cheese blend recipe rows
+  app1CheeseRecipeName: z.string().default(""),
   app1CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  app2CheeseRecipeName: z.string().default(""),
   app2CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  app3CheeseRecipeName: z.string().default(""),
   app3CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  app4CheeseRecipeName: z.string().default(""),
   app4CheeseRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
@@ -378,6 +382,7 @@ function CheeseRecipeCard({
   fields,
   recipe,
   fieldPrefix,
+  recipeNameField,
   register,
   ingredientOptions,
   onAddIngredient,
@@ -391,6 +396,7 @@ function CheeseRecipeCard({
   fields: { id: string }[];
   recipe: RecipeRow[];
   fieldPrefix: string;
+  recipeNameField: string;
   register: any;
   ingredientOptions: string[];
   onAddIngredient: (v: string) => void;
@@ -413,6 +419,12 @@ function CheeseRecipeCard({
             <span className="font-mono text-foreground">{fmtNum(batches, 2)}</span> batches
           </span>
         </div>
+        <input
+          {...register(recipeNameField)}
+          type="text"
+          placeholder="Recipe name (optional)"
+          className="mt-2 h-8 w-full px-3 rounded bg-muted/40 border border-border/40 text-sm outline-none focus:border-primary/60 placeholder:text-muted-foreground/50"
+        />
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {fields.length === 0 ? (
@@ -1344,9 +1356,13 @@ const DEFAULT_VALUES: FormValues = {
   doughRecipeName: "",
   targetDoughballWeight: 0,
   doughRecipe: [],
+  app1CheeseRecipeName: "",
   app1CheeseRecipe: [],
+  app2CheeseRecipeName: "",
   app2CheeseRecipe: [],
+  app3CheeseRecipeName: "",
   app3CheeseRecipe: [],
+  app4CheeseRecipeName: "",
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
@@ -5519,6 +5535,7 @@ export default function Home() {
                     fields={cheese1Fields}
                     recipe={v.app1CheeseRecipe ?? []}
                     fieldPrefix="app1CheeseRecipe"
+                    recipeNameField="app1CheeseRecipeName"
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5535,6 +5552,7 @@ export default function Home() {
                     fields={cheese2Fields}
                     recipe={v.app2CheeseRecipe ?? []}
                     fieldPrefix="app2CheeseRecipe"
+                    recipeNameField="app2CheeseRecipeName"
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5551,6 +5569,7 @@ export default function Home() {
                     fields={cheese3Fields}
                     recipe={v.app3CheeseRecipe ?? []}
                     fieldPrefix="app3CheeseRecipe"
+                    recipeNameField="app3CheeseRecipeName"
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
@@ -5567,6 +5586,7 @@ export default function Home() {
                     fields={cheese4Fields}
                     recipe={v.app4CheeseRecipe ?? []}
                     fieldPrefix="app4CheeseRecipe"
+                    recipeNameField="app4CheeseRecipeName"
                     register={form.register}
                     ingredientOptions={cheeseIngredients}
                     onAddIngredient={addCheeseIngredient}
