@@ -1256,6 +1256,20 @@ type SyncPayload = {
   ingredientTypes?: string[];
   templates?: RunTemplate[];
   history?: HistoryDay[];
+  pepTypes?: string[];
+  dieTypes?: string[];
+  cheeseIngredients?: string[];
+  doughIngredients?: string[];
+  frontlineIngredients?: string[];
+  mixIngredients?: string[];
+  doughRecipeNames?: string[];
+  doughRecipePresets?: Record<string, DoughRecipePreset>;
+  frontlineRecipeNames?: string[];
+  frontlineRecipePresets?: Record<string, RecipeRow[]>;
+  cheeseRecipeNames?: string[];
+  cheeseRecipePresets?: Record<string, RecipeRow[]>;
+  brandProfiles?: Record<string, Partial<FormValues>>;
+  crustProfiles?: Record<string, Partial<FormValues>>;
 };
 
 type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
@@ -1910,6 +1924,50 @@ export default function Home() {
         setTemplates(merged);
       }
 
+      // ── Simple list merges (union, no deletions) ──
+      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void) {
+        if (!remote || remote.length === 0) return;
+        const local = loadList(key, defaults);
+        const merged = [...new Set([...local, ...remote])].sort((a, b) => a.localeCompare(b));
+        saveList(key, merged);
+        setter(merged);
+      }
+      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, payload.pepTypes, setPepTypes);
+      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes);
+      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, payload.cheeseIngredients, setCheeseIngredients);
+      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients);
+      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, payload.frontlineIngredients, setFrontlineIngredients);
+      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, payload.mixIngredients, setMixIngredients);
+      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames);
+      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], payload.frontlineRecipeNames, setFrontlineRecipeNames);
+      mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames);
+
+      // ── Recipe presets (remote wins for same name, local-only kept) ──
+      if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
+        const merged = { ...loadDoughRecipePresets(), ...payload.doughRecipePresets };
+        saveDoughRecipePresets(merged);
+      }
+      if (payload.frontlineRecipePresets && Object.keys(payload.frontlineRecipePresets).length > 0) {
+        const merged = { ...loadFrontlineRecipePresets(), ...payload.frontlineRecipePresets };
+        saveFrontlineRecipePresets(merged);
+      }
+      if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
+        const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
+        saveCheeseRecipePresets(merged);
+      }
+
+      // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
+      if (payload.brandProfiles) {
+        for (const [k, v] of Object.entries(payload.brandProfiles)) {
+          try { localStorage.setItem(`run-calc-profile-${k}`, JSON.stringify(v)); } catch {}
+        }
+      }
+      if (payload.crustProfiles) {
+        for (const [k, v] of Object.entries(payload.crustProfiles)) {
+          try { localStorage.setItem(`run-calc-crust-profile-${k}`, JSON.stringify(v)); } catch {}
+        }
+      }
+
       // ── History (merge by date, union of runs per day) ──
       if (payload.history && payload.history.length > 0) {
         const local = loadHistory();
@@ -2017,6 +2075,18 @@ export default function Home() {
       for (const run of ds.runs) {
         runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
       }
+      // Collect brand+flavor profiles from localStorage
+      const brandProfiles: Record<string, Partial<FormValues>> = {};
+      const crustProfiles: Record<string, Partial<FormValues>> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (key.startsWith("run-calc-profile-")) {
+          try { brandProfiles[key.slice("run-calc-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
+        } else if (key.startsWith("run-calc-crust-profile-")) {
+          try { crustProfiles[key.slice("run-calc-crust-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
+        }
+      }
       const payload: SyncPayload = {
         dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes },
         runValues,
@@ -2025,6 +2095,20 @@ export default function Home() {
         ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
         templates: loadTemplates(),
         history: loadHistory(),
+        pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+        dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
+        cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
+        doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
+        frontlineIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+        mixIngredients: loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS),
+        doughRecipeNames: loadList(DOUGH_RECIPE_NAMES_KEY, []),
+        doughRecipePresets: loadDoughRecipePresets(),
+        frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []),
+        frontlineRecipePresets: loadFrontlineRecipePresets(),
+        cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
+        cheeseRecipePresets: loadCheeseRecipePresets(),
+        brandProfiles,
+        crustProfiles,
       };
       fetch("/api/sync/today", {
         method: "PUT",
