@@ -1557,12 +1557,14 @@ export default function Home() {
     const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeIngredientType(name: string) {
     const updated = ingredientTypes.filter(t => t !== name);
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [pepTypes, setPepTypes] = useState<string[]>(() => {
@@ -1578,6 +1580,7 @@ export default function Home() {
     const updated = [...pepTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removePepType(name: string) {
@@ -1585,6 +1588,7 @@ export default function Home() {
     const updated = pepTypes.filter(t => t !== name);
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [dieTypes, setDieTypes] = useState<string[]>(() =>
@@ -1597,6 +1601,7 @@ export default function Home() {
     const updated = [...dieTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeDieType(name: string) {
@@ -1604,6 +1609,7 @@ export default function Home() {
     const updated = dieTypes.filter(t => t !== name);
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
@@ -1616,12 +1622,14 @@ export default function Home() {
     const updated = [...cheeseIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeCheeseIngredient(name: string) {
     const updated = cheeseIngredients.filter(t => t !== name);
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [mixIngredients, setMixIngredients] = useState<string[]>(() =>
@@ -1634,12 +1642,14 @@ export default function Home() {
     const updated = [...mixIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeMixIngredient(name: string) {
     const updated = mixIngredients.filter(t => t !== name);
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [doughIngredients, setDoughIngredients] = useState<string[]>(() =>
@@ -1652,12 +1662,14 @@ export default function Home() {
     const updated = [...doughIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeDoughIngredient(name: string) {
     const updated = doughIngredients.filter(t => t !== name);
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [doughRecipeNames, setDoughRecipeNames] = useState<string[]>(() =>
@@ -1670,12 +1682,14 @@ export default function Home() {
     const updated = [...doughRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setDoughRecipeNames(updated);
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   function removeDoughRecipeName(name: string) {
     const updated = doughRecipeNames.filter(t => t !== name);
     setDoughRecipeNames(updated);
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [frontlineIngredients, setFrontlineIngredients] = useState<string[]>(() =>
@@ -1687,11 +1701,13 @@ export default function Home() {
     const updated = [...frontlineIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
   function removeFrontlineIngredient(name: string) {
     const updated = frontlineIngredients.filter(t => t !== name);
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [frontlineRecipeNames, setFrontlineRecipeNames] = useState<string[]>(() =>
@@ -1703,11 +1719,13 @@ export default function Home() {
     const updated = [...frontlineRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setFrontlineRecipeNames(updated);
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
   function removeFrontlineRecipeName(name: string) {
     const updated = frontlineRecipeNames.filter(t => t !== name);
     setFrontlineRecipeNames(updated);
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const [cheeseRecipeNames, setCheeseRecipeNames] = useState<string[]>(() =>
@@ -1719,11 +1737,13 @@ export default function Home() {
     const updated = [...cheeseRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
   function removeCheeseRecipeName(name: string) {
     const updated = cheeseRecipeNames.filter(t => t !== name);
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
   }
 
   const form = useForm<FormValues>({
@@ -2391,12 +2411,14 @@ export default function Home() {
     const updated = [template, ...templates].slice(0, MAX_TEMPLATES);
     setTemplates(updated);
     saveTemplates(updated);
+    schedulePush(dayStateRef.current);
   }
 
   function deleteTemplate(id: string) {
     const updated = templates.filter(t => t.id !== id);
     setTemplates(updated);
     saveTemplates(updated);
+    schedulePush(dayStateRef.current);
   }
 
   function applyTemplate(t: RunTemplate) {
