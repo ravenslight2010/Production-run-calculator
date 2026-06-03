@@ -711,7 +711,7 @@ function DoughRecipeCard({
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {/* Target weight + yield comparison */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
           <div className="p-3 rounded-lg bg-muted/30">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
               Target Weight (oz)
@@ -2916,7 +2916,7 @@ export default function Home() {
         </div>
 
         {/* Main stats row */}
-        <div className="grid grid-cols-3 gap-6 flex-1">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 flex-1">
           {/* CPH */}
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
             <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Cases / Hour</p>
@@ -3126,7 +3126,7 @@ export default function Home() {
         {cheeseRecipes.filter(r => r.rows.length > 0).map((recipe, i) => (
           <div key={i} className="rounded-2xl bg-card border border-border p-6">
             <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-4">{recipe.label}</p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {recipe.rows.map((row, j) => (
                 <div key={j} className="flex items-center justify-between gap-3">
                   <span className="text-xl font-semibold">{row.ingredient}</span>
@@ -3238,7 +3238,7 @@ export default function Home() {
         {upcomingRuns.length > 0 && (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Up Next — {upcomingRuns.length} run{upcomingRuns.length > 1 ? "s" : ""}</p>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {upcomingRuns.map((run, i) => {
                 const vals = loadRunValues(run.id);
                 const s = computeSummaryStats(vals);
@@ -3759,7 +3759,7 @@ export default function Home() {
           onClick={() => { setShowPinDialog(false); setPinInput(""); setPinError(""); }}
         >
           <div
-            className="bg-card border border-border rounded-xl p-6 w-80 space-y-4 shadow-2xl"
+            className="bg-card border border-border rounded-xl p-6 w-full max-w-xs space-y-4 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="text-center">
