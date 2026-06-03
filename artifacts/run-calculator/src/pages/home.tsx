@@ -1247,9 +1247,9 @@ const MAX_RUNS = 30;
 
 type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string };
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string; stoppages?: Stoppage[] };
-type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string };
+type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string; runToTime?: string };
 type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string };
   runValues: Record<string, FormValues>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
@@ -1747,7 +1747,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("info");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [nowTime, setNowTime] = useState(() => new Date());
-  const [runToTime, setRunToTime] = useState("19:15");
+  const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
   // Brand/flavor picker state
   const [brandInput, setBrandInput] = useState("");
@@ -1866,7 +1866,7 @@ export default function Home() {
         saveRunValues(id, vals as FormValues);
       }
 
-      // ── Day state (runs + shiftNotes) ──
+      // ── Day state (runs + shiftNotes + runToTime) ──
       setDayState(prev => {
         const newRuns = payload.dayState.runs;
         const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
@@ -1875,10 +1875,12 @@ export default function Home() {
           runs: newRuns,
           currentIndex: newIndex,
           shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
+          runToTime: payload.dayState.runToTime ?? prev.runToTime,
         };
         saveDayState(newDs);
         return newDs;
       });
+      if (payload.dayState.runToTime) setRunToTime(payload.dayState.runToTime);
 
       // ── Form reset for current run (if remote edit is newer) ──
       const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
@@ -2088,7 +2090,7 @@ export default function Home() {
         }
       }
       const payload: SyncPayload = {
-        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes },
+        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime },
         runValues,
         brands: loadList(BRANDS_KEY, []),
         brandFlavors: loadBrandFlavors(),
@@ -5168,7 +5170,14 @@ export default function Home() {
                             <input
                               type="time"
                               value={runToTime}
-                              onChange={(e) => setRunToTime(e.target.value)}
+                              onChange={(e) => {
+                                const t = e.target.value;
+                                setRunToTime(t);
+                                const newDs = { ...dayStateRef.current, runToTime: t };
+                                setDayState(newDs);
+                                saveDayState(newDs);
+                                schedulePush(newDs, 0);
+                              }}
                               className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                             />
                             <p className="text-xs text-muted-foreground mt-1 font-mono">{to12hr(runToTime)}</p>
