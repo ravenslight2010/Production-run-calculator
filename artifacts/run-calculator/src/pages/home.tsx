@@ -3336,8 +3336,10 @@ export default function Home() {
         const dx = e.changedTouches[0].clientX - swipeTouchStart.current.x;
         const dy = e.changedTouches[0].clientY - swipeTouchStart.current.y;
         swipeTouchStart.current = null;
-        // Only register horizontal swipes (dx > 50, and more horizontal than vertical)
-        if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        // Only register clear horizontal swipes: long enough, mostly horizontal, and not a scroll
+        if (Math.abs(dx) < 60) return;           // must travel at least 60px horizontally
+        if (Math.abs(dy) > 30) return;            // any notable vertical movement → it's a scroll
+        if (Math.abs(dx) < Math.abs(dy) * 3) return; // must be 3× more horizontal than vertical
         // Don't swipe if user is interacting with an input
         if ((e.target as HTMLElement).closest("input, textarea, select, button")) return;
         if (dx < 0) { if (dayState.currentIndex < dayState.runs.length - 1) switchToRun(dayState.currentIndex + 1); }
