@@ -1873,6 +1873,7 @@ export default function Home() {
   const [stopReason, setStopReason] = useState("");
   const [stopNotes, setStopNotes] = useState("");
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
+  const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
 
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
@@ -5388,6 +5389,18 @@ export default function Home() {
                             <p className="text-2xl font-mono font-bold text-primary">{batchesPossible}</p>
                             <p className="text-xs text-muted-foreground mt-1">Batches possible</p>
                           </div>
+                          {calc.perBatch > 0 && (
+                            <div className="bg-muted/30 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-mono font-bold text-emerald-400">{fmtNum(batchesPossible * calc.perBatch, 0)}</p>
+                              <p className="text-xs text-muted-foreground mt-1">Doughballs possible</p>
+                            </div>
+                          )}
+                          {calc.perBatch > 0 && v.pizzasPerCase > 0 && (
+                            <div className="bg-muted/30 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-mono font-bold text-sky-400">{Math.floor(batchesPossible * calc.perBatch / v.pizzasPerCase)}</p>
+                              <p className="text-xs text-muted-foreground mt-1">Cases possible</p>
+                            </div>
+                          )}
                         </div>
                       </CardContent>
                     </Card>
@@ -5585,24 +5598,23 @@ export default function Home() {
                               Total downtime: {fmtTime(totalMs / 1000)}
                             </span>
                           )}
-                          {runStatus === "running" && (
-                            activeStopId ? (
-                              <button
-                                type="button"
-                                onClick={endStop}
-                                className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
-                              >
-                                <CircleDot className="w-3 h-3" /> End Stop
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                                className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
-                              >
-                                <Plus className="w-3 h-3" /> Log Stop
-                              </button>
-                            )
+                          {activeStopId && (runStatus === "running" || runStatus === "paused") && (
+                            <button
+                              type="button"
+                              onClick={endStop}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
+                            >
+                              <CircleDot className="w-3 h-3" /> End Stop
+                            </button>
+                          )}
+                          {!activeStopId && runStatus === "running" && (
+                            <button
+                              type="button"
+                              onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                            >
+                              <Plus className="w-3 h-3" /> Log Stop
+                            </button>
                           )}
                         </div>
                       </div>
@@ -5626,13 +5638,28 @@ export default function Home() {
                                 <span className={`text-xs font-semibold tabular-nums shrink-0 ${isActive ? "text-orange-400" : "text-muted-foreground"}`}>
                                   {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
                                 </span>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteStop(stop.id)}
-                                  className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
+                                {confirmDeleteStopId === stop.id ? (
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => { deleteStop(stop.id); setConfirmDeleteStopId(null); }}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/80 hover:bg-destructive text-white font-semibold transition-colors"
+                                    >Del</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteStopId(null)}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground font-semibold transition-colors"
+                                    >No</button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteStopId(stop.id)}
+                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
                             );
                           })}
@@ -6145,6 +6172,7 @@ export default function Home() {
                       setDayState(updated);
                       saveDayState(updated);
                     }}
+                    onFocus={e => e.target.select()}
                     placeholder="Handoff notes, issues, observations for this shift…"
                     rows={3}
                     className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
@@ -6794,20 +6822,27 @@ export default function Home() {
                 )}
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes (optional)</label>
+                <label className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                  <span className={stopReason === "Other" ? "text-orange-400" : "text-muted-foreground"}>
+                    {stopReason === "Other" ? "Description" : "Notes"}
+                  </span>
+                  <span className={`text-[10px] ${stopReason === "Other" ? "text-orange-400" : "text-muted-foreground/60"}`}>
+                    {stopReason === "Other" ? "(required)" : "(optional)"}
+                  </span>
+                </label>
                 <input
                   type="text"
                   value={stopNotes}
                   onChange={e => setStopNotes(e.target.value)}
-                  placeholder="Brief description…"
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  placeholder={stopReason === "Other" ? "What stopped the line?" : "Brief description…"}
+                  className={`w-full border rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 ${stopReason === "Other" && !stopNotes.trim() ? "border-orange-500/60 focus:ring-orange-500/40" : "border-input focus:ring-ring"}`}
                 />
               </div>
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={() => setShowStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
                 <button
                   type="button"
-                  disabled={!stopReason.trim()}
+                  disabled={!stopReason.trim() || (stopReason === "Other" && !stopNotes.trim())}
                   onClick={() => { logStop(stopReason.trim(), stopNotes.trim()); setShowStopDialog(false); }}
                   className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
                 >
