@@ -2616,6 +2616,23 @@ export default function Home() {
     return () => clearInterval(id);
   }, []);
 
+  // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
+  useEffect(() => {
+    const IDLE_MS = 3 * 60 * 1000;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    function resetTimer() {
+      if (timerId) clearTimeout(timerId);
+      timerId = setTimeout(() => setShowFloorMode(true), IDLE_MS);
+    }
+    resetTimer();
+    const events = ["touchstart", "mousedown", "keydown"] as const;
+    events.forEach(ev => window.addEventListener(ev, resetTimer, { passive: true }));
+    return () => {
+      if (timerId) clearTimeout(timerId);
+      events.forEach(ev => window.removeEventListener(ev, resetTimer));
+    };
+  }, []); // setShowFloorMode is a stable setter — no deps needed
+
   // Reset all runs at midnight
   useEffect(() => {
     function msUntilMidnight() {
