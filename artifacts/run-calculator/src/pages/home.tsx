@@ -731,7 +731,7 @@ function DoughRecipeCard({
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {/* Target weight + yield comparison */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className={`grid grid-cols-1 gap-3 mb-4 ${runYield > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
           <div className="p-3 rounded-lg bg-muted/30">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">
               Target Weight (oz)
@@ -753,23 +753,25 @@ function DoughRecipeCard({
             </p>
             <p className="text-[10px] text-muted-foreground">doughballs / batch</p>
           </div>
-          <div className="p-3 rounded-lg bg-muted/30 text-center">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
-            <p className={`text-xl font-mono font-bold ${
-              recipeYield > 0 && runYield > 0
-                ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
-                  : yieldDiff < 0 ? "text-red-400"
-                  : "text-amber-400"
-                : "text-foreground"
-            }`}>
-              {runYield > 0 ? fmtNum(runYield, 1) : "—"}
-            </p>
-            {recipeYield > 0 && runYield > 0 && (
-              <p className="text-[10px] text-muted-foreground font-mono">
-                {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
+          {runYield > 0 && (
+            <div className="p-3 rounded-lg bg-muted/30 text-center">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Run Yield</p>
+              <p className={`text-xl font-mono font-bold ${
+                recipeYield > 0
+                  ? Math.abs(yieldDiff) < 0.5 ? "text-green-400"
+                    : yieldDiff < 0 ? "text-red-400"
+                    : "text-amber-400"
+                  : "text-foreground"
+              }`}>
+                {fmtNum(runYield, 1)}
               </p>
-            )}
-          </div>
+              {recipeYield > 0 && (
+                <p className="text-[10px] text-muted-foreground font-mono">
+                  {yieldDiff > 0 ? "+" : ""}{fmtNum(yieldDiff, 1)} vs recipe
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Ingredient rows */}
