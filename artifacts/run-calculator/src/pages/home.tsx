@@ -7023,7 +7023,7 @@ export default function Home() {
                   onClick={() => { logStop(stopReason.trim(), stopNotes.trim()); setShowStopDialog(false); }}
                   className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
                 >
-                  Start Timer
+                  Log Stop
                 </button>
               </div>
             </div>
