@@ -45,6 +45,9 @@ import {
   OctagonX,
   CircleDot,
   Sparkles,
+  CalendarPlus,
+  ListChecks,
+  PauseCircle,
 } from "lucide-react";
 
 import {
@@ -1306,11 +1309,13 @@ const PROGRESS_FIELDS = ["skidsCompleted", "casesOnCurrentSkid", "traysOnLine", 
 const BRANDS_KEY = "run-calc-brands";
 const FLAVORS_KEY = "run-calc-flavors"; // legacy – kept so old data is not lost
 const BRAND_FLAVORS_KEY = "run-calc-brand-flavors";
+const STOP_REASONS_KEY = "run-calc-stop-reasons";
+const DEFAULT_STOP_REASONS = ["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough"];
 const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
 const DEFAULT_SUPERVISOR_PIN = "1234";
 const MAX_RUNS = 30;
 
-type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string };
+type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string; type?: "stop" | "pause" | "manual" };
 type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string; stoppages?: Stoppage[] };
 type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string; runToTime?: string };
 type SyncPayload = {
@@ -1594,7 +1599,7 @@ export default function Home() {
       for (const run of day.runs) {
         if (!run.startedAt || !run.endedAt) continue;
         const grossSec = (run.endedAt - run.startedAt) / 1000;
-        const dtSec = (run.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+        const dtSec = (run.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
         const netSec = Math.max(0, grossSec - dtSec);
         if (netSec < 60) continue;
         const vals = day.runValues[run.id] as FormValues | undefined;
@@ -1879,6 +1884,19 @@ export default function Home() {
     return run?.stoppages?.find(s => !s.endedAt)?.id ?? null;
   });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
+  const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(STOP_REASONS_KEY) ?? "null") ?? DEFAULT_STOP_REASONS; }
+    catch { return DEFAULT_STOP_REASONS; }
+  });
+  const [editingStop, setEditingStop] = useState<Stoppage | null>(null);
+  const [showManualStopDialog, setShowManualStopDialog] = useState(false);
+  const [showEditReasonsDialog, setShowEditReasonsDialog] = useState(false);
+  const [newReasonInput, setNewReasonInput] = useState("");
+  const [manualStopType, setManualStopType] = useState<"stop" | "pause">("stop");
+  const [manualStopReason, setManualStopReason] = useState("");
+  const [manualStopNotes, setManualStopNotes] = useState("");
+  const [manualStopStart, setManualStopStart] = useState("");
+  const [manualStopEnd, setManualStopEnd] = useState("");
 
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
@@ -2364,8 +2382,12 @@ export default function Home() {
   }
 
   function pauseRun() {
+    const now = Date.now();
+    const pauseStop: Stoppage = { id: genId(), reason: "", type: "pause", startedAt: now };
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, pausedAt: Date.now() } : r
+      i === dayState.currentIndex
+        ? { ...r, pausedAt: now, stoppages: [...(r.stoppages ?? []), pauseStop] }
+        : r
     );
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
@@ -2376,18 +2398,21 @@ export default function Home() {
   function resumeRun(freezerEmpty: boolean) {
     const run = dayState.runs[dayState.currentIndex];
     if (!run?.pausedAt) return;
+    const now = Date.now();
     let newStartedAt = run.startedAt!;
     if (freezerEmpty) {
-      // Restart freezer from zero
-      newStartedAt = Date.now();
+      newStartedAt = now;
     } else {
-      // Shift startedAt forward by pause duration so elapsed time is preserved
-      const pauseDuration = Date.now() - run.pausedAt;
+      const pauseDuration = now - run.pausedAt;
       newStartedAt = run.startedAt! + pauseDuration;
     }
+    // Close the open pause stoppage
+    const updatedStoppages = (run.stoppages ?? []).map(s =>
+      s.type === "pause" && !s.endedAt ? { ...s, endedAt: now } : s
+    );
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex
-        ? { ...r, startedAt: newStartedAt, pausedAt: undefined }
+        ? { ...r, startedAt: newStartedAt, pausedAt: undefined, stoppages: updatedStoppages }
         : r
     );
     const newDs = { ...dayState, runs: newRuns };
@@ -2442,9 +2467,9 @@ export default function Home() {
   }
 
   // ── Downtime log ──────────────────────────────────────────────────────────
-  function logStop(reason: string, notes: string) {
+  function logStop(reason = "", notes = "") {
     const id = genId();
-    const newStop: Stoppage = { id, reason, startedAt: Date.now(), notes: notes.trim() || undefined };
+    const newStop: Stoppage = { id, type: "stop", reason, startedAt: Date.now(), notes: notes.trim() || undefined };
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex
         ? { ...r, stoppages: [...(r.stoppages ?? []), newStop] }
@@ -2454,6 +2479,37 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     setActiveStopId(id);
+    schedulePush(newDs, 0);
+  }
+
+  function updateStop(id: string, patch: Partial<Stoppage>) {
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex
+        ? { ...r, stoppages: (r.stoppages ?? []).map(s => s.id === id ? { ...s, ...patch } : s) }
+        : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs, 600);
+  }
+
+  function addManualStop(type: "stop" | "pause" | "manual", startTs: number, endTs: number | undefined, reason: string, notes: string) {
+    const newStop: Stoppage = {
+      id: genId(),
+      type,
+      reason,
+      startedAt: startTs,
+      endedAt: endTs,
+      notes: notes.trim() || undefined,
+    };
+    const merged = [...(currentRun?.stoppages ?? []), newStop].sort((a, b) => a.startedAt - b.startedAt);
+    const newRuns = dayState.runs.map((r, i) =>
+      i === dayState.currentIndex ? { ...r, stoppages: merged } : r
+    );
+    const newDs = { ...dayState, runs: newRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
     schedulePush(newDs, 0);
   }
 
@@ -2547,7 +2603,7 @@ export default function Home() {
     const s = computeSummaryStats(vals);
     const status = run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
     const grossDurSec = run.startedAt && run.endedAt ? (run.endedAt - run.startedAt) / 1000 : 0;
-    const downtimeSec = (run.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt) / 1000, 0);
+    const downtimeSec = (run.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt) / 1000, 0);
     const netDurSec = Math.max(0, grossDurSec - downtimeSec);
     const netPpm = netDurSec > 0 && s.totalCases > 0 && vals.pizzasPerCase > 0 ? Math.round(((run.actualCases ?? s.totalCases) * vals.pizzasPerCase) / (netDurSec / 60)) : 0;
     const stopReasons = (run.stoppages ?? []).map(s => `${s.reason}(${s.endedAt ? fmtTime((s.endedAt - s.startedAt) / 1000) : "open"})`).join("; ");
@@ -2860,7 +2916,7 @@ export default function Home() {
     let paceDelta = 0; // positive = ahead, negative = behind (in cases)
     if (currentRun?.startedAt && !currentRun?.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
       const refTime = currentRun.pausedAt ?? Date.now();
-      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
       const elapsedMin = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 60000;
       const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
       const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
@@ -2879,7 +2935,7 @@ export default function Home() {
       v.casesNeeded > 0
     ) {
       const refTime = currentRun.pausedAt ?? Date.now();
-      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+      const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
       const elapsedSec = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 1000;
       const remainingCases = v.casesNeeded - casesCompleted;
       const originalTotalSec = ppm > 0 ? (v.casesNeeded * v.pizzasPerCase * 60) / ppm : 0;
@@ -3052,7 +3108,7 @@ export default function Home() {
 
   // ── Screen casting views (early returns) ──────────────────────────────────
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
-  const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+  const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
   const elapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
@@ -5798,8 +5854,10 @@ export default function Home() {
                 {/* ── Downtime / Stoppage log ── */}
                 {(() => {
                   const stoppages = currentRun?.stoppages ?? [];
-                  if (stoppages.length === 0 && runStatus !== "running") return null;
-                  const totalMs = stoppages.filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+                  const hasActiveRun = !!currentRun?.startedAt && !currentRun?.endedAt;
+                  if (stoppages.length === 0 && !hasActiveRun) return null;
+                  const stopOnlyMs = stoppages.filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+                  const noReasonCount = stoppages.filter(s => !s.reason.trim()).length;
                   return (
                     <div className="mt-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
@@ -5807,11 +5865,14 @@ export default function Home() {
                           <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
                           <span className="text-sm font-semibold">Stoppage Log</span>
                           {stoppages.length > 0 && <span className="text-xs text-muted-foreground">{stoppages.length} event{stoppages.length !== 1 ? "s" : ""}</span>}
+                          {noReasonCount > 0 && (
+                            <span className="text-xs font-semibold text-amber-400 animate-pulse">{noReasonCount} need reason</span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          {totalMs > 0 && (
+                        <div className="flex items-center gap-2">
+                          {stopOnlyMs > 0 && (
                             <span className="text-xs text-orange-400 font-semibold">
-                              Total downtime: {fmtTime(totalMs / 1000)}
+                              {fmtTime(stopOnlyMs / 1000)} down
                             </span>
                           )}
                           {activeStopId && (runStatus === "running" || runStatus === "paused") && (
@@ -5832,30 +5893,81 @@ export default function Home() {
                               <Plus className="w-3 h-3" /> Log Stop
                             </button>
                           )}
+                          {hasActiveRun && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date();
+                                const pad = (n: number) => String(n).padStart(2, "0");
+                                const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                                setManualStopType("stop");
+                                setManualStopReason("");
+                                setManualStopNotes("");
+                                setManualStopStart(local);
+                                setManualStopEnd("");
+                                setShowManualStopDialog(true);
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:bg-muted/50 text-xs font-semibold transition-colors"
+                              title="Add a past event you couldn't log at the time"
+                            >
+                              <CalendarPlus className="w-3 h-3" /> Add Past
+                            </button>
+                          )}
                         </div>
                       </div>
                       {stoppages.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">No stoppages recorded yet for this run.</p>
+                        <p className="text-xs text-muted-foreground text-center py-4">No events recorded yet. Pauses and stops are logged automatically.</p>
                       ) : (
                         <div className="divide-y divide-border/20">
                           {[...stoppages].reverse().map(stop => {
+                            const isPause = stop.type === "pause";
+                            const isManual = stop.type === "manual";
                             const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
                             const isActive = !stop.endedAt;
+                            const noReason = !stop.reason.trim();
                             return (
-                              <div key={stop.id} className={`flex items-center gap-3 px-4 py-2.5 text-sm ${isActive ? "bg-orange-950/20" : ""}`}>
-                                <div className={`w-2 h-2 rounded-full shrink-0 ${isActive ? "bg-orange-400 animate-pulse" : "bg-muted-foreground/40"}`} />
-                                <div className="flex-1 min-w-0">
-                                  <span className="font-medium">{stop.reason}</span>
-                                  {stop.notes && <span className="ml-2 text-xs text-muted-foreground">— {stop.notes}</span>}
-                                  <span className="ml-2 text-xs text-muted-foreground">
-                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
-                                  </span>
+                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""}`}>
+                                <div className="mt-0.5 shrink-0">
+                                  {isPause
+                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"}`} />
+                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"}`} />
+                                  }
                                 </div>
-                                <span className={`text-xs font-semibold tabular-nums shrink-0 ${isActive ? "text-orange-400" : "text-muted-foreground"}`}>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"}`}>
+                                      {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
+                                    </span>
+                                    {noReason ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingStop({ ...stop })}
+                                        className="text-xs italic text-amber-400 hover:text-amber-300 transition-colors"
+                                      >
+                                        No reason — tap to add
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs font-medium">{stop.reason}</span>
+                                    )}
+                                    {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
+                                  </div>
+                                </div>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
                                   {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingStop({ ...stop })}
+                                  className="text-muted-foreground/40 hover:text-foreground transition-colors shrink-0 mt-0.5"
+                                  title="Edit"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
                                 {confirmDeleteStopId === stop.id ? (
-                                  <div className="flex items-center gap-1 shrink-0">
+                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
                                     <button
                                       type="button"
                                       onClick={() => { deleteStop(stop.id); setConfirmDeleteStopId(null); }}
@@ -5871,7 +5983,7 @@ export default function Home() {
                                   <button
                                     type="button"
                                     onClick={() => setConfirmDeleteStopId(stop.id)}
-                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0"
+                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0 mt-0.5"
                                   >
                                     <X className="w-3.5 h-3.5" />
                                   </button>
@@ -6404,11 +6516,11 @@ export default function Home() {
                   }, 0);
                   const todayNetSec = todayFinished.reduce((acc, r) => {
                     const gross = (r.endedAt! - r.startedAt!) / 1000;
-                    const dt = (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                    const dt = (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                     return acc + Math.max(0, gross - dt);
                   }, 0);
                   const todayDowntimeSec = todayFinished.reduce((acc, r) => {
-                    return acc + (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                    return acc + (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                   }, 0);
                   const todayTotalPizzas = todayFinished.reduce((acc, r) => {
                     const vals = loadRunValues(r.id);
@@ -6954,7 +7066,7 @@ export default function Home() {
                             }, 0);
                             const totalHistNetSec = finishedRuns.reduce((acc, r) => {
                               const gross = (r.endedAt! - r.startedAt!) / 1000;
-                              const dt = (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                              const dt = (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                               return acc + Math.max(0, gross - dt);
                             }, 0);
                             const totalHistPizzas = finishedRuns.reduce((acc, r) => {
@@ -7023,58 +7135,294 @@ export default function Home() {
                 <button type="button" onClick={() => setShowStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-destructive">*</span></label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
+                  {isSupervisor && (
+                    <button type="button" onClick={() => setShowEditReasonsDialog(true)} className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors">
+                      <ListChecks className="w-3 h-3" /> Edit list
+                    </button>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough", "Other"].map(r => (
+                  {[...stopReasonsList, "Other"].map(r => (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => setStopReason(r)}
+                      onClick={() => setStopReason(stopReason === r ? "" : r)}
                       className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${stopReason === r ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
                     >
                       {r}
                     </button>
                   ))}
                 </div>
-                {!["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough", "Other"].includes(stopReason) && (
+                {stopReason && !stopReasonsList.includes(stopReason) && stopReason !== "Other" && (
                   <input
                     type="text"
                     value={stopReason}
                     onChange={e => setStopReason(e.target.value)}
                     placeholder="Custom reason…"
                     className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                    autoFocus
                   />
                 )}
               </div>
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5">
-                  <span className={stopReason === "Other" ? "text-orange-400" : "text-muted-foreground"}>
-                    {stopReason === "Other" ? "Description" : "Notes"}
-                  </span>
-                  <span className={`text-[10px] ${stopReason === "Other" ? "text-orange-400" : "text-muted-foreground/60"}`}>
-                    {stopReason === "Other" ? "(required)" : "(optional)"}
-                  </span>
-                </label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes <span className="text-muted-foreground/50">(optional)</span></label>
                 <input
                   type="text"
                   value={stopNotes}
                   onChange={e => setStopNotes(e.target.value)}
-                  placeholder={stopReason === "Other" ? "What stopped the line?" : "Brief description…"}
-                  className={`w-full border rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 ${stopReason === "Other" && !stopNotes.trim() ? "border-orange-500/60 focus:ring-orange-500/40" : "border-input focus:ring-ring"}`}
+                  placeholder="Brief description…"
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
+              <p className="text-xs text-muted-foreground">You can add or change the reason later by tapping the entry in the log.</p>
               <div className="flex gap-2 pt-1">
                 <button type="button" onClick={() => setShowStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
                 <button
                   type="button"
-                  disabled={!stopReason.trim() || (stopReason === "Other" && !stopNotes.trim())}
                   onClick={() => { logStop(stopReason.trim(), stopNotes.trim()); setShowStopDialog(false); }}
-                  className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors disabled:opacity-40"
+                  className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors"
                 >
-                  Log Stop
+                  Log Stop Now
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Edit Stoppage Dialog ───────────────────────────────────────────── */}
+        {editingStop && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingStop(null)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-base font-bold">Edit Event</h2>
+                <span className={`ml-1 text-xs font-semibold uppercase px-1.5 py-0.5 rounded ${editingStop.type === "pause" ? "bg-blue-500/20 text-blue-400" : editingStop.type === "manual" ? "bg-violet-500/20 text-violet-400" : "bg-orange-500/20 text-orange-400"}`}>
+                  {editingStop.type ?? "stop"}
+                </span>
+                <button type="button" onClick={() => setEditingStop(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[...stopReasonsList, "Other"].map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setEditingStop(s => s ? { ...s, reason: s.reason === r ? "" : r } : s)}
+                      className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${editingStop.reason === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={[...stopReasonsList, "Other"].includes(editingStop.reason) ? "" : editingStop.reason}
+                  onChange={e => setEditingStop(s => s ? { ...s, reason: e.target.value } : s)}
+                  placeholder="Or type a custom reason…"
+                  className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</label>
+                <input
+                  type="text"
+                  value={editingStop.notes ?? ""}
+                  onChange={e => setEditingStop(s => s ? { ...s, notes: e.target.value } : s)}
+                  placeholder="Optional notes…"
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Start time</label>
+                  <input
+                    type="datetime-local"
+                    value={new Date(editingStop.startedAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16)}
+                    onChange={e => { const ts = new Date(e.target.value).getTime(); if (!isNaN(ts)) setEditingStop(s => s ? { ...s, startedAt: ts } : s); }}
+                    className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">End time</label>
+                  <input
+                    type="datetime-local"
+                    value={editingStop.endedAt ? new Date(editingStop.endedAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0,16) : ""}
+                    onChange={e => { const ts = new Date(e.target.value).getTime(); setEditingStop(s => s ? { ...s, endedAt: isNaN(ts) ? undefined : ts } : s); }}
+                    className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setEditingStop(null)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => { updateStop(editingStop.id, editingStop); setEditingStop(null); }}
+                  className="flex-1 px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Manual Entry Dialog ────────────────────────────────────────────── */}
+        {showManualStopDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowManualStopDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-base font-bold">Add Past Event</h2>
+                <button type="button" onClick={() => setShowManualStopDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <p className="text-xs text-muted-foreground">Add a stop or pause that happened but wasn't logged at the time.</p>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Type</label>
+                <div className="flex gap-2">
+                  {(["stop", "pause"] as const).map(t => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setManualStopType(t)}
+                      className={`flex-1 py-2 rounded-md border text-sm font-semibold transition-colors ${manualStopType === t ? (t === "stop" ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-blue-500 bg-blue-500/10 text-blue-400") : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                    >
+                      {t === "stop" ? "Line Stop" : "Pause"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Start <span className="text-destructive">*</span></label>
+                  <input
+                    type="datetime-local"
+                    value={manualStopStart}
+                    onChange={e => setManualStopStart(e.target.value)}
+                    className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">End <span className="text-muted-foreground/50">(opt)</span></label>
+                  <input
+                    type="datetime-local"
+                    value={manualStopEnd}
+                    onChange={e => setManualStopEnd(e.target.value)}
+                    className="w-full border border-input rounded-md px-2 py-1.5 text-xs bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[...stopReasonsList, "Other"].map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setManualStopReason(manualStopReason === r ? "" : r)}
+                      className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${manualStopReason === r ? "border-primary bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+                {manualStopReason && ![...stopReasonsList, "Other", ""].includes(manualStopReason) && (
+                  <input type="text" value={manualStopReason} onChange={e => setManualStopReason(e.target.value)} placeholder="Custom reason…" className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
+                )}
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes</label>
+                <input type="text" value={manualStopNotes} onChange={e => setManualStopNotes(e.target.value)} placeholder="Optional…" className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button type="button" onClick={() => setShowManualStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                <button
+                  type="button"
+                  disabled={!manualStopStart}
+                  onClick={() => {
+                    const startTs = new Date(manualStopStart).getTime();
+                    const endTs = manualStopEnd ? new Date(manualStopEnd).getTime() : undefined;
+                    if (isNaN(startTs)) return;
+                    addManualStop("manual", startTs, endTs, manualStopReason.trim(), manualStopNotes.trim());
+                    setShowManualStopDialog(false);
+                  }}
+                  className="flex-1 px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors disabled:opacity-40"
+                >
+                  Add Event
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Edit Reasons List Dialog (Supervisor) ─────────────────────────── */}
+        {showEditReasonsDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowEditReasonsDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-5" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center gap-2">
+                <ListChecks className="w-5 h-5 text-primary shrink-0" />
+                <h2 className="text-base font-bold">Quick Reason List</h2>
+                <button type="button" onClick={() => setShowEditReasonsDialog(false)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="space-y-2">
+                {stopReasonsList.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="flex-1 text-sm px-3 py-2 rounded-md bg-muted/30 border border-border/50">{r}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = stopReasonsList.filter((_, j) => j !== i);
+                        setStopReasonsList(updated);
+                        localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                      }}
+                      className="text-muted-foreground/40 hover:text-destructive transition-colors p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newReasonInput}
+                  onChange={e => setNewReasonInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && newReasonInput.trim()) {
+                      const updated = [...stopReasonsList, newReasonInput.trim()];
+                      setStopReasonsList(updated);
+                      localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                      setNewReasonInput("");
+                    }
+                  }}
+                  placeholder="Add new reason…"
+                  className="flex-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <button
+                  type="button"
+                  disabled={!newReasonInput.trim()}
+                  onClick={() => {
+                    const updated = [...stopReasonsList, newReasonInput.trim()];
+                    setStopReasonsList(updated);
+                    localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(updated));
+                    setNewReasonInput("");
+                  }}
+                  className="px-4 py-2 rounded-md bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-semibold transition-colors disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStopReasonsList(DEFAULT_STOP_REASONS);
+                  localStorage.setItem(STOP_REASONS_KEY, JSON.stringify(DEFAULT_STOP_REASONS));
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground text-center transition-colors"
+              >
+                Reset to defaults
+              </button>
             </div>
           </div>
         )}
