@@ -84,6 +84,8 @@ const formSchema = z.object({
   casesOnCurrentSkid: z.coerce.number().min(0).default(6),
   traysOnLine: z.coerce.number().min(0).default(43),
   batchesReady: z.coerce.number().min(0).default(0),
+  startingTrays: z.coerce.number().min(0).default(0),
+  startingBatches: z.coerce.number().min(0).default(0),
   // Frontline weights (oz per pizza application rate)
   sauceOzPerPizza: z.coerce.number().min(0).default(4),
   sauceBarrelLbs: z.coerce.number().min(0.1).default(450),
@@ -1453,6 +1455,8 @@ const DEFAULT_VALUES: FormValues = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
+  startingTrays: 0,
+  startingBatches: 0,
   // Sauce & applicators — zero
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
@@ -2576,7 +2580,7 @@ export default function Home() {
   }
 
   function applyTemplate(t: RunTemplate) {
-    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
     form.reset(clean);
     saveRunValues(currentRunId, clean);
     setShowTemplatesDialog(false);
@@ -2594,7 +2598,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     // Copy all form values except progress fields
-    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
     saveRunValues(newId, copied);
     form.reset(copied);
     schedulePush(newDs, 0);
@@ -3121,18 +3125,29 @@ export default function Home() {
   const elapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
-  // Expected cases based on elapsed time — used for auto-tracking
+  // Expected cases/trays/batches based on elapsed time — used for auto-tracking
   const autoTrackSuggestion = useMemo(() => {
     const ok = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
     if (!ok) return null;
     const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
-    const elapsedMinAfterTunnel = Math.max(0, (elapsedBatchSec / 60) - Number(v.freezerTime));
+    const elapsedMin = elapsedBatchSec / 60;
+    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
     const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    // Tray countdown: startingTrays - trays consumed so far
+    const trays = v.startingTrays > 0 && calc.perTray > 0
+      ? Math.max(0, v.startingTrays - Math.floor((elapsedMin * calc.ppm) / calc.perTray))
+      : null;
+    // Batch countdown: startingBatches - batches consumed so far
+    const batches = v.startingBatches > 0 && calc.perBatch > 0
+      ? Math.max(0, v.startingBatches - Math.floor((elapsedMin * calc.ppm) / calc.perBatch))
+      : null;
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
+      trays,
+      batches,
     };
-  }, [runStatus, calc.ppm, v.casesPerSkid, v.pizzasPerCase, v.casesNeeded, v.freezerTime, elapsedBatchSec]);
+  }, [runStatus, calc.ppm, calc.perTray, calc.perBatch, v.casesPerSkid, v.pizzasPerCase, v.casesNeeded, v.freezerTime, v.startingTrays, v.startingBatches, elapsedBatchSec]);
 
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
@@ -3152,6 +3167,8 @@ export default function Home() {
     lastAutoMinBucketRef.current = bucket;
     form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
     form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
+    if (autoTrackSuggestion.trays !== null) form.setValue("traysOnLine", autoTrackSuggestion.trays, { shouldDirty: true });
+    if (autoTrackSuggestion.batches !== null) form.setValue("batchesReady", autoTrackSuggestion.batches, { shouldDirty: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTime]);
 
@@ -5293,21 +5310,67 @@ export default function Home() {
                         );
                       })()}
                       {(() => {
+                        const s = autoTrackSuggestion;
+                        const suppressed = Date.now() < autoSuppressUntilRef.current;
+                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 15 * 60 * 1000; };
                         const suggestedTrays = calc.traysNeeded > 0
                           ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
                           : null;
                         const suggestedBatches = calc.batchesNeeded > 0
                           ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
                           : null;
+                        const trayAutoActive = autoTrackProgress && s?.trays !== null && !suppressed;
+                        const batchAutoActive = autoTrackProgress && s?.batches !== null && !suppressed;
                         return (
                           <>
+                            {autoTrackProgress && (runStatus === "running" || runStatus === "paused") && (
+                              <div className="grid grid-cols-2 gap-2 p-3 rounded-lg bg-muted/20 border border-border/40">
+                                <div className="space-y-1">
+                                  <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                                    {doughSubTab === "crusts" ? "Stacks at Start" : "Trays at Start"}
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={74}
+                                    value={v.startingTrays || ""}
+                                    placeholder="0"
+                                    onChange={e => form.setValue("startingTrays", Number(e.target.value) || 0, { shouldDirty: true })}
+                                    className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-primary/50"
+                                  />
+                                  {v.startingTrays > 0 && (
+                                    <p className="text-[10px] text-primary text-center">Auto counting down</p>
+                                  )}
+                                </div>
+                                {doughSubTab !== "crusts" && (
+                                  <div className="space-y-1">
+                                    <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Batches at Start</label>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={10}
+                                      value={v.startingBatches || ""}
+                                      placeholder="0"
+                                      onChange={e => form.setValue("startingBatches", Number(e.target.value) || 0, { shouldDirty: true })}
+                                      className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-primary/50"
+                                    />
+                                    {v.startingBatches > 0 && (
+                                      <p className="text-[10px] text-primary text-center">Auto counting down</p>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             <StepperField
                               control={form.control}
                               name="traysOnLine"
-                              label={doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line"}
+                              label={trayAutoActive
+                                ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
+                                : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
                               max={74}
-                              suggestion={suggestedTrays}
+                              suggestion={!trayAutoActive ? suggestedTrays : null}
                               onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
+                              onManualChange={onManual}
                             />
                             {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
                               <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
@@ -5318,10 +5381,11 @@ export default function Home() {
                               <StepperField
                                 control={form.control}
                                 name="batchesReady"
-                                label="Batches of Dough Ready"
+                                label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
                                 max={3}
-                                suggestion={suggestedBatches}
+                                suggestion={!batchAutoActive ? suggestedBatches : null}
                                 onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
+                                onManualChange={onManual}
                               />
                             )}
                             {v.batchesReady >= 3 && doughSubTab !== "crusts" && (
