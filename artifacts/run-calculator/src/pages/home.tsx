@@ -1872,7 +1872,12 @@ export default function Home() {
   const [showStopDialog, setShowStopDialog] = useState(false);
   const [stopReason, setStopReason] = useState("");
   const [stopNotes, setStopNotes] = useState("");
-  const [activeStopId, setActiveStopId] = useState<string | null>(null);
+  const [activeStopId, setActiveStopId] = useState<string | null>(() => {
+    // Restore from any open (no endedAt) stoppage on the current run at startup
+    const ds = loadDayState();
+    const run = ds.runs[ds.currentIndex] ?? ds.runs[0];
+    return run?.stoppages?.find(s => !s.endedAt)?.id ?? null;
+  });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
 
   // ── Screen casting mode ────────────────────────────────────────────────────
@@ -2230,6 +2235,10 @@ export default function Home() {
     saveDayState(newDs);
     form.reset(loadRunValues(newId));
     setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
+    // Restore open stoppage for the new run (or clear if none)
+    const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
+    setActiveStopId(openStop?.id ?? null);
+    setConfirmDeleteStopId(null);
   }
 
   function addRun() {
@@ -2394,7 +2403,12 @@ export default function Home() {
     saveDayState(newDs);
     if (nextIndex !== dayState.currentIndex) {
       form.reset(loadRunValues(dayState.runs[nextIndex].id));
+      const openStop = newRuns[nextIndex].stoppages?.find(s => !s.endedAt);
+      setActiveStopId(openStop?.id ?? null);
+    } else {
+      setActiveStopId(null);
     }
+    setConfirmDeleteStopId(null);
     schedulePush(newDs, 0);
   }
 
@@ -2597,10 +2611,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      if (tag !== "INPUT" && tag !== "TEXTAREA") setNowTime(new Date());
-    }, 1_000);
+    const id = setInterval(() => setNowTime(new Date()), 1_000);
     return () => clearInterval(id);
   }, []);
 
@@ -2959,6 +2970,7 @@ export default function Home() {
     } else if (Notification.permission === "default") {
       Notification.requestPermission();
     }
+    return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
   }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime]);
 
   // ── Run time complete alert ────────────────────────────────────────────────
@@ -3002,7 +3014,9 @@ export default function Home() {
   const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
-  const elapsedBatchSec = currentRun?.startedAt ? Math.max(0, (nowTime.getTime() - currentRun.startedAt - currentRunDowntimeMs)) / 1000 : 0;
+  const elapsedBatchSec = currentRun?.startedAt
+    ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
+    : 0;
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
     ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec)
