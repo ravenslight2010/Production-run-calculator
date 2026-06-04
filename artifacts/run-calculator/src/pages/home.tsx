@@ -1858,6 +1858,7 @@ export default function Home() {
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
+  const [showFloorMode, setShowFloorMode] = useState(false);
 
   // ── Carry-over dismiss tracking ────────────────────────────────────────────
   const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
@@ -3484,6 +3485,159 @@ export default function Home() {
         else { if (dayState.currentIndex > 0) switchToRun(dayState.currentIndex - 1); }
       }}
     >
+      {/* ── Floor Mode overlay ──────────────────────────────────────────── */}
+      {showFloorMode && (() => {
+        const totalSkids = v.casesNeeded > 0 && v.casesPerSkid > 0 ? Math.ceil(v.casesNeeded / v.casesPerSkid) : 0;
+        const floorStatus = runStatus === "ended" ? "paused" : runStatus === "pending" ? "paused" : runStatus;
+        const hasActiveStop = !!activeStopId;
+        const effectiveStatus: "running" | "paused" | "stopped" = hasActiveStop ? "stopped" : floorStatus === "paused" ? "paused" : "running";
+
+        const bg = { running: "#071a0f", paused: "#1a1100", stopped: "#1a0707" }[effectiveStatus];
+        const accentColor = { running: "#4ade80", paused: "#fbbf24", stopped: "#f87171" }[effectiveStatus];
+        const accentBar = { running: "#22c55e", paused: "#f59e0b", stopped: "#ef4444" }[effectiveStatus];
+        const badge = { running: "#14532d", paused: "#713f12", stopped: "#7f1d1d" }[effectiveStatus];
+        const badgeText = { running: "#bbf7d0", paused: "#fef3c7", stopped: "#fee2e2" }[effectiveStatus];
+        const statusLabel = hasActiveStop ? "STOPPAGE" : runStatus === "paused" ? "PAUSED" : runStatus === "running" ? "RUNNING" : runStatus === "ended" ? "ENDED" : "NOT STARTED";
+
+        const pct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
+        const mm = Math.floor(secUntilNextBatch / 60);
+        const ss = Math.floor(secUntilNextBatch % 60);
+        const batchStr = calc.timePerBatchSec > 0 && (runStatus === "running" || runStatus === "paused")
+          ? `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+          : "—";
+        const downtimeStr = currentRunDowntimeMs > 0 ? fmtTime(currentRunDowntimeMs / 1000) : "0m";
+        const estFinish = calc.adjustedTimeSec > 0 && (runStatus === "running" || runStatus === "paused")
+          ? fmtClock(Date.now() + calc.adjustedTimeSec * 1000)
+          : "—";
+
+        return (
+          <div className="fixed inset-0 z-[40] flex flex-col font-sans select-none" style={{ background: bg, color: "white" }}>
+            {/* Header */}
+            <header className="flex justify-between items-center px-5 pt-5 pb-2 shrink-0">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-lg font-bold" style={{ color: "rgba(255,255,255,0.75)" }}>
+                  {currentRun ? runLabel(currentRun) : "No Active Run"}
+                </span>
+                <span className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest" style={{ background: badge, color: badgeText }}>
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: accentColor }} />
+                  {statusLabel}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFloorMode(false)}
+                className="p-2.5 rounded-full transition-colors"
+                style={{ background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.5)" }}
+                title="Exit floor mode"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </header>
+
+            {/* Big three numbers */}
+            <main className="flex-1 flex flex-col items-center justify-center gap-9 py-2">
+              <div className="flex flex-col items-center">
+                <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
+                <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
+              </div>
+              <div className="flex flex-col items-center">
+                <div className="text-[76px] leading-none font-black tracking-tight tabular-nums" style={{ color: "rgba(255,255,255,0.85)" }}>
+                  {v.skidsCompleted}{totalSkids > 0 ? ` / ${totalSkids}` : ""}
+                </div>
+                <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>SKIDS</div>
+              </div>
+              <div className="flex flex-col items-center">
+                <div
+                  className="text-[96px] leading-none font-black tracking-tight tabular-nums"
+                  style={{ color: accentColor, ...(mm === 0 && ss < 120 && runStatus === "running" ? { animation: "pulse 1s ease-in-out infinite" } : {}) }}
+                >
+                  {batchStr}
+                </div>
+                <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>NEXT BATCH</div>
+              </div>
+            </main>
+
+            {/* Bottom */}
+            <div className="px-4 pb-6 space-y-4 shrink-0">
+              {/* Progress */}
+              <div className="px-1 space-y-1.5">
+                <div className="flex justify-between text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  <span>RUN PROGRESS</span>
+                  <span>{Math.round(pct * 100)}%</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct * 100}%`, background: accentBar }} />
+                </div>
+              </div>
+
+              {/* Status strip */}
+              <div className="text-center font-mono text-xs" style={{ color: "rgba(255,255,255,0.28)" }}>
+                {estFinish !== "—" && <>Est. finish: {estFinish}<span style={{ color: "rgba(255,255,255,0.12)", margin: "0 8px" }}>·</span></>}
+                {cph > 0 && <>CPH: {fmtComma(cph)}<span style={{ color: "rgba(255,255,255,0.12)", margin: "0 8px" }}>·</span></>}
+                Downtime: {downtimeStr}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-3">
+                {hasActiveStop ? (
+                  <button
+                    type="button"
+                    onClick={endStop}
+                    className="flex-1 h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 animate-pulse transition-colors"
+                    style={{ background: "rgba(234,88,12,0.5)", color: "#fed7aa", border: "1px solid rgba(234,88,12,0.4)" }}
+                  >
+                    <CircleDot className="w-5 h-5" /> End Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(127,29,29,0.45)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.2)" }}
+                  >
+                    🛑 Log Stop
+                  </button>
+                )}
+                {runStatus === "running" && (
+                  <button
+                    type="button"
+                    onClick={pauseRun}
+                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(255,255,255,0.06)", color: "#fbbf24", border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    ⏸ Pause
+                  </button>
+                )}
+                {runStatus === "paused" && (
+                  <button
+                    type="button"
+                    onClick={() => setResumeDialog(true)}
+                    className="flex-1 h-[68px] rounded-2xl font-medium text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: "rgba(22,101,52,0.5)", color: "#86efac", border: "1px solid rgba(74,222,128,0.2)" }}
+                  >
+                    ▶ Resume
+                  </button>
+                )}
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.vibrate?.(15);
+                      form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
+                      form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                    }}
+                    className="flex-[1.3] h-[68px] rounded-2xl font-bold text-base flex items-center justify-center gap-2 transition-colors"
+                    style={{ background: accentBar, color: bg }}
+                  >
+                    ✅ Skid Done
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Glance overlay ──────────────────────────────────────────────── */}
       {showGlance && (() => {
         const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
@@ -4461,6 +4615,15 @@ export default function Home() {
               className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
             >
               <Monitor className="w-4 h-4" />
+            </button>
+            {/* Floor mode toggle */}
+            <button
+              type="button"
+              onClick={() => setShowFloorMode(true)}
+              title="Floor mode — big numbers, status color"
+              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <Layers className="w-4 h-4" />
             </button>
             {/* Fullscreen / kiosk toggle */}
             <button
