@@ -4,5 +4,6 @@ export const modules: ModuleMap = {
   "./components/mockups/ui-directions/ColorStatus.tsx": () => import("../components/mockups/ui-directions/ColorStatus.tsx"),
   "./components/mockups/ui-directions/Compact.tsx": () => import("../components/mockups/ui-directions/Compact.tsx"),
   "./components/mockups/ui-directions/Hybrid.tsx": () => import("../components/mockups/ui-directions/Hybrid.tsx"),
-  "./components/mockups/ui-directions/Simplified.tsx": () => import("../components/mockups/ui-directions/Simplified.tsx")
+  "./components/mockups/ui-directions/Simplified.tsx": () => import("../components/mockups/ui-directions/Simplified.tsx"),
+  "./components/mockups/ui-directions/SimplifiedColor.tsx": () => import("../components/mockups/ui-directions/SimplifiedColor.tsx")
 };
