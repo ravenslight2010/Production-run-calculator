@@ -1589,9 +1589,9 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
 
-  // ── Historical CPH benchmark (average of finished runs across all days) ───
-  const histBenchmarkCph = useMemo(() => {
-    const cphs: number[] = [];
+  // ── Historical PPM benchmark (average of finished runs across all days) ───
+  const histBenchmarkPpm = useMemo(() => {
+    const ppms: number[] = [];
     for (const day of history) {
       for (const run of day.runs) {
         if (!run.startedAt || !run.endedAt) continue;
@@ -1601,11 +1601,12 @@ export default function Home() {
         if (netSec < 60) continue;
         const vals = day.runValues[run.id] as FormValues | undefined;
         const cases = run.actualCases ?? (vals ? computeSummaryStats(vals).totalCases : 0);
-        if (cases > 0) cphs.push(Math.round(cases / (netSec / 3600)));
+        const ppc = vals?.pizzasPerCase ?? 0;
+        if (cases > 0 && ppc > 0) ppms.push(Math.round((cases * ppc) / (netSec / 60)));
       }
     }
-    if (cphs.length === 0) return null;
-    return Math.round(cphs.reduce((a, b) => a + b, 0) / cphs.length);
+    if (ppms.length === 0) return null;
+    return Math.round(ppms.reduce((a, b) => a + b, 0) / ppms.length);
   }, [history]);
 
   const [brands, setBrands] = useState<string[]>(() =>
@@ -2542,7 +2543,7 @@ export default function Home() {
     const grossDurSec = run.startedAt && run.endedAt ? (run.endedAt - run.startedAt) / 1000 : 0;
     const downtimeSec = (run.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt) / 1000, 0);
     const netDurSec = Math.max(0, grossDurSec - downtimeSec);
-    const netCph = netDurSec > 0 && s.totalCases > 0 ? Math.round((run.actualCases ?? s.totalCases) / (netDurSec / 3600)) : 0;
+    const netPpm = netDurSec > 0 && s.totalCases > 0 && vals.pizzasPerCase > 0 ? Math.round(((run.actualCases ?? s.totalCases) * vals.pizzasPerCase) / (netDurSec / 60)) : 0;
     const stopReasons = (run.stoppages ?? []).map(s => `${s.reason}(${s.endedAt ? fmtTime((s.endedAt - s.startedAt) / 1000) : "open"})`).join("; ");
     return [
       date, run.brand, run.flavor, status,
@@ -2552,14 +2553,14 @@ export default function Home() {
       run.endedAt ? fmtClock(run.endedAt) : "",
       grossDurSec > 0 ? fmtTime(grossDurSec) : "",
       downtimeSec > 0 ? fmtTime(downtimeSec) : "0",
-      netCph > 0 ? String(netCph) : "",
+      netPpm > 0 ? String(netPpm) : "",
       (run.notes ?? "").replace(/"/g, '""'),
       stopReasons,
     ];
   }
 
   function exportCSV() {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual CPH", "Notes", "Stoppages"];
+    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
     const rows: string[][] = [header];
     for (const run of dayState.runs) {
       const vals = run.id === currentRunId ? v : loadRunValues(run.id);
@@ -2574,7 +2575,7 @@ export default function Home() {
   }
 
   function exportHistoryCSV(day: HistoryDay) {
-    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual CPH", "Notes", "Stoppages"];
+    const header = ["Date", "Brand", "Flavor", "Status", "Cases Planned", "Cases Actual", "Waste Lbs", "Started", "Ended", "Duration", "Downtime", "Actual PPM", "Notes", "Stoppages"];
     const rows: string[][] = [header];
     for (const run of day.runs) {
       const vals = day.runValues[run.id] ?? DEFAULT_VALUES;
@@ -2847,8 +2848,8 @@ export default function Home() {
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
     }
 
-    // ── Catch-up CPH: if behind, what CPH is needed to finish on time? ──────
-    let catchUpCph: number | null = null;
+    // ── Catch-up PPM: if behind, what PPM is needed to finish on time? ──────
+    let catchUpPpm: number | null = null;
     if (
       paceStatus === "behind" &&
       currentRun?.startedAt &&
@@ -2861,11 +2862,10 @@ export default function Home() {
       const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
       const elapsedSec = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 1000;
       const remainingCases = v.casesNeeded - casesCompleted;
-      // Time already spent on run (sec), remaining cases must be done in the remaining estimated time
       const originalTotalSec = ppm > 0 ? (v.casesNeeded * v.pizzasPerCase * 60) / ppm : 0;
       const remainingSec = Math.max(60, originalTotalSec - elapsedSec);
       if (remainingSec > 0 && remainingCases > 0) {
-        catchUpCph = Math.round((remainingCases / remainingSec) * 3600);
+        catchUpPpm = Math.round((remainingCases * v.pizzasPerCase * 60) / remainingSec);
       }
     }
 
@@ -2910,7 +2910,7 @@ export default function Home() {
       casesCompleted,
       paceStatus,
       paceDelta,
-      catchUpCph,
+      catchUpPpm,
       perTray,
       perBatch: effectiveDoughBatchYield,
       sauceEffBarrel,
@@ -3031,7 +3031,6 @@ export default function Home() {
   }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
 
   // ── Screen casting views (early returns) ──────────────────────────────────
-  const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
   const elapsedBatchSec = currentRun?.startedAt
@@ -3072,10 +3071,10 @@ export default function Home() {
 
         {/* Main stats row */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 flex-1">
-          {/* CPH */}
+          {/* PPM */}
           <div className="rounded-2xl bg-card border border-border p-8 flex flex-col justify-center">
-            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Cases / Hour</p>
-            <p className="text-8xl font-black tabular-nums text-primary">{cph > 0 ? fmtComma(cph) : "—"}</p>
+            <p className="text-sm font-semibold uppercase tracking-widest text-muted-foreground mb-2">Pizzas / Min</p>
+            <p className="text-8xl font-black tabular-nums text-primary">{calc.ppm > 0 ? fmtComma(calc.ppm) : "—"}</p>
           </div>
 
           {/* Cases progress */}
@@ -3300,7 +3299,7 @@ export default function Home() {
           <div className="flex items-center gap-8 px-6 py-4 rounded-2xl bg-muted/20 border border-border/50 text-muted-foreground">
             <div><p className="text-xs uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
             <div><p className="text-xs uppercase tracking-wider">Time Left</p><p className="text-3xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p></div>
-            {cph > 0 && <div><p className="text-xs uppercase tracking-wider">CPH</p><p className="text-3xl font-black tabular-nums">{fmtComma(cph)}</p></div>}
+            {calc.ppm > 0 && <div><p className="text-xs uppercase tracking-wider">PPM</p><p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p></div>}
           </div>
         )}
       </div>
@@ -3463,10 +3462,10 @@ export default function Home() {
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Cases</p>
                     <p className="text-3xl font-black tabular-nums">{fmtComma(isDone && run.actualCases != null ? run.actualCases : isCurr ? calc.casesCompleted : 0)}<span className="text-lg text-muted-foreground"> / {fmtComma(s.totalCases)}</span></p>
                   </div>
-                  {isCurr && cph > 0 && (
+                  {isCurr && calc.ppm > 0 && (
                     <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wider">CPH</p>
-                      <p className="text-3xl font-black tabular-nums">{fmtComma(cph)}</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">PPM</p>
+                      <p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p>
                     </div>
                   )}
                 </div>
@@ -3592,7 +3591,7 @@ export default function Home() {
               {/* Status strip */}
               <div className="text-center font-mono text-xs" style={{ color: "rgba(255,255,255,0.28)" }}>
                 {estFinish !== "—" && <>Est. finish: {estFinish}<span style={{ color: "rgba(255,255,255,0.12)", margin: "0 8px" }}>·</span></>}
-                {cph > 0 && <>CPH: {fmtComma(cph)}<span style={{ color: "rgba(255,255,255,0.12)", margin: "0 8px" }}>·</span></>}
+                {calc.ppm > 0 && <>PPM: {fmtComma(calc.ppm)}<span style={{ color: "rgba(255,255,255,0.12)", margin: "0 8px" }}>·</span></>}
                 Downtime: {downtimeStr}
               </div>
 
@@ -3659,7 +3658,6 @@ export default function Home() {
 
       {/* ── Glance overlay ──────────────────────────────────────────────── */}
       {showGlance && (() => {
-        const cph = calc.ppm > 0 && v.pizzasPerCase > 0 ? Math.round(calc.ppm * 60 / v.pizzasPerCase) : 0;
         const pct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
         return (
           <div
@@ -3697,14 +3695,14 @@ export default function Home() {
                   <p className="text-5xl font-black tabular-nums">{fmtTime(calc.adjustedTimeSec)}</p>
                 </div>
               )}
-              {/* Pace + CPH */}
+              {/* Pace + PPM */}
               <div className="flex items-center justify-center gap-4">
                 {calc.paceStatus !== null && (
                   <span className={`text-base font-bold ${calc.paceStatus === "behind" ? "text-amber-400" : "text-emerald-400"}`}>
                     {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
                   </span>
                 )}
-                {cph > 0 && <span className="text-base font-bold text-muted-foreground">{cph} CPH</span>}
+                {calc.ppm > 0 && <span className="text-base font-bold text-muted-foreground">{calc.ppm} PPM</span>}
               </div>
             </div>
             <p className="absolute bottom-6 text-xs text-muted-foreground/50">Tap anywhere to dismiss</p>
@@ -3722,7 +3720,7 @@ export default function Home() {
             key: "dashboard",
             icon: <BarChart2 className="w-5 h-5 text-primary" />,
             title: "Dashboard",
-            desc: "Wall TV / floor display — large CPH, pace, cases progress",
+            desc: "Wall TV / floor display — large PPM, pace, cases progress",
             url: `${base}?screen=dashboard`,
           },
           {
@@ -4429,7 +4427,7 @@ export default function Home() {
               );
             })()}
 
-            {/* Pace gauge + CPH */}
+            {/* Pace gauge + PPM */}
             {calc.paceStatus !== null && (
               <div className={`flex flex-wrap items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
                 calc.paceStatus === "on-pace" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
@@ -4437,14 +4435,14 @@ export default function Home() {
                 : "bg-red-950/40 border border-red-700/30 text-red-400"
               }`}>
                 <span>{calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}</span>
-                {calc.ppm > 0 && v.pizzasPerCase > 0 && (
+                {calc.ppm > 0 && (
                   <span className="opacity-60 border-l border-current/30 pl-2 ml-0.5">
-                    {Math.round(calc.ppm * 60 / v.pizzasPerCase)} CPH
+                    {calc.ppm} PPM
                   </span>
                 )}
-                {calc.catchUpCph !== null && (
+                {calc.catchUpPpm !== null && (
                   <span className="border-l border-current/30 pl-2 ml-0.5 text-red-300 font-bold">
-                    Need {calc.catchUpCph} CPH to finish on time
+                    Need {calc.catchUpPpm} PPM to finish on time
                   </span>
                 )}
               </div>
@@ -6379,7 +6377,7 @@ export default function Home() {
                 {/* ── Today's Shift Totals + Benchmark ── */}
                 {(() => {
                   const todayFinished = dayState.runs.filter(r => r.startedAt && r.endedAt);
-                  if (todayFinished.length === 0 && histBenchmarkCph === null) return null;
+                  if (todayFinished.length === 0 && histBenchmarkPpm === null) return null;
                   const todayTotalCases = todayFinished.reduce((acc, r) => {
                     const vals = loadRunValues(r.id);
                     return acc + (r.actualCases ?? computeSummaryStats(vals).totalCases);
@@ -6392,8 +6390,13 @@ export default function Home() {
                   const todayDowntimeSec = todayFinished.reduce((acc, r) => {
                     return acc + (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                   }, 0);
-                  const todayCph = todayNetSec > 0 && todayTotalCases > 0 ? Math.round(todayTotalCases / (todayNetSec / 3600)) : null;
-                  const benchDiff = todayCph !== null && histBenchmarkCph !== null ? todayCph - histBenchmarkCph : null;
+                  const todayTotalPizzas = todayFinished.reduce((acc, r) => {
+                    const vals = loadRunValues(r.id);
+                    const cases = r.actualCases ?? computeSummaryStats(vals).totalCases;
+                    return acc + cases * (vals.pizzasPerCase ?? 0);
+                  }, 0);
+                  const todayPpm = todayNetSec > 0 && todayTotalPizzas > 0 ? Math.round(todayTotalPizzas / (todayNetSec / 60)) : null;
+                  const benchDiff = todayPpm !== null && histBenchmarkPpm !== null ? todayPpm - histBenchmarkPpm : null;
                   return (
                     <div className="mb-5 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
                       <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
@@ -6415,13 +6418,13 @@ export default function Home() {
                           <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
                         </div>
                         <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's CPH</div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's PPM</div>
                           <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {todayCph !== null ? todayCph : "—"}
+                            {todayPpm !== null ? todayPpm : "—"}
                           </div>
-                          {histBenchmarkCph !== null && (
+                          {histBenchmarkPpm !== null && (
                             <div className="text-[10px] text-muted-foreground mt-0.5">
-                              avg {histBenchmarkCph} CPH
+                              avg {histBenchmarkPpm} PPM
                               {benchDiff !== null && (
                                 <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                                   {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
@@ -6431,9 +6434,9 @@ export default function Home() {
                           )}
                         </div>
                       </div>
-                      {histBenchmarkCph !== null && todayCph === null && (
+                      {histBenchmarkPpm !== null && todayPpm === null && (
                         <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
-                          Historical average: <span className="font-bold text-foreground">{histBenchmarkCph} CPH</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
+                          Historical average: <span className="font-bold text-foreground">{histBenchmarkPpm} PPM</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
                         </div>
                       )}
                     </div>
@@ -6934,7 +6937,12 @@ export default function Home() {
                               const dt = (r.stoppages ?? []).filter(s => s.endedAt).reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                               return acc + Math.max(0, gross - dt);
                             }, 0);
-                            const histCph = totalHistNetSec > 0 && totalHistCases > 0 ? Math.round(totalHistCases / (totalHistNetSec / 3600)) : 0;
+                            const totalHistPizzas = finishedRuns.reduce((acc, r) => {
+                              const vals = day.runValues[r.id] ?? DEFAULT_VALUES;
+                              const cases = r.actualCases ?? computeSummaryStats(vals as FormValues).totalCases;
+                              return acc + cases * ((vals as FormValues).pizzasPerCase ?? 0);
+                            }, 0);
+                            const histPpm = totalHistNetSec > 0 && totalHistPizzas > 0 ? Math.round(totalHistPizzas / (totalHistNetSec / 60)) : 0;
                             return (
                             <div key={day.date} className="rounded-lg border border-border/30 bg-card/30 overflow-hidden">
                               <button
@@ -6946,7 +6954,7 @@ export default function Home() {
                                   <span className="font-semibold">{day.date}</span>
                                   <span className="text-xs text-muted-foreground">{day.runs.length} run{day.runs.length !== 1 ? "s" : ""} · {finishedRuns.length} finished</span>
                                   {totalHistCases > 0 && <span className="text-xs font-semibold text-foreground/70">{fmtComma(totalHistCases)} cases</span>}
-                                  {histCph > 0 && <span className="text-xs font-semibold text-primary/70">{histCph} CPH</span>}
+                                  {histPpm > 0 && <span className="text-xs font-semibold text-primary/70">{histPpm} PPM</span>}
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <button
