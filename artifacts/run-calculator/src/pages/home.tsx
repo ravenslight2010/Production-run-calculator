@@ -2834,13 +2834,15 @@ export default function Home() {
     // Adjusted remaining time: based on cases still left rather than full run
     const adjustedTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : totalTimeSec;
     // Pace: expected cases completed by now vs actual
+    // Subtract freeze tunnel time — cases aren't done until they exit the tunnel
     let paceStatus: "on-pace" | "ahead" | "behind" | null = null;
     let paceDelta = 0; // positive = ahead, negative = behind (in cases)
     if (currentRun?.startedAt && !currentRun?.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
       const refTime = currentRun.pausedAt ?? Date.now();
       const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt).reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
       const elapsedMin = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 60000;
-      const expectedCases = Math.floor((ppm * elapsedMin) / v.pizzasPerCase);
+      const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
+      const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
       paceDelta = casesCompleted - expectedCases;
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
     }
@@ -5032,7 +5034,9 @@ export default function Home() {
                         const maxSkids = v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined;
                         const maxCasesOnSkid = v.casesPerSkid > 0 ? v.casesPerSkid : undefined;
                         const canSuggest = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
-                        const expectedCasesFromElapsed = canSuggest ? Math.floor((elapsedBatchSec / 60) * calc.ppm / v.pizzasPerCase) : null;
+                        // Subtract freeze tunnel time — cases counted after exiting the tunnel
+                        const elapsedMinAfterTunnel = Math.max(0, (elapsedBatchSec / 60) - Number(v.freezerTime));
+                        const expectedCasesFromElapsed = canSuggest ? Math.floor(elapsedMinAfterTunnel * calc.ppm / v.pizzasPerCase) : null;
                         const suggestedSkids = expectedCasesFromElapsed !== null
                           ? Math.min(maxSkids ?? 9999, Math.floor(expectedCasesFromElapsed / v.casesPerSkid))
                           : null;
