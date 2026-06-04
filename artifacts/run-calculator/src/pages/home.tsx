@@ -1147,6 +1147,7 @@ function StepperField({
   disabled,
   suggestion,
   onSuggest,
+  onManualChange,
 }: {
   control: any;
   name: keyof FormValues;
@@ -1157,6 +1158,7 @@ function StepperField({
   disabled?: boolean;
   suggestion?: number | null;
   onSuggest?: () => void;
+  onManualChange?: () => void;
 }) {
   const repeatRef = useRef<{ t?: ReturnType<typeof setTimeout>; i?: ReturnType<typeof setInterval> }>({});
   const fieldRef = useRef<any>(null);
@@ -1177,12 +1179,14 @@ function StepperField({
         const decrement = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           navigator.vibrate?.(8);
+          onManualChange?.();
           fieldRef.current?.onChange(Math.max(min, cur - step));
         };
         const increment = () => {
           const cur = Number(fieldRef.current?.value) || 0;
           if (max !== undefined && cur >= max) return;
           navigator.vibrate?.(8);
+          onManualChange?.();
           fieldRef.current?.onChange(max !== undefined ? Math.min(max, cur + step) : cur + step);
         };
         return (
@@ -1884,6 +1888,11 @@ export default function Home() {
     return run?.stoppages?.find(s => !s.endedAt)?.id ?? null;
   });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
+  // ── Auto-track progress ───────────────────────────────────────────────────
+  const [autoTrackProgress, setAutoTrackProgress] = useState(true);
+  const autoSuppressUntilRef = useRef<number>(0);
+  const lastAutoMinBucketRef = useRef<number>(-1);
+
   const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(STOP_REASONS_KEY) ?? "null") ?? DEFAULT_STOP_REASONS; }
     catch { return DEFAULT_STOP_REASONS; }
@@ -3112,6 +3121,19 @@ export default function Home() {
   const elapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
+  // Expected cases based on elapsed time — used for auto-tracking
+  const autoTrackSuggestion = useMemo(() => {
+    const ok = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
+    if (!ok) return null;
+    const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
+    const elapsedMinAfterTunnel = Math.max(0, (elapsedBatchSec / 60) - Number(v.freezerTime));
+    const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    return {
+      skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
+      casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
+    };
+  }, [runStatus, calc.ppm, v.casesPerSkid, v.pizzasPerCase, v.casesNeeded, v.freezerTime, elapsedBatchSec]);
+
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
     ? calc.timePerBatchSec - (elapsedBatchSec % calc.timePerBatchSec)
@@ -3119,6 +3141,19 @@ export default function Home() {
   const totalBatchesNeeded = calc.timePerBatchSec > 0 && calc.totalTimeSec > 0
     ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
     : 0;
+
+  // ── Auto-track: apply expected skids/cases every 5 min while running ────────
+  useEffect(() => {
+    if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
+    if (Date.now() < autoSuppressUntilRef.current) return;
+    // Fire once per 5-minute bucket
+    const bucket = Math.floor(nowTime.getTime() / (5 * 60 * 1000));
+    if (bucket === lastAutoMinBucketRef.current) return;
+    lastAutoMinBucketRef.current = bucket;
+    form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
+    form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nowTime]);
 
   if (screenMode === "dashboard") {
     const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
@@ -5099,55 +5134,75 @@ export default function Home() {
 
                   <Card className="bg-card/50 border-border/50 shadow-md">
                     <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Current Progress
-                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                          Current Progress
+                        </CardTitle>
+                        {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !autoTrackProgress;
+                              setAutoTrackProgress(next);
+                              if (next) {
+                                autoSuppressUntilRef.current = 0;
+                                lastAutoMinBucketRef.current = -1;
+                              }
+                            }}
+                            className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${autoTrackProgress ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground"}`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {autoTrackProgress ? "Auto" : "Manual"}
+                          </button>
+                        )}
+                      </div>
                     </CardHeader>
                     <CardContent className="px-5 pb-5 space-y-3">
                       {(() => {
                         const maxSkids = v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined;
                         const maxCasesOnSkid = v.casesPerSkid > 0 ? v.casesPerSkid : undefined;
-                        const canSuggest = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
-                        // Subtract freeze tunnel time — cases counted after exiting the tunnel
-                        const elapsedMinAfterTunnel = Math.max(0, (elapsedBatchSec / 60) - Number(v.freezerTime));
-                        const expectedCasesFromElapsed = canSuggest ? Math.floor(elapsedMinAfterTunnel * calc.ppm / v.pizzasPerCase) : null;
-                        const suggestedSkids = expectedCasesFromElapsed !== null
-                          ? Math.min(maxSkids ?? 9999, Math.floor(expectedCasesFromElapsed / v.casesPerSkid))
-                          : null;
-                        const suggestedCasesOnSkid = expectedCasesFromElapsed !== null
-                          ? Math.min(v.casesPerSkid, expectedCasesFromElapsed % v.casesPerSkid)
-                          : null;
+                        const s = autoTrackSuggestion;
+                        const suppressed = Date.now() < autoSuppressUntilRef.current;
+                        const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
+                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 15 * 60 * 1000; };
                         return (
                           <>
+                            {autoTrackProgress && s && suppressed && (
+                              <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px]">
+                                <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
+                                <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; lastAutoMinBucketRef.current = -1; }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
+                              </div>
+                            )}
                             <StepperField
                               control={form.control}
                               name="skidsCompleted"
-                              label="Total Skids Completed"
+                              label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
                               max={maxSkids}
-                              suggestion={suggestedSkids !== null && suggestedSkids !== v.skidsCompleted ? suggestedSkids : null}
-                              onSuggest={() => form.setValue("skidsCompleted", suggestedSkids!, { shouldDirty: true })}
+                              suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
+                              onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                              onManualChange={onManual}
                             />
                             <StepperField
                               control={form.control}
                               name="casesOnCurrentSkid"
-                              label="Cases on Current Skid"
+                              label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
                               max={maxCasesOnSkid}
-                              suggestion={suggestedCasesOnSkid !== null && suggestedCasesOnSkid !== v.casesOnCurrentSkid ? suggestedCasesOnSkid : null}
-                              onSuggest={() => form.setValue("casesOnCurrentSkid", suggestedCasesOnSkid!, { shouldDirty: true })}
+                              suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
+                              onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                              onManualChange={onManual}
                             />
-                            {canSuggest && suggestedSkids !== null && suggestedCasesOnSkid !== null &&
-                              (suggestedSkids !== v.skidsCompleted || suggestedCasesOnSkid !== v.casesOnCurrentSkid) && (
+                            {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
                               <button
                                 type="button"
                                 onClick={() => {
                                   navigator.vibrate?.(10);
-                                  form.setValue("skidsCompleted", suggestedSkids!, { shouldDirty: true });
-                                  form.setValue("casesOnCurrentSkid", suggestedCasesOnSkid!, { shouldDirty: true });
+                                  form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
+                                  form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
                                 }}
                                 className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
                               >
                                 <Sparkles className="w-3.5 h-3.5" />
-                                Apply expected values — {suggestedSkids} skids · {suggestedCasesOnSkid} cases
+                                Apply expected — {s.skids} skids · {s.casesOnSkid} cases
                               </button>
                             )}
                           </>
