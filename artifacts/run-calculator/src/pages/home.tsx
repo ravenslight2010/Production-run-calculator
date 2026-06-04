@@ -454,7 +454,7 @@ function CheeseRecipeCard({
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
-            <span className="font-mono text-foreground">{fmtNum(batches, 2)}</span> batches
+            <span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches
           </span>
         </div>
       </CardHeader>
@@ -492,7 +492,7 @@ function CheeseRecipeCard({
                       className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                     />
                     <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
-                      {fmtNum(rowLbs * batches, 1)}
+                      {fmtNum(rowLbs * Math.max(1, batches), 1)}
                     </div>
                     {confirmIdx === idx ? (
                       <div className="flex items-center gap-1">
@@ -518,7 +518,7 @@ function CheeseRecipeCard({
                 {fmtNum(totalLbsPerBatch, 1)} lbs/batch
               </span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalLbsPerBatch * batches, 1)} lbs
+                {fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs
               </span>
               <span />
             </div>
@@ -725,7 +725,7 @@ function DoughRecipeCard({
             />
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
-            <span className="font-mono text-foreground">{fmtNum(batchesNeeded, 2)}</span> batches needed
+            <span className="font-mono text-foreground">{batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"}</span> batches needed
           </span>
         </div>
       </CardHeader>
@@ -879,9 +879,21 @@ function FrontlineRecipeCard({
     <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
       <div className="h-1 bg-red-500/70 w-full" />
       <CardHeader className="pb-2 pt-4 px-5">
-        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Sauce Recipe
-        </CardTitle>
+        <div className="flex items-center gap-3 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">
+            Sauce Recipe
+          </CardTitle>
+          <div className="flex-1 max-w-xs">
+            <IngredientSelect
+              value={recipeName}
+              onChange={onRecipeNameChange}
+              options={recipeNameOptions}
+              onAddOption={onAddRecipeName}
+              onRemoveOption={onRemoveRecipeName}
+              placeholder="Recipe name…"
+            />
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
         {fields.length === 0 ? (
@@ -2422,15 +2434,16 @@ export default function Home() {
   // ── Templates ─────────────────────────────────────────────────────────────
   function saveAsTemplate(name: string) {
     const cur = form.getValues();
+    const trimmedName = name.trim();
     const template: RunTemplate = {
       id: genId(),
-      name: name.trim(),
+      name: trimmedName,
       values: cur,
       brand: currentRun?.brand,
       flavor: currentRun?.flavor,
       createdAt: todayStr(),
     };
-    const updated = [template, ...templates].slice(0, MAX_TEMPLATES);
+    const updated = [template, ...templates.filter(t => t.name !== trimmedName)].slice(0, MAX_TEMPLATES);
     setTemplates(updated);
     saveTemplates(updated);
     schedulePush(dayStateRef.current);
