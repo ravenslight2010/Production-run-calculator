@@ -2569,6 +2569,42 @@ export default function Home() {
     return () => clearTimeout(timeout);
   }, []);
 
+  // Clear hidden fields the moment their recipe-driven hide condition becomes true
+  useEffect(() => {
+    const lbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    if (lbs > 0 && Number(v.targetDoughballWeight) > 0 && v.doughBatchYield !== 0) {
+      form.setValue("doughBatchYield", 0, { shouldDirty: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v.doughRecipe, v.targetDoughballWeight]);
+
+  useEffect(() => {
+    const lbs = (v.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    if (lbs > 0 && v.sauceBarrelLbs !== 0) {
+      form.setValue("sauceBarrelLbs", 0, { shouldDirty: true });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v.frontlineRecipe]);
+
+  useEffect(() => {
+    const check = (
+      recipe: { lbs: number }[] | undefined,
+      type: string,
+      field: "app1BatchLbs" | "app2BatchLbs" | "app3BatchLbs" | "app4BatchLbs",
+      current: number,
+    ) => {
+      const isMix = type.trim().toLowerCase().includes("mix");
+      const hasLbs = !isMix && (recipe ?? []).some(r => Number(r.lbs) > 0);
+      if (hasLbs && current !== 0) form.setValue(field, 0, { shouldDirty: true });
+    };
+    check(v.app1CheeseRecipe, v.app1Type, "app1BatchLbs", v.app1BatchLbs);
+    check(v.app2CheeseRecipe, v.app2Type, "app2BatchLbs", v.app2BatchLbs);
+    check(v.app3CheeseRecipe, v.app3Type, "app3BatchLbs", v.app3BatchLbs);
+    check(v.app4CheeseRecipe, v.app4Type, "app4BatchLbs", v.app4BatchLbs);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe,
+      v.app1Type, v.app2Type, v.app3Type, v.app4Type]);
+
   const calc = useMemo(() => {
     const ppm =
       doughSubTab === "crusts"
