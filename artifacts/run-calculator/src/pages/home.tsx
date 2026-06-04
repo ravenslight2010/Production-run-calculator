@@ -174,9 +174,11 @@ function fmtClock(ts: number): string {
 function computeSummaryStats(vals: FormValues) {
   const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
   const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
+  const frontlineRecipeLbs = (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : vals.sauceBarrelLbs;
   const sauceBatches =
-    vals.sauceBarrelLbs > 0
-      ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (vals.sauceBarrelLbs * 16)
+    sauceEffBarrel > 0
+      ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (sauceEffBarrel * 16)
       : 0;
   const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
@@ -2660,9 +2662,11 @@ export default function Home() {
     // Spreadsheet adds casesPerLayer as a pizza buffer to sauce total only
     const totalPizzasRun = casesLeftToRun * v.pizzasPerCase;
     const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer * v.pizzasPerCase;
+    const frontlineRecipeLbs = (v.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : v.sauceBarrelLbs;
     const sauceBatches =
-      v.sauceBarrelLbs > 0
-        ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
+      sauceEffBarrel > 0
+        ? (totalPizzasForSauce * v.sauceOzPerPizza) / (sauceEffBarrel * 16)
         : 0;
     const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
@@ -5534,20 +5538,25 @@ export default function Home() {
                         onRemoveOption={removeFrontlineRecipeName}
                         allowClear
                       />
-                      {v.frontlineRecipeName.trim() && (
-                        <div className="grid grid-cols-2 gap-3">
-                          <NumField
-                            control={form.control}
-                            name="sauceOzPerPizza"
-                            label="Oz Per Pizza"
-                          />
-                          <NumField
-                            control={form.control}
-                            name="sauceBarrelLbs"
-                            label="Barrel Weight (lbs)"
-                          />
-                        </div>
-                      )}
+                      {v.frontlineRecipeName.trim() && (() => {
+                        const hasRecipe = (v.frontlineRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField
+                              control={form.control}
+                              name="sauceOzPerPizza"
+                              label="Oz Per Pizza"
+                            />
+                            {!hasRecipe && (
+                              <NumField
+                                control={form.control}
+                                name="sauceBarrelLbs"
+                                label="Barrel Weight (lbs)"
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <TypeDropdown
                         label="Applicator 1"
