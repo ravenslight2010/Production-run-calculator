@@ -489,6 +489,7 @@ function CheeseRecipeCard({
                       min="0"
                       step="0.1"
                       placeholder="0"
+                      onFocus={e => e.target.select()}
                       className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                     />
                     <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
@@ -611,6 +612,7 @@ function MixRecipeCard({
                       min="0"
                       step="0.1"
                       placeholder="0"
+                      onFocus={e => e.target.select()}
                       className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                     />
                     <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">
@@ -742,6 +744,7 @@ function DoughRecipeCard({
               step="0.01"
               value={targetWeight || ""}
               onChange={e => onTargetWeightChange(Number(e.target.value))}
+              onFocus={e => e.target.select()}
               placeholder="0.00"
               className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 w-full"
             />
@@ -802,6 +805,7 @@ function DoughRecipeCard({
                     min="0"
                     step="0.1"
                     placeholder="0"
+                    onFocus={e => e.target.select()}
                     className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
                   {confirmIdx === idx ? (
@@ -923,6 +927,7 @@ function FrontlineRecipeCard({
                     min="0"
                     step="0.1"
                     placeholder="0"
+                    onFocus={e => e.target.select()}
                     className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
                   {confirmIdx === idx ? (
@@ -1119,6 +1124,7 @@ function NumField({
               onChange={(e) =>
                 field.onChange(e.target.value === "" ? "" : Number(e.target.value))
               }
+              onFocus={e => e.target.select()}
             />
           </FormControl>
           <FormMessage />
@@ -1149,13 +1155,33 @@ function StepperField({
   suggestion?: number | null;
   onSuggest?: () => void;
 }) {
+  const repeatRef = useRef<{ t?: ReturnType<typeof setTimeout>; i?: ReturnType<typeof setInterval> }>({});
+  const fieldRef = useRef<any>(null);
+  useEffect(() => () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); }, []);
+  const startRepeat = (fn: () => void) => {
+    fn();
+    repeatRef.current.t = setTimeout(() => { repeatRef.current.i = setInterval(fn, 80); }, 400);
+  };
+  const stopRepeat = () => { clearTimeout(repeatRef.current.t); clearInterval(repeatRef.current.i); };
   return (
     <FormField
       control={control}
       name={name}
       render={({ field }) => {
+        fieldRef.current = field;
         const current = Number(field.value) || 0;
         const atMax = max !== undefined && current >= max;
+        const decrement = () => {
+          const cur = Number(fieldRef.current?.value) || 0;
+          navigator.vibrate?.(8);
+          fieldRef.current?.onChange(Math.max(min, cur - step));
+        };
+        const increment = () => {
+          const cur = Number(fieldRef.current?.value) || 0;
+          if (max !== undefined && cur >= max) return;
+          navigator.vibrate?.(8);
+          fieldRef.current?.onChange(max !== undefined ? Math.min(max, cur + step) : cur + step);
+        };
         return (
           <FormItem>
             <div className="flex items-center justify-between gap-2">
@@ -1176,8 +1202,10 @@ function StepperField({
               <div className={`flex items-stretch${disabled ? " opacity-50 pointer-events-none" : ""}`}>
                 <button
                   type="button"
-                  onClick={() => { navigator.vibrate?.(8); field.onChange(Math.max(min, current - step)); }}
-                  className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80"
+                  onPointerDown={() => startRepeat(decrement)}
+                  onPointerUp={stopRepeat}
+                  onPointerLeave={stopRepeat}
+                  className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none"
                   data-testid={`btn-dec-${name}`}
                   disabled={disabled}
                 >
@@ -1191,16 +1219,19 @@ function StepperField({
                     const val = e.target.value === "" ? "" : Number(e.target.value);
                     field.onChange(max !== undefined && typeof val === "number" ? Math.min(max, val) : val);
                   }}
+                  onFocus={e => e.target.select()}
                   className={`h-12 flex-1 border border-input bg-background/50 text-center font-mono text-2xl font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-w-0${atMax ? " text-amber-400" : ""}`}
                   data-testid={`input-${name}`}
                   disabled={disabled}
                 />
                 <button
                   type="button"
-                  onClick={() => { if (max !== undefined && current >= max) return; navigator.vibrate?.(8); field.onChange(max !== undefined ? Math.min(max, current + step) : current + step); }}
-                  className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80${max !== undefined && current >= max ? " opacity-30 cursor-not-allowed" : ""}`}
+                  onPointerDown={() => startRepeat(increment)}
+                  onPointerUp={stopRepeat}
+                  onPointerLeave={stopRepeat}
+                  className={`h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none touch-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
                   data-testid={`btn-inc-${name}`}
-                  disabled={disabled || (max !== undefined && current >= max)}
+                  disabled={disabled || atMax}
                 >
                   +
                 </button>
@@ -4831,6 +4862,21 @@ export default function Home() {
                               suggestion={suggestedCasesOnSkid !== null && suggestedCasesOnSkid !== v.casesOnCurrentSkid ? suggestedCasesOnSkid : null}
                               onSuggest={() => form.setValue("casesOnCurrentSkid", suggestedCasesOnSkid!, { shouldDirty: true })}
                             />
+                            {canSuggest && suggestedSkids !== null && suggestedCasesOnSkid !== null &&
+                              (suggestedSkids !== v.skidsCompleted || suggestedCasesOnSkid !== v.casesOnCurrentSkid) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.vibrate?.(10);
+                                  form.setValue("skidsCompleted", suggestedSkids!, { shouldDirty: true });
+                                  form.setValue("casesOnCurrentSkid", suggestedCasesOnSkid!, { shouldDirty: true });
+                                }}
+                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                Apply expected values — {suggestedSkids} skids · {suggestedCasesOnSkid} cases
+                              </button>
+                            )}
                           </>
                         );
                       })()}
@@ -4844,7 +4890,7 @@ export default function Home() {
                         </div>
                       )}
                       {/* Skid Done quick action */}
-                      {runStatus === "running" && (
+                      {(runStatus === "running" || runStatus === "paused") && (
                         <button
                           type="button"
                           onClick={() => {
@@ -6266,6 +6312,7 @@ export default function Home() {
                                     placeholder={String(s.totalCases)}
                                     disabled={!canEdit}
                                     onChange={e => updateRunMeta(run.id, { actualCases: e.target.value === "" ? undefined : Number(e.target.value) })}
+                                    onFocus={e => e.target.select()}
                                     className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
                                   />
                                   {caseDelta !== null && (
@@ -6284,6 +6331,7 @@ export default function Home() {
                                     placeholder="0"
                                     disabled={!canEdit}
                                     onChange={e => updateRunMeta(run.id, { wasteLbs: e.target.value === "" ? undefined : Number(e.target.value) })}
+                                    onFocus={e => e.target.select()}
                                     className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-sm font-mono outline-none focus:border-primary/60 disabled:opacity-50"
                                   />
                                   {(run.wasteLbs ?? 0) > 0 && (
