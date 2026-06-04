@@ -1506,13 +1506,11 @@ function loadDayState(): DayState {
         return freshDayState();
       }
       // Migrate old shape { id, label } → { id, brand, flavor }
+      // Preserve ALL RunMeta fields (stoppages, notes, actualCases, etc.)
       const runs = parsed.runs.map((r: any) => ({
-        id: r.id,
+        ...r,
         brand: r.brand ?? (r.label ?? ""),
         flavor: r.flavor ?? "",
-        startedAt: r.startedAt,
-        pausedAt: r.pausedAt,
-        endedAt: r.endedAt,
       }));
       return { ...parsed, runs, date: parsed.date ?? todayStr() };
     }
@@ -2144,9 +2142,17 @@ export default function Home() {
         try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
       })();
       if (stored.date && stored.date !== todayStr()) {
-        // Archive yesterday before resetting
+        // Auto-end any active run before archiving yesterday
         const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
-        if (prevDs && stored.date) archiveDayToHistory(prevDs, stored.date);
+        if (prevDs && stored.date) {
+          const finalDs: DayState = {
+            ...prevDs,
+            runs: prevDs.runs.map(r =>
+              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+            ),
+          };
+          archiveDayToHistory(finalDs, stored.date);
+        }
         const fresh = freshDayState();
         saveDayState(fresh);
         setDayState(fresh);
@@ -2634,7 +2640,7 @@ export default function Home() {
     };
   }, []); // setShowFloorMode is a stable setter — no deps needed
 
-  // Reset all runs at midnight
+  // Reset all runs at midnight — archive current day first, auto-end any active run
   useEffect(() => {
     function msUntilMidnight() {
       const now = new Date();
@@ -2645,6 +2651,20 @@ export default function Home() {
     let timeout: ReturnType<typeof setTimeout>;
     function scheduleReset() {
       timeout = setTimeout(() => {
+        const storedDs = (() => {
+          try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; }
+          catch { return null; }
+        })();
+        if (storedDs?.date && storedDs.date !== todayStr()) {
+          // Auto-end any run that was still active when midnight hit
+          const finalDs: DayState = {
+            ...storedDs,
+            runs: storedDs.runs.map(r =>
+              r.startedAt && !r.endedAt ? { ...r, endedAt: Date.now(), pausedAt: undefined } : r
+            ),
+          };
+          archiveDayToHistory(finalDs, storedDs.date);
+        }
         const fresh = freshDayState();
         setDayState(fresh);
         saveDayState(fresh);
