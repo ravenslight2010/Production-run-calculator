@@ -227,13 +227,23 @@ function computeSummaryStats(vals: FormValues) {
   };
 }
 
-/** When a sauce batch weighs less than 450 lbs, multiple batches fit in one barrel. */
-function sauceBarrelBreakdown(sauceBatches: number, effBarrelLbs: number): { batchesPerBarrel: number; totalBarrels: number } | null {
+/** When a sauce batch weighs less than 450 lbs, multiple batches fit in one barrel.
+ *  Returns the full/partial barrel breakdown, e.g. 7 batches @ 175 lbs →
+ *  3 barrels × 2 batches + 1 barrel × 1 batch = 4 barrels total. */
+function sauceBarrelBreakdown(sauceBatches: number, effBarrelLbs: number): {
+  batchesPerBarrel: number;
+  fullBarrels: number;
+  lastBarrelBatches: number;
+  totalBarrels: number;
+} | null {
   if (effBarrelLbs <= 0 || effBarrelLbs >= 450 || sauceBatches <= 0) return null;
   const batchesPerBarrel = Math.floor(450 / effBarrelLbs);
   if (batchesPerBarrel < 2) return null;
-  const totalBarrels = Math.ceil(sauceBatches / batchesPerBarrel);
-  return { batchesPerBarrel, totalBarrels };
+  const wholeBatches = Math.ceil(sauceBatches);      // round up — you mix whole batches
+  const fullBarrels = Math.floor(wholeBatches / batchesPerBarrel);
+  const lastBarrelBatches = wholeBatches % batchesPerBarrel;
+  const totalBarrels = fullBarrels + (lastBarrelBatches > 0 ? 1 : 0);
+  return { batchesPerBarrel, fullBarrels, lastBarrelBatches, totalBarrels };
 }
 
 function StatRow({
@@ -3114,7 +3124,14 @@ export default function Home() {
     const items: { label: string; value: string; sub?: string }[] = [];
     if (s.sauceBatches > 0) {
       const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+      if (bd) {
+        const parts: string[] = [];
+        if (bd.fullBarrels > 0) parts.push(`${bd.fullBarrels} barrel${bd.fullBarrels > 1 ? "s" : ""} × ${bd.batchesPerBarrel}`);
+        if (bd.lastBarrelBatches > 0) parts.push(`1 barrel × ${bd.lastBarrelBatches}`);
+        items.push({ label: "Sauce", value: `${parts.join(" + ")} = ${bd.totalBarrels} barrels` });
+      } else {
+        items.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+      }
     }
     if (s.app1Type) {
       const isMix = s.app1Type.trim().toLowerCase().includes("mix");
@@ -4991,9 +5008,14 @@ export default function Home() {
                       // Sauce
                       if (s.sauceBatches > 0) {
                         const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                        rows.push(bd
-                          ? { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` }
-                          : { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+                        if (bd) {
+                          const parts: string[] = [];
+                          if (bd.fullBarrels > 0) parts.push(`${bd.fullBarrels}×${bd.batchesPerBarrel}`);
+                          if (bd.lastBarrelBatches > 0) parts.push(`1×${bd.lastBarrelBatches}`);
+                          rows.push({ label: "Sauce", value: `${bd.totalBarrels} barrels`, sub: parts.join(" + ") + " batches" });
+                        } else {
+                          rows.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+                        }
                       }
                       // Applicators
                       const apps = [
@@ -5821,9 +5843,11 @@ export default function Home() {
                         label="Sauce"
                         value={(() => {
                           const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
-                          return bd
-                            ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
-                            : fmtNum(calc.sauceBatches, 2) + " batches";
+                          if (!bd) return fmtNum(calc.sauceBatches, 2) + " batches";
+                          const parts: string[] = [];
+                          if (bd.fullBarrels > 0) parts.push(`${bd.fullBarrels} barrel${bd.fullBarrels > 1 ? "s" : ""} × ${bd.batchesPerBarrel}`);
+                          if (bd.lastBarrelBatches > 0) parts.push(`1 barrel × ${bd.lastBarrelBatches}`);
+                          return `${parts.join(" + ")} = ${bd.totalBarrels} barrels`;
                         })()}
                         testId="output-sauce-batches"
                         highlight={calc.sauceBatches > 0}
@@ -6167,7 +6191,14 @@ export default function Home() {
                     const frontlineItems: { label: string; value: string }[] = [];
                     if (s.sauceBatches > 0) {
                       const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                      frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+                      if (bd) {
+                        const parts: string[] = [];
+                        if (bd.fullBarrels > 0) parts.push(`${bd.fullBarrels} barrel${bd.fullBarrels > 1 ? "s" : ""} × ${bd.batchesPerBarrel}`);
+                        if (bd.lastBarrelBatches > 0) parts.push(`1 barrel × ${bd.lastBarrelBatches}`);
+                        frontlineItems.push({ label: "Sauce", value: `${parts.join(" + ")} = ${bd.totalBarrels} barrels` });
+                      } else {
+                        frontlineItems.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+                      }
                     }
                     if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
                     if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
@@ -6436,9 +6467,14 @@ export default function Home() {
                                 if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
                                 if (s.sauceBatches > 0) {
                                   const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                                  lines.push(bd
-                                    ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
-                                    : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                  if (bd) {
+                                    const parts: string[] = [];
+                                    if (bd.fullBarrels > 0) parts.push(`${bd.fullBarrels} × ${bd.batchesPerBarrel} batches`);
+                                    if (bd.lastBarrelBatches > 0) parts.push(`1 × ${bd.lastBarrelBatches} batch${bd.lastBarrelBatches > 1 ? "es" : ""}`);
+                                    lines.push(`  Sauce: ${bd.totalBarrels} barrels (${parts.join(" + ")})`);
+                                  } else {
+                                    lines.push(`  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                  }
                                 }
                                 if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
                                 if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
