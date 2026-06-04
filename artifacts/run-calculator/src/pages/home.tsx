@@ -217,6 +217,7 @@ function computeSummaryStats(vals: FormValues) {
     totalPizzas,
     estimatedTimeSec,
     sauceBatches,
+    sauceEffBarrel,
     app1Lbs, app1Batches, app1Type: vals.app1Type,
     app2Lbs, app2Batches, app2Type: vals.app2Type,
     app3Lbs, app3Batches, app3Type: vals.app3Type,
@@ -224,6 +225,15 @@ function computeSummaryStats(vals: FormValues) {
     pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
     pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
   };
+}
+
+/** When a sauce batch weighs less than 450 lbs, multiple batches fit in one barrel. */
+function sauceBarrelBreakdown(sauceBatches: number, effBarrelLbs: number): { batchesPerBarrel: number; totalBarrels: number } | null {
+  if (effBarrelLbs <= 0 || effBarrelLbs >= 450 || sauceBatches <= 0) return null;
+  const batchesPerBarrel = Math.floor(450 / effBarrelLbs);
+  if (batchesPerBarrel < 2) return null;
+  const totalBarrels = Math.ceil(sauceBatches / batchesPerBarrel);
+  return { batchesPerBarrel, totalBarrels };
 }
 
 function StatRow({
@@ -2825,6 +2835,7 @@ export default function Home() {
       catchUpCph,
       perTray,
       perBatch: effectiveDoughBatchYield,
+      sauceEffBarrel,
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
@@ -3101,7 +3112,10 @@ export default function Home() {
   if (screenMode === "frontline") {
     const s = computeSummaryStats(v);
     const items: { label: string; value: string; sub?: string }[] = [];
-    if (s.sauceBatches > 0) items.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+    if (s.sauceBatches > 0) {
+      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+      items.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+    }
     if (s.app1Type) {
       const isMix = s.app1Type.trim().toLowerCase().includes("mix");
       if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0)
@@ -4975,7 +4989,12 @@ export default function Home() {
                         }
                       }
                       // Sauce
-                      if (s.sauceBatches > 0) rows.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+                      if (s.sauceBatches > 0) {
+                        const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+                        rows.push(bd
+                          ? { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` }
+                          : { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+                      }
                       // Applicators
                       const apps = [
                         { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
@@ -5800,7 +5819,12 @@ export default function Home() {
                       </p>
                       <StatRow
                         label="Sauce"
-                        value={fmtNum(calc.sauceBatches, 2) + " batches"}
+                        value={(() => {
+                          const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
+                          return bd
+                            ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
+                            : fmtNum(calc.sauceBatches, 2) + " batches";
+                        })()}
                         testId="output-sauce-batches"
                         highlight={calc.sauceBatches > 0}
                       />
@@ -6141,7 +6165,10 @@ export default function Home() {
                       ? (run.endedAt - run.startedAt) / 1000
                       : null;
                     const frontlineItems: { label: string; value: string }[] = [];
-                    if (s.sauceBatches > 0) frontlineItems.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2) + " barrels" });
+                    if (s.sauceBatches > 0) {
+                      const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+                      frontlineItems.push({ label: "Sauce", value: bd ? `${fmtNum(s.sauceBatches, 2)} batches · ${bd.totalBarrels} barrels` : fmtNum(s.sauceBatches, 2) + " barrels" });
+                    }
                     if (s.app1Type) { const isMix = s.app1Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app1Lbs > 0 : s.app1Batches > 0) frontlineItems.push({ label: `App 1 — ${s.app1Type}`, value: isMix ? fmtNum(s.app1Lbs, 1) + " lbs" : fmtNum(s.app1Batches, 2) + " batches" }); }
                     if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
                     if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
@@ -6407,7 +6434,12 @@ export default function Home() {
                                 const s = computeSummaryStats(vals);
                                 lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
                                 if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
-                                if (s.sauceBatches > 0) lines.push(`  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                if (s.sauceBatches > 0) {
+                                  const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+                                  lines.push(bd
+                                    ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
+                                    : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
+                                }
                                 if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
                                 if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
                                 if (run.notes) lines.push(`  Notes: ${run.notes}`);
