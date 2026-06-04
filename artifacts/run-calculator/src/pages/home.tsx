@@ -2577,10 +2577,17 @@ export default function Home() {
 
     const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
 
+    // Effective batch yield: derive from recipe when recipe + target weight are both present
+    const doughRecipeLbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+    const effectiveDoughBatchYield =
+      doughRecipeLbs > 0 && v.targetDoughballWeight > 0
+        ? (doughRecipeLbs * 16) / v.targetDoughballWeight
+        : v.doughBatchYield;
+
     const traysPerSkid =
       (v.casesPerSkid * v.pizzasPerCase) / perTray;
-    const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : v.doughBatchYield;
-    const traysPerBatch = v.doughBatchYield / perTray;
+    const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : effectiveDoughBatchYield;
+    const traysPerBatch = effectiveDoughBatchYield / perTray;
     const batchesPerSkid = traysPerSkid / traysPerBatch;
 
     // casesOnLine = ROUNDDOWN(ppm * freezerTime / pizzasPerCase, 0)
@@ -2610,9 +2617,9 @@ export default function Home() {
     // Staged supply: trays/stacks already ready × units per tray, plus mixed batches ready
     const doughOnHand =
       v.traysOnLine * perTray +
-      v.batchesReady * v.doughBatchYield;
+      v.batchesReady * effectiveDoughBatchYield;
     const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
-    const batchesNeeded = doughDeficit / v.doughBatchYield;
+    const batchesNeeded = doughDeficit / effectiveDoughBatchYield;
     const traysNeeded = doughDeficit / perTray;
     // Net pizzas after deducting already-staged trays/stacks (same logic as doughDeficit)
     const pizzasNetOfStaged = Math.max(0, totalPizzasLeft - v.traysOnLine * perTray);
@@ -2781,7 +2788,7 @@ export default function Home() {
       paceDelta,
       catchUpCph,
       perTray,
-      perBatch: v.doughBatchYield,
+      perBatch: effectiveDoughBatchYield,
     };
   }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
@@ -3036,10 +3043,10 @@ export default function Home() {
                 <p className="text-xs uppercase tracking-wider mb-1">Time Per Batch</p>
                 <p className="text-2xl font-bold">{fmtTime(calc.timePerBatchSec)}</p>
               </div>
-              {v.doughBatchYield > 0 && (
+              {calc.perBatch > 0 && (
                 <div className="text-center">
                   <p className="text-xs uppercase tracking-wider mb-1">Yield / Batch</p>
-                  <p className="text-2xl font-bold">{fmtComma(v.doughBatchYield)}</p>
+                  <p className="text-2xl font-bold">{fmtComma(Math.round(calc.perBatch))}</p>
                 </div>
               )}
             </div>
@@ -4708,14 +4715,17 @@ export default function Home() {
                           label="Crusts Per Case"
                           step="1"
                         />
-                      ) : (
-                        <NumField
-                          control={form.control}
-                          name="doughBatchYield"
-                          label="Dough Batch Yield (doughballs)"
-                          step="1"
-                        />
-                      )}
+                      ) : (() => {
+                        const hasRecipe = (v.doughRecipe ?? []).some(r => Number(r.lbs) > 0) && Number(v.targetDoughballWeight) > 0;
+                        return hasRecipe ? null : (
+                          <NumField
+                            control={form.control}
+                            name="doughBatchYield"
+                            label="Dough Batch Yield (doughballs)"
+                            step="1"
+                          />
+                        );
+                      })()}
                     </CardContent>
                     </fieldset>
                   </Card>
@@ -4917,9 +4927,16 @@ export default function Home() {
                       const s = computeSummaryStats(vals);
                       const rows: NeedRow[] = [];
                       // Dough
-                      if (vals.doughBatchYield > 0 && vals.targetDoughballWeight > 0) {
-                        const batches = Math.ceil((s.totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield);
-                        if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
+                      {
+                        const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+                        const effYield =
+                          dRecipeLbs > 0 && vals.targetDoughballWeight > 0
+                            ? (dRecipeLbs * 16) / vals.targetDoughballWeight
+                            : vals.doughBatchYield;
+                        if (effYield > 0 && vals.targetDoughballWeight > 0) {
+                          const batches = Math.ceil((s.totalPizzas * vals.targetDoughballWeight) / effYield);
+                          if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
+                        }
                       }
                       // Sauce
                       if (s.sauceBatches > 0) rows.push({ label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
