@@ -178,18 +178,26 @@ function computeSummaryStats(vals: FormValues) {
     vals.sauceBarrelLbs > 0
       ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (vals.sauceBarrelLbs * 16)
       : 0;
+  const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
   const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
-  const app1Batches = !app1IsMix && vals.app1BatchLbs > 0 ? app1Lbs / vals.app1BatchLbs : 0;
+  const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : vals.app1BatchLbs;
+  const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
+  const app2RecipeLbs = (vals.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app2Lbs = (totalPizzas * vals.app2OzPerPizza) / 16 + 20;
   const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
-  const app2Batches = !app2IsMix && vals.app2BatchLbs > 0 ? app2Lbs / vals.app2BatchLbs : 0;
+  const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : vals.app2BatchLbs;
+  const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
+  const app3RecipeLbs = (vals.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app3Lbs = (totalPizzas * vals.app3OzPerPizza) / 16 + 20;
   const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
-  const app3Batches = !app3IsMix && vals.app3BatchLbs > 0 ? app3Lbs / vals.app3BatchLbs : 0;
+  const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : vals.app3BatchLbs;
+  const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
+  const app4RecipeLbs = (vals.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const app4Lbs = (totalPizzas * vals.app4OzPerPizza) / 16 + 20;
   const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
-  const app4Batches = !app4IsMix && vals.app4BatchLbs > 0 ? app4Lbs / vals.app4BatchLbs : 0;
+  const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
+  const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
   const pep1Lbs = (totalPizzas * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
   const pep1Batches =
     !DEFAULT_PEP_TYPES.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
@@ -2656,18 +2664,26 @@ export default function Home() {
       v.sauceBarrelLbs > 0
         ? (totalPizzasForSauce * v.sauceOzPerPizza) / (v.sauceBarrelLbs * 16)
         : 0;
+    const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
     const app1IsMix = v.app1Type.trim().toLowerCase().includes("mix");
-    const app1Batches = !app1IsMix && v.app1BatchLbs > 0 ? app1Lbs / v.app1BatchLbs : 0;
+    const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : v.app1BatchLbs;
+    const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
+    const app2RecipeLbs = (v.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app2Lbs = (totalPizzasRun * v.app2OzPerPizza) / 16 + 20;
     const app2IsMix = v.app2Type.trim().toLowerCase().includes("mix");
-    const app2Batches = !app2IsMix && v.app2BatchLbs > 0 ? app2Lbs / v.app2BatchLbs : 0;
+    const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : v.app2BatchLbs;
+    const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
+    const app3RecipeLbs = (v.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app3Lbs = (totalPizzasRun * v.app3OzPerPizza) / 16 + 20;
     const app3IsMix = v.app3Type.trim().toLowerCase().includes("mix");
-    const app3Batches = !app3IsMix && v.app3BatchLbs > 0 ? app3Lbs / v.app3BatchLbs : 0;
+    const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : v.app3BatchLbs;
+    const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
+    const app4RecipeLbs = (v.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app4Lbs = (totalPizzasRun * v.app4OzPerPizza) / 16 + 20;
     const app4IsMix = v.app4Type.trim().toLowerCase().includes("mix");
-    const app4Batches = !app4IsMix && v.app4BatchLbs > 0 ? app4Lbs / v.app4BatchLbs : 0;
+    const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : v.app4BatchLbs;
+    const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
     const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
@@ -5542,14 +5558,18 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      {v.app1Type.trim() && (
-                        <div className={v.app1Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                          <NumField control={form.control} name="app1OzPerPizza" label="Oz Per Pizza" />
-                          {!v.app1Type.trim().toLowerCase().includes("mix") && (
-                            <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" />
-                          )}
-                        </div>
-                      )}
+                      {v.app1Type.trim() && (() => {
+                        const isMix = v.app1Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app1CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app1OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app1BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <TypeDropdown
                         label="Applicator 2"
@@ -5560,14 +5580,18 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      {v.app2Type.trim() && (
-                        <div className={v.app2Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                          <NumField control={form.control} name="app2OzPerPizza" label="Oz Per Pizza" />
-                          {!v.app2Type.trim().toLowerCase().includes("mix") && (
-                            <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" />
-                          )}
-                        </div>
-                      )}
+                      {v.app2Type.trim() && (() => {
+                        const isMix = v.app2Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app2CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app2OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app2BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <TypeDropdown
                         label="Applicator 3"
@@ -5578,14 +5602,18 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      {v.app3Type.trim() && (
-                        <div className={v.app3Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                          <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
-                          {!v.app3Type.trim().toLowerCase().includes("mix") && (
-                            <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
-                          )}
-                        </div>
-                      )}
+                      {v.app3Type.trim() && (() => {
+                        const isMix = v.app3Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app3CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <TypeDropdown
                         label="Applicator 4"
@@ -5596,14 +5624,18 @@ export default function Home() {
                         onRemoveOption={removeIngredientType}
                         allowClear
                       />
-                      {v.app4Type.trim() && (
-                        <div className={v.app4Type.trim().toLowerCase().includes("mix") ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                          <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
-                          {!v.app4Type.trim().toLowerCase().includes("mix") && (
-                            <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
-                          )}
-                        </div>
-                      )}
+                      {v.app4Type.trim() && (() => {
+                        const isMix = v.app4Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app4CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       <TypeDropdown
                         label="Pep Applicator 1"
