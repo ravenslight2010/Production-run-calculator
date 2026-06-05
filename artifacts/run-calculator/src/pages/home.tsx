@@ -5262,10 +5262,10 @@ export default function Home() {
                               {hasOnHand ? "Batches still to mix" : "Batches possible"}
                             </p>
                           </div>
-                          {calc.perBatch > 0 && (
+                          {calc.perBatch > 0 && calc.perTray > 0 && (
                             <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(remainingDoughballs, 0)}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">Doughballs</p>
+                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(remainingDoughballs / calc.perTray, 0)}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Trays</p>
                             </div>
                           )}
                           {calc.perBatch > 0 && v.pizzasPerCase > 0 && (
