@@ -2685,7 +2685,14 @@ export default function Home() {
             <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
               <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
             </div>
-            <p className="text-lg font-semibold text-muted-foreground">{Math.round(casesPct * 100)}% complete</p>
+            <div className="flex items-center gap-6">
+              <p className="text-lg font-semibold text-muted-foreground">{Math.round(casesPct * 100)}% complete</p>
+              {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
+                <p className="text-lg font-semibold text-muted-foreground">
+                  {v.skidsCompleted} / {Math.floor(v.casesNeeded / v.casesPerSkid)} skids
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Pace + time */}
@@ -2783,6 +2790,34 @@ export default function Home() {
             </p>
           </div>
         )}
+
+        {/* Dough stats row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="rounded-2xl bg-card border border-border p-4 text-center">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Trays on Line</p>
+            <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
+            {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} needed</p>}
+          </div>
+          <div className="rounded-2xl bg-card border border-border p-4 text-center">
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
+            <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
+            {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} needed</p>}
+          </div>
+          {v.doughBatchYield > 0 && (
+            <div className="rounded-2xl bg-card border border-border p-4 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batch Yield</p>
+              <p className="text-3xl font-black tabular-nums">{fmtComma(v.doughBatchYield)}</p>
+              <p className="text-sm text-muted-foreground">lbs</p>
+            </div>
+          )}
+          {v.casesNeeded > 0 && (
+            <div className="rounded-2xl bg-card border border-border p-4 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Cases Done</p>
+              <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
+              <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -2951,6 +2986,13 @@ export default function Home() {
               <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
                 <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
               </div>
+              <div className="flex gap-6 flex-wrap">
+                {v.casesPerSkid > 0 && (
+                  <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Skids Done</p><p className="text-2xl font-black tabular-nums">{v.skidsCompleted}{v.casesNeeded > 0 ? ` / ${Math.floor(v.casesNeeded / v.casesPerSkid)}` : ""}</p></div>
+                )}
+                {calc.ppm > 0 && <div><p className="text-xs text-muted-foreground uppercase tracking-wider">PPM</p><p className="text-2xl font-black tabular-nums">{fmtComma(calc.ppm)}</p></div>}
+                {currentRunDowntimeMs > 0 && <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Downtime</p><p className="text-2xl font-black tabular-nums text-amber-400">{fmtTime(currentRunDowntimeMs / 1000)}</p></div>}
+              </div>
               {calc.adjustedTimeSec > 0 && (
                 <div className="flex gap-8 mt-1">
                   <div><p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Finish</p><p className="text-3xl font-black tabular-nums">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</p></div>
@@ -3055,7 +3097,7 @@ export default function Home() {
                     {isCurr ? "Current" : isDone ? "Done" : "Upcoming"}
                   </span>
                 </div>
-                <div className="flex gap-6">
+                <div className="flex gap-6 flex-wrap">
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wider">Cases</p>
                     <p className="text-3xl font-black tabular-nums">{fmtComma(isDone && run.actualCases != null ? run.actualCases : isCurr ? calc.casesCompleted : 0)}<span className="text-lg text-muted-foreground"> / {fmtComma(s.totalCases)}</span></p>
@@ -3064,6 +3106,21 @@ export default function Home() {
                     <div>
                       <p className="text-xs text-muted-foreground uppercase tracking-wider">PPM</p>
                       <p className="text-3xl font-black tabular-nums">{fmtComma(calc.ppm)}</p>
+                    </div>
+                  )}
+                  {isCurr && calc.paceStatus && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Pace</p>
+                      <p className={`text-2xl font-black ${calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400"}`}>
+                        {calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE"}
+                        {calc.paceDelta !== 0 && <span className="text-lg text-muted-foreground ml-1">{calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))}</span>}
+                      </p>
+                    </div>
+                  )}
+                  {s.estimatedTimeSec > 0 && !isCurr && !isDone && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wider">Est. Time</p>
+                      <p className="text-2xl font-black tabular-nums">{fmtTime(s.estimatedTimeSec)}</p>
                     </div>
                   )}
                 </div>
