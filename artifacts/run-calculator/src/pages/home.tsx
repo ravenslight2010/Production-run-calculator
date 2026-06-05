@@ -3084,7 +3084,7 @@ export default function Home() {
 
   return (
     <div
-      className="min-h-screen bg-background text-foreground p-4 md:p-6 font-sans"
+      className="min-h-screen bg-background text-foreground p-4 md:p-6 pb-20 font-sans"
       onTouchStart={e => { swipeTouchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
       onTouchEnd={e => {
         if (!swipeTouchStart.current) return;
@@ -4983,7 +4983,7 @@ export default function Home() {
                       </div>
                     );
                   })()}
-              <TabsList className="grid grid-cols-3 w-full mb-4 print:hidden">
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-3 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
                   <Layers className="w-4 h-4 shrink-0" />
                   <span className="hidden sm:inline truncate">Dough/Crusts</span>
