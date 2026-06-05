@@ -1176,6 +1176,7 @@ export default function Home() {
 
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
+  const [sauceWeightsOpen, setSauceWeightsOpen] = useState(true);
 
   // ── Historical PPM benchmark (average of finished runs across all days) ───
   const histBenchmarkPpm = useMemo(() => {
@@ -5332,12 +5333,19 @@ export default function Home() {
                 <div className="space-y-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   <Card className="bg-card/50 border-border/50 shadow-md">
-                    <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Sauce & Applicator Weights
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-5 pb-5 space-y-4">
+                    <button
+                      type="button"
+                      onClick={() => setSauceWeightsOpen(o => !o)}
+                      className="w-full text-left"
+                    >
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                          Sauce & Applicator Weights
+                          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${sauceWeightsOpen ? "rotate-180" : ""}`} />
+                        </CardTitle>
+                      </CardHeader>
+                    </button>
+                    {sauceWeightsOpen && <CardContent className="px-5 pb-5 space-y-4">
                       <TypeDropdown
                         label="Sauce"
                         value={v.frontlineRecipeName}
@@ -5532,7 +5540,7 @@ export default function Home() {
                           )}
                         </>
                       )}
-                    </CardContent>
+                    </CardContent>}
                   </Card>
 
                   <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
