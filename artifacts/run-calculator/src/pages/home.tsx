@@ -3352,13 +3352,13 @@ export default function Home() {
         ];
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScreensDialog(false)}>
-            <div className="bg-card border border-border rounded-xl p-6 w-full max-w-lg space-y-5" onClick={e => e.stopPropagation()}>
+            <div className="bg-card border border-border rounded-xl p-4 w-full max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-bold flex items-center gap-2"><Monitor className="w-4 h-4 text-primary" /> Cast to Screens</h3>
                 <button type="button" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
-              <p className="text-xs text-muted-foreground">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
-              <div className="space-y-3">
+              <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
+              <div className="space-y-3 overflow-y-auto flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
                     {/* QR code */}
