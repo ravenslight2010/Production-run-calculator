@@ -4671,24 +4671,26 @@ export default function Home() {
                                 <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; lastAutoMinBucketRef.current = -1; }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
                               </div>
                             )}
-                            <StepperField
-                              control={form.control}
-                              name="skidsCompleted"
-                              label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
-                              max={maxSkids}
-                              suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                              onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                              onManualChange={onManual}
-                            />
-                            <StepperField
-                              control={form.control}
-                              name="casesOnCurrentSkid"
-                              label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
-                              max={maxCasesOnSkid}
-                              suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                              onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                              onManualChange={onManual}
-                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <StepperField
+                                control={form.control}
+                                name="skidsCompleted"
+                                label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
+                                max={maxSkids}
+                                suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
+                                onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                                onManualChange={onManual}
+                              />
+                              <StepperField
+                                control={form.control}
+                                name="casesOnCurrentSkid"
+                                label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
+                                max={maxCasesOnSkid}
+                                suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
+                                onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                                onManualChange={onManual}
+                              />
+                            </div>
                             {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
                               <button
                                 type="button"
@@ -4842,38 +4844,44 @@ export default function Home() {
                                 )}
                               </div>
                             )}
-                            <StepperField
-                              control={form.control}
-                              name="traysOnLine"
-                              label={trayAutoActive
-                                ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
-                                : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
-                              max={74}
-                              suggestion={!trayAutoActive ? suggestedTrays : null}
-                              onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
-                              onManualChange={onManual}
-                            />
-                            {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
-                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
-                              </p>
-                            )}
-                            {doughSubTab !== "crusts" && (
-                              <StepperField
-                                control={form.control}
-                                name="batchesReady"
-                                label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
-                                max={3}
-                                suggestion={!batchAutoActive ? suggestedBatches : null}
-                                onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
-                                onManualChange={onManual}
-                              />
-                            )}
-                            {v.batchesReady >= 3 && doughSubTab !== "crusts" && (
-                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
-                              </p>
-                            )}
+                            <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
+                              <div>
+                                <StepperField
+                                  control={form.control}
+                                  name="traysOnLine"
+                                  label={trayAutoActive
+                                    ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
+                                    : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
+                                  max={74}
+                                  suggestion={!trayAutoActive ? suggestedTrays : null}
+                                  onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
+                                  onManualChange={onManual}
+                                />
+                                {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
+                                  <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
+                                    <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
+                                  </p>
+                                )}
+                              </div>
+                              {doughSubTab !== "crusts" && (
+                                <div>
+                                  <StepperField
+                                    control={form.control}
+                                    name="batchesReady"
+                                    label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
+                                    max={3}
+                                    suggestion={!batchAutoActive ? suggestedBatches : null}
+                                    onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
+                                    onManualChange={onManual}
+                                  />
+                                  {v.batchesReady >= 3 && (
+                                    <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
+                                      <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </>
                         );
                       })()}
