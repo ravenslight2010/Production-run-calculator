@@ -4593,6 +4593,38 @@ export default function Home() {
                           />
                         );
                       })()}
+                      {/* Dough / Crust toggle */}
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Line Type</label>
+                        <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDoughSubTab("dough");
+                              const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "dough" as const } : r);
+                              const newDs = { ...dayState, runs: newRuns };
+                              setDayState(newDs);
+                              saveDayState(newDs);
+                            }}
+                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            Dough
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDoughSubTab("crusts");
+                              const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "crusts" as const } : r);
+                              const newDs = { ...dayState, runs: newRuns };
+                              setDayState(newDs);
+                              saveDayState(newDs);
+                            }}
+                            className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                          >
+                            Crust
+                          </button>
+                        </div>
+                      </div>
                     </fieldset>
                     </div>
                 </details>
@@ -4975,36 +5007,6 @@ export default function Home() {
                   </div>
                 )}
                 <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
-                {/* Sub-toggle */}
-                <div className="flex gap-1 p-1 bg-muted/40 rounded-lg w-fit mb-5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDoughSubTab("dough");
-                      const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "dough" as const } : r);
-                      const newDs = { ...dayState, runs: newRuns };
-                      setDayState(newDs);
-                      saveDayState(newDs);
-                    }}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "dough" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Dough
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDoughSubTab("crusts");
-                      const newRuns = dayState.runs.map((r, i) => i === dayState.currentIndex ? { ...r, subTab: "crusts" as const } : r);
-                      const newDs = { ...dayState, runs: newRuns };
-                      setDayState(newDs);
-                      saveDayState(newDs);
-                    }}
-                    className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${doughSubTab === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    Crust
-                  </button>
-                </div>
-
                 {/* ── Crust run ── */}
                 {doughSubTab === "crusts" && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
