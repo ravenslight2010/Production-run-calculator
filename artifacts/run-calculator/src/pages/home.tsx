@@ -4412,7 +4412,7 @@ export default function Home() {
                 )}
 
                 {isSupervisor && (
-                <details open className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
+                <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                         <Settings className="w-3.5 h-3.5" />
