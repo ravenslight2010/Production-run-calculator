@@ -1547,33 +1547,45 @@ export default function Home() {
     applySyncCallbackRef.current = (payload: SyncPayload) => {
       isSyncApplyingRef.current = true;
 
-      // ── Run values ──
-      for (const [id, vals] of Object.entries(payload.runValues)) {
-        saveRunValues(id, vals as FormValues);
+      // ── Reset guard: only apply day state + run values if remote reset is at least as recent ──
+      const remoteResetAt = payload.dayState.resetAt ?? 0;
+      const localResetAt = dayStateRef.current.resetAt ?? 0;
+      const acceptRemoteDay = remoteResetAt >= localResetAt;
+
+      // ── Run values (only accept if we're taking the remote day) ──
+      if (acceptRemoteDay) {
+        for (const [id, vals] of Object.entries(payload.runValues)) {
+          saveRunValues(id, vals as FormValues);
+        }
       }
 
       // ── Day state (runs + shiftNotes + runToTime) ──
-      setDayState(prev => {
-        const newRuns = payload.dayState.runs;
-        const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
-        const newDs = {
-          ...prev,
-          runs: newRuns,
-          currentIndex: newIndex,
-          shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
-          runToTime: payload.dayState.runToTime ?? prev.runToTime,
-        };
-        saveDayState(newDs);
-        return newDs;
-      });
-      if (payload.dayState.runToTime) setRunToTime(payload.dayState.runToTime);
+      if (acceptRemoteDay) {
+        setDayState(prev => {
+          const newRuns = payload.dayState.runs;
+          const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
+          const newDs = {
+            ...prev,
+            runs: newRuns,
+            currentIndex: newIndex,
+            shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
+            runToTime: payload.dayState.runToTime ?? prev.runToTime,
+            resetAt: remoteResetAt > 0 ? remoteResetAt : prev.resetAt,
+          };
+          saveDayState(newDs);
+          return newDs;
+        });
+        if (payload.dayState.runToTime) setRunToTime(payload.dayState.runToTime);
+      }
 
-      // ── Form reset for current run (if remote edit is newer) ──
-      const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
-      const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
-      if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
-      if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
-        form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
+      // ── Form reset for current run (if remote edit is newer, and we accepted the remote day) ──
+      if (acceptRemoteDay) {
+        const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
+        const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
+        if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
+        if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
+          form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
+        }
       }
 
       // ── Brands ──
@@ -1748,10 +1760,11 @@ export default function Home() {
           };
           archiveDayToHistory(finalDs, stored.date);
         }
-        const fresh = freshDayState();
+        const fresh = { ...freshDayState(), resetAt: Date.now() };
         saveDayState(fresh);
         setDayState(fresh);
         form.reset(DEFAULT_VALUES);
+        schedulePush(fresh, 0);
       }
     }
     const interval = setInterval(checkDateRollover, 60_000);
@@ -1784,7 +1797,7 @@ export default function Home() {
         }
       }
       const payload: SyncPayload = {
-        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime },
+        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt },
         runValues,
         brands: loadList(BRANDS_KEY, []),
         brandFlavors: loadBrandFlavors(),
@@ -2296,10 +2309,11 @@ export default function Home() {
           };
           archiveDayToHistory(finalDs, storedDs.date);
         }
-        const fresh = freshDayState();
+        const fresh = { ...freshDayState(), resetAt: Date.now() };
         setDayState(fresh);
         saveDayState(fresh);
         form.reset(DEFAULT_VALUES);
+        schedulePush(fresh, 0);
         scheduleReset();
       }, msUntilMidnight());
     }
