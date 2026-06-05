@@ -5209,8 +5209,8 @@ export default function Home() {
                   const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
                   const onHandBatches = v.batchesReady ?? 0;
                   const onHandTrays = v.traysOnLine ?? 0;
-                  const totalBatches = batchesPossible + onHandBatches;
-                  const totalDoughballs = totalBatches * calc.perBatch + onHandTrays * calc.perTray;
+                  const remainingBatches = Math.max(0, batchesPossible - onHandBatches);
+                  const remainingDoughballs = Math.max(0, remainingBatches * calc.perBatch - onHandTrays * calc.perTray);
                   const hasOnHand = onHandBatches > 0 || onHandTrays > 0;
                   const to12hr = (hhmm: string) => {
                     const [h, m] = hhmm.split(":").map(Number);
@@ -5257,30 +5257,30 @@ export default function Home() {
                             <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
                           </div>
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-primary">{totalBatches}</p>
+                            <p className="text-xl font-mono font-bold text-primary">{remainingBatches}</p>
                             <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {onHandBatches > 0 ? `Batches (${batchesPossible}+${onHandBatches})` : "Batches possible"}
+                              {hasOnHand ? "Batches still to mix" : "Batches possible"}
                             </p>
                           </div>
                           {calc.perBatch > 0 && (
                             <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(totalDoughballs, 0)}</p>
+                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(remainingDoughballs, 0)}</p>
                               <p className="text-[10px] text-muted-foreground mt-0.5">Doughballs</p>
                             </div>
                           )}
                           {calc.perBatch > 0 && v.pizzasPerCase > 0 && (
                             <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-sky-400">{Math.floor(totalDoughballs / v.pizzasPerCase)}</p>
+                              <p className="text-xl font-mono font-bold text-sky-400">{Math.floor(remainingDoughballs / v.pizzasPerCase)}</p>
                               <p className="text-[10px] text-muted-foreground mt-0.5">Cases possible</p>
                             </div>
                           )}
                         </div>
                         {hasOnHand && (
                           <p className="text-[10px] text-muted-foreground mt-2">
-                            Includes {[
+                            {[
                               onHandBatches > 0 && `${onHandBatches} batch${onHandBatches !== 1 ? "es" : ""} ready`,
                               onHandTrays > 0 && `${onHandTrays} tray${onHandTrays !== 1 ? "s" : ""} on line`,
-                            ].filter(Boolean).join(" · ")} already on hand
+                            ].filter(Boolean).join(" · ")} already on hand — subtracted from totals
                           </p>
                         )}
                       </CardContent>
