@@ -155,7 +155,7 @@ function StatRow({
 }) {
   return (
     <div
-      className={`flex items-baseline justify-between py-2.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
+      className={`flex items-baseline justify-between py-1.5 border-b border-border/40 last:border-0 ${highlight ? "text-primary" : ""}`}
     >
       <span className="text-sm text-muted-foreground">{label}</span>
       <span
@@ -5120,40 +5120,27 @@ export default function Home() {
                         What You Need Now
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="px-5 pb-5">
-                      <div className="mb-2">
-                        <p
-                          className="text-5xl font-mono font-bold text-primary"
-                          data-testid="output-batches-needed"
-                        >
-                          {fmtNum(calc.batchesNeeded, 2)}
-                        </p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Batches to mix
-                        </p>
-                      </div>
-                      <Separator className="my-4 opacity-30" />
-                      <div>
-                        <p
-                          className="text-3xl font-mono font-bold"
-                          data-testid="output-trays-needed"
-                        >
-                          {fmtNum(calc.traysNeeded, 0)}
-                        </p>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          Trays needed
-                        </p>
+                    <CardContent className="px-4 pb-4">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-muted/20 rounded-lg p-3 text-center">
+                          <p className="text-3xl font-mono font-bold text-primary tabular-nums" data-testid="output-batches-needed">{fmtNum(calc.batchesNeeded, 2)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Batches to mix</p>
+                        </div>
+                        <div className="bg-muted/20 rounded-lg p-3 text-center">
+                          <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-trays-needed">{fmtNum(calc.traysNeeded, 0)}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">Trays needed</p>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
 
                   <Card className="bg-card/50 border-border/50 shadow-md">
-                    <CardHeader className="pb-2 pt-4 px-5">
+                    <CardHeader className="pb-1 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
                         Run Details
                       </CardTitle>
                     </CardHeader>
-                    <CardContent className="px-5 pb-5">
+                    <CardContent className="px-4 pb-3">
                       <StatRow
                         label="Cases Left to Run"
                         value={fmtNum(calc.casesLeftToRun, 0)}
@@ -5238,56 +5225,46 @@ export default function Home() {
                           Run to Time
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-                          <div>
-                            <label className="text-xs text-muted-foreground block mb-1">Current Time</label>
-                            <p className="font-mono text-lg font-bold">{nowLabel}</p>
-                          </div>
-                          <div>
-                            <label className="text-xs text-muted-foreground block mb-1">Run Until</label>
-                            <input
-                              type="time"
-                              value={runToTime}
-                              onChange={(e) => {
-                                const t = e.target.value;
-                                setRunToTime(t);
-                                const newDs = { ...dayStateRef.current, runToTime: t };
-                                setDayState(newDs);
-                                saveDayState(newDs);
-                                schedulePush(newDs, 0);
-                              }}
-                              className="w-full rounded-md border border-input bg-background px-3 py-1.5 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                            />
-                            <p className="text-xs text-muted-foreground mt-1 font-mono">{to12hr(runToTime)}</p>
-                          </div>
-                          <div>
-                            <label className="text-xs text-muted-foreground block mb-1">Min / Batch</label>
-                            <p className="font-mono text-lg font-bold">{fmtNum(batchMixMinutes, 1)}</p>
-                          </div>
+                      <CardContent className="px-4 pb-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
+                          <input
+                            type="time"
+                            value={runToTime}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setRunToTime(t);
+                              const newDs = { ...dayStateRef.current, runToTime: t };
+                              setDayState(newDs);
+                              saveDayState(newDs);
+                              schedulePush(newDs, 0);
+                            }}
+                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          />
+                          <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(batchMixMinutes, 1)} min/batch</span>
                         </div>
-                        <Separator className="mb-4 opacity-30" />
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                          <div className="bg-muted/30 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold text-amber-400">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-amber-400">
                               {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
                             </p>
-                            <p className="text-xs text-muted-foreground mt-1">Time available</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
                           </div>
-                          <div className="bg-muted/30 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold text-primary">{batchesPossible}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Batches possible</p>
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-primary">{batchesPossible}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Batches possible</p>
                           </div>
                           {calc.perBatch > 0 && (
-                            <div className="bg-muted/30 rounded-lg p-3 text-center">
-                              <p className="text-2xl font-mono font-bold text-emerald-400">{fmtNum(batchesPossible * calc.perBatch, 0)}</p>
-                              <p className="text-xs text-muted-foreground mt-1">Doughballs possible</p>
+                            <div className="bg-muted/30 rounded-lg p-2 text-center">
+                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(batchesPossible * calc.perBatch, 0)}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Doughballs</p>
                             </div>
                           )}
                           {calc.perBatch > 0 && v.pizzasPerCase > 0 && (
-                            <div className="bg-muted/30 rounded-lg p-3 text-center">
-                              <p className="text-2xl font-mono font-bold text-sky-400">{Math.floor(batchesPossible * calc.perBatch / v.pizzasPerCase)}</p>
-                              <p className="text-xs text-muted-foreground mt-1">Cases possible</p>
+                            <div className="bg-muted/30 rounded-lg p-2 text-center">
+                              <p className="text-xl font-mono font-bold text-sky-400">{Math.floor(batchesPossible * calc.perBatch / v.pizzasPerCase)}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Cases possible</p>
                             </div>
                           )}
                         </div>
