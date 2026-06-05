@@ -1129,7 +1129,7 @@ export default function Home() {
 
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
-  const [sauceWeightsOpen, setSauceWeightsOpen] = useState(true);
+  const [sauceWeightsOpen, setSauceWeightsOpen] = useState(false);
 
   // ── Historical PPM benchmark (average of finished runs across all days) ───
   const histBenchmarkPpm = useMemo(() => {
