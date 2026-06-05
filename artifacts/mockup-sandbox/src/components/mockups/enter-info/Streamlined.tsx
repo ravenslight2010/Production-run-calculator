@@ -82,7 +82,7 @@ export function Streamlined() {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_6px_#22c55e]" />
-          <span className="text-sm font-semibold text-zinc-300">Run 1 · 10″ Thin</span>
+          <span className="text-sm font-semibold text-zinc-300">Run 1{die ? ` · ${die}` : ""}</span>
         </div>
         <span className="text-xs text-zinc-500 tabular-nums">08:14 elapsed</span>
       </div>
@@ -92,16 +92,14 @@ export function Streamlined() {
         <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-3">Target</p>
 
         {/* Cases needed */}
-        <div className="mb-3">
+        <div>
           <label className="text-xs text-zinc-400 font-medium block mb-1.5">Cases Needed</label>
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={cases}
-              onChange={e => setCases(Number(e.target.value))}
-              className="w-full rounded-xl bg-zinc-800 border border-zinc-700 text-white text-base font-bold px-3 py-2 focus:outline-none focus:border-indigo-500 tabular-nums"
-            />
-          </div>
+          <input
+            type="number"
+            value={cases}
+            onChange={e => setCases(Number(e.target.value))}
+            className="w-full rounded-xl bg-zinc-800 border border-zinc-700 text-white text-base font-bold px-3 py-2 focus:outline-none focus:border-indigo-500 tabular-nums"
+          />
           {/* Overall progress bar */}
           <div className="mt-2.5 space-y-1">
             <div className="flex justify-between text-[10px] font-semibold text-zinc-500">
@@ -117,26 +115,6 @@ export function Streamlined() {
                 }}
               />
             </div>
-          </div>
-        </div>
-
-        {/* Die type */}
-        <div>
-          <label className="text-xs text-zinc-400 font-medium block mb-1.5">Die Type</label>
-          <div className="flex flex-wrap gap-1.5">
-            {DIE_TYPES.map(d => (
-              <button
-                key={d}
-                onClick={() => setDie(d)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-                  die === d
-                    ? "bg-indigo-600 border-indigo-500 text-white"
-                    : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-                }`}
-              >
-                {d}
-              </button>
-            ))}
           </div>
         </div>
       </div>
@@ -189,6 +167,26 @@ export function Streamlined() {
 
         {settingsOpen && (
           <div className="px-4 pb-4 space-y-3 border-t border-zinc-800/60 pt-3">
+            {/* Die type */}
+            <div>
+              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1.5">Die Type</label>
+              <div className="flex flex-wrap gap-1.5">
+                {DIE_TYPES.map(d => (
+                  <button
+                    key={d}
+                    onClick={() => setDie(d)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${
+                      die === d
+                        ? "bg-indigo-600 border-indigo-500 text-white"
+                        : "bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-zinc-800" />
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1">Crusts / Cycle</label>
