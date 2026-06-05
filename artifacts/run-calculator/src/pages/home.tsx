@@ -1,7 +1,89 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
+import {
+  formSchema,
+  type FormValues,
+  type RecipeRow,
+  type DoughRecipePreset,
+  type Stoppage,
+  type RunMeta,
+  type DayState,
+  type SyncPayload,
+  type HistoryDay,
+  type RunTemplate,
+  DEFAULT_VALUES,
+  CRUST_FIELDS,
+  PROGRESS_FIELDS,
+  DAY_KEY,
+  STOP_REASONS_KEY,
+  SUPERVISOR_PIN_KEY,
+  DEFAULT_STOP_REASONS,
+  DEFAULT_SUPERVISOR_PIN,
+  DEFAULT_PEP_TYPES,
+  DEFAULT_DIE_TYPES,
+  DEFAULT_INGREDIENT_TYPES,
+  DEFAULT_CHEESE_INGREDIENTS,
+  DEFAULT_MIX_INGREDIENTS,
+  DEFAULT_DOUGH_INGREDIENTS,
+  DEFAULT_DOUGH_RECIPE_NAMES,
+  DEFAULT_FRONTLINE_INGREDIENTS,
+  DEFAULT_FRONTLINE_RECIPE_NAMES,
+  INGREDIENT_TYPES_KEY,
+  PEP_TYPES_KEY,
+  DIE_TYPES_KEY,
+  CHEESE_INGREDIENTS_KEY,
+  MIX_INGREDIENTS_KEY,
+  DOUGH_INGREDIENTS_KEY,
+  DOUGH_RECIPE_NAMES_KEY,
+  FRONTLINE_INGREDIENTS_KEY,
+  FRONTLINE_RECIPE_NAMES_KEY,
+  CHEESE_RECIPE_NAMES_KEY,
+  MAX_RUNS,
+  MAX_TEMPLATES,
+  RUN_KEY,
+  BRANDS_KEY,
+  HISTORY_KEY,
+  MAX_HISTORY_DAYS,
+} from "../types";
+import {
+  fmtElapsed,
+  fmtTime,
+  fmtNum,
+  fmtComma,
+  fmtClock,
+  computeSummaryStats,
+  sauceBarrelBreakdown,
+  genId,
+  todayStr,
+  runLabel,
+} from "../utils";
+import {
+  freshDayState,
+  loadDayState,
+  saveDayState,
+  loadHistory,
+  archiveDayToHistory,
+  loadRunValues,
+  saveRunValues,
+  loadTemplates,
+  saveTemplates,
+  loadProfile,
+  saveProfile,
+  loadBrandFlavors,
+  saveBrandFlavors,
+  loadList,
+  saveList,
+  loadDoughRecipePresets,
+  saveDoughRecipePresets,
+  loadFrontlineRecipePresets,
+  saveFrontlineRecipePresets,
+  loadCheeseRecipePresets,
+  saveCheeseRecipePresets,
+} from "../storage";
+import { useClock } from "../hooks/useClock";
+import { useAutoTrack } from "../hooks/useAutoTrack";
+import { useNotifications } from "../hooks/useNotifications";
 import {
   Factory,
   Layers,
@@ -64,183 +146,6 @@ import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const formSchema = z.object({
-  // Line settings
-  casesNeeded: z.coerce.number().min(0).default(384),
-  crustsPerCycle: z.coerce.number().min(1).default(5),
-  cycleSpeed: z.coerce.number().min(0.1).default(7.8),
-  speedAdjustment: z.coerce.number().min(0.01).default(1.0),
-  approxLineSpeed: z.coerce.number().min(0).default(39),
-  freezerTime: z.coerce.number().min(0).default(15),
-  pizzasPerCase: z.coerce.number().min(1).default(12),
-  casesPerSkid: z.coerce.number().min(1).default(48),
-  casesPerLayer: z.coerce.number().min(1).default(6),
-  doughballsPerTray: z.coerce.number().min(1).default(24),
-  crustsPerStack: z.coerce.number().min(1).default(24),
-  doughBatchYield: z.coerce.number().min(1).default(620),
-  crustsPerCase: z.coerce.number().min(1).default(12),
-  // Progress tracking
-  skidsCompleted: z.coerce.number().min(0).default(5),
-  casesOnCurrentSkid: z.coerce.number().min(0).default(6),
-  traysOnLine: z.coerce.number().min(0).default(43),
-  batchesReady: z.coerce.number().min(0).default(0),
-  startingTrays: z.coerce.number().min(0).default(0),
-  startingBatches: z.coerce.number().min(0).default(0),
-  // Frontline weights (oz per pizza application rate)
-  sauceOzPerPizza: z.coerce.number().min(0).default(4),
-  sauceBarrelLbs: z.coerce.number().min(0.1).default(450),
-  app1OzPerPizza: z.coerce.number().min(0).default(0),
-  app1BatchLbs: z.coerce.number().min(0.1).default(30),
-  app2OzPerPizza: z.coerce.number().min(0).default(4),
-  app2BatchLbs: z.coerce.number().min(0.1).default(55),
-  app3OzPerPizza: z.coerce.number().min(0).default(0),
-  app3BatchLbs: z.coerce.number().min(0.1).default(45),
-  app4OzPerPizza: z.coerce.number().min(0).default(4),
-  app4BatchLbs: z.coerce.number().min(0.1).default(55),
-  pep1Sticks: z.coerce.number().min(0).default(0),
-  pep1OzPerPizza: z.coerce.number().min(0).default(0),
-  pep1BatchLbs: z.coerce.number().min(0.1).default(25),
-  pep2Sticks: z.coerce.number().min(0).default(0),
-  pep2OzPerPizza: z.coerce.number().min(0).default(0),
-  pep2BatchLbs: z.coerce.number().min(0.1).default(25),
-  // Applicator ingredient labels
-  app1Type: z.string().default(""),
-  app2Type: z.string().default(""),
-  app3Type: z.string().default(""),
-  app4Type: z.string().default(""),
-  pep1Type: z.string().default(""),
-  pep2Type: z.string().default(""),
-  dieType: z.string().default(""),
-  // Dough recipe
-  doughRecipeName: z.string().default(""),
-  targetDoughballWeight: z.coerce.number().min(0).default(0),
-  doughRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-  // Per-applicator cheese blend recipe rows
-  app1CheeseRecipeName: z.string().default(""),
-  app1CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-  app2CheeseRecipeName: z.string().default(""),
-  app2CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-  app3CheeseRecipeName: z.string().default(""),
-  app3CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-  app4CheeseRecipeName: z.string().default(""),
-  app4CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-  frontlineRecipeName: z.string().default(""),
-  frontlineRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
-});
-
-type FormValues = z.infer<typeof formSchema>;
-
-function fmtElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-function fmtTime(totalSec: number): string {
-  if (!isFinite(totalSec) || totalSec < 0) return "—";
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = Math.round(totalSec % 60);
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
-
-function fmtNum(n: number, dec = 2): string {
-  const num = Number(n);
-  if (!isFinite(num)) return "—";
-  return num.toFixed(dec);
-}
-
-function fmtComma(n: number, dec = 0): string {
-  const num = Number(n);
-  if (!isFinite(num)) return "—";
-  return num.toLocaleString(undefined, { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-function fmtClock(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function computeSummaryStats(vals: FormValues) {
-  const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
-  const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
-  const frontlineRecipeLbs = (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : vals.sauceBarrelLbs;
-  const sauceBatches =
-    sauceEffBarrel > 0
-      ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (sauceEffBarrel * 16)
-      : 0;
-  const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
-  const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
-  const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : vals.app1BatchLbs;
-  const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
-  const app2RecipeLbs = (vals.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app2Lbs = (totalPizzas * vals.app2OzPerPizza) / 16 + 20;
-  const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
-  const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : vals.app2BatchLbs;
-  const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
-  const app3RecipeLbs = (vals.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app3Lbs = (totalPizzas * vals.app3OzPerPizza) / 16 + 20;
-  const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
-  const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : vals.app3BatchLbs;
-  const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
-  const app4RecipeLbs = (vals.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app4Lbs = (totalPizzas * vals.app4OzPerPizza) / 16 + 20;
-  const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
-  const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
-  const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-  const pep1Lbs = (totalPizzas * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
-  const pep1Batches =
-    !DEFAULT_PEP_TYPES.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
-      ? pep1Lbs / vals.pep1BatchLbs
-      : 0;
-  const pep2Lbs = (totalPizzas * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
-  const pep2Batches =
-    !DEFAULT_PEP_TYPES.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
-      ? pep2Lbs / vals.pep2BatchLbs
-      : 0;
-  const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
-  const estimatedTimeSec = ppm > 0 ? (totalPizzas * 60) / ppm : 0;
-  return {
-    totalCases: vals.casesNeeded,
-    totalPizzas,
-    estimatedTimeSec,
-    sauceBatches,
-    sauceEffBarrel,
-    app1Lbs, app1Batches, app1Type: vals.app1Type,
-    app2Lbs, app2Batches, app2Type: vals.app2Type,
-    app3Lbs, app3Batches, app3Type: vals.app3Type,
-    app4Lbs, app4Batches, app4Type: vals.app4Type,
-    pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
-    pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
-  };
-}
-
-/** When a sauce batch weighs less than 450 lbs, multiple batches fit in one barrel. */
-function sauceBarrelBreakdown(sauceBatches: number, effBarrelLbs: number): { batchesPerBarrel: number; totalBarrels: number } | null {
-  if (effBarrelLbs <= 0 || effBarrelLbs >= 450 || sauceBatches <= 0) return null;
-  const batchesPerBarrel = Math.floor(450 / effBarrelLbs);
-  if (batchesPerBarrel < 2) return null;
-  const totalBarrels = Math.ceil(sauceBatches / batchesPerBarrel);
-  return { batchesPerBarrel, totalBarrels };
-}
-
 function StatRow({
   label,
   value,
@@ -266,8 +171,6 @@ function StatRow({
     </div>
   );
 }
-
-type RecipeRow = { ingredient: string; lbs: number };
 
 function IngredientSelect({
   value,
@@ -1254,328 +1157,6 @@ function StepperField({
   );
 }
 
-const DAY_KEY = "run-calc-day";
-const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
-const DEFAULT_INGREDIENT_TYPES = [
-  "Cheese", "Pepperoni", "Sausage",
-  "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
-];
-const PEP_TYPES_KEY = "run-calc-pep-types";
-const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
-const DIE_TYPES_KEY = "run-calc-die-types";
-const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
-const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
-const DEFAULT_CHEESE_INGREDIENTS = [
-  "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
-];
-const MIX_INGREDIENTS_KEY = "run-calc-mix-ingredients";
-const DEFAULT_MIX_INGREDIENTS: string[] = [];
-const DOUGH_INGREDIENTS_KEY = "run-calc-dough-ingredients";
-const DEFAULT_DOUGH_INGREDIENTS = [
-  "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
-];
-const DOUGH_RECIPE_NAMES_KEY = "run-calc-dough-recipe-names";
-const DEFAULT_DOUGH_RECIPE_NAMES: string[] = [];
-const DOUGH_RECIPE_PRESETS_KEY = "run-calc-dough-recipe-presets";
-const FRONTLINE_INGREDIENTS_KEY = "run-calc-frontline-ingredients";
-const DEFAULT_FRONTLINE_INGREDIENTS = ["Flour", "Water", "Salt", "Sugar", "Oil", "Yeast"];
-const FRONTLINE_RECIPE_NAMES_KEY = "run-calc-frontline-recipe-names";
-const DEFAULT_FRONTLINE_RECIPE_NAMES: string[] = [];
-const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";
-const CHEESE_RECIPE_NAMES_KEY = "run-calc-cheese-recipe-names";
-const CHEESE_RECIPE_PRESETS_KEY = "run-calc-cheese-recipe-presets";
-
-type DoughRecipePreset = { rows: RecipeRow[] };
-function loadDoughRecipePresets(): Record<string, DoughRecipePreset> {
-  try { return JSON.parse(localStorage.getItem(DOUGH_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, DoughRecipePreset>; } catch { return {}; }
-}
-function saveDoughRecipePresets(p: Record<string, DoughRecipePreset>): void {
-  try { localStorage.setItem(DOUGH_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
-}
-function loadFrontlineRecipePresets(): Record<string, RecipeRow[]> {
-  try { return JSON.parse(localStorage.getItem(FRONTLINE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
-}
-function saveFrontlineRecipePresets(p: Record<string, RecipeRow[]>): void {
-  try { localStorage.setItem(FRONTLINE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
-}
-function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
-  try { return JSON.parse(localStorage.getItem(CHEESE_RECIPE_PRESETS_KEY) ?? "{}") as Record<string, RecipeRow[]>; } catch { return {}; }
-}
-function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
-  try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
-}
-const RUN_KEY = (id: string) => `run-calc-run-${id}`;
-const PROFILE_KEY = (brand: string, flavor: string) =>
-  `run-calc-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-const CRUST_PROFILE_KEY = (brand: string, flavor: string) =>
-  `run-calc-crust-profile-${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
-const CRUST_FIELDS = ["crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray", "approxLineSpeed", "crustsPerStack", "crustsPerCase"] as const;
-type CrustField = (typeof CRUST_FIELDS)[number];
-const PROGRESS_FIELDS = ["skidsCompleted", "casesOnCurrentSkid", "traysOnLine", "batchesReady"] as const;
-const BRANDS_KEY = "run-calc-brands";
-const FLAVORS_KEY = "run-calc-flavors"; // legacy – kept so old data is not lost
-const BRAND_FLAVORS_KEY = "run-calc-brand-flavors";
-const STOP_REASONS_KEY = "run-calc-stop-reasons";
-const DEFAULT_STOP_REASONS = ["Equipment jam", "Changeover", "Break", "Maintenance", "Quality hold", "Staffing", "Waiting on dough"];
-const SUPERVISOR_PIN_KEY = "run-calc-supervisor-pin";
-const DEFAULT_SUPERVISOR_PIN = "1234";
-const MAX_RUNS = 30;
-
-type Stoppage = { id: string; reason: string; startedAt: number; endedAt?: number; notes?: string; type?: "stop" | "pause" | "manual" };
-type RunMeta = { id: string; brand: string; flavor: string; startedAt?: number; pausedAt?: number; endedAt?: number; subTab?: "dough" | "crusts"; notes?: string; actualCases?: number; wasteLbs?: number; gapType?: "switchover" | "break"; gapNote?: string; stoppages?: Stoppage[] };
-type DayState = { runs: RunMeta[]; currentIndex: number; date?: string; shiftNotes?: string; runToTime?: string };
-type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string };
-  runValues: Record<string, FormValues>;
-  brands?: string[];
-  brandFlavors?: Record<string, string[]>;
-  ingredientTypes?: string[];
-  templates?: RunTemplate[];
-  history?: HistoryDay[];
-  pepTypes?: string[];
-  dieTypes?: string[];
-  cheeseIngredients?: string[];
-  doughIngredients?: string[];
-  frontlineIngredients?: string[];
-  mixIngredients?: string[];
-  doughRecipeNames?: string[];
-  doughRecipePresets?: Record<string, DoughRecipePreset>;
-  frontlineRecipeNames?: string[];
-  frontlineRecipePresets?: Record<string, RecipeRow[]>;
-  cheeseRecipeNames?: string[];
-  cheeseRecipePresets?: Record<string, RecipeRow[]>;
-  brandProfiles?: Record<string, Partial<FormValues>>;
-  crustProfiles?: Record<string, Partial<FormValues>>;
-};
-
-type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
-const HISTORY_KEY = "run-calc-history";
-const MAX_HISTORY_DAYS = 14;
-
-type RunTemplate = { id: string; name: string; values: FormValues; brand?: string; flavor?: string; createdAt: string };
-const TEMPLATES_KEY = "run-calc-templates";
-const MAX_TEMPLATES = 20;
-
-function loadTemplates(): RunTemplate[] {
-  try {
-    const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) return JSON.parse(raw) as RunTemplate[];
-  } catch {}
-  return [];
-}
-function saveTemplates(t: RunTemplate[]): void {
-  try { localStorage.setItem(TEMPLATES_KEY, JSON.stringify(t)); } catch {}
-}
-
-function runLabel(r: RunMeta) {
-  if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
-  if (r.brand) return r.brand;
-  if (r.flavor) return r.flavor;
-  return "Unnamed Run";
-}
-
-function loadList(key: string, fallback: string[]): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return JSON.parse(raw) as string[];
-  } catch {}
-  return fallback;
-}
-
-function saveList(key: string, list: string[]): void {
-  try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
-}
-
-function loadBrandFlavors(): Record<string, string[]> {
-  try {
-    const raw = localStorage.getItem(BRAND_FLAVORS_KEY);
-    if (raw) return JSON.parse(raw) as Record<string, string[]>;
-    // Migrate: seed every existing brand with the old global flavors list
-    const oldFlavors = loadList(FLAVORS_KEY, []);
-    if (oldFlavors.length > 0) {
-      const brands = loadList(BRANDS_KEY, []);
-      const seeded: Record<string, string[]> = {};
-      brands.forEach(b => { seeded[b] = [...oldFlavors]; });
-      return seeded;
-    }
-  } catch {}
-  return {};
-}
-
-function saveBrandFlavors(bf: Record<string, string[]>): void {
-  try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
-}
-
-function loadProfile(brand: string, flavor: string): FormValues | null {
-  try {
-    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
-    if (!raw) return null;
-    const doughVals: Partial<FormValues> = JSON.parse(raw);
-    // Load crust settings from their own independent key
-    let crustVals: Partial<FormValues> = {};
-    try {
-      const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
-      if (crustRaw) crustVals = JSON.parse(crustRaw);
-    } catch {}
-    return { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
-  } catch {}
-  return null;
-}
-
-function saveProfile(brand: string, flavor: string, values: FormValues): void {
-  if (!brand && !flavor) return;
-  // Save dough fields (everything except crust-specific and progress fields)
-  const doughVals = { ...values } as Record<string, unknown>;
-  CRUST_FIELDS.forEach((f) => delete doughVals[f]);
-  PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
-  try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(doughVals)); } catch {}
-  // Save crust fields to their own independent key (also strip progress)
-  const crustVals: Partial<Record<CrustField, unknown>> = {};
-  CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
-  try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), JSON.stringify(crustVals)); } catch {}
-}
-
-const DEFAULT_VALUES: FormValues = {
-  // Line settings — all blank/zero until the user fills them in
-  casesNeeded: 0,
-  crustsPerCycle: 0,
-  cycleSpeed: 0,
-  speedAdjustment: 1.0,
-  approxLineSpeed: 0,
-  freezerTime: 0,
-  pizzasPerCase: 0,
-  casesPerSkid: 0,
-  casesPerLayer: 0,
-  doughballsPerTray: 0,
-  crustsPerStack: 0,
-  doughBatchYield: 0,
-  crustsPerCase: 0,
-  // Current progress — zero
-  skidsCompleted: 0,
-  casesOnCurrentSkid: 0,
-  traysOnLine: 0,
-  batchesReady: 0,
-  startingTrays: 0,
-  startingBatches: 0,
-  // Sauce & applicators — zero
-  sauceOzPerPizza: 0,
-  sauceBarrelLbs: 0,
-  app1OzPerPizza: 0,
-  app1BatchLbs: 0,
-  app2OzPerPizza: 0,
-  app2BatchLbs: 0,
-  app3OzPerPizza: 0,
-  app3BatchLbs: 0,
-  app4OzPerPizza: 0,
-  app4BatchLbs: 0,
-  pep1Sticks: 0,
-  pep1OzPerPizza: 0,
-  pep1BatchLbs: 25,
-  pep2Sticks: 0,
-  pep2OzPerPizza: 0,
-  pep2BatchLbs: 25,
-  app1Type: "",
-  app2Type: "",
-  app3Type: "",
-  app4Type: "",
-  pep1Type: "",
-  pep2Type: "",
-  dieType: "",
-  doughRecipeName: "",
-  targetDoughballWeight: 0,
-  doughRecipe: [],
-  app1CheeseRecipeName: "",
-  app1CheeseRecipe: [],
-  app2CheeseRecipeName: "",
-  app2CheeseRecipe: [],
-  app3CheeseRecipeName: "",
-  app3CheeseRecipe: [],
-  app4CheeseRecipeName: "",
-  app4CheeseRecipe: [],
-  frontlineRecipeName: "",
-  frontlineRecipe: [],
-};
-
-function genId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function freshDayState(): DayState {
-  return { runs: [{ id: genId(), brand: "", flavor: "" }], currentIndex: 0, date: todayStr() };
-}
-
-function loadDayState(): DayState {
-  try {
-    const raw = localStorage.getItem(DAY_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as DayState;
-      // Reset if stored date is missing or doesn't match today
-      if (!parsed.date || parsed.date !== todayStr()) {
-        return freshDayState();
-      }
-      // Migrate old shape { id, label } → { id, brand, flavor }
-      // Preserve ALL RunMeta fields (stoppages, notes, actualCases, etc.)
-      const runs = parsed.runs.map((r: any) => ({
-        ...r,
-        brand: r.brand ?? (r.label ?? ""),
-        flavor: r.flavor ?? "",
-      }));
-      return { ...parsed, runs, date: parsed.date ?? todayStr() };
-    }
-  } catch {}
-  return freshDayState();
-}
-
-function saveDayState(ds: DayState): void {
-  try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...ds, date: todayStr() })); } catch {}
-}
-
-function loadHistory(): HistoryDay[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY);
-    if (raw) return JSON.parse(raw) as HistoryDay[];
-  } catch {}
-  return [];
-}
-
-function archiveDayToHistory(ds: DayState, date: string): void {
-  try {
-    const history = loadHistory().filter(h => h.date !== date);
-    const runValues: Record<string, FormValues> = {};
-    for (const run of ds.runs) {
-      const raw = localStorage.getItem(RUN_KEY(run.id));
-      if (raw) runValues[run.id] = JSON.parse(raw);
-    }
-    const entry: HistoryDay = { date, runs: ds.runs, runValues };
-    const trimmed = [entry, ...history].slice(0, MAX_HISTORY_DAYS);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed));
-  } catch {}
-}
-
-function loadRunValues(id: string): FormValues {
-  try {
-    const raw = localStorage.getItem(RUN_KEY(id));
-    if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
-    // Migrate legacy single-run data to this run slot
-    const legacy = localStorage.getItem("run-calc-v1");
-    if (legacy) {
-      const vals = { ...DEFAULT_VALUES, ...JSON.parse(legacy) };
-      localStorage.setItem(RUN_KEY(id), JSON.stringify(vals));
-      return vals;
-    }
-  } catch {}
-  return DEFAULT_VALUES;
-}
-
-function saveRunValues(id: string, values: FormValues): void {
-  try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
-}
-
 function NotesTextarea({ initialValue, onCommit, className }: { initialValue: string; onCommit: (v: string) => void; className?: string }) {
   const [local, setLocal] = useState(initialValue);
   const committed = useRef(initialValue);
@@ -1843,7 +1424,6 @@ export default function Home() {
 
   const [activeTab, setActiveTab] = useState("info");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
-  const [nowTime, setNowTime] = useState(() => new Date());
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
   // Brand/flavor picker state
@@ -1892,11 +1472,6 @@ export default function Home() {
     return run?.stoppages?.find(s => !s.endedAt)?.id ?? null;
   });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
-  // ── Auto-track progress ───────────────────────────────────────────────────
-  const [autoTrackProgress, setAutoTrackProgress] = useState(true);
-  const autoSuppressUntilRef = useRef<number>(0);
-  const lastAutoMinBucketRef = useRef<number>(-1);
-
   const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(STOP_REASONS_KEY) ?? "null") ?? DEFAULT_STOP_REASONS; }
     catch { return DEFAULT_STOP_REASONS; }
@@ -1940,13 +1515,6 @@ export default function Home() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
-  // ── End-of-run notification ────────────────────────────────────────────────
-  const notifiedRunRef = useRef<string | null>(null);
-  const batchNotifRef = useRef<string>("");
-  const runCompleteNotifRef = useRef<string>("");
-  const freezerDoneNotifRef = useRef<string>("");
-  const [showBatchDue, setShowBatchDue] = useState(false);
-  const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
   const [showReorderDialog, setShowReorderDialog] = useState(false);
@@ -2674,6 +2242,8 @@ export default function Home() {
     : currentRun?.startedAt ? "running"
     : "pending";
 
+  const nowTime = useClock(runStatus);
+
   const liveFreezerMin = (() => {
     if (!currentRun?.startedAt) return 0;
     if (currentRun.endedAt) return Number(v.freezerTime);
@@ -2687,33 +2257,6 @@ export default function Home() {
     document.documentElement.classList.add("dark");
   }, []);
 
-  // Clock tick — 1 s while a run is live, 10 s otherwise; paused entirely when
-  // the tab is hidden so the device isn't woken every second with screen off.
-  useEffect(() => {
-    const delay = (runStatus === "running" || runStatus === "paused") ? 1_000 : 10_000;
-    let id: ReturnType<typeof setInterval> | null = null;
-
-    const start = () => {
-      if (id) clearInterval(id);
-      id = document.hidden ? null : setInterval(() => setNowTime(new Date()), delay);
-    };
-
-    const onVisibility = () => {
-      if (document.hidden) {
-        if (id) { clearInterval(id); id = null; }
-      } else {
-        setNowTime(new Date()); // snap clock forward immediately
-        start();
-      }
-    };
-
-    start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      if (id) clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [runStatus]);
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
   useEffect(() => {
@@ -3056,91 +2599,13 @@ export default function Home() {
     return null;
   }, [currentRun?.brand, currentRun?.flavor]);
 
-  // ── 15-minute end-of-run notification (placed after calc is defined) ───────
-  useEffect(() => {
-    if (!currentRun?.startedAt || currentRun?.endedAt) return;
-    const runId = currentRun.id;
-    if (notifiedRunRef.current === runId) return;
-    if (calc.adjustedTimeSec > 0 && calc.adjustedTimeSec <= 900) {
-      if ("Notification" in window) {
-        const fire = () => {
-          notifiedRunRef.current = runId;
-          new Notification("⏰ 15 minutes left", {
-            body: `${runLabel(currentRun)} — wrap up and prepare for end of run.`,
-            icon: "/icons/icon-192.png",
-            tag: `run-end-${runId}`,
-          });
-        };
-        if (Notification.permission === "granted") {
-          fire();
-        } else if (Notification.permission === "default") {
-          Notification.requestPermission().then((p) => { if (p === "granted") fire(); });
-        }
-      }
-    }
-  }, [currentRun?.id, currentRun?.startedAt, currentRun?.endedAt, calc.adjustedTimeSec]);
-
-  // ── Batch cycle alert ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (runStatus !== "running" || !currentRun?.startedAt || calc.timePerBatchSec <= 0) return;
-    const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
-    const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
-    if (batchNum < 1) return;
-    const key = `${currentRun.id}-${batchNum}`;
-    if (batchNotifRef.current === key) return;
-    batchNotifRef.current = key;
-    navigator.vibrate?.([100, 50, 100]);
-    setShowBatchDue(true);
-    if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
-    batchDismissRef.current = setTimeout(() => setShowBatchDue(false), 10000);
-    if (Notification.permission === "granted") {
-      new Notification("🍕 Start next dough batch", {
-        body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
-        icon: "/icons/icon-192.png",
-        tag: `batch-${currentRun.id}-${batchNum}`,
-      });
-    } else if (Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-    return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime]);
-
-  // ── Run time complete alert ────────────────────────────────────────────────
-  useEffect(() => {
-    if (runStatus !== "running" || !currentRun?.startedAt) return;
-    if (calc.adjustedTimeSec > 0) return;
-    const runId = currentRun.id;
-    if (runCompleteNotifRef.current === runId) return;
-    runCompleteNotifRef.current = runId;
-    navigator.vibrate?.([300, 100, 300, 100, 300]);
-    if (Notification.permission === "granted") {
-      new Notification("✅ Run time complete", {
-        body: `${runLabel(currentRun)} — time's up, end the run.`,
-        icon: "/icons/icon-192.png",
-        tag: `run-complete-${runId}`,
-      });
-    }
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec]);
-
-  // ── Freezer drain complete alert ───────────────────────────────────────────
-  useEffect(() => {
-    if (runStatus !== "ended" || !currentRun?.endedAt) return;
-    const freezerMs = Number(v.freezerTime) * 60000;
-    if (freezerMs <= 0) return;
-    const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
-    if (remainMs > 0) return;
-    const runId = currentRun.id;
-    if (freezerDoneNotifRef.current === runId) return;
-    freezerDoneNotifRef.current = runId;
-    navigator.vibrate?.([200, 100, 200]);
-    if (Notification.permission === "granted") {
-      new Notification("❄️ Freezer empty", {
-        body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
-        icon: "/icons/icon-192.png",
-        tag: `freezer-done-${runId}`,
-      });
-    }
-  }, [runStatus, currentRun?.id, currentRun?.endedAt, v.freezerTime, nowTime]);
+  const { showBatchDue, setShowBatchDue } = useNotifications({
+    runStatus,
+    nowTime,
+    currentRun,
+    calc,
+    v,
+  });
 
   // ── Screen casting views (early returns) ──────────────────────────────────
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
@@ -3148,29 +2613,15 @@ export default function Home() {
   const elapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
-  // Expected cases/trays/batches based on elapsed time — used for auto-tracking
-  const autoTrackSuggestion = useMemo(() => {
-    const ok = (runStatus === "running" || runStatus === "paused") && calc.ppm > 0 && v.casesPerSkid > 0 && v.pizzasPerCase > 0;
-    if (!ok) return null;
-    const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
-    const elapsedMin = elapsedBatchSec / 60;
-    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
-    const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
-    // Tray countdown: startingTrays - trays consumed so far
-    const trays = v.startingTrays > 0 && calc.perTray > 0
-      ? Math.max(0, v.startingTrays - Math.floor((elapsedMin * calc.ppm) / calc.perTray))
-      : null;
-    // Batch countdown: startingBatches - batches consumed so far
-    const batches = v.startingBatches > 0 && calc.perBatch > 0
-      ? Math.max(0, v.startingBatches - Math.floor((elapsedMin * calc.ppm) / calc.perBatch))
-      : null;
-    return {
-      skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
-      casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
-      trays,
-      batches,
-    };
-  }, [runStatus, calc.ppm, calc.perTray, calc.perBatch, v.casesPerSkid, v.pizzasPerCase, v.casesNeeded, v.freezerTime, v.startingTrays, v.startingBatches, elapsedBatchSec]);
+  // ── Auto-track progress ───────────────────────────────────────────────────
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, lastAutoMinBucketRef } = useAutoTrack({
+    runStatus,
+    nowTime,
+    elapsedBatchSec,
+    calc,
+    v,
+    form,
+  });
 
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
   const secUntilNextBatch = calc.timePerBatchSec > 0
@@ -3180,20 +2631,6 @@ export default function Home() {
     ? Math.ceil(calc.totalTimeSec / calc.timePerBatchSec)
     : 0;
 
-  // ── Auto-track: apply expected skids/cases every 5 min while running ────────
-  useEffect(() => {
-    if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
-    if (Date.now() < autoSuppressUntilRef.current) return;
-    // Fire once per 5-minute bucket
-    const bucket = Math.floor(nowTime.getTime() / (5 * 60 * 1000));
-    if (bucket === lastAutoMinBucketRef.current) return;
-    lastAutoMinBucketRef.current = bucket;
-    form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
-    form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
-    if (autoTrackSuggestion.trays !== null) form.setValue("traysOnLine", autoTrackSuggestion.trays, { shouldDirty: true });
-    if (autoTrackSuggestion.batches !== null) form.setValue("batchesReady", autoTrackSuggestion.batches, { shouldDirty: true });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nowTime]);
 
   if (screenMode === "dashboard") {
     const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
