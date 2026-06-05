@@ -1418,7 +1418,7 @@ export default function Home() {
   const { fields: doughFields, append: appendDough, remove: removeDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
-  const [activeTab, setActiveTab] = useState("info");
+  const [activeTab, setActiveTab] = useState("dough");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -4263,27 +4263,7 @@ export default function Home() {
         <Form {...form}>
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
-              <TabsList className="grid grid-cols-4 w-full mb-4 print:hidden">
-                <TabsTrigger value="info" data-testid="tab-info" className="flex items-center gap-1 px-1 sm:px-3">
-                  <ClipboardList className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Enter Info</span>
-                </TabsTrigger>
-                <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
-                  <Layers className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Dough/Crusts</span>
-                </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex items-center gap-1 px-1 sm:px-3">
-                  <Droplets className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Frontline</span>
-                </TabsTrigger>
-                <TabsTrigger value="summary" data-testid="tab-summary" className="flex items-center gap-1 px-1 sm:px-3">
-                  <BarChart2 className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Summary</span>
-                </TabsTrigger>
-              </TabsList>
-
-              {/* ─── ENTER INFO ─── */}
-              <TabsContent value="info">
+              {/* ─── ALWAYS VISIBLE: status banners + line settings + progress ─── */}
                 {/* Ended-run banner */}
                 {currentRun?.endedAt && (() => {
                   const freezerMs = Number(v.freezerTime) * 60000;
@@ -4406,8 +4386,8 @@ export default function Home() {
                   </div>
                 )}
 
-                <div className="space-y-4">
-                  <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden">
+                {isSupervisor && (
+                <details open className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                         <Settings className="w-3.5 h-3.5" />
@@ -4601,9 +4581,10 @@ export default function Home() {
                       })()}
                     </fieldset>
                     </div>
-                  </details>
+                </details>
+                )}
 
-                  <Card className="bg-card/50 border-border/50 shadow-md">
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-2 pt-4 px-5">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -4980,8 +4961,20 @@ export default function Home() {
                       </div>
                     );
                   })()}
-                </div>
-              </TabsContent>
+              <TabsList className="grid grid-cols-3 w-full mb-4 print:hidden">
+                <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
+                  <Layers className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Dough/Crusts</span>
+                </TabsTrigger>
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex items-center gap-1 px-1 sm:px-3">
+                  <Droplets className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Frontline</span>
+                </TabsTrigger>
+                <TabsTrigger value="summary" data-testid="tab-summary" className="flex items-center gap-1 px-1 sm:px-3">
+                  <BarChart2 className="w-4 h-4 shrink-0" />
+                  <span className="hidden sm:inline truncate">Summary</span>
+                </TabsTrigger>
+              </TabsList>
 
               {/* ─── DOUGH ─── */}
               <TabsContent value="dough">
