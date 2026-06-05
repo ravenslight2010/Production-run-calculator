@@ -5525,43 +5525,6 @@ export default function Home() {
                         testId="output-sauce-batches"
                         highlight={calc.sauceBatches > 0}
                       />
-                      <StatRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
-                        testId="output-app1-batches"
-                        highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
-                        testId="output-app2-batches"
-                        highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                        value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
-                        testId="output-app3-batches"
-                        highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                        value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
-                        testId="output-app4-batches"
-                        highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
-                      />
-                      <Separator className="my-3 opacity-30" />
-                      <StatRow
-                        label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
-                        testId="output-pep1-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
-                      />
-                      <StatRow
-                        label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
-                        testId="output-pep2-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
-                      />
                       {v.frontlineRecipeName.trim() && (
                         <FrontlineRecipeCard
                           embedded
@@ -5587,6 +5550,12 @@ export default function Home() {
                           }}
                         />
                       )}
+                      <StatRow
+                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                        value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
+                        testId="output-app1-batches"
+                        highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
+                      />
                       {v.app1Type.trim().toLowerCase() === "cheese" && (
                         <CheeseRecipeCard
                           embedded
@@ -5615,6 +5584,29 @@ export default function Home() {
                           }}
                         />
                       )}
+                      {v.app1Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app1Type || "Applicator 1"}
+                          totalRunLbs={calc.app1Lbs}
+                          fields={cheese1Fields}
+                          recipe={v.app1CheeseRecipe ?? []}
+                          fieldPrefix="app1CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese1}
+                        />
+                      )}
+                      <StatRow
+                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                        value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
+                        testId="output-app2-batches"
+                        highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
+                      />
                       {v.app2Type.trim().toLowerCase() === "cheese" && (
                         <CheeseRecipeCard
                           embedded
@@ -5643,6 +5635,29 @@ export default function Home() {
                           }}
                         />
                       )}
+                      {v.app2Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app2Type || "Applicator 2"}
+                          totalRunLbs={calc.app2Lbs}
+                          fields={cheese2Fields}
+                          recipe={v.app2CheeseRecipe ?? []}
+                          fieldPrefix="app2CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese2}
+                        />
+                      )}
+                      <StatRow
+                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                        value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
+                        testId="output-app3-batches"
+                        highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
+                      />
                       {v.app3Type.trim().toLowerCase() === "cheese" && (
                         <CheeseRecipeCard
                           embedded
@@ -5671,6 +5686,29 @@ export default function Home() {
                           }}
                         />
                       )}
+                      {v.app3Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app3Type || "Applicator 3"}
+                          totalRunLbs={calc.app3Lbs}
+                          fields={cheese3Fields}
+                          recipe={v.app3CheeseRecipe ?? []}
+                          fieldPrefix="app3CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese3}
+                        />
+                      )}
+                      <StatRow
+                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                        value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
+                        testId="output-app4-batches"
+                        highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
+                      />
                       {v.app4Type.trim().toLowerCase() === "cheese" && (
                         <CheeseRecipeCard
                           embedded
@@ -5699,57 +5737,6 @@ export default function Home() {
                           }}
                         />
                       )}
-                      {v.app1Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app1Type || "Applicator 1"}
-                          totalRunLbs={calc.app1Lbs}
-                          fields={cheese1Fields}
-                          recipe={v.app1CheeseRecipe ?? []}
-                          fieldPrefix="app1CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese1}
-                        />
-                      )}
-                      {v.app2Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app2Type || "Applicator 2"}
-                          totalRunLbs={calc.app2Lbs}
-                          fields={cheese2Fields}
-                          recipe={v.app2CheeseRecipe ?? []}
-                          fieldPrefix="app2CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese2}
-                        />
-                      )}
-                      {v.app3Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          totalRunLbs={calc.app3Lbs}
-                          fields={cheese3Fields}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                        />
-                      )}
                       {v.app4Type.trim().toLowerCase().includes("mix") && (
                         <MixRecipeCard
                           embedded
@@ -5767,6 +5754,19 @@ export default function Home() {
                           onRemove={removeCheese4}
                         />
                       )}
+                      <Separator className="my-3 opacity-30" />
+                      <StatRow
+                        label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
+                        value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
+                        testId="output-pep1-batches"
+                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
+                      />
+                      <StatRow
+                        label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
+                        value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
+                        testId="output-pep2-batches"
+                        highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
+                      />
                     </CardContent>
                   </Card>
                 </div>
