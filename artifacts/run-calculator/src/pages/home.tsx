@@ -2687,10 +2687,33 @@ export default function Home() {
     document.documentElement.classList.add("dark");
   }, []);
 
+  // Clock tick — 1 s while a run is live, 10 s otherwise; paused entirely when
+  // the tab is hidden so the device isn't woken every second with screen off.
   useEffect(() => {
-    const id = setInterval(() => setNowTime(new Date()), 1_000);
-    return () => clearInterval(id);
-  }, []);
+    const delay = (runStatus === "running" || runStatus === "paused") ? 1_000 : 10_000;
+    let id: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (id) clearInterval(id);
+      id = document.hidden ? null : setInterval(() => setNowTime(new Date()), delay);
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (id) { clearInterval(id); id = null; }
+      } else {
+        setNowTime(new Date()); // snap clock forward immediately
+        start();
+      }
+    };
+
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      if (id) clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [runStatus]);
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
   useEffect(() => {
