@@ -4585,9 +4585,9 @@ export default function Home() {
                 )}
 
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                    <CardHeader className="pb-2 pt-4 px-5">
+                    <CardHeader className="pb-1 pt-3 px-4">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                           Current Progress
                         </CardTitle>
                         {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
@@ -4609,7 +4609,7 @@ export default function Home() {
                         )}
                       </div>
                     </CardHeader>
-                    <CardContent className="px-5 pb-5 space-y-3">
+                    <CardContent className="px-4 pb-4 space-y-2">
                       {(() => {
                         const maxSkids = v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined;
                         const maxCasesOnSkid = v.casesPerSkid > 0 ? v.casesPerSkid : undefined;
@@ -4832,30 +4832,6 @@ export default function Home() {
                         );
                       })()}
                     </CardContent>
-
-                    {/* Quick summary */}
-                    <div className="mx-5 mb-5 rounded-md bg-primary/10 border border-primary/20 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
-                        Quick Summary
-                      </p>
-                      <StatRow
-                        label="Cases Left to Run"
-                        value={fmtNum(calc.casesLeftToRun, 0)}
-                        testId="output-cases-left"
-                        highlight
-                      />
-                      <StatRow
-                        label="Time Left"
-                        value={fmtTime(calc.totalTimeSec)}
-                        testId="output-time-left"
-                        highlight
-                      />
-                      <StatRow
-                        label="Pizzas / Min"
-                        value={fmtNum(calc.ppm, 1)}
-                        testId="output-ppm"
-                      />
-                    </div>
                   </Card>
 
                   {/* ── Ingredient Needs ─────────────────────────────── */}
