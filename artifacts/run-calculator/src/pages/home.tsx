@@ -4263,7 +4263,7 @@ export default function Home() {
         <Form {...form}>
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
-              <TabsList className="grid grid-cols-5 w-full mb-4 print:hidden">
+              <TabsList className="grid grid-cols-4 w-full mb-4 print:hidden">
                 <TabsTrigger value="info" data-testid="tab-info" className="flex items-center gap-1 px-1 sm:px-3">
                   <ClipboardList className="w-4 h-4 shrink-0" />
                   <span className="hidden sm:inline truncate">Enter Info</span>
@@ -4271,10 +4271,6 @@ export default function Home() {
                 <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
                   <Layers className="w-4 h-4 shrink-0" />
                   <span className="hidden sm:inline truncate">Dough/Crusts</span>
-                </TabsTrigger>
-                <TabsTrigger value="timing" data-testid="tab-timing" className="flex items-center gap-1 px-1 sm:px-3">
-                  <Clock className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Timing</span>
                 </TabsTrigger>
                 <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex items-center gap-1 px-1 sm:px-3">
                   <Droplets className="w-4 h-4 shrink-0" />
@@ -4410,16 +4406,18 @@ export default function Home() {
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <Card className={`bg-card/50 border-border/50 shadow-md${!isSupervisor ? " opacity-60" : ""}`}>
-                    <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                <div className="space-y-4">
+                  <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden">
+                    <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
+                      <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                        <Settings className="w-3.5 h-3.5" />
                         Line Settings
                         {!isSupervisor && <Lock className="w-3.5 h-3.5 text-muted-foreground/50" />}
-                      </CardTitle>
-                    </CardHeader>
+                      </span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                    </summary>
+                    <div className={`border-t border-border/40 px-5 pb-5 pt-4 space-y-3${!isSupervisor ? " opacity-60 pointer-events-none" : ""}`}>
                     <fieldset disabled={!isSupervisor} className="contents">
-                    <CardContent className="px-5 pb-5 space-y-3">
                       {/* Die type selector */}
                       <div>
                         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Die Type</label>
@@ -4601,9 +4599,9 @@ export default function Home() {
                           />
                         );
                       })()}
-                    </CardContent>
                     </fieldset>
-                  </Card>
+                    </div>
+                  </details>
 
                   <Card className="bg-card/50 border-border/50 shadow-md">
                     <CardHeader className="pb-2 pt-4 px-5">
@@ -5286,294 +5284,6 @@ export default function Home() {
                 </fieldset>
               </TabsContent>
 
-              {/* ─── TIMING ─── */}
-              <TabsContent value="timing">
-                {!isSupervisor && (
-                  <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
-                    <Lock className="w-3.5 h-3.5 shrink-0" />
-                    Supervisor access required to edit these settings
-                  </div>
-                )}
-                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  <div className="space-y-5">
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
-                      <div className="h-1 bg-primary w-full" />
-                      <CardContent className="p-5">
-                        <div className="mb-2">
-                          <p
-                            className="text-4xl font-mono font-bold text-primary"
-                            data-testid="output-total-time-left"
-                          >
-                            {fmtTime(calc.totalTimeSec)}
-                          </p>
-                          <p className="text-sm text-muted-foreground mt-1">
-                            Total time left for run
-                          </p>
-                        </div>
-                        <Separator className="my-4 opacity-30" />
-                        <StatRow
-                          label={doughSubTab === "crusts" ? "Time for Crusts to Clear" : "Time for Dough to Clear"}
-                          value={fmtTime(calc.doughMadeTimeSec)}
-                          testId="output-dough-time"
-                        />
-                        <div className="flex items-center justify-between py-1.5" data-testid="output-dough-depletion">
-                          <span className="text-sm text-muted-foreground">{doughSubTab === "crusts" ? "Crusts Run Out In" : "Dough Runs Out In"}</span>
-                          {calc.doughDepletionSec <= 0 ? (
-                            <span className="text-sm font-semibold text-muted-foreground">—</span>
-                          ) : calc.doughDepletionSec >= calc.totalTimeSec ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
-                              <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
-                              {fmtTime(calc.doughDepletionSec)} (run covered)
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                              <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
-                              {fmtTime(calc.doughDepletionSec)} (short!)
-                            </span>
-                          )}
-                        </div>
-                        {doughSubTab !== "crusts" && (
-                          <StatRow
-                            label="Pizzas Per Minute"
-                            value={fmtNum(calc.ppm, 1)}
-                            testId="output-timing-ppm"
-                          />
-                        )}
-                        {doughSubTab !== "crusts" && (
-                          <StatRow
-                            label={
-                              runStatus === "running"
-                                ? `Freezer Time (${fmtNum(liveFreezerMin, 1)} / ${fmtNum(Number(v.freezerTime), 1)} min)`
-                                : "Freezer Time"
-                            }
-                            value={fmtNum(liveFreezerMin, 1) + " min"}
-                            testId="output-freezer-time"
-                          />
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    <Card className="bg-card/50 border-border/50 shadow-md">
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Per Unit Times
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        {doughSubTab !== "crusts" && (
-                          <StatRow
-                            label="Time Per Press Cycle"
-                            value={fmtNum(calc.timePressHzSec, 2) + "s"}
-                            testId="output-time-per-cycle"
-                          />
-                        )}
-                        <StatRow
-                          label={doughSubTab === "crusts" ? "Time Per Stack" : "Time Per Tray"}
-                          value={fmtTime(calc.timePerTraySec)}
-                          testId="output-time-per-tray"
-                        />
-                        {doughSubTab !== "crusts" && (
-                          <StatRow
-                            label="Time Per Batch"
-                            value={calc.timePerBatchSec > 0
-                              ? fmtTime(calc.timePerBatchSec) + (currentRun?.startedAt && !currentRun?.endedAt
-                                  ? ` · next at ${fmtClock(Date.now() + calc.timePerBatchSec * 1000)}`
-                                  : "")
-                              : "—"}
-                            testId="output-time-per-batch"
-                          />
-                        )}
-                        {doughSubTab === "crusts" && (
-                          <StatRow
-                            label="Time Per Case"
-                            value={fmtTime(calc.timePerCaseSec)}
-                            testId="output-time-per-case"
-                          />
-                        )}
-                        <StatRow
-                          label="Time Per Skid"
-                          value={fmtTime(calc.timePerSkidSec)}
-                          testId="output-time-per-skid"
-                          highlight
-                        />
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  {doughSubTab !== "crusts" && (
-                    <Card className="bg-card/50 border-border/50 shadow-md">
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Rack Times
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        {calc.rackTimes.map(({ trays, sec }) => (
-                          <StatRow
-                            key={trays}
-                            label={`${trays}-Tray Rack`}
-                            value={sec > 0
-                              ? fmtTime(sec) + (currentRun?.startedAt && !currentRun?.endedAt
-                                  ? ` · at ${fmtClock(Date.now() + sec * 1000)}`
-                                  : "")
-                              : "—"}
-                            testId={`output-rack-${trays}`}
-                          />
-                        ))}
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-
-                {/* ── Downtime / Stoppage log ── */}
-                {(() => {
-                  const stoppages = currentRun?.stoppages ?? [];
-                  const hasActiveRun = !!currentRun?.startedAt && !currentRun?.endedAt;
-                  if (stoppages.length === 0 && !hasActiveRun) return null;
-                  const stopOnlyMs = stoppages.filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
-                  const noReasonCount = stoppages.filter(s => !s.reason.trim()).length;
-                  return (
-                    <div className="mt-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
-                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
-                        <div className="flex items-center gap-2">
-                          <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
-                          <span className="text-sm font-semibold">Stoppage Log</span>
-                          {stoppages.length > 0 && <span className="text-xs text-muted-foreground">{stoppages.length} event{stoppages.length !== 1 ? "s" : ""}</span>}
-                          {noReasonCount > 0 && (
-                            <span className="text-xs font-semibold text-amber-400 animate-pulse">{noReasonCount} need reason</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {stopOnlyMs > 0 && (
-                            <span className="text-xs text-orange-400 font-semibold">
-                              {fmtTime(stopOnlyMs / 1000)} down
-                            </span>
-                          )}
-                          {activeStopId && (runStatus === "running" || runStatus === "paused") && (
-                            <button
-                              type="button"
-                              onClick={endStop}
-                              className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
-                            >
-                              <CircleDot className="w-3 h-3" /> End Stop
-                            </button>
-                          )}
-                          {!activeStopId && runStatus === "running" && (
-                            <button
-                              type="button"
-                              onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
-                            >
-                              <Plus className="w-3 h-3" /> Log Stop
-                            </button>
-                          )}
-                          {hasActiveRun && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const now = new Date();
-                                const pad = (n: number) => String(n).padStart(2, "0");
-                                const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
-                                setManualStopType("stop");
-                                setManualStopReason("");
-                                setManualStopNotes("");
-                                setManualStopStart(local);
-                                setManualStopEnd("");
-                                setShowManualStopDialog(true);
-                              }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:bg-muted/50 text-xs font-semibold transition-colors"
-                              title="Add a past event you couldn't log at the time"
-                            >
-                              <CalendarPlus className="w-3 h-3" /> Add Past
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {stoppages.length === 0 ? (
-                        <p className="text-xs text-muted-foreground text-center py-4">No events recorded yet. Pauses and stops are logged automatically.</p>
-                      ) : (
-                        <div className="divide-y divide-border/20">
-                          {[...stoppages].reverse().map(stop => {
-                            const isPause = stop.type === "pause";
-                            const isManual = stop.type === "manual";
-                            const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
-                            const isActive = !stop.endedAt;
-                            const noReason = !stop.reason.trim();
-                            return (
-                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""}`}>
-                                <div className="mt-0.5 shrink-0">
-                                  {isPause
-                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"}`} />
-                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"}`} />
-                                  }
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"}`}>
-                                      {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
-                                    </span>
-                                    {noReason ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingStop({ ...stop })}
-                                        className="text-xs italic text-amber-400 hover:text-amber-300 transition-colors"
-                                      >
-                                        No reason — tap to add
-                                      </button>
-                                    ) : (
-                                      <span className="text-xs font-medium">{stop.reason}</span>
-                                    )}
-                                    {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
-                                  </div>
-                                </div>
-                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
-                                  {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingStop({ ...stop })}
-                                  className="text-muted-foreground/40 hover:text-foreground transition-colors shrink-0 mt-0.5"
-                                  title="Edit"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                {confirmDeleteStopId === stop.id ? (
-                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => { deleteStop(stop.id); setConfirmDeleteStopId(null); }}
-                                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/80 hover:bg-destructive text-white font-semibold transition-colors"
-                                    >Del</button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setConfirmDeleteStopId(null)}
-                                      className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground font-semibold transition-colors"
-                                    >No</button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteStopId(stop.id)}
-                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0 mt-0.5"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-                </fieldset>
-              </TabsContent>
-
               {/* ─── FRONTLINE ─── */}
               <TabsContent value="frontline">
                 {!isSupervisor && (
@@ -6144,6 +5854,152 @@ export default function Home() {
                       {histBenchmarkPpm !== null && todayPpm === null && (
                         <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
                           Historical average: <span className="font-bold text-foreground">{histBenchmarkPpm} PPM</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Stoppage Log ── */}
+                {currentRun && (() => {
+                  const stoppages = currentRun.stoppages ?? [];
+                  const hasActiveRun = !!currentRun.startedAt && !currentRun.endedAt;
+                  if (stoppages.length === 0 && !hasActiveRun) return null;
+                  const stopOnlyMs = stoppages.filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+                  const noReasonCount = stoppages.filter(s => !s.reason.trim()).length;
+                  return (
+                    <div className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
+                        <div className="flex items-center gap-2">
+                          <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
+                          <span className="text-sm font-semibold">Stoppage Log</span>
+                          {stoppages.length > 0 && <span className="text-xs text-muted-foreground">{stoppages.length} event{stoppages.length !== 1 ? "s" : ""}</span>}
+                          {noReasonCount > 0 && (
+                            <span className="text-xs font-semibold text-amber-400 animate-pulse">{noReasonCount} need reason</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {stopOnlyMs > 0 && (
+                            <span className="text-xs text-orange-400 font-semibold">
+                              {fmtTime(stopOnlyMs / 1000)} down
+                            </span>
+                          )}
+                          {activeStopId && (runStatus === "running" || runStatus === "paused") && (
+                            <button
+                              type="button"
+                              onClick={endStop}
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
+                            >
+                              <CircleDot className="w-3 h-3" /> End Stop
+                            </button>
+                          )}
+                          {!activeStopId && runStatus === "running" && (
+                            <button
+                              type="button"
+                              onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
+                            >
+                              <Plus className="w-3 h-3" /> Log Stop
+                            </button>
+                          )}
+                          {hasActiveRun && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date();
+                                const pad = (n: number) => String(n).padStart(2, "0");
+                                const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+                                setManualStopType("stop");
+                                setManualStopReason("");
+                                setManualStopNotes("");
+                                setManualStopStart(local);
+                                setManualStopEnd("");
+                                setShowManualStopDialog(true);
+                              }}
+                              className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border/60 text-muted-foreground hover:bg-muted/50 text-xs font-semibold transition-colors"
+                              title="Add a past event you couldn't log at the time"
+                            >
+                              <CalendarPlus className="w-3 h-3" /> Add Past
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {stoppages.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">No events recorded yet. Pauses and stops are logged automatically.</p>
+                      ) : (
+                        <div className="divide-y divide-border/20">
+                          {[...stoppages].reverse().map(stop => {
+                            const isPause = stop.type === "pause";
+                            const isManual = stop.type === "manual";
+                            const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
+                            const isActive = !stop.endedAt;
+                            const noReason = !stop.reason.trim();
+                            return (
+                              <div key={stop.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${isActive && !isPause ? "bg-orange-950/20" : isActive && isPause ? "bg-blue-950/20" : ""}`}>
+                                <div className="mt-0.5 shrink-0">
+                                  {isPause
+                                    ? <PauseCircle className={`w-3.5 h-3.5 ${isActive ? "text-blue-400 animate-pulse" : "text-blue-400/50"}`} />
+                                    : <OctagonX className={`w-3.5 h-3.5 ${isActive ? "text-orange-400 animate-pulse" : "text-orange-400/50"}`} />
+                                  }
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${isPause ? "text-blue-400/70" : isManual ? "text-violet-400/70" : "text-orange-400/70"}`}>
+                                      {isPause ? "Pause" : isManual ? "Manual" : "Stop"}
+                                    </span>
+                                    {noReason ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingStop({ ...stop })}
+                                        className="text-xs italic text-amber-400 hover:text-amber-300 transition-colors"
+                                      >
+                                        No reason — tap to add
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs font-medium">{stop.reason}</span>
+                                    )}
+                                    {stop.notes && <span className="text-xs text-muted-foreground">— {stop.notes}</span>}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                                    {fmtClock(stop.startedAt)}{stop.endedAt ? ` → ${fmtClock(stop.endedAt)}` : " (ongoing)"}
+                                  </div>
+                                </div>
+                                <span className={`text-xs font-semibold tabular-nums shrink-0 mt-0.5 ${isActive ? (isPause ? "text-blue-400" : "text-orange-400") : "text-muted-foreground"}`}>
+                                  {dur !== null ? fmtTime(dur) : fmtElapsed(nowTime.getTime() - stop.startedAt)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingStop({ ...stop })}
+                                  className="text-muted-foreground/40 hover:text-foreground transition-colors shrink-0 mt-0.5"
+                                  title="Edit"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                                {confirmDeleteStopId === stop.id ? (
+                                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => { deleteStop(stop.id); setConfirmDeleteStopId(null); }}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-destructive/80 hover:bg-destructive text-white font-semibold transition-colors"
+                                    >Del</button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteStopId(null)}
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-muted/60 hover:bg-muted text-muted-foreground font-semibold transition-colors"
+                                    >No</button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteStopId(stop.id)}
+                                    className="text-muted-foreground/30 hover:text-destructive transition-colors shrink-0 mt-0.5"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
