@@ -250,6 +250,7 @@ export const DEFAULT_FRONTLINE_RECIPE_NAMES: string[] = [];
 export const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";
 export const CHEESE_RECIPE_NAMES_KEY = "run-calc-cheese-recipe-names";
 export const CHEESE_RECIPE_PRESETS_KEY = "run-calc-cheese-recipe-presets";
+export const MIX_RECIPE_NAMES_KEY = "run-calc-mix-recipe-names";
 
 export const RUN_KEY = (id: string) => `run-calc-run-${id}`;
 export const PROFILE_KEY = (brand: string, flavor: string) =>

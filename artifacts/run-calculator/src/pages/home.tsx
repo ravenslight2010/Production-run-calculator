@@ -36,6 +36,7 @@ import {
   FRONTLINE_INGREDIENTS_KEY,
   FRONTLINE_RECIPE_NAMES_KEY,
   CHEESE_RECIPE_NAMES_KEY,
+  MIX_RECIPE_NAMES_KEY,
   MAX_RUNS,
   MAX_TEMPLATES,
   BRANDS_KEY,
@@ -1353,6 +1354,24 @@ export default function Home() {
     const updated = cheeseRecipeNames.filter(t => t !== name);
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
+  const [mixRecipeNames, setMixRecipeNames] = useState<string[]>(() =>
+    [...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b))
+  );
+  function addMixRecipeName(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || mixRecipeNames.includes(trimmed)) return;
+    const updated = [...mixRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
+    setMixRecipeNames(updated);
+    saveList(MIX_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+  function removeMixRecipeName(name: string) {
+    const updated = mixRecipeNames.filter(t => t !== name);
+    setMixRecipeNames(updated);
+    saveList(MIX_RECIPE_NAMES_KEY, updated);
     schedulePush(dayStateRef.current);
   }
 
@@ -3565,35 +3584,99 @@ export default function Home() {
       )}
 
       {showManageDialog && (() => {
-        type Category = {
-          key: string;
-          label: string;
-          items: string[];
-          protected?: string[];
-          onAdd: (v: string) => void;
-          onRemove: (v: string) => void;
-        };
-        const categories: Category[] = [
-          { key: "brands", label: "Brands", items: brands, onAdd: (v) => addBrand(v), onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
+        // Simple list panel: add input + item list
+        const ListPanel = ({
+          items, onAdd, onRemove, placeholder, protected: protectedItems,
+          inputVal, setInputVal,
+        }: {
+          items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
+          placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
+        }) => (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inputVal}
+                onChange={e => setInputVal(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
+                placeholder={placeholder}
+                className="flex-1 border border-input rounded-md px-3 py-1.5 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <button
+                type="button"
+                onClick={() => { if (inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
+                disabled={!inputVal.trim()}
+                className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
+              >Add</button>
+            </div>
+            {items.length === 0
+              ? <p className="text-xs text-muted-foreground text-center py-3">No items yet.</p>
+              : <ul className="space-y-1 max-h-48 overflow-y-auto">
+                  {items.map(item => {
+                    const isProt = protectedItems?.includes(item);
+                    return (
+                      <li key={item} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-muted/30 hover:bg-muted/50">
+                        <span className="text-sm">{item}</span>
+                        {isProt
+                          ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
+                          : <button type="button" onClick={() => onRemove(item)} className="text-muted-foreground hover:text-destructive shrink-0"><X className="w-3.5 h-3.5" /></button>}
+                      </li>
+                    );
+                  })}
+                </ul>
+            }
+          </div>
+        );
+
+        // Grouped panel: recipe names (left) + ingredients (right)
+        const [mgNamesInput, setMgNamesInput] = useState("");
+        const [mgIngInput, setMgIngInput] = useState("");
+
+        const GroupedPanel = ({
+          namesLabel, names, onAddName, onRemoveName,
+          ingLabel, ingredients, onAddIng, onRemoveIng,
+          ingProtected,
+        }: {
+          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void;
+          ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void;
+          ingProtected?: string[];
+        }) => (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
+              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
+              <ListPanel items={ingredients} onAdd={onAddIng} onRemove={onRemoveIng} placeholder="Add ingredient…" protected={ingProtected} inputVal={mgIngInput} setInputVal={setMgIngInput} />
+            </div>
+          </div>
+        );
+
+        // Standalone tabs: still use a single input
+        const [mgStandaloneInput, setMgStandaloneInput] = useState("");
+
+        type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; };
+        const standaloneTabs: StandaloneTab[] = [
+          { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter) },
           { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
           { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType },
-          { key: "cheeseIngredients", label: "Cheese Ingredients", items: cheeseIngredients, onAdd: addCheeseIngredient, onRemove: removeCheeseIngredient },
-          { key: "mixIngredients", label: "Mix Ingredients", items: mixIngredients, onAdd: addMixIngredient, onRemove: removeMixIngredient },
-          { key: "doughIngredients", label: "Dough Ingredients", items: doughIngredients, onAdd: addDoughIngredient, onRemove: removeDoughIngredient },
-          { key: "doughRecipeNames", label: "Dough Recipe Names", items: doughRecipeNames, onAdd: addDoughRecipeName, onRemove: removeDoughRecipeName },
-          { key: "frontlineIngredients", label: "Sauce Ingredients", items: frontlineIngredients, onAdd: addFrontlineIngredient, onRemove: removeFrontlineIngredient },
-          { key: "frontlineRecipeNames", label: "Sauce Recipe Names", items: frontlineRecipeNames, onAdd: addFrontlineRecipeName, onRemove: removeFrontlineRecipeName },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
-        const cat = categories.find(c => c.key === manageCategory) ?? categories[0];
-        const handleAdd = () => {
-          const v = manageInput.trim();
-          if (!v) return;
-          cat.onAdd(v);
-          setManageInput("");
-        };
+        const groupedTabs = [
+          { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: addDoughRecipeName,     onRemoveName: removeDoughRecipeName,     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: addDoughIngredient,     onRemoveIng: removeDoughIngredient },
+          { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: addFrontlineRecipeName, onRemoveName: removeFrontlineRecipeName, ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: addFrontlineIngredient, onRemoveIng: removeFrontlineIngredient },
+          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: addCheeseRecipeName,    onRemoveName: removeCheeseRecipeName,    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: addCheeseIngredient,   onRemoveIng: removeCheeseIngredient },
+          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient },
+        ];
+
+        const allTabs = [...groupedTabs, ...standaloneTabs];
+        const isGrouped = groupedTabs.some(t => t.key === manageCategory);
+        const groupedTab = groupedTabs.find(t => t.key === manageCategory);
+        const standaloneTab = standaloneTabs.find(t => t.key === manageCategory);
+
         const handlePinSave = () => {
           if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
           if (newPin !== newPinConfirm) { setPinChangeMsg("PINs don't match."); return; }
@@ -3601,13 +3684,14 @@ export default function Home() {
           setNewPin(""); setNewPinConfirm("");
           setPinChangeMsg("PIN updated successfully.");
         };
+
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
             onClick={() => setShowManageDialog(false)}
           >
             <div
-              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]"
+              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
               onClick={e => e.stopPropagation()}
             >
               {/* Header */}
@@ -3621,127 +3705,102 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Category tabs */}
+              {/* Tab row — grouped first, then standalone */}
               <div className="flex gap-1 flex-wrap px-5 py-3 border-b border-border shrink-0">
-                {categories.map(c => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => { setManageCategory(c.key); setManageInput(""); setPinChangeMsg(""); }}
-                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === c.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
-                  >
-                    {c.label}
-                  </button>
+                {groupedTabs.map(t => (
+                  <button key={t.key} type="button"
+                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); }}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
+                  >{t.label}</button>
+                ))}
+                <span className="w-px bg-border/60 self-stretch mx-1" />
+                {standaloneTabs.map(t => (
+                  <button key={t.key} type="button"
+                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); }}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
+                  >{t.label}</button>
                 ))}
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
+                {isGrouped && groupedTab && (
+                  <GroupedPanel
+                    namesLabel={groupedTab.namesLabel}
+                    names={groupedTab.names}
+                    onAddName={groupedTab.onAddName}
+                    onRemoveName={groupedTab.onRemoveName}
+                    ingLabel={groupedTab.ingLabel}
+                    ingredients={groupedTab.ingredients}
+                    onAddIng={groupedTab.onAddIng}
+                    onRemoveIng={groupedTab.onRemoveIng}
+                  />
+                )}
+
+                {/* Standalone: flavors brand picker */}
                 {manageCategory === "flavors" && (
-                  <div className="space-y-2">
-                    <label className="text-xs text-muted-foreground">Select brand to manage its flavors</label>
-                    <select
-                      value={manageBrandFilter}
-                      onChange={e => { setManageBrandFilter(e.target.value); setManageInput(""); }}
-                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      <option value="">— choose a brand —</option>
-                      {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                    </select>
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs text-muted-foreground">Select brand to manage its flavors</label>
+                      <select
+                        value={manageBrandFilter}
+                        onChange={e => { setManageBrandFilter(e.target.value); setMgStandaloneInput(""); }}
+                        className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        <option value="">— choose a brand —</option>
+                        {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                    </div>
+                    {manageBrandFilter && standaloneTab && (
+                      <ListPanel
+                        items={standaloneTab.items}
+                        onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
+                        onRemove={standaloneTab.onRemove}
+                        placeholder={`Add flavor for ${manageBrandFilter}…`}
+                        inputVal={mgStandaloneInput}
+                        setInputVal={setMgStandaloneInput}
+                      />
+                    )}
                   </div>
                 )}
 
-                {manageCategory === "pin" ? (
-                  <div className="space-y-3">
+                {/* Standalone: PIN change */}
+                {manageCategory === "pin" && (
+                  <div className="space-y-3 max-w-xs mx-auto">
                     <p className="text-xs text-muted-foreground">Set a new supervisor PIN. It must match in both fields.</p>
                     <div className="space-y-2">
                       <label className="text-xs text-muted-foreground">New PIN</label>
-                      <input
-                        type="password"
-                        value={newPin}
-                        onChange={e => { setNewPin(e.target.value); setPinChangeMsg(""); }}
-                        placeholder="New PIN"
-                        maxLength={8}
-                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
+                      <input type="password" value={newPin} onChange={e => { setNewPin(e.target.value); setPinChangeMsg(""); }} placeholder="New PIN" maxLength={8}
+                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs text-muted-foreground">Confirm PIN</label>
-                      <input
-                        type="password"
-                        value={newPinConfirm}
-                        onChange={e => { setNewPinConfirm(e.target.value); setPinChangeMsg(""); }}
-                        placeholder="Confirm PIN"
-                        maxLength={8}
+                      <input type="password" value={newPinConfirm} onChange={e => { setNewPinConfirm(e.target.value); setPinChangeMsg(""); }} placeholder="Confirm PIN" maxLength={8}
                         onKeyDown={e => e.key === "Enter" && handlePinSave()}
-                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
+                        className="w-full font-mono text-center text-xl tracking-[0.3em] border border-input rounded-md h-11 bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     {pinChangeMsg && (
-                      <p className={`text-xs text-center font-medium ${pinChangeMsg.includes("success") ? "text-green-400" : "text-destructive"}`}>
-                        {pinChangeMsg}
-                      </p>
+                      <p className={`text-xs text-center font-medium ${pinChangeMsg.includes("success") ? "text-green-400" : "text-destructive"}`}>{pinChangeMsg}</p>
                     )}
-                    <button
-                      type="button"
-                      onClick={handlePinSave}
-                      className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-                    >
+                    <button type="button" onClick={handlePinSave}
+                      className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                       Save PIN
                     </button>
                   </div>
-                ) : (
-                  <>
-                    {/* Add input — for flavors, require a brand to be selected */}
-                    {(manageCategory !== "flavors" || manageBrandFilter) && (
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={manageInput}
-                        onChange={e => setManageInput(e.target.value)}
-                        onKeyDown={e => e.key === "Enter" && handleAdd()}
-                        placeholder={manageCategory === "flavors" ? `Add flavor for ${manageBrandFilter}…` : `Add to ${cat.label}…`}
-                        className="flex-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleAdd}
-                        disabled={!manageInput.trim()}
-                        className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40"
-                      >
-                        Add
-                      </button>
-                    </div>
-                    )}
+                )}
 
-                    {/* Items list */}
-                    {cat.items.length === 0 && (manageCategory !== "flavors" || manageBrandFilter) ? (
-                      <p className="text-xs text-muted-foreground text-center py-4">No items yet. Add one above.</p>
-                    ) : cat.items.length === 0 && manageCategory === "flavors" && !manageBrandFilter ? null : (
-                      <ul className="space-y-1">
-                        {cat.items.map(item => {
-                          const isProtected = cat.protected?.includes(item);
-                          return (
-                            <li key={item} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/30 hover:bg-muted/50 transition-colors">
-                              <span className="text-sm">{item}</span>
-                              {isProtected ? (
-                                <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wide">default</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => cat.onRemove(item)}
-                                  className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
-                                  title={`Remove ${item}`}
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </>
+                {/* Standalone: simple list tabs (Brands, Applicator Ingredients, Pep Types, Die Types) */}
+                {!isGrouped && manageCategory !== "flavors" && manageCategory !== "pin" && standaloneTab && (
+                  <ListPanel
+                    items={standaloneTab.items}
+                    onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
+                    onRemove={standaloneTab.onRemove}
+                    placeholder={`Add to ${standaloneTab.label}…`}
+                    protected={standaloneTab.protected}
+                    inputVal={mgStandaloneInput}
+                    setInputVal={setMgStandaloneInput}
+                  />
                 )}
               </div>
             </div>
