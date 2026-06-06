@@ -1717,6 +1717,7 @@ export default function Home() {
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         saveDayState(fresh);
         setDayState(fresh);
+        setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
         schedulePush(fresh, 0);
       }
@@ -2266,6 +2267,7 @@ export default function Home() {
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         setDayState(fresh);
         saveDayState(fresh);
+        setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
         schedulePush(fresh, 0);
         scheduleReset();
