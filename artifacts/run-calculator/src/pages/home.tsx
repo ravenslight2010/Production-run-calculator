@@ -1496,6 +1496,9 @@ export default function Home() {
   const [manageCategory, setManageCategory] = useState("brands");
   const [manageBrandFilter, setManageBrandFilter] = useState("");
   const [manageInput, setManageInput] = useState("");
+  const [mgNamesInput, setMgNamesInput] = useState("");
+  const [mgIngInput, setMgIngInput] = useState("");
+  const [mgStandaloneInput, setMgStandaloneInput] = useState("");
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [pinChangeMsg, setPinChangeMsg] = useState("");
@@ -3629,9 +3632,6 @@ export default function Home() {
         );
 
         // Grouped panel: recipe names (left) + ingredients (right)
-        const [mgNamesInput, setMgNamesInput] = useState("");
-        const [mgIngInput, setMgIngInput] = useState("");
-
         const GroupedPanel = ({
           namesLabel, names, onAddName, onRemoveName,
           ingLabel, ingredients, onAddIng, onRemoveIng,
@@ -3654,8 +3654,6 @@ export default function Home() {
         );
 
         // Standalone tabs: still use a single input
-        const [mgStandaloneInput, setMgStandaloneInput] = useState("");
-
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
