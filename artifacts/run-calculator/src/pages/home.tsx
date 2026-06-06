@@ -1365,12 +1365,12 @@ export default function Home() {
 
   const v = form.watch();
 
-  const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
-  const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
-  const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
-  const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
-  const { fields: doughFields, append: appendDough, remove: removeDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
-  const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
+  const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
+  const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
+  const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3, replace: replaceCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
+  const { fields: cheese4Fields, append: appendCheese4, remove: removeCheese4, replace: replaceCheese4 } = useFieldArray({ control: form.control, name: "app4CheeseRecipe" });
+  const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
+  const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
   const [activeTab, setActiveTab] = useState("dough");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
@@ -1538,7 +1538,9 @@ export default function Home() {
         const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
         if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
         if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
-          form.reset({ ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) });
+          const merged = { ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) };
+          form.reset(merged);
+          resetFieldArrays(merged);
         }
       }
 
@@ -1719,6 +1721,7 @@ export default function Home() {
         setDayState(fresh);
         setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
+        resetFieldArrays(DEFAULT_VALUES);
         schedulePush(fresh, 0);
       }
     }
@@ -1781,6 +1784,15 @@ export default function Home() {
       }).catch(() => {});
     }, delay);
   }
+  function resetFieldArrays(vals: FormValues) {
+    replaceCheese1(vals.app1CheeseRecipe ?? []);
+    replaceCheese2(vals.app2CheeseRecipe ?? []);
+    replaceCheese3(vals.app3CheeseRecipe ?? []);
+    replaceCheese4(vals.app4CheeseRecipe ?? []);
+    replaceDough(vals.doughRecipe ?? []);
+    replaceFrontline(vals.frontlineRecipe ?? []);
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1804,7 +1816,9 @@ export default function Home() {
     const newDs = { ...dayState, currentIndex: newIndex };
     setDayState(newDs);
     saveDayState(newDs);
-    form.reset(loadRunValues(newId));
+    const newVals = loadRunValues(newId);
+    form.reset(newVals);
+    resetFieldArrays(newVals);
     setDoughSubTab(dayState.runs[newIndex].subTab ?? "dough");
     // Restore open stoppage for the new run (or clear if none)
     const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
@@ -1826,6 +1840,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     form.reset(DEFAULT_VALUES);
+    resetFieldArrays(DEFAULT_VALUES);
     schedulePush(newDs, 0);
   }
 
@@ -1839,7 +1854,9 @@ export default function Home() {
     const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
     setDayState(newDs);
     saveDayState(newDs);
-    form.reset(loadRunValues(newRuns[newIndex].id));
+    const removedVals = loadRunValues(newRuns[newIndex].id);
+    form.reset(removedVals);
+    resetFieldArrays(removedVals);
     schedulePush(newDs, 0);
     setConfirmRemoveRun(false);
   }
@@ -1860,7 +1877,7 @@ export default function Home() {
 
     // Load profile for new brand+flavor if it exists
     const profile = loadProfile(brand, flavor);
-    if (profile) form.reset(profile);
+    if (profile) { form.reset(profile); resetFieldArrays(profile); }
     schedulePush(newDs, 0);
   }
 
@@ -1980,7 +1997,9 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     if (nextIndex !== dayState.currentIndex) {
-      form.reset(loadRunValues(dayState.runs[nextIndex].id));
+      const nextVals = loadRunValues(dayState.runs[nextIndex].id);
+      form.reset(nextVals);
+      resetFieldArrays(nextVals);
       const openStop = newRuns[nextIndex].stoppages?.find(s => !s.endedAt);
       setActiveStopId(openStop?.id ?? null);
     } else {
@@ -2114,6 +2133,7 @@ export default function Home() {
   function applyTemplate(t: RunTemplate) {
     const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
     form.reset(clean);
+    resetFieldArrays(clean);
     saveRunValues(currentRunId, clean);
     setShowTemplatesDialog(false);
   }
@@ -2133,6 +2153,7 @@ export default function Home() {
     const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
     saveRunValues(newId, copied);
     form.reset(copied);
+    resetFieldArrays(copied);
     schedulePush(newDs, 0);
   }
 
@@ -2269,6 +2290,7 @@ export default function Home() {
         saveDayState(fresh);
         setRunToTime("19:15");
         form.reset(DEFAULT_VALUES);
+        resetFieldArrays(DEFAULT_VALUES);
         schedulePush(fresh, 0);
         scheduleReset();
       }, msUntilMidnight());
