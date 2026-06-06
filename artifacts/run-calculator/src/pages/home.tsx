@@ -2462,9 +2462,10 @@ export default function Home() {
     const totalPizzasForSauce = totalPizzasRun + v.casesPerLayer * v.pizzasPerCase;
     const frontlineRecipeLbs = (v.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : v.sauceBarrelLbs;
+    const sauceLbs = (totalPizzasForSauce * v.sauceOzPerPizza) / 16 + 30;
     const sauceBatches =
       sauceEffBarrel > 0
-        ? (totalPizzasForSauce * v.sauceOzPerPizza) / (sauceEffBarrel * 16)
+        ? sauceLbs / sauceEffBarrel
         : 0;
     const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
     const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
