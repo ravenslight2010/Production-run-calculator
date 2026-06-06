@@ -4387,8 +4387,8 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Batch due alert */}
-                {showBatchDue && runStatus === "running" && (
+                {/* Batch due alert — dough only */}
+                {showBatchDue && runStatus === "running" && doughSubTab !== "crusts" && (
                   <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-orange-950/40 border border-orange-500/50 animate-pulse">
                     <div className="flex items-center gap-2.5">
                       <span className="text-lg">🍕</span>
@@ -4804,9 +4804,9 @@ export default function Home() {
                               <div className="flex items-start gap-2">
                                 <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
                                 <p className="text-xs text-amber-300 leading-snug">
-                                  <span className="font-semibold">Surplus dough</span> exceeds this run
-                                  {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} tray{excessTrays !== 1 ? "s" : ""}</span></span>}
-                                  {excessBatches > 0 && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
+                                  <span className="font-semibold">{doughSubTab === "crusts" ? "Surplus crusts" : "Surplus dough"}</span> exceeds this run
+                                  {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} {doughSubTab === "crusts" ? `stack${excessTrays !== 1 ? "s" : ""}` : `tray${excessTrays !== 1 ? "s" : ""}`}</span></span>}
+                                  {excessBatches > 0 && doughSubTab !== "crusts" && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
                                   . Carry to <span className="font-semibold">{nextLabel}</span>?
                                 </p>
                               </div>
@@ -5070,37 +5070,58 @@ export default function Home() {
                       <div className="h-1 bg-sky-500 w-full" />
                       <CardHeader className="pb-2 pt-4 px-5">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Run Details
+                          What You Need Now
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} highlight />
-                        <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
-                        <Separator className="my-3 opacity-30" />
-                        <StatRow label="Cases Left to Open" value={fmtNum(calc.casesLeftToOpen, 0)} />
-                        <StatRow label="Stacks Needed" value={fmtNum(calc.stacksNeededTotal, 0)} />
-                        <Separator className="my-3 opacity-30" />
-                        <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} />
+                      <CardContent className="px-4 pb-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-muted/20 rounded-lg p-3 text-center">
+                            <p className="text-3xl font-mono font-bold text-sky-400 tabular-nums" data-testid="output-cases-to-open">{fmtNum(calc.casesLeftToOpen, 0)}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Cases to open</p>
+                          </div>
+                          <div className="bg-muted/20 rounded-lg p-3 text-center">
+                            <p className="text-3xl font-mono font-bold tabular-nums" data-testid="output-stacks-needed">{fmtNum(calc.stacksNeededTotal, 0)}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Stacks to stage</p>
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
 
-                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
-                      <div className="h-1 bg-sky-500 w-full" />
-                      <CardHeader className="pb-2 pt-4 px-5">
+                    <Card className="bg-card/50 border-border/50 shadow-md">
+                      <CardHeader className="pb-1 pt-3 px-4">
                         <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Crust Output
+                          Run Details
                         </CardTitle>
                       </CardHeader>
-                      <CardContent className="px-5 pb-5">
-                        <div className="mb-2">
-                          <p className="text-5xl font-mono font-bold text-sky-400" data-testid="output-ppm-crust">
-                            {fmtNum(calc.ppm, 1)}
-                          </p>
-                          <p className="text-sm text-muted-foreground mt-1">Pizzas per minute</p>
+                      <CardContent className="px-4 pb-3">
+                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} testId="output-crust-cases-left" highlight />
+                        <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
+                        <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} testId="output-cases-on-line" />
+                        <div className="flex items-center justify-between py-1.5">
+                          <span className="text-sm text-muted-foreground">Crust Supply</span>
+                          {calc.doughShortCases > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                              <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
+                              SHORT {fmtNum(calc.doughShortCases, 1)} cases
+                            </span>
+                          ) : calc.buffer > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
+                              <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
+                              +{fmtNum(calc.buffer, 1)} cases ahead
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                              <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                              Balanced
+                            </span>
+                          )}
                         </div>
-                        <Separator className="my-4 opacity-30" />
+                        <StatRow label="Cases on Last Skid" value={fmtNum(calc.casesOnLastSkid, 0)} />
+                        <Separator className="my-3 opacity-30" />
+                        <StatRow label="Stacks Per Skid" value={fmtNum(calc.traysPerSkid, 2)} />
                         <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
                         <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
+                        <StatRow label="PPM" value={fmtNum(calc.ppm, 1)} testId="output-ppm-crust" />
                       </CardContent>
                     </Card>
                   </div>
@@ -5278,6 +5299,93 @@ export default function Home() {
                               onHandBatches > 0 && `${onHandBatches} batch${onHandBatches !== 1 ? "es" : ""} ready`,
                               onHandTrays > 0 && `${onHandTrays} tray${onHandTrays !== 1 ? "s" : ""} on line`,
                             ].filter(Boolean).join(" · ")} already on hand — subtracted from totals
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
+
+                {/* Run to Time card — crust mode */}
+                {doughSubTab === "crusts" && (() => {
+                  const target = new Date(nowTime);
+                  const [hrs, mins] = runToTime.split(":").map(Number);
+                  target.setHours(hrs, mins, 0, 0);
+                  if (target <= nowTime) target.setDate(target.getDate() + 1);
+                  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+                  const pizzasByTime = calc.ppm * minutesAvailable;
+                  const casesToOpenByTime = v.crustsPerCase > 0 ? Math.ceil(pizzasByTime / v.crustsPerCase) : 0;
+                  const stacksByTime = calc.perTray > 0 ? Math.ceil(pizzasByTime / calc.perTray) : 0;
+                  const stacksAlreadyOpen = v.traysOnLine ?? 0;
+                  const moreStacksNeeded = Math.max(0, stacksByTime - stacksAlreadyOpen);
+                  const moreCasesNeeded = v.crustsPerCase > 0 && v.crustsPerStack > 0
+                    ? Math.max(0, casesToOpenByTime - Math.floor(stacksAlreadyOpen * v.crustsPerStack / v.crustsPerCase))
+                    : casesToOpenByTime;
+                  const hasAlreadyOpen = stacksAlreadyOpen > 0;
+                  const to12hr = (hhmm: string) => {
+                    const [h, m] = hhmm.split(":").map(Number);
+                    const ampm = h >= 12 ? "PM" : "AM";
+                    const h12 = h % 12 || 12;
+                    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+                  };
+                  const nowLabel = to12hr(
+                    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
+                  );
+                  return (
+                    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-0">
+                      <div className="h-1 bg-sky-500 w-full" />
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5" />
+                          Run to Time
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4">
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
+                          <input
+                            type="time"
+                            value={runToTime}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              setRunToTime(t);
+                              const newDs = { ...dayStateRef.current, runToTime: t };
+                              setDayState(newDs);
+                              saveDayState(newDs);
+                              schedulePush(newDs, 0);
+                            }}
+                            className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-amber-400">
+                              {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}{Math.round(minutesAvailable % 60)}m
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-sky-400">{casesToOpenByTime}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {hasAlreadyOpen ? "Cases total" : "Cases to open"}
+                            </p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-primary">{stacksByTime}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {hasAlreadyOpen ? "Stacks total" : "Stacks to stage"}
+                            </p>
+                          </div>
+                          <div className="bg-muted/30 rounded-lg p-2 text-center">
+                            <p className="text-xl font-mono font-bold text-emerald-400">{moreStacksNeeded}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">More stacks needed</p>
+                          </div>
+                        </div>
+                        {hasAlreadyOpen && (
+                          <p className="text-[10px] text-muted-foreground mt-2">
+                            {stacksAlreadyOpen} stack{stacksAlreadyOpen !== 1 ? "s" : ""} already open — subtracted from totals
+                            {moreCasesNeeded > 0 && ` · open ${moreCasesNeeded} more case${moreCasesNeeded !== 1 ? "s" : ""}`}
                           </p>
                         )}
                       </CardContent>
