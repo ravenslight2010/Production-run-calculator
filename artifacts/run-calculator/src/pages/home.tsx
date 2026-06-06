@@ -2599,6 +2599,8 @@ export default function Home() {
   if (screenMode === "dashboard") {
     const paceColor = calc.paceStatus === "ahead" ? "text-emerald-400" : calc.paceStatus === "behind" ? "text-red-400" : "text-yellow-400";
     const paceLabel = calc.paceStatus === "ahead" ? "AHEAD" : calc.paceStatus === "behind" ? "BEHIND" : "ON PACE";
+    const dashDowntimeSec = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+    const dashMinutesDelta = calc.ppm > 0 && calc.paceDelta !== 0 ? Math.round(Math.abs(calc.paceDelta) * v.pizzasPerCase / calc.ppm) : 0;
     return (
       <div className="min-h-screen bg-background text-foreground flex flex-col p-6 gap-6 select-none">
         {/* Top bar */}
@@ -2656,6 +2658,12 @@ export default function Home() {
             {calc.paceDelta !== 0 && (
               <p className="text-2xl font-bold text-muted-foreground">
                 {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
+                {dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~{dashMinutesDelta} min)</span>}
+              </p>
+            )}
+            {dashDowntimeSec > 0 && (
+              <p className="text-lg font-semibold text-red-400/80">
+                ↓ {fmtTime(dashDowntimeSec)} downtime
               </p>
             )}
             {calc.adjustedTimeSec > 0 && (
@@ -4054,6 +4062,14 @@ export default function Home() {
                     Need {calc.catchUpPpm} PPM to finish on time
                   </span>
                 )}
+                {(() => {
+                  const dtSec = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                  return dtSec > 0 ? (
+                    <span className="border-l border-current/30 pl-2 ml-0.5 text-red-300">
+                      ↓ {fmtTime(dtSec)} downtime
+                    </span>
+                  ) : null;
+                })()}
               </div>
             )}
 
@@ -6567,7 +6583,7 @@ export default function Home() {
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Reason <span className="text-muted-foreground/50">(optional)</span></label>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tap a reason to log instantly</label>
                   {isSupervisor && (
                     <button type="button" onClick={() => setShowEditReasonsDialog(true)} className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors">
                       <ListChecks className="w-3 h-3" /> Edit list
@@ -6575,46 +6591,52 @@ export default function Home() {
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  {[...stopReasonsList, "Other"].map(r => (
+                  {stopReasonsList.map(r => (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => setStopReason(stopReason === r ? "" : r)}
-                      className={`px-3 py-2 rounded-md border text-sm font-medium text-left transition-colors ${stopReason === r ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                      onClick={() => { logStop(r, ""); setShowStopDialog(false); }}
+                      className="px-3 py-3 rounded-md border border-orange-700/50 bg-orange-950/20 text-orange-300 text-sm font-semibold text-left hover:bg-orange-900/40 hover:border-orange-500 active:scale-95 transition-all"
                     >
                       {r}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setStopReason("Other")}
+                    className={`px-3 py-3 rounded-md border text-sm font-semibold text-left transition-all ${stopReason === "Other" ? "border-orange-500 bg-orange-500/10 text-orange-400" : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/50"}`}
+                  >
+                    Other…
+                  </button>
                 </div>
-                {stopReason && !stopReasonsList.includes(stopReason) && stopReason !== "Other" && (
-                  <input
-                    type="text"
-                    value={stopReason}
-                    onChange={e => setStopReason(e.target.value)}
-                    placeholder="Custom reason…"
-                    className="w-full mt-1 border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
+                {stopReason === "Other" && (
+                  <div className="space-y-2 pt-1">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={stopNotes}
+                      onChange={e => setStopNotes(e.target.value)}
+                      placeholder="Describe the reason…"
+                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => { logStop("Other", stopNotes.trim()); setShowStopDialog(false); }}
+                      className="w-full px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors"
+                    >
+                      Log Stop Now
+                    </button>
+                  </div>
                 )}
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Notes <span className="text-muted-foreground/50">(optional)</span></label>
-                <input
-                  type="text"
-                  value={stopNotes}
-                  onChange={e => setStopNotes(e.target.value)}
-                  placeholder="Brief description…"
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">You can add or change the reason later by tapping the entry in the log.</p>
-              <div className="flex gap-2 pt-1">
+              <div className="flex gap-2 pt-1 border-t border-border">
                 <button type="button" onClick={() => setShowStopDialog(false)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
                 <button
                   type="button"
-                  onClick={() => { logStop(stopReason.trim(), stopNotes.trim()); setShowStopDialog(false); }}
-                  className="flex-1 px-4 py-2 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-sm font-semibold transition-colors"
+                  onClick={() => { logStop("", ""); setShowStopDialog(false); }}
+                  className="flex-1 px-4 py-2 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-sm font-semibold transition-colors"
                 >
-                  Log Stop Now
+                  Log Without Reason
                 </button>
               </div>
             </div>
