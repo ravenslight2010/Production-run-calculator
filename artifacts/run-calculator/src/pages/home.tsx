@@ -3239,6 +3239,48 @@ export default function Home() {
                 Downtime: {downtimeStr}
               </div>
 
+              {/* Frontline reference */}
+              {(() => {
+                const s = calc;
+                type FLItem = { label: string; oz: number; value: string };
+                const items: FLItem[] = [];
+                if (v.frontlineRecipeName.trim() && v.sauceOzPerPizza > 0) {
+                  const bd = s.sauceBatches > 0 ? sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel) : null;
+                  const valStr = s.sauceBatches > 0
+                    ? (bd ? `${fmtNum(s.sauceBatches, 1)}bt · ${bd.totalBarrels}bbl` : `${fmtNum(s.sauceBatches, 1)} batches`)
+                    : "";
+                  items.push({ label: v.frontlineRecipeName, oz: v.sauceOzPerPizza, value: valStr });
+                }
+                const apps = [
+                  { type: v.app1Type, oz: v.app1OzPerPizza, lbs: s.app1Lbs, batches: s.app1Batches, isMix: v.app1Type.trim().toLowerCase().includes("mix") },
+                  { type: v.app2Type, oz: v.app2OzPerPizza, lbs: s.app2Lbs, batches: s.app2Batches, isMix: v.app2Type.trim().toLowerCase().includes("mix") },
+                  { type: v.app3Type, oz: v.app3OzPerPizza, lbs: s.app3Lbs, batches: s.app3Batches, isMix: v.app3Type.trim().toLowerCase().includes("mix") },
+                  { type: v.app4Type, oz: v.app4OzPerPizza, lbs: s.app4Lbs, batches: s.app4Batches, isMix: v.app4Type.trim().toLowerCase().includes("mix") },
+                ];
+                for (const a of apps) {
+                  if (!a.type.trim() || a.oz <= 0) continue;
+                  const valStr = a.isMix
+                    ? (a.lbs > 0 ? `${fmtNum(a.lbs, 1)} lbs` : "")
+                    : (a.batches > 0 ? `${fmtNum(a.batches, 1)} batches` : "");
+                  items.push({ label: a.type, oz: a.oz, value: valStr });
+                }
+                if (items.length === 0) return null;
+                return (
+                  <div className="rounded-xl px-3 py-2.5" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <div className="text-[9px] font-bold tracking-[0.18em] mb-2" style={{ color: "rgba(255,255,255,0.25)" }}>FRONTLINE</div>
+                    <div className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${Math.min(items.length, 4)}, 1fr)` }}>
+                      {items.map((item, i) => (
+                        <div key={i} className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-semibold truncate" style={{ color: "rgba(255,255,255,0.45)" }}>{item.label}</span>
+                          <span className="text-sm font-bold tabular-nums" style={{ color: "rgba(255,255,255,0.85)" }}>{item.oz} oz</span>
+                          {item.value && <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.3)" }}>{item.value}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Action buttons */}
               <div className="flex gap-3">
                 {hasActiveStop ? (
