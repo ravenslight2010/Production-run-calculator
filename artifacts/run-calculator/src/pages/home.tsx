@@ -5323,13 +5323,22 @@ export default function Home() {
                   target.setHours(hrs, mins, 0, 0);
                   if (target <= nowTime) target.setDate(target.getDate() + 1);
                   const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
-                  const batchMixMinutes = calc.timePerBatchSec / 60;
-                  const batchesPossible = batchMixMinutes > 0 ? Math.floor(minutesAvailable / batchMixMinutes) : 0;
+                  const timePerBatchMin = calc.timePerBatchSec / 60;
                   const onHandBatches = v.batchesReady ?? 0;
                   const onHandTrays = v.traysOnLine ?? 0;
-                  const remainingBatches = Math.max(0, batchesPossible - onHandBatches);
-                  const remainingDoughballs = Math.max(0, remainingBatches * calc.perBatch - onHandTrays * calc.perTray);
                   const hasOnHand = onHandBatches > 0 || onHandTrays > 0;
+                  // Total doughballs the line will consume in the available window
+                  const totalDoughballsNeeded = calc.ppm > 0 ? calc.ppm * minutesAvailable : 0;
+                  // Combine ALL on-hand dough into a single doughball count
+                  const doughOnHand = onHandBatches * calc.perBatch + onHandTrays * calc.perTray;
+                  // Net doughballs still needed after deducting everything on hand
+                  const doughStillNeeded = Math.max(0, totalDoughballsNeeded - doughOnHand);
+                  // Batches to mix — allow partial so the decimal shows a partial batch
+                  const batchesStillToMix = calc.perBatch > 0 ? doughStillNeeded / calc.perBatch : 0;
+                  // Trays those remaining batches will produce
+                  const traysFromBatches = calc.perTray > 0 ? (batchesStillToMix * calc.perBatch) / calc.perTray : 0;
+                  // Total cases the line will run in this window
+                  const casesInWindow = v.pizzasPerCase > 0 ? Math.floor(totalDoughballsNeeded / v.pizzasPerCase) : 0;
                   const to12hr = (hhmm: string) => {
                     const [h, m] = hhmm.split(":").map(Number);
                     const ampm = h >= 12 ? "PM" : "AM";
@@ -5365,7 +5374,7 @@ export default function Home() {
                             }}
                             className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                           />
-                          <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(batchMixMinutes, 1)} min/batch</span>
+                          <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
@@ -5375,21 +5384,19 @@ export default function Home() {
                             <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
                           </div>
                           <div className="bg-muted/30 rounded-lg p-2 text-center">
-                            <p className="text-xl font-mono font-bold text-primary">{remainingBatches}</p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {hasOnHand ? "Batches still to mix" : "Batches possible"}
-                            </p>
+                            <p className="text-xl font-mono font-bold text-primary">{fmtNum(batchesStillToMix, 2)}</p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">Batches to mix</p>
                           </div>
                           {calc.perBatch > 0 && calc.perTray > 0 && (
                             <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-emerald-400">{fmtNum(remainingDoughballs / calc.perTray, 0)}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">Trays</p>
+                              <p className="text-xl font-mono font-bold text-emerald-400">{Math.ceil(traysFromBatches)}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Trays to make</p>
                             </div>
                           )}
-                          {calc.perBatch > 0 && v.pizzasPerCase > 0 && (
+                          {v.pizzasPerCase > 0 && (
                             <div className="bg-muted/30 rounded-lg p-2 text-center">
-                              <p className="text-xl font-mono font-bold text-sky-400">{Math.floor(remainingDoughballs / v.pizzasPerCase)}</p>
-                              <p className="text-[10px] text-muted-foreground mt-0.5">Cases possible</p>
+                              <p className="text-xl font-mono font-bold text-sky-400">{casesInWindow}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">Cases in window</p>
                             </div>
                           )}
                         </div>
