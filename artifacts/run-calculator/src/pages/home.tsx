@@ -126,6 +126,8 @@ import {
   CalendarPlus,
   ListChecks,
   PauseCircle,
+  Share2,
+  Copy,
 } from "lucide-react";
 
 import {
@@ -1422,6 +1424,7 @@ export default function Home() {
     return run?.stoppages?.find(s => !s.endedAt)?.id ?? null;
   });
   const [confirmDeleteStopId, setConfirmDeleteStopId] = useState<string | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
   const [stopReasonsList, setStopReasonsList] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem(STOP_REASONS_KEY) ?? "null") ?? DEFAULT_STOP_REASONS; }
     catch { return DEFAULT_STOP_REASONS; }
@@ -6319,34 +6322,47 @@ export default function Home() {
                     <div className="space-y-6">
                       {/* Export buttons */}
                       <div className="flex gap-2 justify-end print:hidden flex-wrap">
-                        {"share" in navigator && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const lines: string[] = [`Production Run Summary — ${todayStr()}`, ""];
-                              for (const run of dayState.runs) {
-                                const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
-                                const s = computeSummaryStats(vals);
-                                lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
-                                if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
-                                if (s.sauceBatches > 0) {
-                                  const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                                  lines.push(bd
-                                    ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
-                                    : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
-                                }
-                                if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
-                                if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
-                                if (run.notes) lines.push(`  Notes: ${run.notes}`);
-                                lines.push("");
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const lines: string[] = [`Production Run Summary — ${todayStr()}`, ""];
+                            for (const run of dayState.runs) {
+                              const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
+                              const s = computeSummaryStats(vals);
+                              lines.push(`${runLabel(run)} — ${fmtComma(s.totalCases)} cases / ${fmtComma(s.totalPizzas)} pizzas`);
+                              if (run.startedAt) lines.push(`  Started: ${fmtClock(run.startedAt)}${run.endedAt ? `  Ended: ${fmtClock(run.endedAt)}` : ""}`);
+                              if (s.sauceBatches > 0) {
+                                const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+                                lines.push(bd
+                                  ? `  Sauce: ${fmtNum(s.sauceBatches, 2)} batches (${bd.batchesPerBarrel}/barrel) → ${bd.totalBarrels} barrels`
+                                  : `  Sauce: ${fmtNum(s.sauceBatches, 2)} barrels`);
                               }
-                              navigator.share({ title: "Run Summary", text: lines.join("\n") }).catch(() => {});
-                            }}
-                            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <FileText className="w-3.5 h-3.5" /> Share
-                          </button>
-                        )}
+                              if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
+                              if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
+                              if (run.notes) lines.push(`  Notes: ${run.notes}`);
+                              lines.push("");
+                            }
+                            if (dayState.shiftNotes?.trim()) {
+                              lines.push(`Shift Notes: ${dayState.shiftNotes.trim()}`);
+                            }
+                            const text = lines.join("\n");
+                            const nav = navigator as Navigator & { share?: (d: ShareData) => Promise<void> };
+                            if (nav.share) {
+                              nav.share({ title: "Run Summary", text }).catch(() => {});
+                            } else {
+                              navigator.clipboard?.writeText(text).then(() => {
+                                setCopiedSummary(true);
+                                setTimeout(() => setCopiedSummary(false), 2000);
+                              }).catch(() => {});
+                            }
+                          }}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {copiedSummary
+                            ? <><Check className="w-3.5 h-3.5 text-emerald-400" /> <span className="text-emerald-400">Copied!</span></>
+                            : <><Share2 className="w-3.5 h-3.5" /> Share</>
+                          }
+                        </button>
                         <button
                           type="button"
                           onClick={printSummary}
