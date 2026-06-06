@@ -2468,31 +2468,31 @@ export default function Home() {
         ? sauceLbs / sauceEffBarrel
         : 0;
     const app1RecipeLbs = (v.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-    const app1Lbs = (totalPizzasRun * v.app1OzPerPizza) / 16 + 20;
+    const app1Lbs = (totalPizzasForSauce * v.app1OzPerPizza) / 16 + 20;
     const app1IsMix = v.app1Type.trim().toLowerCase().includes("mix");
     const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : v.app1BatchLbs;
     const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
     const app2RecipeLbs = (v.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-    const app2Lbs = (totalPizzasRun * v.app2OzPerPizza) / 16 + 20;
+    const app2Lbs = (totalPizzasForSauce * v.app2OzPerPizza) / 16 + 20;
     const app2IsMix = v.app2Type.trim().toLowerCase().includes("mix");
     const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : v.app2BatchLbs;
     const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
     const app3RecipeLbs = (v.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-    const app3Lbs = (totalPizzasRun * v.app3OzPerPizza) / 16 + 20;
+    const app3Lbs = (totalPizzasForSauce * v.app3OzPerPizza) / 16 + 20;
     const app3IsMix = v.app3Type.trim().toLowerCase().includes("mix");
     const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : v.app3BatchLbs;
     const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
     const app4RecipeLbs = (v.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-    const app4Lbs = (totalPizzasRun * v.app4OzPerPizza) / 16 + 20;
+    const app4Lbs = (totalPizzasForSauce * v.app4OzPerPizza) / 16 + 20;
     const app4IsMix = v.app4Type.trim().toLowerCase().includes("mix");
     const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : v.app4BatchLbs;
     const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-    const pep1Lbs = (totalPizzasRun * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
+    const pep1Lbs = (totalPizzasForSauce * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
         ? pep1Lbs / v.pep1BatchLbs
         : 0;
-    const pep2Lbs = (totalPizzasRun * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
+    const pep2Lbs = (totalPizzasForSauce * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
     const pep2Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
         ? pep2Lbs / v.pep2BatchLbs
