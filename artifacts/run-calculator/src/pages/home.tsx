@@ -4903,9 +4903,10 @@ export default function Home() {
                         if (carryOverDismissedFor === currentRun?.id) return null;
                         const excessPizzas = calc.buffer * v.pizzasPerCase;
                         if (excessPizzas < 1 || calc.perTray <= 0) return null;
-                        const excessTrays = Math.floor(excessPizzas / calc.perTray);
-                        const remainingPizzas = excessPizzas - excessTrays * calc.perTray;
-                        const excessBatches = calc.perBatch > 0 ? Math.floor(remainingPizzas / calc.perBatch) : 0;
+                        // Decompose surplus: full batches first (larger unit), then trays from the remainder
+                        const excessBatches = calc.perBatch > 0 ? Math.floor(excessPizzas / calc.perBatch) : 0;
+                        const afterBatches = excessBatches > 0 ? excessPizzas - excessBatches * calc.perBatch : excessPizzas;
+                        const excessTrays = Math.floor(afterBatches / calc.perTray);
                         if (excessTrays === 0 && excessBatches === 0) return null;
                         const nextLabel = `${nextRun.brand ?? ""}${nextRun.flavor ? ` – ${nextRun.flavor}` : ""}`.trim() || `Run ${dayState.currentIndex + 2}`;
                         return (
@@ -5090,9 +5091,15 @@ export default function Home() {
                         if (isMix && a.lbs > 0) rows.push({ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" });
                         else if (!isMix && a.batches > 0) rows.push({ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" });
                       }
-                      // Pep
-                      if (s.pep1Type && s.pep1Lbs > 0) rows.push({ label: s.pep1Type, value: fmtNum(s.pep1Lbs, 1), sub: "lbs" });
-                      if (s.pep2Type && s.pep2Lbs > 0) rows.push({ label: s.pep2Type, value: fmtNum(s.pep2Lbs, 1), sub: "lbs" });
+                      // Pep — standard types tracked in lbs, custom types tracked in batches
+                      if (s.pep1Type && s.pep1Lbs > 0) {
+                        const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
+                        rows.push({ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" });
+                      }
+                      if (s.pep2Type && s.pep2Lbs > 0) {
+                        const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
+                        rows.push({ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" });
+                      }
                       return rows;
                     }
 
