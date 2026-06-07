@@ -4016,12 +4016,17 @@ export default function Home() {
 
             </div>
 
-            {/* Cases Needed — editable by all */}
+            {/* Cases Needed — editable by all, plain input outside Form context */}
             <div className="px-1">
-              <NumField
-                control={form.control}
-                name="casesNeeded"
-                label="Cases Needed"
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Cases Needed</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={v.casesNeeded === 0 ? "" : v.casesNeeded}
+                onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
+                placeholder="0"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
               {Number(v.casesNeeded) === 0 && (
                 <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
