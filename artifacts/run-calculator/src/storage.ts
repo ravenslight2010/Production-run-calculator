@@ -57,6 +57,9 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
   try { localStorage.setItem(BRAND_FLAVORS_KEY, JSON.stringify(bf)); } catch {}
 }
 
+// Fields that are run-specific and must never carry over via a brand/flavor profile
+const PER_RUN_FIELDS: (keyof FormValues)[] = ["casesNeeded"];
+
 export function loadProfile(brand: string, flavor: string): FormValues | null {
   try {
     const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
@@ -67,7 +70,10 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
       const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
       if (crustRaw) crustVals = JSON.parse(crustRaw);
     } catch {}
-    return { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
+    const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
+    // Strip per-run fields even if they were saved in an old profile
+    PER_RUN_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
+    return result;
   } catch {}
   return null;
 }
@@ -77,6 +83,7 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   const doughVals = { ...values } as Record<string, unknown>;
   CRUST_FIELDS.forEach((f) => delete doughVals[f]);
   PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
+  PER_RUN_FIELDS.forEach((f) => delete doughVals[f]);
   try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(doughVals)); } catch {}
   const crustVals: Partial<Record<CrustField, unknown>> = {};
   CRUST_FIELDS.forEach((f) => { crustVals[f] = values[f]; });
