@@ -58,7 +58,7 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
 }
 
 // Fields that are run-specific and must never carry over via a brand/flavor profile
-const PER_RUN_FIELDS: (keyof FormValues)[] = ["casesNeeded"];
+const PER_RUN_FIELDS: (keyof FormValues)[] = ["casesNeeded", "carryOverDone"];
 
 export function loadProfile(brand: string, flavor: string): FormValues | null {
   try {

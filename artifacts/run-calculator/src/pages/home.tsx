@@ -1430,8 +1430,6 @@ export default function Home() {
   const [showGlance, setShowGlance] = useState(false);
   const [showFloorMode, setShowFloorMode] = useState(false);
 
-  // ── Carry-over dismiss tracking ────────────────────────────────────────────
-  const [carryOverDismissedFor, setCarryOverDismissedFor] = useState<string>("");
 
   // ── Templates ─────────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<RunTemplate[]>(() => loadTemplates());
@@ -2166,7 +2164,7 @@ export default function Home() {
   }
 
   function applyTemplate(t: RunTemplate) {
-    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false };
     form.reset(clean);
     resetFieldArrays(clean);
     saveRunValues(currentRunId, clean);
@@ -2185,7 +2183,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     // Copy all form values except progress fields
-    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
+    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false };
     saveRunValues(newId, copied);
     form.reset(copied);
     resetFieldArrays(copied);
@@ -4858,7 +4856,7 @@ export default function Home() {
                       {(() => {
                         const nextRun = dayState.runs[dayState.currentIndex + 1];
                         if (!nextRun) return null;
-                        if (carryOverDismissedFor === currentRun?.id) return null;
+                        if (v.carryOverDone) return null;
                         const excessPizzas = calc.buffer * v.pizzasPerCase;
                         if (excessPizzas < 1 || calc.perTray <= 0) return null;
                         // Decompose surplus: full batches first (larger unit), then trays from the remainder
@@ -4881,7 +4879,7 @@ export default function Home() {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => setCarryOverDismissedFor(currentRun?.id ?? "")}
+                                onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
                                 className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 mt-0.5"
                               >
                                 <X className="w-3.5 h-3.5" />
@@ -4897,7 +4895,7 @@ export default function Home() {
                                     traysOnLine: excessTrays,
                                     batchesReady: excessBatches,
                                   });
-                                  setCarryOverDismissedFor(currentRun?.id ?? "");
+                                  form.setValue("carryOverDone", true, { shouldDirty: true });
                                   navigator.vibrate?.(15);
                                 }}
                                 className="flex-1 py-1.5 rounded-md bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 text-xs font-semibold transition-colors"
@@ -4906,7 +4904,7 @@ export default function Home() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setCarryOverDismissedFor(currentRun?.id ?? "")}
+                                onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
                                 className="px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground text-xs transition-colors hover:bg-muted/30"
                               >
                                 Skip
