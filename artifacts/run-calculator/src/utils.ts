@@ -56,36 +56,34 @@ export function computeSummaryStats(vals: FormValues) {
   const totalPizzasForSauce = totalPizzas + vals.casesPerLayer * vals.pizzasPerCase;
   const frontlineRecipeLbs = (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const sauceEffBarrel = frontlineRecipeLbs > 0 ? frontlineRecipeLbs : vals.sauceBarrelLbs;
-  const sauceBatches =
-    sauceEffBarrel > 0
-      ? (totalPizzasForSauce * vals.sauceOzPerPizza) / (sauceEffBarrel * 16)
-      : 0;
+  const sauceLbs = (totalPizzasForSauce * vals.sauceOzPerPizza) / 16 + 30;
+  const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
   const app1RecipeLbs = (vals.app1CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app1Lbs = (totalPizzas * vals.app1OzPerPizza) / 16 + 20;
+  const app1Lbs = (totalPizzasForSauce * vals.app1OzPerPizza) / 16 + 20;
   const app1IsMix = vals.app1Type.trim().toLowerCase().includes("mix");
   const app1EffBatch = app1RecipeLbs > 0 ? app1RecipeLbs : vals.app1BatchLbs;
   const app1Batches = !app1IsMix && app1EffBatch > 0 ? app1Lbs / app1EffBatch : 0;
   const app2RecipeLbs = (vals.app2CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app2Lbs = (totalPizzas * vals.app2OzPerPizza) / 16 + 20;
+  const app2Lbs = (totalPizzasForSauce * vals.app2OzPerPizza) / 16 + 20;
   const app2IsMix = vals.app2Type.trim().toLowerCase().includes("mix");
   const app2EffBatch = app2RecipeLbs > 0 ? app2RecipeLbs : vals.app2BatchLbs;
   const app2Batches = !app2IsMix && app2EffBatch > 0 ? app2Lbs / app2EffBatch : 0;
   const app3RecipeLbs = (vals.app3CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app3Lbs = (totalPizzas * vals.app3OzPerPizza) / 16 + 20;
+  const app3Lbs = (totalPizzasForSauce * vals.app3OzPerPizza) / 16 + 20;
   const app3IsMix = vals.app3Type.trim().toLowerCase().includes("mix");
   const app3EffBatch = app3RecipeLbs > 0 ? app3RecipeLbs : vals.app3BatchLbs;
   const app3Batches = !app3IsMix && app3EffBatch > 0 ? app3Lbs / app3EffBatch : 0;
   const app4RecipeLbs = (vals.app4CheeseRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
-  const app4Lbs = (totalPizzas * vals.app4OzPerPizza) / 16 + 20;
+  const app4Lbs = (totalPizzasForSauce * vals.app4OzPerPizza) / 16 + 20;
   const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
   const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
   const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-  const pep1Lbs = (totalPizzas * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
+  const pep1Lbs = (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
   const pep1Batches =
     !DEFAULT_PEP_TYPES.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
       ? pep1Lbs / vals.pep1BatchLbs
       : 0;
-  const pep2Lbs = (totalPizzas * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
+  const pep2Lbs = (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
   const pep2Batches =
     !DEFAULT_PEP_TYPES.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
       ? pep2Lbs / vals.pep2BatchLbs

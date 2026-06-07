@@ -2449,7 +2449,7 @@ export default function Home() {
     const doughMadeTimeSec =
       ppm > 0
         ? ((v.traysOnLine * perTray +
-            v.batchesReady * v.doughBatchYield) /
+            v.batchesReady * effectiveDoughBatchYield) /
             ppm) *
           60
         : 0;
@@ -2822,7 +2822,7 @@ export default function Home() {
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batch Yield</p>
               <p className="text-3xl font-black tabular-nums">{fmtComma(v.doughBatchYield)}</p>
-              <p className="text-sm text-muted-foreground">lbs</p>
+              <p className="text-sm text-muted-foreground">doughballs</p>
             </div>
           )}
           {v.casesNeeded > 0 && (
@@ -6514,11 +6514,13 @@ export default function Home() {
                   for (const run of dayState.runs) {
                     const vals = run.id === currentRun.id ? v : loadRunValues(run.id);
                     const s = computeSummaryStats(vals);
-                    // Dough batches needed (calc inline from vals)
+                    // Dough batches needed (calc inline from vals, same logic as Ingredient Needs)
                     const totalPizzas = s.totalPizzas;
-                    const doughBatches = vals.doughBatchYield > 0
-                      ? Math.ceil((totalPizzas * vals.targetDoughballWeight) / vals.doughBatchYield)
-                      : 0;
+                    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc: number, r: { lbs: number }) => acc + Number(r.lbs ?? 0), 0);
+                    const effYield = dRecipeLbs > 0 && vals.targetDoughballWeight > 0
+                      ? (dRecipeLbs * 16) / vals.targetDoughballWeight
+                      : vals.doughBatchYield;
+                    const doughBatches = effYield > 0 ? Math.ceil(totalPizzas / effYield) : 0;
                     // Sauce
                     if (s.sauceBatches > 0) shopAdd("Sauce", s.sauceBatches, "barrels");
                     // Dough ingredients
