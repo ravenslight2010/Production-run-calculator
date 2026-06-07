@@ -4777,7 +4777,7 @@ export default function Home() {
                         const s = autoTrackSuggestion;
                         const suppressed = Date.now() < autoSuppressUntilRef.current;
                         const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 15 * 60 * 1000; };
+                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
                         return (
                           <>
                             {autoTrackProgress && s && suppressed && (
@@ -4911,7 +4911,7 @@ export default function Home() {
                       {(() => {
                         const s = autoTrackSuggestion;
                         const suppressed = Date.now() < autoSuppressUntilRef.current;
-                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 15 * 60 * 1000; };
+                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
                         const suggestedTrays = calc.traysNeeded > 0
                           ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
                           : null;
