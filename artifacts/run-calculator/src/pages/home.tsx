@@ -4892,8 +4892,8 @@ export default function Home() {
                                   const existing = loadRunValues(nextRun.id);
                                   saveRunValues(nextRun.id, {
                                     ...existing,
-                                    traysOnLine: excessTrays,
-                                    batchesReady: excessBatches,
+                                    traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
+                                    batchesReady: (existing.batchesReady ?? 0) + excessBatches,
                                   });
                                   form.setValue("carryOverDone", true, { shouldDirty: true });
                                   navigator.vibrate?.(15);
