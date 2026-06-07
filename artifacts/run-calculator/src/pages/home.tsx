@@ -4016,6 +4016,20 @@ export default function Home() {
 
             </div>
 
+            {/* Cases Needed — editable by all */}
+            <div className="px-1">
+              <NumField
+                control={form.control}
+                name="casesNeeded"
+                label="Cases Needed"
+              />
+              {Number(v.casesNeeded) === 0 && (
+                <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
+                  <span>⚠</span> Enter cases needed to enable calculations
+                </p>
+              )}
+            </div>
+
             {/* Last-run recall hint */}
             {lastRunRecall && (
               <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70 -mt-1">
@@ -4771,21 +4785,6 @@ export default function Home() {
                     </div>
                 </details>
                 )}
-
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                  <CardContent className="px-4 pt-4 pb-3">
-                    <NumField
-                      control={form.control}
-                      name="casesNeeded"
-                      label="Cases Needed"
-                    />
-                    {Number(v.casesNeeded) === 0 && (
-                      <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
-                        <span>⚠</span> Enter cases needed to enable calculations
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
 
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-1 pt-3 px-4">
