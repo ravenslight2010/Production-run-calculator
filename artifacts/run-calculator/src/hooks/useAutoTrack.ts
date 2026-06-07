@@ -15,8 +15,6 @@ interface AutoTrackValues {
   pizzasPerCase: number;
   casesNeeded: number;
   freezerTime: number;
-  startingTrays: number;
-  startingBatches: number;
 }
 
 interface AutoTrackParams {
@@ -71,21 +69,11 @@ export function useAutoTrack({
     const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
     const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
 
-    const trays =
-      v.startingTrays > 0 && calc.perTray > 0
-        ? Math.max(0, v.startingTrays - Math.floor((elapsedMin * calc.ppm) / calc.perTray))
-        : null;
-
-    const batches =
-      v.startingBatches > 0 && calc.perBatch > 0
-        ? Math.max(0, v.startingBatches - Math.floor((elapsedMin * calc.ppm) / calc.perBatch))
-        : null;
-
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
-      trays,
-      batches,
+      trays: null,
+      batches: null,
     };
   }, [
     runStatus,
@@ -96,8 +84,6 @@ export function useAutoTrack({
     v.pizzasPerCase,
     v.casesNeeded,
     v.freezerTime,
-    v.startingTrays,
-    v.startingBatches,
     elapsedBatchSec,
   ]);
 
@@ -110,10 +96,6 @@ export function useAutoTrack({
     lastAutoMinBucketRef.current = bucket;
     form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
     form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
-    if (autoTrackSuggestion.trays !== null)
-      form.setValue("traysOnLine", autoTrackSuggestion.trays, { shouldDirty: true });
-    if (autoTrackSuggestion.batches !== null)
-      form.setValue("batchesReady", autoTrackSuggestion.batches, { shouldDirty: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTime]);
 

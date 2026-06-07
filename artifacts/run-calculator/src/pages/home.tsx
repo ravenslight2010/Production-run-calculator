@@ -2159,7 +2159,7 @@ export default function Home() {
   }
 
   function applyTemplate(t: RunTemplate) {
-    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
+    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
     form.reset(clean);
     resetFieldArrays(clean);
     saveRunValues(currentRunId, clean);
@@ -2178,7 +2178,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     // Copy all form values except progress fields
-    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, startingTrays: 0, startingBatches: 0 };
+    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 };
     saveRunValues(newId, copied);
     form.reset(copied);
     resetFieldArrays(copied);
@@ -4922,44 +4922,6 @@ export default function Home() {
                         const batchAutoActive = autoTrackProgress && s?.batches !== null && !suppressed;
                         return (
                           <>
-                            {autoTrackProgress && (runStatus === "running" || runStatus === "paused") && (
-                              <div className="grid grid-cols-2 gap-2 p-3 rounded-lg bg-muted/20 border border-border/40">
-                                <div className="space-y-1">
-                                  <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                                    {doughSubTab === "crusts" ? "Stacks at Start" : "Trays at Start"}
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={74}
-                                    value={v.startingTrays || ""}
-                                    placeholder="0"
-                                    onChange={e => form.setValue("startingTrays", Number(e.target.value) || 0, { shouldDirty: true })}
-                                    className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-primary/50"
-                                  />
-                                  {v.startingTrays > 0 && (
-                                    <p className="text-[10px] text-primary text-center">Auto counting down</p>
-                                  )}
-                                </div>
-                                {doughSubTab !== "crusts" && (
-                                  <div className="space-y-1">
-                                    <label className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">Batches at Start</label>
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      max={10}
-                                      value={v.startingBatches || ""}
-                                      placeholder="0"
-                                      onChange={e => form.setValue("startingBatches", Number(e.target.value) || 0, { shouldDirty: true })}
-                                      className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-center tabular-nums focus:outline-none focus:border-primary/50"
-                                    />
-                                    {v.startingBatches > 0 && (
-                                      <p className="text-[10px] text-primary text-center">Auto counting down</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
                             <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
                               <div>
                                 <StepperField
