@@ -2955,7 +2955,7 @@ export default function Home() {
   }
 
   if (screenMode === "backline") {
-    const freezerMs = Number(v.freezerEmptyTime) * 60000;
+    const freezerMs = Number(v.freezerTime) * 60000;
     const freezerRemainMs = runStatus === "ended" && currentRun?.endedAt && freezerMs > 0
       ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
       : 0;
@@ -4138,7 +4138,7 @@ export default function Home() {
                 </div>
               )}
               {runStatus === "ended" && (() => {
-                const emptyMs = Number(v.freezerEmptyTime) * 60000;
+                const emptyMs = Number(v.freezerTime) * 60000;
                 const remainMs = currentRun?.endedAt && emptyMs > 0
                   ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
                   : 0;
@@ -4456,7 +4456,7 @@ export default function Home() {
               {/* ─── ALWAYS VISIBLE: status banners + line settings + progress ─── */}
                 {/* Ended-run banner */}
                 {currentRun?.endedAt && (() => {
-                  const emptyMs = Number(v.freezerEmptyTime) * 60000;
+                  const emptyMs = Number(v.freezerTime) * 60000;
                   const remainMs = emptyMs > 0
                     ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
                     : 0;
@@ -4477,7 +4477,7 @@ export default function Home() {
                               : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtNum(Number(v.freezerEmptyTime), 0)} min to empty` : ""} — switch to another run to continue.
+                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtNum(Number(v.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
                           </p>
                           {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
@@ -4672,21 +4672,16 @@ export default function Home() {
                           />
                         </div>
                       )}
-                      <NumField
-                        control={form.control}
-                        name="speedAdjustment"
-                        label="Speed Adjustment"
-                      />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
                           control={form.control}
-                          name="freezerTime"
-                          label="Freezer Fill Time (min)"
+                          name="speedAdjustment"
+                          label="Speed Adjustment"
                         />
                         <NumField
                           control={form.control}
-                          name="freezerEmptyTime"
-                          label="Freezer Empty Time (min)"
+                          name="freezerTime"
+                          label="Freezer Time (min)"
                         />
                       </div>
                       <Separator className="opacity-30" />
@@ -5007,7 +5002,7 @@ export default function Home() {
                         );
                       })()}
                       {/* Freezer countdowns */}
-                      {(Number(v.freezerTime) > 0 || Number(v.freezerEmptyTime) > 0) && (runStatus === "running" || runStatus === "ended") && (
+                      {Number(v.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
                         <Separator className="opacity-30 my-1" />
                       )}
                       {runStatus === "running" && Number(v.freezerTime) > 0 && (() => {
@@ -5033,8 +5028,8 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                      {runStatus === "ended" && Number(v.freezerEmptyTime) > 0 && currentRun?.endedAt && (() => {
-                        const freezerMs = Number(v.freezerEmptyTime) * 60000;
+                      {runStatus === "ended" && Number(v.freezerTime) > 0 && currentRun?.endedAt && (() => {
+                        const freezerMs = Number(v.freezerTime) * 60000;
                         const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
                         const pct = Math.min(1 - remainMs / freezerMs, 1);
                         const mm = Math.floor(remainMs / 60000);
