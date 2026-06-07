@@ -4628,18 +4628,6 @@ export default function Home() {
                           )}
                         </div>
                       </div>
-                      <div>
-                        <NumField
-                          control={form.control}
-                          name="casesNeeded"
-                          label="Cases Needed"
-                        />
-                        {Number(v.casesNeeded) === 0 && (
-                          <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
-                            <span>⚠</span> Enter cases needed to enable calculations
-                          </p>
-                        )}
-                      </div>
                       {doughSubTab === "crusts" ? (
                         <NumField
                           control={form.control}
@@ -4783,6 +4771,21 @@ export default function Home() {
                     </div>
                 </details>
                 )}
+
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                  <CardContent className="px-4 pt-4 pb-3">
+                    <NumField
+                      control={form.control}
+                      name="casesNeeded"
+                      label="Cases Needed"
+                    />
+                    {Number(v.casesNeeded) === 0 && (
+                      <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
+                        <span>⚠</span> Enter cases needed to enable calculations
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
 
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-1 pt-3 px-4">
