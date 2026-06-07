@@ -1526,10 +1526,13 @@ export default function Home() {
     applySyncCallbackRef.current = (payload: SyncPayload) => {
       isSyncApplyingRef.current = true;
 
-      // ── Reset guard: only apply day state + run values if remote reset is at least as recent ──
+      // ── Reset guard: only apply day state + run values if remote reset is at least as recent
+      //    AND the remote date matches today (prevents yesterday's stale device from overwriting a fresh day) ──
       const remoteResetAt = payload.dayState.resetAt ?? 0;
       const localResetAt = dayStateRef.current.resetAt ?? 0;
-      const acceptRemoteDay = remoteResetAt >= localResetAt;
+      const remoteDate = payload.dayState.date;
+      const remoteDateOk = !remoteDate || remoteDate === todayStr();
+      const acceptRemoteDay = remoteDateOk && remoteResetAt >= localResetAt;
 
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
@@ -1780,7 +1783,7 @@ export default function Home() {
         }
       }
       const payload: SyncPayload = {
-        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt },
+        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr() },
         runValues,
         brands: loadList(BRANDS_KEY, []),
         brandFlavors: loadBrandFlavors(),

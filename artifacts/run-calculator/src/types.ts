@@ -178,7 +178,7 @@ export type DayState = {
 };
 
 export type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string };
   runValues: Record<string, FormValues>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
