@@ -43,7 +43,12 @@ interface AutoTrackResult {
 
 /**
  * Tracks expected progress automatically every 5-minute bucket while running.
- * Trays and batches count down from the values present when the run starts.
+ *
+ * Skids/cases: absolute calculation from run start (using total elapsed time).
+ * Trays/batches: incremental decrement per bucket — subtracts consumption for
+ * the actual duration since the last bucket fired. This is self-correcting:
+ * it survives page reloads and handles mid-run replenishments correctly without
+ * needing a starting-value snapshot.
  */
 export function useAutoTrack({
   runStatus,
@@ -56,26 +61,9 @@ export function useAutoTrack({
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   const autoSuppressUntilRef = useRef<number>(0);
   const lastAutoMinBucketRef = useRef<number>(-1);
-
-  // Snapshot trays/batches at the moment the run becomes "running".
-  const startingTraysRef = useRef<number | null>(null);
-  const startingBatchesRef = useRef<number | null>(null);
-  const prevStatusRef = useRef<RunStatus>(runStatus);
-
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    if (prev !== "running" && runStatus === "running") {
-      // Run just started — capture current values as the baseline.
-      startingTraysRef.current = v.traysOnLine;
-      startingBatchesRef.current = v.batchesReady;
-    }
-    if (runStatus === "pending" || runStatus === "ended") {
-      // Reset snapshots when run is over or hasn't started.
-      startingTraysRef.current = null;
-      startingBatchesRef.current = null;
-    }
-    prevStatusRef.current = runStatus;
-  }, [runStatus, v.traysOnLine, v.batchesReady]);
+  // Wall-clock timestamp (ms) when the last bucket write happened.
+  // Used to compute actual duration for incremental tray/batch decrement.
+  const lastBucketTimeMsRef = useRef<number>(0);
 
   const autoTrackSuggestion = useMemo(() => {
     const ok =
@@ -90,24 +78,13 @@ export function useAutoTrack({
     const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
     const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
 
-    const startTrays = startingTraysRef.current;
-    const startBatches = startingBatchesRef.current;
-
-    const trays =
-      startTrays !== null && startTrays > 0 && calc.perTray > 0
-        ? Math.max(0, startTrays - Math.floor((elapsedMin * calc.ppm) / calc.perTray))
-        : null;
-
-    const batches =
-      startBatches !== null && startBatches > 0 && calc.perBatch > 0
-        ? Math.max(0, startBatches - Math.floor((elapsedMin * calc.ppm) / calc.perBatch))
-        : null;
-
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
-      trays,
-      batches,
+      // Tray/batch suggestions are handled incrementally in the write effect;
+      // returning null here means the UI falls back to the calc-based suggestion.
+      trays: null,
+      batches: null,
     };
   }, [
     runStatus,
@@ -125,17 +102,48 @@ export function useAutoTrack({
   useEffect(() => {
     if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
     if (Date.now() < autoSuppressUntilRef.current) return;
+
     const bucket = Math.floor(nowTime.getTime() / (5 * 60 * 1000));
     if (bucket === lastAutoMinBucketRef.current) return;
+
+    // How long since the last bucket fired (capped to 10 min to avoid huge jumps).
+    const nowMs = nowTime.getTime();
+    const prevMs = lastBucketTimeMsRef.current;
+    const bucketDurationMin = prevMs > 0
+      ? Math.min(10, (nowMs - prevMs) / 60000)
+      : 5; // first bucket — assume 5-min duration
+
     lastAutoMinBucketRef.current = bucket;
+    lastBucketTimeMsRef.current = nowMs;
+
+    // Skids / cases: absolute calculation based on total elapsed time.
     form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
     form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
-    if (autoTrackSuggestion.trays !== null)
-      form.setValue("traysOnLine", autoTrackSuggestion.trays, { shouldDirty: true });
-    if (autoTrackSuggestion.batches !== null)
-      form.setValue("batchesReady", autoTrackSuggestion.batches, { shouldDirty: true });
+
+    // Trays / batches: incremental decrement for this bucket's duration.
+    // Works after page reloads and naturally handles mid-run replenishments.
+    if (calc.perTray > 0 && calc.ppm > 0) {
+      const traysConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perTray);
+      if (traysConsumed > 0) {
+        form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
+      }
+    }
+    if (calc.perBatch > 0 && calc.ppm > 0) {
+      const batchesConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perBatch);
+      if (batchesConsumed > 0) {
+        form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
+      }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTime]);
+
+  // Reset lastBucketTimeMsRef when the run stops so the next run starts fresh.
+  useEffect(() => {
+    if (runStatus === "pending" || runStatus === "ended") {
+      lastBucketTimeMsRef.current = 0;
+      lastAutoMinBucketRef.current = -1;
+    }
+  }, [runStatus]);
 
   return {
     autoTrackProgress,

@@ -4923,8 +4923,8 @@ export default function Home() {
                         const suggestedBatches = calc.batchesNeeded > 0
                           ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
                           : null;
-                        const trayAutoActive = autoTrackProgress && s?.trays !== null && !suppressed;
-                        const batchAutoActive = autoTrackProgress && s?.batches !== null && !suppressed;
+                        const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
+                        const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
                         return (
                           <>
                             <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
