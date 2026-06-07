@@ -4672,67 +4672,11 @@ export default function Home() {
                           />
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-3">
-                        <NumField
-                          control={form.control}
-                          name="speedAdjustment"
-                          label="Speed Adjustment"
-                        />
-                        <div>
-                          <NumField
-                            control={form.control}
-                            name="freezerTime"
-                            label="Freezer Time (min)"
-                          />
-                          {runStatus === "running" && (() => {
-                            const totalSecs = Number(v.freezerTime) * 60;
-                            const elapsedSecs = liveFreezerMin * 60;
-                            const remainSecs = Math.max(0, totalSecs - elapsedSecs);
-                            const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
-                            const mm = Math.floor(remainSecs / 60);
-                            const ss = Math.floor(remainSecs % 60);
-                            const done = remainSecs === 0;
-                            return (
-                              <div className="mt-1.5 space-y-1">
-                                <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary"}`}
-                                    style={{ width: `${pct * 100}%` }}
-                                  />
-                                </div>
-                                <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-green-400" : "text-muted-foreground"}`}>
-                                  {done
-                                    ? "✓ Freezer time complete"
-                                    : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`}
-                                </p>
-                              </div>
-                            );
-                          })()}
-                        {runStatus === "ended" && Number(v.freezerTime) > 0 && currentRun?.endedAt && (() => {
-                            const freezerMs = Number(v.freezerTime) * 60000;
-                            const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
-                            const pct = Math.min(1 - remainMs / freezerMs, 1);
-                            const mm = Math.floor(remainMs / 60000);
-                            const ss = Math.floor((remainMs % 60000) / 1000);
-                            const done = remainMs === 0;
-                            return (
-                              <div className="mt-1.5 space-y-1">
-                                <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
-                                    style={{ width: `${pct * 100}%` }}
-                                  />
-                                </div>
-                                <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-emerald-400" : "text-amber-400"}`}>
-                                  {done
-                                    ? "✓ Freezer empty"
-                                    : `Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
-                                </p>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
+                      <NumField
+                        control={form.control}
+                        name="speedAdjustment"
+                        label="Speed Adjustment"
+                      />
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -5050,6 +4994,62 @@ export default function Home() {
                           </>
                         );
                       })()}
+                      {/* Freezer Timer */}
+                      <Separator className="opacity-30 my-1" />
+                      <div>
+                        <NumField
+                          control={form.control}
+                          name="freezerTime"
+                          label="Freezer Time (min)"
+                        />
+                        {runStatus === "running" && Number(v.freezerTime) > 0 && (() => {
+                          const totalSecs = Number(v.freezerTime) * 60;
+                          const elapsedSecs = liveFreezerMin * 60;
+                          const remainSecs = Math.max(0, totalSecs - elapsedSecs);
+                          const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
+                          const mm = Math.floor(remainSecs / 60);
+                          const ss = Math.floor(remainSecs % 60);
+                          const done = remainSecs === 0;
+                          return (
+                            <div className="mt-1.5 space-y-1">
+                              <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary"}`}
+                                  style={{ width: `${pct * 100}%` }}
+                                />
+                              </div>
+                              <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-green-400" : "text-muted-foreground"}`}>
+                                {done
+                                  ? "✓ Freezer time complete"
+                                  : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`}
+                              </p>
+                            </div>
+                          );
+                        })()}
+                        {runStatus === "ended" && Number(v.freezerTime) > 0 && currentRun?.endedAt && (() => {
+                          const freezerMs = Number(v.freezerTime) * 60000;
+                          const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
+                          const pct = Math.min(1 - remainMs / freezerMs, 1);
+                          const mm = Math.floor(remainMs / 60000);
+                          const ss = Math.floor((remainMs % 60000) / 1000);
+                          const done = remainMs === 0;
+                          return (
+                            <div className="mt-1.5 space-y-1">
+                              <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
+                                  style={{ width: `${pct * 100}%` }}
+                                />
+                              </div>
+                              <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-emerald-400" : "text-amber-400"}`}>
+                                {done
+                                  ? "✓ Freezer empty"
+                                  : `Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
+                              </p>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </CardContent>
                   </Card>
 
