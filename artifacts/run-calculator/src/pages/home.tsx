@@ -4672,11 +4672,18 @@ export default function Home() {
                           />
                         </div>
                       )}
-                      <NumField
-                        control={form.control}
-                        name="speedAdjustment"
-                        label="Speed Adjustment"
-                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <NumField
+                          control={form.control}
+                          name="speedAdjustment"
+                          label="Speed Adjustment"
+                        />
+                        <NumField
+                          control={form.control}
+                          name="freezerTime"
+                          label="Freezer Time (min)"
+                        />
+                      </div>
                       <Separator className="opacity-30" />
                       <div className="grid grid-cols-2 gap-3">
                         <NumField
@@ -4994,15 +5001,11 @@ export default function Home() {
                           </>
                         );
                       })()}
-                      {/* Freezer Timer */}
-                      <Separator className="opacity-30 my-1" />
-                      <div>
-                        <NumField
-                          control={form.control}
-                          name="freezerTime"
-                          label="Freezer Time (min)"
-                        />
-                        {runStatus === "running" && Number(v.freezerTime) > 0 && (() => {
+                      {/* Freezer countdown */}
+                      {Number(v.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
+                        <Separator className="opacity-30 my-1" />
+                      )}
+                      {runStatus === "running" && Number(v.freezerTime) > 0 && (() => {
                           const totalSecs = Number(v.freezerTime) * 60;
                           const elapsedSecs = liveFreezerMin * 60;
                           const remainSecs = Math.max(0, totalSecs - elapsedSecs);
@@ -5049,7 +5052,6 @@ export default function Home() {
                             </div>
                           );
                         })()}
-                      </div>
                     </CardContent>
                   </Card>
 
