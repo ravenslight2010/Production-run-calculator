@@ -5066,7 +5066,7 @@ export default function Home() {
                             ? (dRecipeLbs * 16) / vals.targetDoughballWeight
                             : vals.doughBatchYield;
                         if (effYield > 0 && vals.targetDoughballWeight > 0) {
-                          const batches = Math.ceil((s.totalPizzas * vals.targetDoughballWeight) / effYield);
+                          const batches = Math.ceil(s.totalPizzas / effYield);
                           if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
                         }
                       }
