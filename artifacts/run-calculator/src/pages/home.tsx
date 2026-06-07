@@ -1129,6 +1129,13 @@ export default function Home() {
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
+  // Most recently ended run across the whole day — used for freezer-drain countdown
+  // regardless of which run is currently being viewed.
+  const lastEndedRun = dayState.runs.reduce<RunMeta | undefined>((best, r) => {
+    if (!r.endedAt) return best;
+    if (!best?.endedAt || r.endedAt > best.endedAt) return r;
+    return best;
+  }, undefined);
 
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
@@ -4139,8 +4146,8 @@ export default function Home() {
               )}
               {runStatus === "ended" && (() => {
                 const emptyMs = Number(v.freezerTime) * 60000;
-                const remainMs = currentRun?.endedAt && emptyMs > 0
-                  ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
+                const remainMs = lastEndedRun?.endedAt && emptyMs > 0
+                  ? Math.max(0, lastEndedRun.endedAt + emptyMs - nowTime.getTime())
                   : 0;
                 const draining = emptyMs > 0 && remainMs > 0;
                 const mm = Math.floor(remainMs / 60000);
@@ -4990,9 +4997,9 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                      {runStatus === "ended" && Number(v.freezerTime) > 0 && currentRun?.endedAt && (() => {
+                      {Number(v.freezerTime) > 0 && lastEndedRun?.endedAt && (() => {
                         const freezerMs = Number(v.freezerTime) * 60000;
-                        const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
+                        const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
                         const pct = Math.min(1 - remainMs / freezerMs, 1);
                         const mm = Math.floor(remainMs / 60000);
                         const ss = Math.floor((remainMs % 60000) / 1000);
