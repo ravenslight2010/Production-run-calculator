@@ -5508,7 +5508,7 @@ export default function Home() {
                     form.setValue("doughRecipeName", val, { shouldDirty: true });
                     if (val.trim()) {
                       const preset = loadDoughRecipePresets()[val.trim()];
-                      if (preset) form.setValue("doughRecipe", preset.rows, { shouldDirty: true });
+                      if (preset) { form.setValue("doughRecipe", preset.rows, { shouldDirty: true }); replaceDough(preset.rows); }
                     }
                   }}
                 />
@@ -5787,7 +5787,7 @@ export default function Home() {
                             form.setValue("frontlineRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
                               const preset = loadFrontlineRecipePresets()[val.trim()];
-                              if (preset) form.setValue("frontlineRecipe", preset, { shouldDirty: true });
+                              if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); }
                             }
                           }}
                         />
@@ -5821,7 +5821,7 @@ export default function Home() {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
                               const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) form.setValue("app1CheeseRecipe", preset, { shouldDirty: true });
+                              if (preset) { form.setValue("app1CheeseRecipe", preset, { shouldDirty: true }); replaceCheese1(preset); }
                             }
                           }}
                         />
@@ -5872,7 +5872,7 @@ export default function Home() {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
                               const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) form.setValue("app2CheeseRecipe", preset, { shouldDirty: true });
+                              if (preset) { form.setValue("app2CheeseRecipe", preset, { shouldDirty: true }); replaceCheese2(preset); }
                             }
                           }}
                         />
@@ -5923,7 +5923,7 @@ export default function Home() {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
                               const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) form.setValue("app3CheeseRecipe", preset, { shouldDirty: true });
+                              if (preset) { form.setValue("app3CheeseRecipe", preset, { shouldDirty: true }); replaceCheese3(preset); }
                             }
                           }}
                         />
@@ -5974,7 +5974,7 @@ export default function Home() {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
                               const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) form.setValue("app4CheeseRecipe", preset, { shouldDirty: true });
+                              if (preset) { form.setValue("app4CheeseRecipe", preset, { shouldDirty: true }); replaceCheese4(preset); }
                             }
                           }}
                         />
