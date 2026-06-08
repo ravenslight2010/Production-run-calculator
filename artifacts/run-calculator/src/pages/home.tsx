@@ -1522,6 +1522,8 @@ export default function Home() {
   const isSyncApplyingRef = useRef(false);
   const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
   const initialFinishTimestampRef = useRef<number>(0);
+  const pushAcknowledgedRef = useRef(true);
+  const [syncConnected, setSyncConnected] = useState(false);
 
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
@@ -1570,7 +1572,7 @@ export default function Home() {
         const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
         const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
         if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
-        if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000) {
+        if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current) {
           const merged = { ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) };
           form.reset(merged);
           resetFieldArrays(merged);
@@ -1685,13 +1687,26 @@ export default function Home() {
   // SSE connection — receives updates from other clients
   useEffect(() => {
     const es = new EventSource("/api/sync/events?clientId=" + clientId.current);
+    es.onopen = () => {
+      setSyncConnected(true);
+      // Re-push our current state after every (re)connect so the server always has our latest,
+      // even if pushes failed while the server was restarting.
+      schedulePush(dayStateRef.current, 1000);
+    };
     es.onmessage = (e: MessageEvent) => {
       try {
         const msg = JSON.parse(e.data as string) as { data: SyncPayload | null };
         if (msg.data) applySyncCallbackRef.current(msg.data);
       } catch {}
     };
-    return () => es.close();
+    es.onerror = () => { setSyncConnected(false); };
+    return () => { setSyncConnected(false); es.close(); };
+  }, []);
+
+  // Periodic push every 30 s — ensures sync recovers automatically even with no user activity
+  useEffect(() => {
+    const id = setInterval(() => { schedulePush(dayStateRef.current, 0); }, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   // Auto-save dough recipe preset whenever name + rows are set
@@ -1766,10 +1781,28 @@ export default function Home() {
     };
   }, []);
 
+  function doFetch(payload: SyncPayload, retriesLeft: number) {
+    fetch("/api/sync/today", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ senderId: clientId.current, payload }),
+    }).then(() => {
+      pushAcknowledgedRef.current = true;
+    }).catch(() => {
+      if (retriesLeft > 0) {
+        setTimeout(() => doFetch(payload, retriesLeft - 1), 5_000);
+      } else {
+        // All retries exhausted — stop blocking remote state so other devices can still sync
+        pushAcknowledgedRef.current = true;
+      }
+    });
+  }
+
   function schedulePush(ds: DayState, delay = 600) {
     if (isSyncApplyingRef.current) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     const curId = ds.runs[ds.currentIndex]?.id;
+    pushAcknowledgedRef.current = false;
     pushTimerRef.current = setTimeout(() => {
       const runValues: Record<string, FormValues> = {};
       for (const run of ds.runs) {
@@ -1810,11 +1843,7 @@ export default function Home() {
         brandProfiles,
         crustProfiles,
       };
-      fetch("/api/sync/today", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderId: clientId.current, payload }),
-      }).catch(() => {});
+      doFetch(payload, 3);
     }, delay);
   }
   function resetFieldArrays(vals: FormValues) {
@@ -4382,10 +4411,10 @@ export default function Home() {
             </div>
           </div>
           <div className="print:hidden flex items-center gap-1.5 shrink-0">
-            {/* Online/offline dot */}
+            {/* Sync status dot */}
             <span
-              title={isOnline ? "Online" : "Offline — changes saved locally"}
-              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${isOnline ? "bg-emerald-500" : "bg-zinc-500 animate-pulse"}`}
+              title={syncConnected ? "Sync connected" : isOnline ? "Reconnecting to sync…" : "Offline — changes saved locally"}
+              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${syncConnected ? "bg-emerald-500" : isOnline ? "bg-amber-400 animate-pulse" : "bg-zinc-500 animate-pulse"}`}
             />
             {/* Auto-save badge — hidden on xs to save space */}
             <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="hidden sm:flex text-[10px] font-semibold items-center gap-1 text-emerald-400 pointer-events-none">
