@@ -76,16 +76,30 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 // treat "scheduled" as a date param.
 
 router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void> => {
+  const includeRuns = req.query.include === "runs";
   const rows = await db
     .select()
     .from(dailySyncTable)
     .where(gt(dailySyncTable.date, todayStr()))
     .orderBy(asc(dailySyncTable.date));
   res.json(
-    rows.map(r => ({
-      date: r.date,
-      runCount: ((r.data as any)?.dayState?.runs?.length ?? 0),
-    }))
+    rows.map(r => {
+      const data = r.data as any;
+      const runs: Array<{ brand: string; flavor: string }> = data?.dayState?.runs ?? [];
+      const runValues: Record<string, any> = data?.runValues ?? {};
+      const base: Record<string, unknown> = {
+        date: r.date,
+        runCount: runs.length,
+      };
+      if (includeRuns) {
+        base.runs = runs.map((run: any) => ({
+          brand: run.brand ?? "",
+          flavor: run.flavor ?? "",
+          casesNeeded: runValues[run.id]?.casesNeeded ?? 0,
+        }));
+      }
+      return base;
+    })
   );
 });
 

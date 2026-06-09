@@ -1494,7 +1494,7 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -1514,7 +1514,8 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
-  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number}[]>([]);
+  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number}[]}[]>([]);
+  const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
@@ -1580,7 +1581,7 @@ export default function Home() {
         body: JSON.stringify({ payload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
         setScheduleView("list");
       }
     } catch {}
@@ -1879,7 +1880,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
               return;
             }
           }
@@ -2485,7 +2486,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
               scheduleReset();
               return;
             }
@@ -4581,7 +4582,7 @@ export default function Home() {
             {isSupervisor && (
               <button
                 type="button"
-                onClick={() => { fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
+                onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
                 title="Schedule future production days"
                 className="relative flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
               >
@@ -7330,39 +7331,75 @@ export default function Home() {
                         <p className="text-sm font-medium text-muted-foreground">No days scheduled yet</p>
                         <p className="text-xs text-muted-foreground/60 mt-1">Pre-plan a future day's runs so they load automatically at midnight.</p>
                       </div>
-                    ) : scheduledDays.map(day => (
-                      <div key={day.date} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold truncate">
-                            {new Date(day.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""} planned</p>
-                        </div>
-                        <div className="flex gap-1.5 shrink-0 items-center">
-                          <button
-                            type="button"
-                            onClick={() => openScheduleEditor(day.date)}
-                            className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <Pencil className="w-3 h-3" /> Edit
-                          </button>
-                          {scheduleDeleteConfirm === day.date ? (
-                            <span className="flex gap-1 items-center">
-                              <button type="button" className="px-2 py-1 text-xs rounded-md bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => deleteScheduledDay(day.date)}>Yes</button>
-                              <button type="button" className="px-2 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors" onMouseDown={() => setScheduleDeleteConfirm(null)}>No</button>
-                            </span>
-                          ) : (
+                    ) : scheduledDays.map(day => {
+                      const isExpanded = expandedScheduleDay === day.date;
+                      return (
+                        <div key={day.date} className="rounded-lg bg-muted/30 border border-border/50 overflow-hidden">
+                          {/* ── Header row ── */}
+                          <div className="flex items-center justify-between gap-3 p-3">
                             <button
                               type="button"
-                              onClick={() => setScheduleDeleteConfirm(day.date)}
-                              className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                              onClick={() => setExpandedScheduleDay(isExpanded ? null : day.date)}
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <ChevronDown
+                                className={`w-3.5 h-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                              />
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold truncate">
+                                  {new Date(day.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                                </p>
+                                <p className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""} planned</p>
+                              </div>
                             </button>
-                          )}
+                            <div className="flex gap-1.5 shrink-0 items-center">
+                              <button
+                                type="button"
+                                onClick={() => openScheduleEditor(day.date)}
+                                className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <Pencil className="w-3 h-3" /> Edit
+                              </button>
+                              {scheduleDeleteConfirm === day.date ? (
+                                <span className="flex gap-1 items-center">
+                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => deleteScheduledDay(day.date)}>Yes</button>
+                                  <button type="button" className="px-2 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors" onMouseDown={() => setScheduleDeleteConfirm(null)}>No</button>
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleDeleteConfirm(day.date)}
+                                  className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {/* ── Expandable run list ── */}
+                          <div
+                            className="overflow-hidden transition-all duration-200"
+                            style={{ maxHeight: isExpanded ? `${(day.runs?.length ?? 0) * 44 + 8}px` : "0px", opacity: isExpanded ? 1 : 0 }}
+                          >
+                            <div className="border-t border-border/40 px-3 pb-2 pt-1 space-y-1">
+                              {(day.runs ?? []).length === 0 ? (
+                                <p className="text-xs text-muted-foreground/60 py-1 pl-5">No runs recorded</p>
+                              ) : (day.runs ?? []).map((run, i) => (
+                                <div key={i} className="flex items-center gap-2 py-1 pl-5">
+                                  <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
+                                  <span className="text-xs font-medium truncate flex-1">
+                                    {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                                  </span>
+                                  {run.casesNeeded > 0 && (
+                                    <span className="text-xs text-muted-foreground shrink-0">{run.casesNeeded} cs</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="px-5 py-4 border-t border-border/40">
                     <button
