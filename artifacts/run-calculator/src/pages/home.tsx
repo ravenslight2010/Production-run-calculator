@@ -1211,6 +1211,15 @@ export default function Home() {
     schedulePush(dayStateRef.current);
   }
 
+  function renameIngredientType(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || ingredientTypes.includes(trimmed)) return;
+    const updated = ingredientTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setIngredientTypes(updated);
+    saveList(INGREDIENT_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
   const [pepTypes, setPepTypes] = useState<string[]>(() => {
     const LEGACY_PEP_TYPES = ["Natural", "Cured"];
     const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
@@ -2213,6 +2222,132 @@ export default function Home() {
     setMixRecipeNames(updated);
     saveList(MIX_RECIPE_NAMES_KEY, updated);
     schedulePush(dayStateRef.current);
+  }
+
+  function renameDoughRecipeName(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || doughRecipeNames.includes(trimmed)) return;
+    const updated = doughRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setDoughRecipeNames(updated);
+    saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
+  function renameFrontlineRecipeName(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || frontlineRecipeNames.includes(trimmed)) return;
+    const updated = frontlineRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setFrontlineRecipeNames(updated);
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
+  function renameCheeseRecipeName(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || cheeseRecipeNames.includes(trimmed)) return;
+    const updated = cheeseRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setCheeseRecipeNames(updated);
+    saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
+  function renameDoughIngredient(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || doughIngredients.includes(trimmed)) return;
+    const updated = doughIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setDoughIngredients(updated);
+    saveList(DOUGH_INGREDIENTS_KEY, updated);
+    const ds = dayStateRef.current;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const newVals = { ...vals, doughRecipe: vals.doughRecipe.map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r) };
+      saveRunValues(run.id, newVals);
+      if (run.id === currentRunId) form.setValue("doughRecipe", newVals.doughRecipe);
+    }
+    schedulePush(ds);
+  }
+
+  function renameFrontlineIngredient(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || frontlineIngredients.includes(trimmed)) return;
+    const updated = frontlineIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setFrontlineIngredients(updated);
+    saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    const ds = dayStateRef.current;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const newVals = { ...vals, frontlineRecipe: vals.frontlineRecipe.map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r) };
+      saveRunValues(run.id, newVals);
+      if (run.id === currentRunId) form.setValue("frontlineRecipe", newVals.frontlineRecipe);
+    }
+    schedulePush(ds);
+  }
+
+  function renameCheeseIngredient(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || cheeseIngredients.includes(trimmed)) return;
+    const updated = cheeseIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setCheeseIngredients(updated);
+    saveList(CHEESE_INGREDIENTS_KEY, updated);
+    const ds = dayStateRef.current;
+    const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const patch: Partial<typeof vals> = {};
+      for (const f of appFields) patch[f] = (vals[f] as RecipeRow[]).map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r);
+      const newVals = { ...vals, ...patch };
+      saveRunValues(run.id, newVals);
+      if (run.id === currentRunId) for (const f of appFields) form.setValue(f, patch[f]!);
+    }
+    schedulePush(ds);
+  }
+
+  function renameMixIngredient(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || mixIngredients.includes(trimmed)) return;
+    const updated = mixIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setMixIngredients(updated);
+    saveList(MIX_INGREDIENTS_KEY, updated);
+    const ds = dayStateRef.current;
+    const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      const patch: Partial<typeof vals> = {};
+      for (const f of appFields) patch[f] = (vals[f] as RecipeRow[]).map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r);
+      const newVals = { ...vals, ...patch };
+      saveRunValues(run.id, newVals);
+      if (run.id === currentRunId) for (const f of appFields) form.setValue(f, patch[f]!);
+    }
+    schedulePush(ds);
+  }
+
+  function renamePepType(oldName: string, newName: string) {
+    if (DEFAULT_PEP_TYPES.includes(oldName)) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || pepTypes.includes(trimmed)) return;
+    const updated = pepTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setPepTypes(updated);
+    saveList(PEP_TYPES_KEY, updated);
+    schedulePush(dayStateRef.current);
+  }
+
+  function renameDieType(oldName: string, newName: string) {
+    if (DEFAULT_DIE_TYPES.includes(oldName)) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || dieTypes.includes(trimmed)) return;
+    const updated = dieTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setDieTypes(updated);
+    saveList(DIE_TYPES_KEY, updated);
+    const ds = dayStateRef.current;
+    for (const run of ds.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      if (vals.dieType === oldName) {
+        const newVals = { ...vals, dieType: trimmed };
+        saveRunValues(run.id, newVals);
+        if (run.id === currentRunId) form.setValue("dieType", trimmed);
+      }
+    }
+    schedulePush(ds);
   }
 
   function checkPin() {
@@ -3959,11 +4094,11 @@ export default function Home() {
         // Grouped panel: recipe names (left) + ingredients (right)
         const GroupedPanel = ({
           namesLabel, names, onAddName, onRemoveName, onRenameName,
-          ingLabel, ingredients, onAddIng, onRemoveIng,
+          ingLabel, ingredients, onAddIng, onRemoveIng, onRenameIng,
           ingProtected,
         }: {
           namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void;
-          ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void;
+          ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void; onRenameIng?: (o: string, n: string) => void;
           ingProtected?: string[];
         }) => (
           <div className="grid grid-cols-2 gap-4">
@@ -3973,7 +4108,7 @@ export default function Home() {
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
-              <ListPanel items={ingredients} onAdd={onAddIng} onRemove={onRemoveIng} placeholder="Add ingredient…" protected={ingProtected} inputVal={mgIngInput} setInputVal={setMgIngInput} />
+              <ListPanel items={ingredients} onAdd={onAddIng} onRemove={onRemoveIng} onRename={onRenameIng} placeholder="Add ingredient…" protected={ingProtected} inputVal={mgIngInput} setInputVal={setMgIngInput} />
             </div>
           </div>
         );
@@ -3983,16 +4118,16 @@ export default function Home() {
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }, onRename: renameBrand },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter), onRename: (o, n) => renameFlavor(o, n, manageBrandFilter) },
-          { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
-          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
-          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType },
+          { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType, onRename: renameIngredientType },
+          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType, onRename: renamePepType },
+          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType, onRename: renameDieType },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
         const groupedTabs = [
-          { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: addDoughRecipeName,     onRemoveName: removeDoughRecipeName,     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: addDoughIngredient,     onRemoveIng: removeDoughIngredient },
-          { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: addFrontlineRecipeName, onRemoveName: removeFrontlineRecipeName, ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: addFrontlineIngredient, onRemoveIng: removeFrontlineIngredient },
-          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: addCheeseRecipeName,    onRemoveName: removeCheeseRecipeName,    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: addCheeseIngredient,   onRemoveIng: removeCheeseIngredient },
-          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       onRenameName: renameMixRecipeName, ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient },
+          { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: addDoughRecipeName,     onRemoveName: removeDoughRecipeName,     onRenameName: renameDoughRecipeName,     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: addDoughIngredient,     onRemoveIng: removeDoughIngredient,     onRenameIng: renameDoughIngredient },
+          { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: addFrontlineRecipeName, onRemoveName: removeFrontlineRecipeName, onRenameName: renameFrontlineRecipeName, ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: addFrontlineIngredient, onRemoveIng: removeFrontlineIngredient, onRenameIng: renameFrontlineIngredient },
+          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: addCheeseRecipeName,    onRemoveName: removeCheeseRecipeName,    onRenameName: renameCheeseRecipeName,    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: addCheeseIngredient,   onRemoveIng: removeCheeseIngredient,   onRenameIng: renameCheeseIngredient },
+          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       onRenameName: renameMixRecipeName,       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient,      onRenameIng: renameMixIngredient },
         ];
 
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -4059,6 +4194,7 @@ export default function Home() {
                     ingredients={groupedTab.ingredients}
                     onAddIng={groupedTab.onAddIng}
                     onRemoveIng={groupedTab.onRemoveIng}
+                    onRenameIng={(groupedTab as any).onRenameIng}
                   />
                 )}
 
