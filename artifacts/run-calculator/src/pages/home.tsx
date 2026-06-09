@@ -221,7 +221,7 @@ function IngredientSelect({
   const dropStyle: React.CSSProperties = rect
     ? {
         position: "fixed",
-        left: rect.left,
+        left: Math.max(4, Math.min(rect.left, window.innerWidth - Math.max(rect.width, 192) - 8)),
         width: Math.max(rect.width, 192),
         zIndex: 9999,
         ...(dropUp
@@ -364,9 +364,9 @@ function CheeseRecipeCard({
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the blend.</p>
       ) : (
         <div className="w-full mb-3">
-          <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mb-1 px-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
             <span />
           </div>
@@ -374,10 +374,10 @@ function CheeseRecipeCard({
             {fields.map((field, idx) => {
               const rowLbs = Number(recipe[idx]?.lbs ?? 0);
               return (
-                <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_120px_auto]" : "grid-cols-[1fr_120px_120px_32px]"}`}>
+                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
                   <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
+                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
                   {confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
                       <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
@@ -390,9 +390,9 @@ function CheeseRecipeCard({
               );
             })}
           </div>
-          <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs/batch</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
             <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs</span>
             <span />
           </div>
@@ -488,9 +488,9 @@ function MixRecipeCard({
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the mix.</p>
       ) : (
         <div className="w-full mb-3">
-          <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mb-1 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mb-1 px-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz / Pizza</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz<span className="hidden sm:inline"> / Pizza</span></span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
             <span />
           </div>
@@ -498,10 +498,10 @@ function MixRecipeCard({
             {fields.map((field, idx) => {
               const rowLbs = Number(recipe[idx]?.lbs ?? 0);
               return (
-                <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_120px_auto]" : "grid-cols-[1fr_120px_120px_32px]"}`}>
+                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_76px_76px_auto] sm:grid-cols-[1fr_110px_110px_auto]" : "grid-cols-[minmax(0,1fr)_76px_76px_32px] sm:grid-cols-[1fr_110px_110px_32px]"}`}>
                   <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
-                  <div className="h-8 px-2 rounded bg-muted/20 border border-border/20 text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowTotal(rowLbs), 1)}</div>
+                  <input {...register(`${fieldPrefix}.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowTotal(rowLbs), 1)}</div>
                   {confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
                       <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
@@ -514,9 +514,9 @@ function MixRecipeCard({
               );
             })}
           </div>
-          <div className="grid grid-cols-[1fr_120px_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px_32px] gap-x-1 sm:grid-cols-[1fr_110px_110px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
-            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 2)} oz/pizza</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 2)} oz</span>
             <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalRunLbs, 1)} lbs</span>
             <span />
           </div>
@@ -679,14 +679,14 @@ function DoughRecipeCard({
           </p>
         ) : (
           <div className="w-full mb-3">
-            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mb-1 px-1">
+            <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mb-1 px-1">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
               <span />
             </div>
             <div className="space-y-1.5">
               {fields.map((field, idx) => (
-                <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_auto]" : "grid-cols-[1fr_120px_32px]"}`}>
+                <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
                   <IngredientSelect
                     value={recipe[idx]?.ingredient ?? ""}
                     onChange={val => onSetIngredient(idx, val)}
@@ -701,7 +701,7 @@ function DoughRecipeCard({
                     step="0.1"
                     placeholder="0"
                     onFocus={e => e.target.select()}
-                    className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                    className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
                   />
                   {confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
@@ -720,7 +720,7 @@ function DoughRecipeCard({
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+            <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
               <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
                 {fmtNum(totalLbsPerBatch, 1)} lbs
@@ -789,16 +789,16 @@ function FrontlineRecipeCard({
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the recipe.</p>
       ) : (
         <div className="w-full mb-3">
-          <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mb-1 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mb-1 px-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
             <span />
           </div>
           <div className="space-y-1.5">
             {fields.map((field, idx) => (
-              <div key={field.id} className={`grid gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[1fr_120px_auto]" : "grid-cols-[1fr_120px_32px]"}`}>
+              <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
                 <IngredientSelect value={recipe[idx]?.ingredient ?? ""} onChange={val => onSetIngredient(idx, val)} options={ingredientOptions} onAddOption={onAddIngredient} onRemoveOption={onRemoveIngredient} />
-                <input {...register(`frontlineRecipe.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-2 rounded bg-muted/40 border border-border/40 text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
+                <input {...register(`frontlineRecipe.${idx}.lbs`, { valueAsNumber: true })} type="number" min="0" step="0.1" placeholder="0" onFocus={e => e.target.select()} className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full" />
                 {confirmIdx === idx ? (
                   <div className="flex items-center gap-1">
                     <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
@@ -810,7 +810,7 @@ function FrontlineRecipeCard({
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-[1fr_120px_32px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
             <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
             <span />
