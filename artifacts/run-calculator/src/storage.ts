@@ -145,12 +145,6 @@ export function loadRunValues(id: string): FormValues {
   try {
     const raw = localStorage.getItem(RUN_KEY(id));
     if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
-    const legacy = localStorage.getItem("run-calc-v1");
-    if (legacy) {
-      const vals = { ...DEFAULT_VALUES, ...JSON.parse(legacy) };
-      localStorage.setItem(RUN_KEY(id), JSON.stringify(vals));
-      return vals;
-    }
   } catch {}
   return DEFAULT_VALUES;
 }
@@ -238,6 +232,8 @@ export function applyMixSeedIfNeeded(): void {
   if (localStorage.getItem(MIX_SEED_KEY)) return;
   try {
     // ── Purge stale data from previous seed versions ──
+    localStorage.removeItem("run-calc-v1");
+
     const cleanedBrands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
     saveList(BRANDS_KEY, cleanedBrands);
 

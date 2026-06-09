@@ -1984,16 +1984,19 @@ export default function Home() {
   // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (currentRunId) {
-      saveRunValues(currentRunId, v);
-      if (currentRun?.brand || currentRun?.flavor) {
-        saveProfile(currentRun.brand, currentRun.flavor, v);
+    const ds = dayStateRef.current;
+    const run = ds?.runs[ds?.currentIndex];
+    const runId = run?.id;
+    if (runId) {
+      saveRunValues(runId, v);
+      if (run?.brand || run?.flavor) {
+        saveProfile(run.brand, run.flavor, v);
       }
       lastLocalEditRef.current = Date.now();
-      schedulePush(dayStateRef.current, 2000);
+      schedulePush(ds, 2000);
       flashSaved();
     }
-  }, [v, currentRunId]);
+  }, [v]);
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
