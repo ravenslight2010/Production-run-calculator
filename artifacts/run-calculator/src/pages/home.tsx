@@ -1492,6 +1492,10 @@ export default function Home() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
 
+  // ── Fetch scheduled future days for badge ──────────────────────────────────
+  useEffect(() => {
+    fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+  }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
   const [showReorderDialog, setShowReorderDialog] = useState(false);
@@ -1507,6 +1511,78 @@ export default function Home() {
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [pinChangeMsg, setPinChangeMsg] = useState("");
+
+  // ── Schedule future days ────────────────────────────────────────────────────
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number}[]>([]);
+  const [scheduleView, setScheduleView] = useState<"list" | "editor">("list");
+  const [scheduleEditorDate, setScheduleEditorDate] = useState("");
+  const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleDeleteConfirm, setScheduleDeleteConfirm] = useState<string | null>(null);
+  function tomorrowStr() {
+    const d = new Date(); d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  async function openScheduleEditor(date?: string) {
+    if (date) {
+      try {
+        const res = await fetch(`/api/sync/${date}`);
+        if (res.ok) {
+          const payload = await res.json() as SyncPayload | null;
+          if (payload?.dayState) {
+            setScheduleEditorDate(date);
+            setScheduleEditorRuns(
+              payload.dayState.runs.map(r => ({
+                id: r.id, brand: r.brand, flavor: r.flavor,
+                casesNeeded: ((payload.runValues ?? {})[r.id] as FormValues)?.casesNeeded ?? 0,
+              }))
+            );
+            setScheduleView("editor");
+            return;
+          }
+        }
+      } catch {}
+    }
+    setScheduleEditorDate(tomorrowStr());
+    setScheduleEditorRuns([{ id: genId(), brand: "", flavor: "", casesNeeded: 0 }]);
+    setScheduleView("editor");
+  }
+  async function saveScheduledDay() {
+    if (!scheduleEditorDate) return;
+    setScheduleSaving(true);
+    try {
+      const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
+      const runValues: Record<string, FormValues> = {};
+      for (const r of scheduleEditorRuns) {
+        const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+        runValues[r.id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesNeeded };
+      }
+      const payload: SyncPayload = {
+        dayState: { runs, date: scheduleEditorDate, resetAt: Date.now() },
+        runValues,
+        brands: loadList(BRANDS_KEY, []),
+        brandFlavors: loadBrandFlavors(),
+      };
+      const res = await fetch(`/api/sync/${scheduleEditorDate}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload }),
+      });
+      if (res.ok) {
+        fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+        setScheduleView("list");
+      }
+    } catch {}
+    setScheduleSaving(false);
+  }
+  async function deleteScheduledDay(date: string) {
+    try {
+      await fetch(`/api/sync/${date}`, { method: "DELETE" });
+      setScheduledDays(prev => prev.filter(d => d.date !== date));
+      setScheduleDeleteConfirm(null);
+    } catch {}
+  }
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
   const clientId = useRef<string>(
@@ -1748,7 +1824,7 @@ export default function Home() {
 
   // Detect day change while the tab is open (visibility change + periodic check)
   useEffect(() => {
-    function checkDateRollover() {
+    async function checkDateRollover() {
       const stored = (() => {
         try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "{}") as { date?: string }; } catch { return {}; }
       })();
@@ -1764,6 +1840,29 @@ export default function Home() {
           };
           archiveDayToHistory(finalDs, stored.date);
         }
+        const newDate = todayStr();
+        // Try to load any pre-scheduled data for the new day
+        try {
+          const res = await fetch(`/api/sync/${newDate}`);
+          if (res.ok) {
+            const payload = await res.json() as SyncPayload | null;
+            if (payload?.dayState?.runs?.length) {
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now() };
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              saveDayState(ds);
+              setDayState(ds);
+              if (ds.runToTime) setRunToTime(ds.runToTime);
+              const firstId = ds.runs[0]?.id;
+              const firstVals = firstId ? { ...DEFAULT_VALUES, ...((payload.runValues ?? {})[firstId] as FormValues ?? {}) } : DEFAULT_VALUES;
+              form.reset(firstVals);
+              resetFieldArrays(firstVals);
+              schedulePush(ds, 0);
+              fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+              return;
+            }
+          }
+        } catch {}
+        // Fallback: fresh empty state
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         saveDayState(fresh);
         setDayState(fresh);
@@ -2332,7 +2431,7 @@ export default function Home() {
     }
     let timeout: ReturnType<typeof setTimeout>;
     function scheduleReset() {
-      timeout = setTimeout(() => {
+      timeout = setTimeout(async () => {
         const storedDs = (() => {
           try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; }
           catch { return null; }
@@ -2347,6 +2446,30 @@ export default function Home() {
           };
           archiveDayToHistory(finalDs, storedDs.date);
         }
+        const newDate = todayStr();
+        // Try to load any pre-scheduled data for the new day
+        try {
+          const res = await fetch(`/api/sync/${newDate}`);
+          if (res.ok) {
+            const payload = await res.json() as SyncPayload | null;
+            if (payload?.dayState?.runs?.length) {
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now() };
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              saveDayState(ds);
+              setDayState(ds);
+              if (ds.runToTime) setRunToTime(ds.runToTime);
+              const firstId = ds.runs[0]?.id;
+              const firstVals = firstId ? { ...DEFAULT_VALUES, ...((payload.runValues ?? {})[firstId] as FormValues ?? {}) } : DEFAULT_VALUES;
+              form.reset(firstVals);
+              resetFieldArrays(firstVals);
+              schedulePush(ds, 0);
+              fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {});
+              scheduleReset();
+              return;
+            }
+          }
+        } catch {}
+        // Fallback: fresh empty state
         const fresh = { ...freshDayState(), resetAt: Date.now() };
         setDayState(fresh);
         saveDayState(fresh);
@@ -4430,6 +4553,23 @@ export default function Home() {
               >
                 <Settings className="w-3.5 h-3.5 shrink-0" />
                 <span className="hidden sm:inline">Manage</span>
+              </button>
+            )}
+            {/* Schedule future days — supervisor only */}
+            {isSupervisor && (
+              <button
+                type="button"
+                onClick={() => { fetch("/api/sync/scheduled").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
+                title="Schedule future production days"
+                className="relative flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
+              >
+                <CalendarPlus className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Schedule</span>
+                {scheduledDays.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center leading-none">
+                    {scheduledDays.length}
+                  </span>
+                )}
               </button>
             )}
             {/* Screens / cast button */}
@@ -7146,6 +7286,189 @@ export default function Home() {
               >
                 Reset to defaults
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
+        {showScheduleDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              {scheduleView === "list" ? (
+                <>
+                  <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
+                    <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
+                    <h2 className="text-base font-bold flex-1">Scheduled Days</h2>
+                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3 min-h-0">
+                    {scheduledDays.length === 0 ? (
+                      <div className="text-center py-10">
+                        <CalendarPlus className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+                        <p className="text-sm font-medium text-muted-foreground">No days scheduled yet</p>
+                        <p className="text-xs text-muted-foreground/60 mt-1">Pre-plan a future day's runs so they load automatically at midnight.</p>
+                      </div>
+                    ) : scheduledDays.map(day => (
+                      <div key={day.date} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {new Date(day.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""} planned</p>
+                        </div>
+                        <div className="flex gap-1.5 shrink-0 items-center">
+                          <button
+                            type="button"
+                            onClick={() => openScheduleEditor(day.date)}
+                            className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <Pencil className="w-3 h-3" /> Edit
+                          </button>
+                          {scheduleDeleteConfirm === day.date ? (
+                            <span className="flex gap-1 items-center">
+                              <button type="button" className="px-2 py-1 text-xs rounded-md bg-destructive text-destructive-foreground font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => deleteScheduledDay(day.date)}>Yes</button>
+                              <button type="button" className="px-2 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors" onMouseDown={() => setScheduleDeleteConfirm(null)}>No</button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setScheduleDeleteConfirm(day.date)}
+                              className="p-1 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-5 py-4 border-t border-border/40">
+                    <button
+                      type="button"
+                      onClick={() => openScheduleEditor()}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> Schedule New Day
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
+                    <button type="button" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <CalendarPlus className="w-5 h-5 text-primary shrink-0" />
+                    <h2 className="text-base font-bold flex-1">
+                      {scheduleEditorDate ? `Plan for ${new Date(scheduleEditorDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Plan Future Day"}
+                    </h2>
+                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-5 min-h-0">
+                    {/* Date picker */}
+                    <div>
+                      <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Date</label>
+                      <input
+                        type="date"
+                        value={scheduleEditorDate}
+                        min={tomorrowStr()}
+                        onChange={e => setScheduleEditorDate(e.target.value)}
+                        className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                      />
+                    </div>
+                    {/* Runs */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Runs</label>
+                        <button
+                          type="button"
+                          onClick={() => setScheduleEditorRuns(prev => [...prev, { id: genId(), brand: "", flavor: "", casesNeeded: 0 }])}
+                          className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add Run
+                        </button>
+                      </div>
+                      <div className="space-y-3">
+                        {scheduleEditorRuns.map((run, idx) => (
+                          <div key={run.id} className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-semibold text-muted-foreground">Run {idx + 1}</span>
+                              {scheduleEditorRuns.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleEditorRuns(prev => prev.filter((_, i) => i !== idx))}
+                                  className="text-muted-foreground/40 hover:text-destructive transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Brand</label>
+                                <select
+                                  value={run.brand}
+                                  onChange={e => {
+                                    const brand = e.target.value;
+                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, brand, flavor: "" } : r));
+                                  }}
+                                  className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                >
+                                  <option value="">— Brand —</option>
+                                  {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
+                                <select
+                                  value={run.flavor}
+                                  onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, flavor: e.target.value } : r))}
+                                  disabled={!run.brand}
+                                  className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-40"
+                                >
+                                  <option value="">— Flavor —</option>
+                                  {(brandFlavors[run.brand] ?? []).map(f => <option key={f} value={f}>{f}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Cases Needed</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={run.casesNeeded || ""}
+                                onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, casesNeeded: Number(e.target.value) || 0 } : r))}
+                                placeholder="0"
+                                className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                              />
+                            </div>
+                            {run.brand && (
+                              <p className="text-[10px] text-muted-foreground/50">Recipe settings will load from the saved {run.brand} {run.flavor ? `/ ${run.flavor}` : ""} profile.</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="px-5 py-4 border-t border-border/40 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setScheduleView("list")}
+                      className="flex-1 py-2 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!scheduleEditorDate || scheduleSaving}
+                      onClick={saveScheduledDay}
+                      className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {scheduleSaving ? "Saving…" : "Save Schedule"}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}

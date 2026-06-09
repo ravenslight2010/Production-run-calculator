@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { db, dailySyncTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, gt, asc } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -10,6 +10,10 @@ const clients = new Set<SseClient>();
 function todayStr(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isValidDate(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
 function broadcast(data: unknown, senderId: string): void {
@@ -65,6 +69,53 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
     clients.delete(client);
     clearInterval(heartbeat);
   });
+});
+
+// ── Scheduled (future) days ──────────────────────────────────────────────────
+// NOTE: /sync/scheduled must be declared before /sync/:date so Express doesn't
+// treat "scheduled" as a date param.
+
+router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(dailySyncTable)
+    .where(gt(dailySyncTable.date, todayStr()))
+    .orderBy(asc(dailySyncTable.date));
+  res.json(
+    rows.map(r => ({
+      date: r.date,
+      runCount: ((r.data as any)?.dayState?.runs?.length ?? 0),
+    }))
+  );
+});
+
+router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+  const { date } = req.params;
+  if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
+  const [row] = await db.select().from(dailySyncTable).where(eq(dailySyncTable.date, date));
+  res.json(row?.data ?? null);
+});
+
+router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+  const { date } = req.params;
+  if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
+  const { payload } = req.body as { payload: unknown };
+  await db
+    .insert(dailySyncTable)
+    .values({ date, data: payload as any, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: dailySyncTable.date,
+      set: { data: payload as any, updatedAt: new Date() },
+    });
+  res.json({ ok: true });
+});
+
+router.delete("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
+  const { date } = req.params;
+  if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
+  if (date <= todayStr()) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
+  await db.delete(dailySyncTable).where(eq(dailySyncTable.date, date));
+  res.json({ ok: true });
 });
 
 export default router;
