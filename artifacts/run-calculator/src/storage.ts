@@ -17,6 +17,7 @@ import {
   FRONTLINE_INGREDIENTS_KEY,
   DEFAULT_FRONTLINE_INGREDIENTS,
   CHEESE_RECIPE_PRESETS_KEY,
+  MIX_RECIPE_NAMES_KEY,
   MAX_HISTORY_DAYS,
   type FormValues,
   type DayState,
@@ -186,7 +187,7 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
 }
 
-const MIX_SEED_KEY = "run-calc-mix-seed-v11";
+const MIX_SEED_KEY = "run-calc-mix-seed-v12";
 
 export const STALE_BRANDS = [
   "Bobos","Lowes","Lucias","Morming Melts",
@@ -244,11 +245,20 @@ export function applyMixSeedIfNeeded(): void {
     }
     saveBrandFlavors(cleanedBF);
 
-    const cleanedNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !STALE_RECIPE_NAMES.includes(n));
-    saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedNames);
+    // Move misplaced topping recipe names from frontline (sauce) → mix
+    const allMixNames = MIX_SEED.mixRecipeNames;
+    const existingFrontlineNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []);
+    const migratedToMix = existingFrontlineNames.filter(n => allMixNames.includes(n));
+    const remainingFrontline = existingFrontlineNames.filter(n => !allMixNames.includes(n) && !STALE_RECIPE_NAMES.includes(n));
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, remainingFrontline);
+
+    const existingMixNames = loadList(MIX_RECIPE_NAMES_KEY, []);
+    const mergedMixNames = [...new Set([...existingMixNames, ...migratedToMix, ...allMixNames])].sort((a, b) => a.localeCompare(b));
+    saveList(MIX_RECIPE_NAMES_KEY, mergedMixNames);
 
     const cleanedPresets = loadFrontlineRecipePresets();
     for (const n of STALE_RECIPE_NAMES) delete cleanedPresets[n];
+    for (const n of allMixNames) delete cleanedPresets[n];
     saveFrontlineRecipePresets(cleanedPresets);
 
     const cleanedIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)
@@ -268,25 +278,9 @@ export function applyMixSeedIfNeeded(): void {
     }
     saveBrandFlavors(mergedBF);
 
-    const existingNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []);
-    const mergedNames = [...new Set([...existingNames, ...MIX_SEED.frontlineRecipeNames])];
-    saveList(FRONTLINE_RECIPE_NAMES_KEY, mergedNames);
-
-    const existingPresets = loadFrontlineRecipePresets();
-    const mergedPresets = { ...MIX_SEED.frontlineRecipePresets, ...existingPresets };
-    saveFrontlineRecipePresets(mergedPresets);
-
     const existingIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
     const mergedIngredients = [...new Set([...existingIngredients, ...MIX_SEED.frontlineIngredients])].sort();
     saveList(FRONTLINE_INGREDIENTS_KEY, mergedIngredients);
-
-    for (const p of MIX_SEED.profiles) {
-      const key = PROFILE_KEY(p.brand, p.flavor);
-      localStorage.setItem(key, JSON.stringify({
-        frontlineRecipeName: p.recipeName,
-        frontlineRecipe: p.recipe,
-      }));
-    }
 
     localStorage.setItem(MIX_SEED_KEY, "1");
   } catch {}
