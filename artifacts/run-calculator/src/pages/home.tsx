@@ -1543,6 +1543,8 @@ export default function Home() {
   const [mgNamesInput, setMgNamesInput] = useState("");
   const [mgIngInput, setMgIngInput] = useState("");
   const [mgStandaloneInput, setMgStandaloneInput] = useState("");
+  const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null);
+  const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([]);
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [pinChangeMsg, setPinChangeMsg] = useState("");
@@ -4020,11 +4022,13 @@ export default function Home() {
         // Simple list panel: add input + item list
         const ListPanel = ({
           items, onAdd, onRemove, placeholder, protected: protectedItems,
-          inputVal, setInputVal, onRename,
+          inputVal, setInputVal, onRename, onEdit, selectedItem,
         }: {
           items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
           placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
           onRename?: (oldName: string, newName: string) => void;
+          onEdit?: (name: string) => void;
+          selectedItem?: string | null;
         }) => {
           const [renamingItem, setRenamingItem] = useState<string | null>(null);
           const [renameVal, setRenameVal] = useState("");
@@ -4059,8 +4063,9 @@ export default function Home() {
                   {items.map(item => {
                     const isProt = protectedItems?.includes(item);
                     const isRenaming = renamingItem === item;
+                    const isSelected = selectedItem === item;
                     return (
-                      <li key={item} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-muted/30 hover:bg-muted/50">
+                      <li key={item} className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-md transition-colors ${isSelected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/30 hover:bg-muted/50"}`}>
                         {isRenaming ? (
                           <input
                             autoFocus
@@ -4079,6 +4084,7 @@ export default function Home() {
                           : isRenaming
                           ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
                           : <div className="flex items-center gap-1 shrink-0">
+                              {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
                               {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
                               <button type="button" onClick={() => onRemove(item)} className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
                             </div>}
@@ -4093,18 +4099,18 @@ export default function Home() {
 
         // Grouped panel: recipe names (left) + ingredients (right)
         const GroupedPanel = ({
-          namesLabel, names, onAddName, onRemoveName, onRenameName,
+          namesLabel, names, onAddName, onRemoveName, onRenameName, onEditName, selectedName,
           ingLabel, ingredients, onAddIng, onRemoveIng, onRenameIng,
           ingProtected,
         }: {
-          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void;
+          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void; onEditName?: (n: string) => void; selectedName?: string | null;
           ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void; onRenameIng?: (o: string, n: string) => void;
           ingProtected?: string[];
         }) => (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
-              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
+              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} onEdit={onEditName} selectedItem={selectedName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
@@ -4134,6 +4140,39 @@ export default function Home() {
         const isGrouped = groupedTabs.some(t => t.key === manageCategory);
         const groupedTab = groupedTabs.find(t => t.key === manageCategory);
         const standaloneTab = standaloneTabs.find(t => t.key === manageCategory);
+
+        // Preset config per grouped tab: ingredient list + load/save helpers
+        const presetConfig = (() => {
+          const base: Record<string, { ingOptions: string[]; load: (n: string) => RecipeRow[]; save: (n: string, rows: RecipeRow[]) => void }> = {
+            dough:  { ingOptions: doughIngredients,     load: (n) => loadDoughRecipePresets()[n]?.rows ?? [],    save: (n, rows) => { const p = loadDoughRecipePresets(); p[n] = { rows }; saveDoughRecipePresets(p); schedulePush(dayStateRef.current); } },
+            sauce:  { ingOptions: frontlineIngredients, load: (n) => loadFrontlineRecipePresets()[n] ?? [],      save: (n, rows) => { const p = loadFrontlineRecipePresets(); p[n] = rows; saveFrontlineRecipePresets(p); schedulePush(dayStateRef.current); } },
+            cheese: { ingOptions: cheeseIngredients,    load: (n) => loadCheeseRecipePresets()[n] ?? [],         save: (n, rows) => { const p = loadCheeseRecipePresets(); p[n] = rows; saveCheeseRecipePresets(p); schedulePush(dayStateRef.current); } },
+            mix:    { ingOptions: mixIngredients,       load: (n) => loadCheeseRecipePresets()[n] ?? [],         save: (n, rows) => { const p = loadCheeseRecipePresets(); p[n] = rows; saveCheeseRecipePresets(p); schedulePush(dayStateRef.current); } },
+          };
+          return base[manageCategory] ?? null;
+        })();
+
+        function selectPreset(name: string) {
+          if (name === mgSelectedPreset) { setMgSelectedPreset(null); setMgPresetRows([]); return; }
+          setMgSelectedPreset(name);
+          setMgPresetRows(presetConfig?.load(name) ?? []);
+        }
+        function updatePresetRow(i: number, field: "ingredient" | "lbs", val: string | number) {
+          const newRows = mgPresetRows.map((r, idx) => idx === i ? { ...r, [field]: field === "lbs" ? Number(val) : val } : r);
+          setMgPresetRows(newRows);
+          if (mgSelectedPreset) presetConfig?.save(mgSelectedPreset, newRows);
+        }
+        function addPresetRow() {
+          const first = presetConfig?.ingOptions[0] ?? "";
+          const newRows = [...mgPresetRows, { ingredient: first, lbs: 0 }];
+          setMgPresetRows(newRows);
+          if (mgSelectedPreset) presetConfig?.save(mgSelectedPreset, newRows);
+        }
+        function removePresetRow(i: number) {
+          const newRows = mgPresetRows.filter((_, idx) => idx !== i);
+          setMgPresetRows(newRows);
+          if (mgSelectedPreset) presetConfig?.save(mgSelectedPreset, newRows);
+        }
 
         const handlePinSave = () => {
           if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
@@ -4167,14 +4206,14 @@ export default function Home() {
               <div className="flex gap-1 flex-wrap px-5 py-3 border-b border-border shrink-0">
                 {groupedTabs.map(t => (
                   <button key={t.key} type="button"
-                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); }}
+                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
                     className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
                   >{t.label}</button>
                 ))}
                 <span className="w-px bg-border/60 self-stretch mx-1" />
                 {standaloneTabs.map(t => (
                   <button key={t.key} type="button"
-                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); }}
+                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
                     className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
                   >{t.label}</button>
                 ))}
@@ -4184,18 +4223,76 @@ export default function Home() {
               <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
-                  <GroupedPanel
-                    namesLabel={groupedTab.namesLabel}
-                    names={groupedTab.names}
-                    onAddName={groupedTab.onAddName}
-                    onRemoveName={groupedTab.onRemoveName}
-                    onRenameName={(groupedTab as any).onRenameName}
-                    ingLabel={groupedTab.ingLabel}
-                    ingredients={groupedTab.ingredients}
-                    onAddIng={groupedTab.onAddIng}
-                    onRemoveIng={groupedTab.onRemoveIng}
-                    onRenameIng={(groupedTab as any).onRenameIng}
-                  />
+                  <div className="space-y-4">
+                    <GroupedPanel
+                      namesLabel={groupedTab.namesLabel}
+                      names={groupedTab.names}
+                      onAddName={groupedTab.onAddName}
+                      onRemoveName={groupedTab.onRemoveName}
+                      onRenameName={(groupedTab as any).onRenameName}
+                      onEditName={selectPreset}
+                      selectedName={mgSelectedPreset}
+                      ingLabel={groupedTab.ingLabel}
+                      ingredients={groupedTab.ingredients}
+                      onAddIng={groupedTab.onAddIng}
+                      onRemoveIng={groupedTab.onRemoveIng}
+                      onRenameIng={(groupedTab as any).onRenameIng}
+                    />
+
+                    {/* Recipe ingredient editor */}
+                    {mgSelectedPreset && presetConfig && (
+                      <div className="border border-primary/30 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
+                          <div className="flex items-center gap-2">
+                            <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-xs font-semibold text-primary">{mgSelectedPreset}</span>
+                            <span className="text-[10px] text-muted-foreground">(click ingredient to edit, lbs is per batch)</span>
+                          </div>
+                          <button type="button" onClick={() => { setMgSelectedPreset(null); setMgPresetRows([]); }} className="text-muted-foreground hover:text-foreground">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="p-3 space-y-1.5">
+                          {mgPresetRows.length === 0 && (
+                            <p className="text-xs text-muted-foreground text-center py-2">No ingredients saved yet — add a row below.</p>
+                          )}
+                          {mgPresetRows.map((row, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <select
+                                value={row.ingredient}
+                                onChange={e => updatePresetRow(i, "ingredient", e.target.value)}
+                                className="flex-1 border border-input rounded px-2 py-1 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                              >
+                                {row.ingredient === "" && <option value="">— ingredient —</option>}
+                                {presetConfig.ingOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                              </select>
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={row.lbs === 0 ? "" : row.lbs}
+                                onChange={e => updatePresetRow(i, "lbs", e.target.value)}
+                                placeholder="0"
+                                className="w-20 border border-input rounded px-2 py-1 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring text-right"
+                              />
+                              <span className="text-xs text-muted-foreground shrink-0">lbs</span>
+                              <button type="button" onClick={() => removePresetRow(i)} className="text-muted-foreground hover:text-destructive shrink-0">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={addPresetRow}
+                            className="mt-1 flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add ingredient row
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Standalone: flavors brand picker */}
