@@ -1772,7 +1772,15 @@ export default function Home() {
       // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
       if (payload.brandProfiles) {
         for (const [k, v] of Object.entries(payload.brandProfiles)) {
-          try { localStorage.setItem(`run-calc-profile-${k}`, JSON.stringify(v)); } catch {}
+          try {
+            // Strip mix recipe names from the sauce fields before saving
+            const cleaned = { ...v };
+            if (cleaned.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(cleaned.frontlineRecipeName)) {
+              delete cleaned.frontlineRecipeName;
+              delete cleaned.frontlineRecipe;
+            }
+            localStorage.setItem(`run-calc-profile-${k}`, JSON.stringify(cleaned));
+          } catch {}
         }
       }
       if (payload.crustProfiles) {
@@ -2088,7 +2096,14 @@ export default function Home() {
 
     // Load profile for new brand+flavor if it exists
     const profile = loadProfile(brand, flavor);
-    if (profile) { form.reset(profile); resetFieldArrays(profile); }
+    if (profile) {
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+        profile.frontlineRecipeName = "";
+        profile.frontlineRecipe = [];
+      }
+      form.reset(profile); resetFieldArrays(profile);
+    }
     schedulePush(newDs, 0);
   }
 

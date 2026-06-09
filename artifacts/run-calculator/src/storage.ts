@@ -267,6 +267,22 @@ export function applyMixSeedIfNeeded(): void {
       .filter(i => !STALE_INGREDIENTS.includes(i));
     saveList(FRONTLINE_INGREDIENTS_KEY, cleanedIngredients);
 
+    // ── Scrub mix recipe names from all stored brand profiles ──
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith("run-calc-profile-")) continue;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const prof = JSON.parse(raw) as Record<string, unknown>;
+        if (prof.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(prof.frontlineRecipeName as string)) {
+          delete prof.frontlineRecipeName;
+          delete prof.frontlineRecipe;
+          localStorage.setItem(key, JSON.stringify(prof));
+        }
+      } catch {}
+    }
+
     // ── Merge seed data ──
     const existingBrands = loadList(BRANDS_KEY, []);
     const mergedBrands = [...new Set([...existingBrands, ...MIX_SEED.brands])].sort();
