@@ -1515,11 +1515,11 @@ export default function Home() {
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number}[]>([]);
-  const [scheduleView, setScheduleView] = useState<"list" | "editor">("list");
+  const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
-  const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number; casesPerSkid: number; targetDoughballWeight: number; dieType: string; pep1Type: string; pep2Type: string}[]>([]);
+  const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
-  const [scheduleExpandedRuns, setScheduleExpandedRuns] = useState<Record<string, boolean>>({});
+  const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDeleteConfirm, setScheduleDeleteConfirm] = useState<string | null>(null);
   function tomorrowStr() {
@@ -1527,7 +1527,7 @@ export default function Home() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   async function openScheduleEditor(date?: string) {
-    setScheduleExpandedRuns({});
+    setScheduleAdvancedRunId(null);
     if (date) {
       try {
         const res = await fetch(`/api/sync/${date}`);
@@ -1540,15 +1540,7 @@ export default function Home() {
             setScheduleEditorRuns(
               payload.dayState.runs.map(r => {
                 const v = storedVals[r.id] ?? {} as Partial<FormValues>;
-                return {
-                  id: r.id, brand: r.brand, flavor: r.flavor,
-                  casesNeeded: v.casesNeeded ?? 0,
-                  casesPerSkid: v.casesPerSkid ?? 0,
-                  targetDoughballWeight: v.targetDoughballWeight ?? 0,
-                  dieType: v.dieType ?? "",
-                  pep1Type: v.pep1Type ?? "",
-                  pep2Type: v.pep2Type ?? "",
-                };
+                return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
               })
             );
             setScheduleView("editor");
@@ -1557,9 +1549,10 @@ export default function Home() {
         }
       } catch {}
     }
-    setScheduleEditorRunValues({});
+    const newId = genId();
+    setScheduleEditorRunValues({ [newId]: { ...DEFAULT_VALUES } });
     setScheduleEditorDate(tomorrowStr());
-    setScheduleEditorRuns([{ id: genId(), brand: "", flavor: "", casesNeeded: 0, casesPerSkid: 0, targetDoughballWeight: 0, dieType: "", pep1Type: "", pep2Type: "" }]);
+    setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
     setScheduleView("editor");
   }
   async function saveScheduledDay() {
@@ -1569,20 +1562,11 @@ export default function Home() {
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
       for (const r of scheduleEditorRuns) {
-        // Merge in priority: previously-stored full values > saved profile > defaults
+        // Merge in priority: editor-set values > saved profile > defaults
         const stored = scheduleEditorRunValues[r.id];
         const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
         const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
-        runValues[r.id] = {
-          ...base,
-          casesNeeded: r.casesNeeded,
-          // Override with any explicitly-set advanced fields (non-zero / non-empty wins)
-          ...(r.casesPerSkid > 0 && { casesPerSkid: r.casesPerSkid }),
-          ...(r.targetDoughballWeight > 0 && { targetDoughballWeight: r.targetDoughballWeight }),
-          ...(r.dieType && { dieType: r.dieType }),
-          ...(r.pep1Type && { pep1Type: r.pep1Type }),
-          ...(r.pep2Type && { pep2Type: r.pep2Type }),
-        };
+        runValues[r.id] = { ...base, casesNeeded: r.casesNeeded };
       }
       const payload: SyncPayload = {
         dayState: { runs, date: scheduleEditorDate, resetAt: Date.now() },
@@ -1608,6 +1592,18 @@ export default function Home() {
       setScheduledDays(prev => prev.filter(d => d.date !== date));
       setScheduleDeleteConfirm(null);
     } catch {}
+  }
+  function updateAdvancedField<K extends keyof FormValues>(runId: string, field: K, value: FormValues[K]) {
+    setScheduleEditorRunValues(prev => ({
+      ...prev,
+      [runId]: { ...(prev[runId] ?? DEFAULT_VALUES), [field]: value },
+    }));
+  }
+  function updateAdvancedArray(runId: string, field: keyof FormValues, rows: {ingredient: string; lbs: number}[]) {
+    setScheduleEditorRunValues(prev => ({
+      ...prev,
+      [runId]: { ...(prev[runId] ?? DEFAULT_VALUES), [field]: rows },
+    }));
   }
 
   // ── Sync refs ──────────────────────────────────────────────────────────────
@@ -7378,7 +7374,7 @@ export default function Home() {
                     </button>
                   </div>
                 </>
-              ) : (
+              ) : scheduleView === "editor" ? (
                 <>
                   <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
                     <button type="button" onClick={() => setScheduleView("list")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
@@ -7408,7 +7404,11 @@ export default function Home() {
                         <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Runs</label>
                         <button
                           type="button"
-                          onClick={() => setScheduleEditorRuns(prev => [...prev, { id: genId(), brand: "", flavor: "", casesNeeded: 0, casesPerSkid: 0, targetDoughballWeight: 0, dieType: "", pep1Type: "", pep2Type: "" }])}
+                          onClick={() => {
+                            const newId = genId();
+                            setScheduleEditorRuns(prev => [...prev, { id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
+                            setScheduleEditorRunValues(prev => ({ ...prev, [newId]: { ...DEFAULT_VALUES } }));
+                          }}
                           className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
                         >
                           <Plus className="w-3.5 h-3.5" /> Add Run
@@ -7437,6 +7437,11 @@ export default function Home() {
                                   onChange={e => {
                                     const brand = e.target.value;
                                     setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, brand, flavor: "" } : r));
+                                    const profile = brand ? loadProfile(brand, "") : null;
+                                    setScheduleEditorRunValues(prev => ({
+                                      ...prev,
+                                      [run.id]: { ...(profile ?? DEFAULT_VALUES), casesNeeded: prev[run.id]?.casesNeeded ?? 0 },
+                                    }));
                                   }}
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                                 >
@@ -7448,7 +7453,15 @@ export default function Home() {
                                 <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Flavor</label>
                                 <select
                                   value={run.flavor}
-                                  onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, flavor: e.target.value } : r))}
+                                  onChange={e => {
+                                    const flavor = e.target.value;
+                                    setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, flavor } : r));
+                                    const profile = run.brand ? loadProfile(run.brand, flavor) : null;
+                                    if (profile) setScheduleEditorRunValues(prev => ({
+                                      ...prev,
+                                      [run.id]: { ...profile, casesNeeded: prev[run.id]?.casesNeeded ?? 0 },
+                                    }));
+                                  }}
                                   disabled={!run.brand}
                                   className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-40"
                                 >
@@ -7468,80 +7481,14 @@ export default function Home() {
                                 className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                               />
                             </div>
-                            {/* Advanced Settings toggle */}
                             <button
                               type="button"
-                              onClick={() => setScheduleExpandedRuns(prev => ({ ...prev, [run.id]: !prev[run.id] }))}
-                              className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 hover:text-muted-foreground transition-colors w-full"
+                              onClick={() => { setScheduleAdvancedRunId(run.id); setScheduleView("advanced"); }}
+                              className="flex items-center justify-between w-full pt-1 border-t border-border/30 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 hover:text-primary transition-colors"
                             >
-                              <ChevronLeft className={`w-3 h-3 transition-transform ${scheduleExpandedRuns[run.id] ? "-rotate-90" : "rotate-180"}`} />
-                              Advanced Settings
-                              {(run.casesPerSkid > 0 || run.targetDoughballWeight > 0 || run.dieType || run.pep1Type || run.pep2Type) && (
-                                <span className="ml-1 px-1 rounded bg-primary/10 text-primary text-[9px] font-bold">overrides</span>
-                              )}
+                              <span>Full Recipe &amp; Settings</span>
+                              <ChevronLeft className="w-3 h-3 rotate-180" />
                             </button>
-                            {scheduleExpandedRuns[run.id] && (
-                              <div className="space-y-2 pt-1 border-t border-border/30">
-                                <p className="text-[10px] text-muted-foreground/50 pb-1">
-                                  Leave fields at 0 / blank to use the saved profile. Set a value to override it for this scheduled run.
-                                </p>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Cases / Skid</label>
-                                    <input type="number" min="0"
-                                      value={run.casesPerSkid || ""}
-                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, casesPerSkid: Number(e.target.value) || 0 } : r))}
-                                      placeholder="from profile"
-                                      className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Target Ball Wt (oz)</label>
-                                    <input type="number" min="0"
-                                      value={run.targetDoughballWeight || ""}
-                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, targetDoughballWeight: Number(e.target.value) || 0 } : r))}
-                                      placeholder="from profile"
-                                      className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
-                                    />
-                                  </div>
-                                </div>
-                                <div>
-                                  <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
-                                  <select
-                                    value={run.dieType}
-                                    onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, dieType: e.target.value } : r))}
-                                    className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
-                                  >
-                                    <option value="">— from profile —</option>
-                                    {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
-                                  </select>
-                                </div>
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Pep 1 Type</label>
-                                    <select
-                                      value={run.pep1Type}
-                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, pep1Type: e.target.value } : r))}
-                                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
-                                    >
-                                      <option value="">— from profile —</option>
-                                      {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Pep 2 Type</label>
-                                    <select
-                                      value={run.pep2Type}
-                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, pep2Type: e.target.value } : r))}
-                                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
-                                    >
-                                      <option value="">— from profile —</option>
-                                      {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
-                                    </select>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         ))}
                       </div>
@@ -7557,7 +7504,7 @@ export default function Home() {
                     </button>
                     <button
                       type="button"
-                      disabled={!scheduleEditorDate || scheduleSaving}
+                      disabled={!scheduleEditorDate || scheduleSaving || scheduleEditorRuns.some(r => !r.brand || !r.casesNeeded)}
                       onClick={saveScheduledDay}
                       className="flex-1 py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -7565,7 +7512,258 @@ export default function Home() {
                     </button>
                   </div>
                 </>
-              )}
+              ) : scheduleAdvancedRunId ? (
+                <>
+                  {/* ── Advanced Settings full-form view ──────────────────────── */}
+                  <div className="flex items-center gap-2 px-5 py-4 border-b border-border/40">
+                    <button type="button" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <h2 className="text-base font-bold flex-1">
+                      {(() => { const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId); return r?.brand ? `${r.brand}${r.flavor ? ` / ${r.flavor}` : ""} — Settings` : "Advanced Settings"; })()}
+                    </h2>
+                    <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 min-h-0 space-y-6">
+                    {/* ── Dough & Crust ──────────────────────────────────────── */}
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough &amp; Crust</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        {([
+                          ["targetDoughballWeight", "Target Ball Wt (oz)"],
+                          ["casesPerSkid", "Cases / Skid"],
+                          ["crustsPerCycle", "Crusts / Cycle"],
+                          ["cycleSpeed", "Cycle Speed (rpm)"],
+                          ["speedAdjustment", "Speed Adj"],
+                          ["approxLineSpeed", "Line Speed"],
+                          ["freezerTime", "Freezer Time (min)"],
+                          ["pizzasPerCase", "Pizzas / Case"],
+                          ["casesPerLayer", "Cases / Layer"],
+                          ["doughballsPerTray", "Doughballs / Tray"],
+                          ["crustsPerStack", "Crusts / Stack"],
+                          ["crustsPerCase", "Crusts / Case"],
+                          ["doughBatchYield", "Dough Batch Yield"],
+                        ] as [keyof FormValues, string][]).map(([field, label]) => (
+                          <div key={field}>
+                            <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">{label}</label>
+                            <input type="number" min="0"
+                              value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[field] as number) || ""}
+                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, field, Number(e.target.value) || 0)}
+                              placeholder="0"
+                              className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-3">
+                        <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
+                        <select
+                          value={scheduleEditorRunValues[scheduleAdvancedRunId]?.dieType ?? ""}
+                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "dieType", e.target.value)}
+                          className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                        >
+                          <option value="">— Select —</option>
+                          {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                    </section>
+                    {/* ── Dough Recipe ───────────────────────────────────────── */}
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Dough Recipe</h3>
+                      <div className="mb-2">
+                        <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Recipe Name</label>
+                        <select
+                          value={scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipeName ?? ""}
+                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "doughRecipeName", e.target.value)}
+                          className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                        >
+                          <option value="">— Select —</option>
+                          {doughRecipeNames.map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        {(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).map((row, ri) => (
+                          <div key={ri} className="flex gap-2 items-center">
+                            <select value={row.ingredient}
+                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
+                              className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                            >
+                              <option value="">— Ingredient —</option>
+                              {doughIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                            </select>
+                            <input type="number" min="0" step="0.1" value={row.lbs || ""}
+                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", rows); }}
+                              placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                            />
+                            <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []).filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "doughRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.doughRecipe ?? []), { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                      </div>
+                    </section>
+                    {/* ── Applicators & Sauce ────────────────────────────────── */}
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Applicators &amp; Sauce</h3>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Sauce Oz / Pizza</label>
+                            <input type="number" min="0" step="0.1" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceOzPerPizza || ""} onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "sauceOzPerPizza", Number(e.target.value) || 0)} placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Sauce Barrel (lbs)</label>
+                            <input type="number" min="0" value={scheduleEditorRunValues[scheduleAdvancedRunId]?.sauceBarrelLbs || ""} onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "sauceBarrelLbs", Number(e.target.value) || 0)} placeholder="0" className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors" />
+                          </div>
+                        </div>
+                        {([1, 2, 3, 4] as const).map(n => (
+                          <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Applicator {n}</p>
+                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}Type` as keyof FormValues] as string) ?? ""}
+                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}Type` as keyof FormValues, e.target.value)}
+                              className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                            >
+                              <option value="">— Type —</option>
+                              {ingredientTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
+                                <input type="number" min="0" step="0.1" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}OzPerPizza` as keyof FormValues] as number) || ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground mb-0.5 block">Batch (lbs)</label>
+                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`app${n}BatchLbs` as keyof FormValues] as number) || ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `app${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        {([1, 2] as const).map(n => (
+                          <div key={n} className="rounded-md bg-muted/20 p-2.5 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pepperoni {n}</p>
+                            <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Type` as keyof FormValues] as string) ?? ""}
+                              onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Type` as keyof FormValues, e.target.value)}
+                              className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                            >
+                              <option value="">— Type —</option>
+                              {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                            <div className="grid grid-cols-3 gap-2">
+                              <div>
+                                <label className="text-[10px] text-muted-foreground mb-0.5 block">Sticks</label>
+                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}Sticks` as keyof FormValues] as number) || ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}Sticks` as keyof FormValues, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground mb-0.5 block">Oz / Pizza</label>
+                                <input type="number" min="0" step="0.1" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}OzPerPizza` as keyof FormValues] as number) || ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}OzPerPizza` as keyof FormValues, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-muted-foreground mb-0.5 block">Batch (lbs)</label>
+                                <input type="number" min="0" value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[`pep${n}BatchLbs` as keyof FormValues] as number) || ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, `pep${n}BatchLbs` as keyof FormValues, Number(e.target.value) || 0)}
+                                  placeholder="0" className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    {/* ── Cheese / Mix Recipes (App 1–4) ─────────────────────── */}
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Cheese / Mix Recipes</h3>
+                      <div className="space-y-4">
+                        {([1, 2, 3, 4] as const).map(n => {
+                          const recipeField = `app${n}CheeseRecipe` as keyof FormValues;
+                          const nameField = `app${n}CheeseRecipeName` as keyof FormValues;
+                          const rows = (scheduleEditorRunValues[scheduleAdvancedRunId]?.[recipeField] ?? []) as {ingredient: string; lbs: number}[];
+                          return (
+                            <div key={n}>
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">App {n} Recipe</p>
+                              <div className="mb-2">
+                                <select value={(scheduleEditorRunValues[scheduleAdvancedRunId]?.[nameField] as string) ?? ""}
+                                  onChange={e => updateAdvancedField(scheduleAdvancedRunId!, nameField, e.target.value)}
+                                  className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                >
+                                  <option value="">— Recipe Name —</option>
+                                  {cheeseRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                {rows.map((row, ri) => (
+                                  <div key={ri} className="flex gap-2 items-center">
+                                    <select value={row.ingredient}
+                                      onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
+                                      className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                    >
+                                      <option value="">— Ingredient —</option>
+                                      {cheeseIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                                    </select>
+                                    <input type="number" min="0" step="0.1" value={row.lbs || ""}
+                                      onChange={e => { const next = [...rows]; next[ri] = { ...next[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, recipeField, next); }}
+                                      placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                    />
+                                    <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, rows.filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                                  </div>
+                                ))}
+                                <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, recipeField, [...rows, { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                    {/* ── Frontline Recipe ───────────────────────────────────── */}
+                    <section>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 pb-1 border-b border-border/30">Frontline Recipe</h3>
+                      <div className="mb-2">
+                        <select value={scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipeName ?? ""}
+                          onChange={e => updateAdvancedField(scheduleAdvancedRunId!, "frontlineRecipeName", e.target.value)}
+                          className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                        >
+                          <option value="">— Select —</option>
+                          {frontlineRecipeNames.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1.5">
+                        {(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).map((row, ri) => (
+                          <div key={ri} className="flex gap-2 items-center">
+                            <select value={row.ingredient}
+                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], ingredient: e.target.value }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
+                              className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                            >
+                              <option value="">— Ingredient —</option>
+                              {frontlineIngredients.map(i => <option key={i} value={i}>{i}</option>)}
+                            </select>
+                            <input type="number" min="0" step="0.1" value={row.lbs || ""}
+                              onChange={e => { const rows = [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? [])]; rows[ri] = { ...rows[ri], lbs: Number(e.target.value) || 0 }; updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", rows); }}
+                              placeholder="lbs" className="w-20 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                            />
+                            <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", (scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []).filter((_, i) => i !== ri))} className="text-muted-foreground/40 hover:text-destructive transition-colors"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => updateAdvancedArray(scheduleAdvancedRunId!, "frontlineRecipe", [...(scheduleEditorRunValues[scheduleAdvancedRunId]?.frontlineRecipe ?? []), { ingredient: "", lbs: 0 }])} className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors mt-1"><Plus className="w-3 h-3" /> Add Ingredient</button>
+                      </div>
+                    </section>
+                  </div>
+                  <div className="px-5 py-4 border-t border-border/40">
+                    <button type="button" onClick={() => setScheduleView("editor")} className="w-full py-2 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors">
+                      Done — Back to Run List
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </div>
           </div>
         )}
