@@ -77,7 +77,9 @@ import {
   saveFrontlineRecipePresets,
   loadCheeseRecipePresets,
   saveCheeseRecipePresets,
+  applyMixSeedIfNeeded,
 } from "../storage";
+
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
@@ -144,6 +146,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+applyMixSeedIfNeeded();
 
 function StatRow({
   label,

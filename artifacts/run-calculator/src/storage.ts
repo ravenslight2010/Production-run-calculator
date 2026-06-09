@@ -13,6 +13,9 @@ import {
   FLAVORS_KEY,
   DOUGH_RECIPE_PRESETS_KEY,
   FRONTLINE_RECIPE_PRESETS_KEY,
+  FRONTLINE_RECIPE_NAMES_KEY,
+  FRONTLINE_INGREDIENTS_KEY,
+  DEFAULT_FRONTLINE_INGREDIENTS,
   CHEESE_RECIPE_PRESETS_KEY,
   MAX_HISTORY_DAYS,
   type FormValues,
@@ -24,6 +27,7 @@ import {
   type RecipeRow,
   type CrustField,
 } from "./types";
+import { MIX_SEED } from "./mixSeed";
 import { genId, todayStr } from "./utils";
 
 export function loadList(key: string, fallback: string[]): string[] {
@@ -186,4 +190,48 @@ export function loadCheeseRecipePresets(): Record<string, RecipeRow[]> {
 }
 export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
+}
+
+const MIX_SEED_KEY = "run-calc-mix-seed-v1";
+
+export function applyMixSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(MIX_SEED_KEY)) return;
+  try {
+    const existingBrands = loadList(BRANDS_KEY, []);
+    const mergedBrands = [...new Set([...existingBrands, ...MIX_SEED.brands])].sort();
+    saveList(BRANDS_KEY, mergedBrands);
+
+    const existingBF = loadBrandFlavors();
+    const mergedBF: Record<string, string[]> = { ...existingBF };
+    for (const [brand, flavors] of Object.entries(MIX_SEED.brandFlavors)) {
+      if (!mergedBF[brand]) mergedBF[brand] = [];
+      mergedBF[brand] = [...new Set([...mergedBF[brand], ...flavors])];
+    }
+    saveBrandFlavors(mergedBF);
+
+    const existingNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []);
+    const mergedNames = [...new Set([...existingNames, ...MIX_SEED.frontlineRecipeNames])];
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, mergedNames);
+
+    const existingPresets = loadFrontlineRecipePresets();
+    const mergedPresets = { ...MIX_SEED.frontlineRecipePresets, ...existingPresets };
+    saveFrontlineRecipePresets(mergedPresets);
+
+    const existingIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
+    const mergedIngredients = [...new Set([...existingIngredients, ...MIX_SEED.frontlineIngredients])].sort();
+    saveList(FRONTLINE_INGREDIENTS_KEY, mergedIngredients);
+
+    for (const p of MIX_SEED.profiles) {
+      const key = PROFILE_KEY(p.brand, p.flavor);
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, JSON.stringify({
+          frontlineRecipeName: p.recipeName,
+          frontlineRecipe: p.recipe,
+        }));
+      }
+    }
+
+    localStorage.setItem(MIX_SEED_KEY, "1");
+  } catch {}
 }
