@@ -446,6 +446,11 @@ function MixRecipeCard({
   onAppend,
   onRemove,
   embedded,
+  recipeName,
+  recipeNameOptions,
+  onAddRecipeName,
+  onRemoveRecipeName,
+  onRecipeNameChange,
 }: {
   label: string;
   totalRunLbs: number;
@@ -460,6 +465,11 @@ function MixRecipeCard({
   onAppend: () => void;
   onRemove: (idx: number) => void;
   embedded?: boolean;
+  recipeName?: string;
+  recipeNameOptions?: string[];
+  onAddRecipeName?: (v: string) => void;
+  onRemoveRecipeName?: (v: string) => void;
+  onRecipeNameChange?: (v: string) => void;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
@@ -468,6 +478,11 @@ function MixRecipeCard({
 
   const body = (
     <>
+      {recipeNameOptions && onRecipeNameChange && (
+        <div className="flex-1 max-w-xs mb-3">
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName ?? (() => {})} onRemoveOption={onRemoveRecipeName ?? (() => {})} placeholder="Recipe name…" />
+        </div>
+      )}
       {fields.length === 0 ? (
         <p className="text-xs text-muted-foreground mb-3">No ingredients yet. Add rows to build the mix.</p>
       ) : (
@@ -6075,6 +6090,11 @@ export default function Home() {
                           onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese1}
+                          recipeName={v.app1CheeseRecipeName ?? ""}
+                          recipeNameOptions={mixRecipeNames}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => form.setValue("app1CheeseRecipeName", val, { shouldDirty: true })}
                         />
                       )}
                       <StatRow
@@ -6126,6 +6146,11 @@ export default function Home() {
                           onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese2}
+                          recipeName={v.app2CheeseRecipeName ?? ""}
+                          recipeNameOptions={mixRecipeNames}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => form.setValue("app2CheeseRecipeName", val, { shouldDirty: true })}
                         />
                       )}
                       <StatRow
@@ -6177,6 +6202,11 @@ export default function Home() {
                           onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese3}
+                          recipeName={v.app3CheeseRecipeName ?? ""}
+                          recipeNameOptions={mixRecipeNames}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => form.setValue("app3CheeseRecipeName", val, { shouldDirty: true })}
                         />
                       )}
                       <StatRow
@@ -6228,6 +6258,11 @@ export default function Home() {
                           onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese4}
+                          recipeName={v.app4CheeseRecipeName ?? ""}
+                          recipeNameOptions={mixRecipeNames}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => form.setValue("app4CheeseRecipeName", val, { shouldDirty: true })}
                         />
                       )}
                       <Separator className="my-3 opacity-30" />
