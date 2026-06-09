@@ -79,6 +79,7 @@ import {
   saveCheeseRecipePresets,
   applyMixSeedIfNeeded,
   STALE_BRANDS,
+  SEED_MIX_RECIPE_NAMES,
 } from "../storage";
 
 import { useClock } from "../hooks/useClock";
@@ -1334,7 +1335,7 @@ export default function Home() {
   }
 
   const [frontlineRecipeNames, setFrontlineRecipeNames] = useState<string[]>(() =>
-    [...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b))
+    [...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].filter(n => !SEED_MIX_RECIPE_NAMES.has(n)).sort((a, b) => a.localeCompare(b))
   );
   function addFrontlineRecipeName(name: string) {
     const trimmed = name.trim();
@@ -1740,7 +1741,13 @@ export default function Home() {
       mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, payload.frontlineIngredients, setFrontlineIngredients);
       mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, payload.mixIngredients, setMixIngredients);
       mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames);
-      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], payload.frontlineRecipeNames, setFrontlineRecipeNames);
+      // Filter mix-category names out of the incoming frontline list (server may still have old data)
+      const incomingFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
+      const incomingMixFromFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => SEED_MIX_RECIPE_NAMES.has(n));
+      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames);
+      if (incomingMixFromFrontline.length > 0) {
+        mergeList(MIX_RECIPE_NAMES_KEY, [], incomingMixFromFrontline, setMixRecipeNames);
+      }
       mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames);
 
       // ── Recipe presets (remote wins for same name, local-only kept) ──
@@ -1969,7 +1976,7 @@ export default function Home() {
         mixIngredients: loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS),
         doughRecipeNames: loadList(DOUGH_RECIPE_NAMES_KEY, []),
         doughRecipePresets: loadDoughRecipePresets(),
-        frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []),
+        frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !SEED_MIX_RECIPE_NAMES.has(n)),
         frontlineRecipePresets: loadFrontlineRecipePresets(),
         cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
         cheeseRecipePresets: loadCheeseRecipePresets(),

@@ -189,6 +189,8 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
 
 const MIX_SEED_KEY = "run-calc-mix-seed-v12";
 
+export const SEED_MIX_RECIPE_NAMES = new Set(MIX_SEED.mixRecipeNames);
+
 export const STALE_BRANDS = [
   "Bobos","Lowes","Lucias","Morming Melts",
   "Lucia's / Craft","Lucia's / Morning Melts","Lucia's / Pinsa",
