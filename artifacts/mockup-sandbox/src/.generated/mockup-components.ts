@@ -5,10 +5,10 @@ export const modules: ModuleMap = {
   "./components/mockups/tab-dough/Dough.tsx": () => import("../components/mockups/tab-dough/Dough.tsx"),
   "./components/mockups/tab-frontline/Frontline.tsx": () => import("../components/mockups/tab-frontline/Frontline.tsx"),
   "./components/mockups/tab-summary/Summary.tsx": () => import("../components/mockups/tab-summary/Summary.tsx"),
-  "./components/mockups/tab-timing/Timing.tsx": () => import("../components/mockups/tab-timing/Timing.tsx"),
   "./components/mockups/ui-directions/ColorStatus.tsx": () => import("../components/mockups/ui-directions/ColorStatus.tsx"),
   "./components/mockups/ui-directions/Compact.tsx": () => import("../components/mockups/ui-directions/Compact.tsx"),
   "./components/mockups/ui-directions/Hybrid.tsx": () => import("../components/mockups/ui-directions/Hybrid.tsx"),
   "./components/mockups/ui-directions/Simplified.tsx": () => import("../components/mockups/ui-directions/Simplified.tsx"),
-  "./components/mockups/ui-directions/SimplifiedColor.tsx": () => import("../components/mockups/ui-directions/SimplifiedColor.tsx")
+  "./components/mockups/ui-directions/SimplifiedColor.tsx": () => import("../components/mockups/ui-directions/SimplifiedColor.tsx"),
+  "./components/mockups/tab-timing/Timing.tsx": () => import("../components/mockups/tab-timing/Timing.tsx")
 };
