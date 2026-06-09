@@ -192,12 +192,74 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
 }
 
-const MIX_SEED_KEY = "run-calc-mix-seed-v10";
+const MIX_SEED_KEY = "run-calc-mix-seed-v11";
+
+const STALE_BRANDS = [
+  "Bobos","Lowes","Lucias","Morming Melts",
+  "Lucia's / Craft","Lucia's / Morning Melts","Lucia's / Pinsa",
+];
+
+const STALE_LUCIA_FLAVORS = [
+  "Morning Melts Americano","Morming Melts Italiano","Morning Melts Mexicano","Morning Melts Parisian",
+  "Pinsa Margherita","Pinsa Spinach","Pinsa Tikka Masala",
+  "SOB","Caribbean","Bratwurst","Bacon Cheeseburger","Alfredo Spinach","Red Hot","Chicken Club","Tikka Masala",
+];
+
+const STALE_RECIPE_NAMES = [
+  "Bobos Deluxe","Bobos Breakfast",
+  "Lowes 7in Red Fajita","Lowes 7in White Spin","Lowes Bacon Cheeseburger",
+  "Lowes California","Lowes Caribbean","Lowes Chicken Club","Lowes Grilled Vegetable",
+  "Lowes Red Hot","Lowes Spinach","Lowes 11in White Spinach",
+  "Lucias Morning Melts Americano","Lucias Morming Melts Italiano","Lucias Morning Melts Mexicano","Lucias Morning Melts Parisian",
+  "Lucias Pinsa Margherita","Lucias Pinsa Spinach","Lucias Pinsa Tikka Masala",
+  "Lucias Buffalo Chicken","Lucias Supreme",
+  "Morning Melts Americano (old)","Morming Melts Italiano",
+];
+
+const STALE_INGREDIENTS = [
+  "Bacon",
+  "Bacon - NATURAL / tri meats tm3514u or / c&f 061anub40",
+  "Bacon / (Tri Meats tm3514u or c&fb 061anub40)",
+  "Bacon / Tri Meats tm3514u or / c&f 001anub40",
+  "Bacon / Tri Meats tm3514u or / c&f 061anub40",
+  "Bacon / Tri Meats tm3514u or c&f 001anub40",
+  "Bacon, NATURAL / Tri Meats tm3514u or / c&f 061anub40",
+  "Bacon, NATURAL / Tri Meats tm3514u or c&f 061anub40",
+  "Bacon, NATURAL / tri meats tm3514u or / c&f 061anub40",
+  "Chicken, Diced / House of Raeford 28501 or / c&f 001mpdc40",
+  "Chicken, Diced / c&f - 001mpdc40 or / House of Raeford - 28501",
+  "Chicken, Diced / c&f - 001mpdc40 or House of Raeford - 28501",
+  "Diced Chicken / (C&F 0001mpdc40 or House of Raeford 28501)",
+  "Diced Chicken / c&f 001mpdc40 or / House of Raeford 28501",
+];
 
 export function applyMixSeedIfNeeded(): void {
   if (typeof localStorage === "undefined") return;
   if (localStorage.getItem(MIX_SEED_KEY)) return;
   try {
+    // ── Purge stale data from previous seed versions ──
+    const cleanedBrands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
+    saveList(BRANDS_KEY, cleanedBrands);
+
+    const cleanedBF = loadBrandFlavors();
+    for (const b of STALE_BRANDS) delete cleanedBF[b];
+    if (cleanedBF["Lucia's"]) {
+      cleanedBF["Lucia's"] = cleanedBF["Lucia's"].filter(f => !STALE_LUCIA_FLAVORS.includes(f));
+    }
+    saveBrandFlavors(cleanedBF);
+
+    const cleanedNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !STALE_RECIPE_NAMES.includes(n));
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedNames);
+
+    const cleanedPresets = loadFrontlineRecipePresets();
+    for (const n of STALE_RECIPE_NAMES) delete cleanedPresets[n];
+    saveFrontlineRecipePresets(cleanedPresets);
+
+    const cleanedIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)
+      .filter(i => !STALE_INGREDIENTS.includes(i));
+    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedIngredients);
+
+    // ── Merge seed data ──
     const existingBrands = loadList(BRANDS_KEY, []);
     const mergedBrands = [...new Set([...existingBrands, ...MIX_SEED.brands])].sort();
     saveList(BRANDS_KEY, mergedBrands);
