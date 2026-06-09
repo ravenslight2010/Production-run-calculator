@@ -894,7 +894,7 @@ function TypeDropdown({
               placeholder="Search or add…"
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
-            <div className="max-h-48 overflow-y-auto">
+            <div className="max-h-48 overflow-y-auto overscroll-contain">
               {allowClear && value && (
                 <button
                   type="button"
@@ -3506,7 +3506,7 @@ export default function Home() {
                 <button type="button" onClick={() => setShowScreensDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
               </div>
               <p className="text-xs text-muted-foreground mt-3">Open any URL below on another device or browser tab. Each screen stays live-synced automatically.</p>
-              <div className="space-y-3 overflow-y-auto flex-1 mt-3">
+              <div className="space-y-3 overflow-y-auto overscroll-contain flex-1 mt-3">
                 {screens.map(s => (
                   <div key={s.key} className="flex items-start gap-4 p-4 rounded-lg bg-muted/20 border border-border/50">
                     {/* QR code */}
@@ -3573,7 +3573,7 @@ export default function Home() {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="overflow-y-auto flex-1 p-3 space-y-2">
+            <div className="overflow-y-auto overscroll-contain flex-1 p-3 space-y-2">
               {dayState.runs.map((run, idx) => {
                 const isCur = idx === dayState.currentIndex;
                 const statusDot = run.endedAt ? "bg-emerald-400" : run.startedAt ? "bg-primary animate-pulse" : "bg-muted-foreground/40";
@@ -3652,7 +3652,7 @@ export default function Home() {
             </div>
             {items.length === 0
               ? <p className="text-xs text-muted-foreground text-center py-3">No items yet.</p>
-              : <ul className="space-y-1 max-h-48 overflow-y-auto">
+              : <ul className="space-y-1 max-h-48 overflow-y-auto overscroll-contain">
                   {items.map(item => {
                     const isProt = protectedItems?.includes(item);
                     return (
@@ -3759,7 +3759,7 @@ export default function Home() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <GroupedPanel
@@ -3920,7 +3920,7 @@ export default function Home() {
                     onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
                   />
                   {showBrandDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
                       {brands
                         .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
                         .map((b) =>
@@ -3998,7 +3998,7 @@ export default function Home() {
                     onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
                   />
                   {showFlavorDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto">
+                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
                       {!(currentRun?.brand) && (
                         <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
                       )}
@@ -7153,7 +7153,7 @@ export default function Home() {
         {/* ── Templates Dialog ──────────────────────────────────────────────── */}
         {showTemplatesDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowTemplatesDialog(false)}>
-            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4 max-h-[90vh] overflow-y-auto overscroll-contain" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-2">
                 <Bookmark className="w-5 h-5 text-primary shrink-0" />
                 <h2 className="text-base font-bold">Run Templates</h2>
