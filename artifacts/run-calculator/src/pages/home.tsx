@@ -1167,7 +1167,7 @@ export default function Home() {
   }, [history]);
 
   const [brands, setBrands] = useState<string[]>(() =>
-    [...loadList(BRANDS_KEY, ["Lucia's"])].sort((a, b) => a.localeCompare(b))
+    [...loadList(BRANDS_KEY, ["Lucia's"])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
   );
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
@@ -1577,7 +1577,7 @@ export default function Home() {
       const payload: SyncPayload = {
         dayState: { runs, date: scheduleEditorDate, resetAt: Date.now() },
         runValues,
-        brands: loadList(BRANDS_KEY, []),
+        brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
       };
       const res = await fetch(`/api/sync/${scheduleEditorDate}`, {
@@ -1685,7 +1685,7 @@ export default function Home() {
 
       // ── Brands ──
       if (payload.brands && payload.brands.length > 0) {
-        const local = loadList(BRANDS_KEY, []);
+        const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
         const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
         const merged = [...new Set([...local, ...remoteSanitized])].sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
@@ -1695,7 +1695,11 @@ export default function Home() {
       // ── Brand flavors ──
       if (payload.brandFlavors) {
         const local = loadBrandFlavors();
-        const merged: Record<string, string[]> = { ...local };
+        const merged: Record<string, string[]> = {};
+        for (const [brand, flavors] of Object.entries(local)) {
+          if (STALE_BRANDS.includes(brand)) continue;
+          merged[brand] = flavors;
+        }
         for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
           if (STALE_BRANDS.includes(brand)) continue;
           merged[brand] = [...new Set([...(merged[brand] ?? []), ...flavors])].sort((a, b) => a.localeCompare(b));
@@ -1952,7 +1956,7 @@ export default function Home() {
       const payload: SyncPayload = {
         dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr() },
         runValues,
-        brands: loadList(BRANDS_KEY, []),
+        brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
         ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
         templates: loadTemplates(),
