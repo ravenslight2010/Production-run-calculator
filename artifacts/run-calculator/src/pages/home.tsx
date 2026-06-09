@@ -78,6 +78,7 @@ import {
   loadCheeseRecipePresets,
   saveCheeseRecipePresets,
   applyMixSeedIfNeeded,
+  STALE_BRANDS,
 } from "../storage";
 
 import { useClock } from "../hooks/useClock";
@@ -1685,7 +1686,8 @@ export default function Home() {
       // ── Brands ──
       if (payload.brands && payload.brands.length > 0) {
         const local = loadList(BRANDS_KEY, []);
-        const merged = [...new Set([...local, ...payload.brands])].sort((a, b) => a.localeCompare(b));
+        const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
+        const merged = [...new Set([...local, ...remoteSanitized])].sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(merged);
       }
@@ -1695,6 +1697,7 @@ export default function Home() {
         const local = loadBrandFlavors();
         const merged: Record<string, string[]> = { ...local };
         for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
+          if (STALE_BRANDS.includes(brand)) continue;
           merged[brand] = [...new Set([...(merged[brand] ?? []), ...flavors])].sort((a, b) => a.localeCompare(b));
         }
         saveBrandFlavors(merged);
