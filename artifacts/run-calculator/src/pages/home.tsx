@@ -1517,7 +1517,9 @@ export default function Home() {
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number}[]>([]);
   const [scheduleView, setScheduleView] = useState<"list" | "editor">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
-  const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
+  const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number; casesPerSkid: number; targetDoughballWeight: number; dieType: string; pep1Type: string; pep2Type: string}[]>([]);
+  const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
+  const [scheduleExpandedRuns, setScheduleExpandedRuns] = useState<Record<string, boolean>>({});
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDeleteConfirm, setScheduleDeleteConfirm] = useState<string | null>(null);
   function tomorrowStr() {
@@ -1525,18 +1527,29 @@ export default function Home() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   async function openScheduleEditor(date?: string) {
+    setScheduleExpandedRuns({});
     if (date) {
       try {
         const res = await fetch(`/api/sync/${date}`);
         if (res.ok) {
           const payload = await res.json() as SyncPayload | null;
           if (payload?.dayState) {
+            const storedVals = (payload.runValues ?? {}) as Record<string, FormValues>;
+            setScheduleEditorRunValues(storedVals);
             setScheduleEditorDate(date);
             setScheduleEditorRuns(
-              payload.dayState.runs.map(r => ({
-                id: r.id, brand: r.brand, flavor: r.flavor,
-                casesNeeded: ((payload.runValues ?? {})[r.id] as FormValues)?.casesNeeded ?? 0,
-              }))
+              payload.dayState.runs.map(r => {
+                const v = storedVals[r.id] ?? {} as Partial<FormValues>;
+                return {
+                  id: r.id, brand: r.brand, flavor: r.flavor,
+                  casesNeeded: v.casesNeeded ?? 0,
+                  casesPerSkid: v.casesPerSkid ?? 0,
+                  targetDoughballWeight: v.targetDoughballWeight ?? 0,
+                  dieType: v.dieType ?? "",
+                  pep1Type: v.pep1Type ?? "",
+                  pep2Type: v.pep2Type ?? "",
+                };
+              })
             );
             setScheduleView("editor");
             return;
@@ -1544,8 +1557,9 @@ export default function Home() {
         }
       } catch {}
     }
+    setScheduleEditorRunValues({});
     setScheduleEditorDate(tomorrowStr());
-    setScheduleEditorRuns([{ id: genId(), brand: "", flavor: "", casesNeeded: 0 }]);
+    setScheduleEditorRuns([{ id: genId(), brand: "", flavor: "", casesNeeded: 0, casesPerSkid: 0, targetDoughballWeight: 0, dieType: "", pep1Type: "", pep2Type: "" }]);
     setScheduleView("editor");
   }
   async function saveScheduledDay() {
@@ -1555,8 +1569,20 @@ export default function Home() {
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
       for (const r of scheduleEditorRuns) {
+        // Merge in priority: previously-stored full values > saved profile > defaults
+        const stored = scheduleEditorRunValues[r.id];
         const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
-        runValues[r.id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesNeeded };
+        const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
+        runValues[r.id] = {
+          ...base,
+          casesNeeded: r.casesNeeded,
+          // Override with any explicitly-set advanced fields (non-zero / non-empty wins)
+          ...(r.casesPerSkid > 0 && { casesPerSkid: r.casesPerSkid }),
+          ...(r.targetDoughballWeight > 0 && { targetDoughballWeight: r.targetDoughballWeight }),
+          ...(r.dieType && { dieType: r.dieType }),
+          ...(r.pep1Type && { pep1Type: r.pep1Type }),
+          ...(r.pep2Type && { pep2Type: r.pep2Type }),
+        };
       }
       const payload: SyncPayload = {
         dayState: { runs, date: scheduleEditorDate, resetAt: Date.now() },
@@ -7382,7 +7408,7 @@ export default function Home() {
                         <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Runs</label>
                         <button
                           type="button"
-                          onClick={() => setScheduleEditorRuns(prev => [...prev, { id: genId(), brand: "", flavor: "", casesNeeded: 0 }])}
+                          onClick={() => setScheduleEditorRuns(prev => [...prev, { id: genId(), brand: "", flavor: "", casesNeeded: 0, casesPerSkid: 0, targetDoughballWeight: 0, dieType: "", pep1Type: "", pep2Type: "" }])}
                           className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
                         >
                           <Plus className="w-3.5 h-3.5" /> Add Run
@@ -7442,8 +7468,79 @@ export default function Home() {
                                 className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
                               />
                             </div>
-                            {run.brand && (
-                              <p className="text-[10px] text-muted-foreground/50">Recipe settings will load from the saved {run.brand} {run.flavor ? `/ ${run.flavor}` : ""} profile.</p>
+                            {/* Advanced Settings toggle */}
+                            <button
+                              type="button"
+                              onClick={() => setScheduleExpandedRuns(prev => ({ ...prev, [run.id]: !prev[run.id] }))}
+                              className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 hover:text-muted-foreground transition-colors w-full"
+                            >
+                              <ChevronLeft className={`w-3 h-3 transition-transform ${scheduleExpandedRuns[run.id] ? "-rotate-90" : "rotate-180"}`} />
+                              Advanced Settings
+                              {(run.casesPerSkid > 0 || run.targetDoughballWeight > 0 || run.dieType || run.pep1Type || run.pep2Type) && (
+                                <span className="ml-1 px-1 rounded bg-primary/10 text-primary text-[9px] font-bold">overrides</span>
+                              )}
+                            </button>
+                            {scheduleExpandedRuns[run.id] && (
+                              <div className="space-y-2 pt-1 border-t border-border/30">
+                                <p className="text-[10px] text-muted-foreground/50 pb-1">
+                                  Leave fields at 0 / blank to use the saved profile. Set a value to override it for this scheduled run.
+                                </p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Cases / Skid</label>
+                                    <input type="number" min="0"
+                                      value={run.casesPerSkid || ""}
+                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, casesPerSkid: Number(e.target.value) || 0 } : r))}
+                                      placeholder="from profile"
+                                      className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Target Ball Wt (oz)</label>
+                                    <input type="number" min="0"
+                                      value={run.targetDoughballWeight || ""}
+                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, targetDoughballWeight: Number(e.target.value) || 0 } : r))}
+                                      placeholder="from profile"
+                                      className="w-full h-8 px-3 rounded-md bg-muted/40 border border-border/60 text-sm font-mono outline-none focus:border-primary/60 transition-colors"
+                                    />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Die Type</label>
+                                  <select
+                                    value={run.dieType}
+                                    onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, dieType: e.target.value } : r))}
+                                    className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                  >
+                                    <option value="">— from profile —</option>
+                                    {dieTypes.map(d => <option key={d} value={d}>{d}</option>)}
+                                  </select>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Pep 1 Type</label>
+                                    <select
+                                      value={run.pep1Type}
+                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, pep1Type: e.target.value } : r))}
+                                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                    >
+                                      <option value="">— from profile —</option>
+                                      {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1 block">Pep 2 Type</label>
+                                    <select
+                                      value={run.pep2Type}
+                                      onChange={e => setScheduleEditorRuns(prev => prev.map((r, i) => i === idx ? { ...r, pep2Type: e.target.value } : r))}
+                                      className="w-full h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                                    >
+                                      <option value="">— from profile —</option>
+                                      {pepTypes.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </div>
                         ))}

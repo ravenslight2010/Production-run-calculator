@@ -99,7 +99,7 @@ router.get("/sync/:date", async (req: Request<{ date: string }>, res: Response):
 router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
-  const { payload } = req.body as { payload: unknown };
+  const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   await db
     .insert(dailySyncTable)
     .values({ date, data: payload as any, updatedAt: new Date() })
@@ -107,6 +107,10 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
       target: dailySyncTable.date,
       set: { data: payload as any, updatedAt: new Date() },
     });
+  // Broadcast to live SSE clients when writing today's date (supports same-day watchers)
+  if (date === todayStr()) {
+    broadcast(payload, senderId);
+  }
   res.json({ ok: true });
 });
 
