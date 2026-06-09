@@ -16,6 +16,8 @@ import {
   FRONTLINE_RECIPE_NAMES_KEY,
   FRONTLINE_INGREDIENTS_KEY,
   DEFAULT_FRONTLINE_INGREDIENTS,
+  MIX_INGREDIENTS_KEY,
+  DEFAULT_MIX_INGREDIENTS,
   CHEESE_RECIPE_PRESETS_KEY,
   MIX_RECIPE_NAMES_KEY,
   MAX_HISTORY_DAYS,
@@ -188,6 +190,7 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
 }
 
 const MIX_SEED_KEY = "run-calc-mix-seed-v13";
+const MIX_SEED_V14_KEY = "run-calc-mix-seed-v14";
 
 export const SEED_MIX_RECIPE_NAMES = new Set(MIX_SEED.mixRecipeNames);
 
@@ -296,10 +299,32 @@ export function applyMixSeedIfNeeded(): void {
     }
     saveBrandFlavors(mergedBF);
 
-    const existingIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
-    const mergedIngredients = [...new Set([...existingIngredients, ...MIX_SEED.frontlineIngredients])].sort();
-    saveList(FRONTLINE_INGREDIENTS_KEY, mergedIngredients);
+    // Topping ingredients go into Mix (applicator), NOT into Sauce/Frontline
+    const existingMixIng = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
+    const mergedMixIng = [...new Set([...existingMixIng, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
+    saveList(MIX_INGREDIENTS_KEY, mergedMixIng);
 
     localStorage.setItem(MIX_SEED_KEY, "1");
+  } catch {}
+}
+
+/** v14: move topping ingredients that were mis-seeded into Sauce → into Mix */
+export function applyMixSeedV14IfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(MIX_SEED_V14_KEY)) return;
+  try {
+    const toppingSet = new Set(MIX_SEED.frontlineIngredients);
+
+    // Remove toppings from the Sauce/Frontline ingredient list
+    const currentFrontline = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
+    const cleanedFrontline = currentFrontline.filter(i => !toppingSet.has(i));
+    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedFrontline);
+
+    // Merge toppings into the Mix ingredient list
+    const currentMix = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
+    const mergedMix = [...new Set([...currentMix, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
+    saveList(MIX_INGREDIENTS_KEY, mergedMix);
+
+    localStorage.setItem(MIX_SEED_V14_KEY, "1");
   } catch {}
 }

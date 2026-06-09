@@ -78,6 +78,7 @@ import {
   loadCheeseRecipePresets,
   saveCheeseRecipePresets,
   applyMixSeedIfNeeded,
+  applyMixSeedV14IfNeeded,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -151,6 +152,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 applyMixSeedIfNeeded();
+applyMixSeedV14IfNeeded();
 
 function StatRow({
   label,
@@ -4129,7 +4131,7 @@ export default function Home() {
         const standaloneTabs: StandaloneTab[] = [
           { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }, onRename: renameBrand },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter), onRename: (o, n) => renameFlavor(o, n, manageBrandFilter) },
-          { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType, onRename: renameIngredientType },
+          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType, onRename: renameIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType, onRename: renamePepType },
           { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType, onRename: renameDieType },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
