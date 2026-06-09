@@ -1742,11 +1742,16 @@ export default function Home() {
       mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, payload.mixIngredients, setMixIngredients);
       mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames);
       // Filter mix-category names out of the incoming frontline list (server may still have old data)
+      // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
+      const cleanedLocalFrontline = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
+      saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedLocalFrontline);
       const incomingFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
       const incomingMixFromFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => SEED_MIX_RECIPE_NAMES.has(n));
       mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames);
-      if (incomingMixFromFrontline.length > 0) {
-        mergeList(MIX_RECIPE_NAMES_KEY, [], incomingMixFromFrontline, setMixRecipeNames);
+      // Merge mix recipe names from both the redirected frontline names and the dedicated payload field
+      const allIncomingMix = [...new Set([...incomingMixFromFrontline, ...(payload.mixRecipeNames ?? [])])];
+      if (allIncomingMix.length > 0) {
+        mergeList(MIX_RECIPE_NAMES_KEY, [], allIncomingMix, setMixRecipeNames);
       }
       mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames);
 
@@ -1979,6 +1984,7 @@ export default function Home() {
         frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !SEED_MIX_RECIPE_NAMES.has(n)),
         frontlineRecipePresets: loadFrontlineRecipePresets(),
         cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
+        mixRecipeNames: loadList(MIX_RECIPE_NAMES_KEY, []),
         cheeseRecipePresets: loadCheeseRecipePresets(),
         brandProfiles,
         crustProfiles,

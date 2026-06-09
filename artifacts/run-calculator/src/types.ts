@@ -195,6 +195,7 @@ export type SyncPayload = {
   frontlineRecipePresets?: Record<string, RecipeRow[]>;
   cheeseRecipeNames?: string[];
   cheeseRecipePresets?: Record<string, RecipeRow[]>;
+  mixRecipeNames?: string[];
   brandProfiles?: Record<string, Partial<FormValues>>;
   crustProfiles?: Record<string, Partial<FormValues>>;
 };
