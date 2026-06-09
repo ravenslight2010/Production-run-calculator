@@ -2144,6 +2144,28 @@ export default function Home() {
     schedulePush(dayStateRef.current);
   }
 
+  function renameBrand(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || brands.includes(trimmed)) return;
+    const updated = brands.map(b => b === oldName ? trimmed : b).sort((a, b) => a.localeCompare(b));
+    setBrands(updated);
+    saveList(BRANDS_KEY, updated);
+    // Move flavors over to new brand name
+    if (brandFlavors[oldName]) {
+      const next = { ...brandFlavors, [trimmed]: brandFlavors[oldName] };
+      delete next[oldName];
+      setBrandFlavors(next);
+      saveBrandFlavors(next);
+    }
+    // Update any open runs that reference this brand
+    const ds = dayStateRef.current;
+    const updatedRuns = ds.runs.map(r => r.brand === oldName ? { ...r, brand: trimmed } : r);
+    const newDs = { ...ds, runs: updatedRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs);
+  }
+
   function addFlavor(name: string, brand?: string) {
     const b = (brand ?? currentRun?.brand ?? "").trim();
     const trimmed = name.trim();
@@ -2163,6 +2185,33 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: (brandFlavors[b] ?? []).filter(f => f !== name) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    schedulePush(dayStateRef.current);
+  }
+
+  function renameFlavor(oldName: string, newName: string, brand?: string) {
+    const b = (brand ?? currentRun?.brand ?? "").trim();
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || !b) return;
+    const current = brandFlavors[b] ?? [];
+    if (current.includes(trimmed)) return;
+    const next = { ...brandFlavors, [b]: current.map(f => f === oldName ? trimmed : f).sort((a, bv) => a.localeCompare(bv)) };
+    setBrandFlavors(next);
+    saveBrandFlavors(next);
+    // Update any open runs that reference this flavor
+    const ds = dayStateRef.current;
+    const updatedRuns = ds.runs.map(r => (r.brand === b && r.flavor === oldName) ? { ...r, flavor: trimmed } : r);
+    const newDs = { ...ds, runs: updatedRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs);
+  }
+
+  function renameMixRecipeName(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName || mixRecipeNames.includes(trimmed)) return;
+    const updated = mixRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    setMixRecipeNames(updated);
+    saveList(MIX_RECIPE_NAMES_KEY, updated);
     schedulePush(dayStateRef.current);
   }
 
@@ -3836,11 +3885,22 @@ export default function Home() {
         // Simple list panel: add input + item list
         const ListPanel = ({
           items, onAdd, onRemove, placeholder, protected: protectedItems,
-          inputVal, setInputVal,
+          inputVal, setInputVal, onRename,
         }: {
           items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
           placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
-        }) => (
+          onRename?: (oldName: string, newName: string) => void;
+        }) => {
+          const [renamingItem, setRenamingItem] = useState<string | null>(null);
+          const [renameVal, setRenameVal] = useState("");
+          function beginRename(item: string) { setRenamingItem(item); setRenameVal(item); }
+          function commitRename() {
+            if (renamingItem && renameVal.trim() && renameVal.trim() !== renamingItem) {
+              onRename!(renamingItem, renameVal.trim());
+            }
+            setRenamingItem(null); setRenameVal("");
+          }
+          return (
           <div className="space-y-2">
             <div className="flex gap-2">
               <input
@@ -3863,34 +3923,53 @@ export default function Home() {
               : <ul className="space-y-1 max-h-48 overflow-y-auto overscroll-contain">
                   {items.map(item => {
                     const isProt = protectedItems?.includes(item);
+                    const isRenaming = renamingItem === item;
                     return (
                       <li key={item} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md bg-muted/30 hover:bg-muted/50">
-                        <span className="text-sm">{item}</span>
+                        {isRenaming ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={renameVal}
+                            onChange={e => setRenameVal(e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setRenamingItem(null); setRenameVal(""); } }}
+                            onBlur={commitRename}
+                            className="flex-1 border border-primary rounded px-2 py-0.5 text-sm bg-background focus:outline-none"
+                          />
+                        ) : (
+                          <span className="text-sm flex-1">{item}</span>
+                        )}
                         {isProt
                           ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
-                          : <button type="button" onClick={() => onRemove(item)} className="text-muted-foreground hover:text-destructive shrink-0"><X className="w-3.5 h-3.5" /></button>}
+                          : isRenaming
+                          ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
+                          : <div className="flex items-center gap-1 shrink-0">
+                              {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
+                              <button type="button" onClick={() => onRemove(item)} className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
+                            </div>}
                       </li>
                     );
                   })}
                 </ul>
             }
           </div>
-        );
+          );
+        };
 
         // Grouped panel: recipe names (left) + ingredients (right)
         const GroupedPanel = ({
-          namesLabel, names, onAddName, onRemoveName,
+          namesLabel, names, onAddName, onRemoveName, onRenameName,
           ingLabel, ingredients, onAddIng, onRemoveIng,
           ingProtected,
         }: {
-          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void;
+          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void;
           ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void;
           ingProtected?: string[];
         }) => (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
-              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
+              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
@@ -3900,10 +3979,10 @@ export default function Home() {
         );
 
         // Standalone tabs: still use a single input
-        type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; };
+        type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
-          { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); } },
-          { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter) },
+          { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }, onRename: renameBrand },
+          { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter), onRename: (o, n) => renameFlavor(o, n, manageBrandFilter) },
           { key: "ingredientTypes", label: "Applicator Ingredients", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType },
           { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType },
@@ -3913,7 +3992,7 @@ export default function Home() {
           { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: addDoughRecipeName,     onRemoveName: removeDoughRecipeName,     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: addDoughIngredient,     onRemoveIng: removeDoughIngredient },
           { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: addFrontlineRecipeName, onRemoveName: removeFrontlineRecipeName, ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: addFrontlineIngredient, onRemoveIng: removeFrontlineIngredient },
           { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: addCheeseRecipeName,    onRemoveName: removeCheeseRecipeName,    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: addCheeseIngredient,   onRemoveIng: removeCheeseIngredient },
-          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient },
+          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       onRenameName: renameMixRecipeName, ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient },
         ];
 
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -3975,6 +4054,7 @@ export default function Home() {
                     names={groupedTab.names}
                     onAddName={groupedTab.onAddName}
                     onRemoveName={groupedTab.onRemoveName}
+                    onRenameName={(groupedTab as any).onRenameName}
                     ingLabel={groupedTab.ingLabel}
                     ingredients={groupedTab.ingredients}
                     onAddIng={groupedTab.onAddIng}
@@ -4001,6 +4081,7 @@ export default function Home() {
                         items={standaloneTab.items}
                         onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
                         onRemove={standaloneTab.onRemove}
+                        onRename={standaloneTab.onRename}
                         placeholder={`Add flavor for ${manageBrandFilter}…`}
                         inputVal={mgStandaloneInput}
                         setInputVal={setMgStandaloneInput}
@@ -4040,6 +4121,7 @@ export default function Home() {
                     items={standaloneTab.items}
                     onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}
                     onRemove={standaloneTab.onRemove}
+                    onRename={standaloneTab.onRename}
                     placeholder={`Add to ${standaloneTab.label}…`}
                     protected={standaloneTab.protected}
                     inputVal={mgStandaloneInput}
