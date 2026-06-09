@@ -83,6 +83,7 @@ import {
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
+import { MIX_SEED } from "../mixSeed";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1776,8 +1777,14 @@ export default function Home() {
       mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes);
       mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, payload.cheeseIngredients, setCheeseIngredients);
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients);
-      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, payload.frontlineIngredients, setFrontlineIngredients);
-      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, payload.mixIngredients, setMixIngredients);
+      // Strip topping items from incoming frontline payload — old server payloads may still carry them
+      const toppingSet = new Set(MIX_SEED.frontlineIngredients);
+      const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i));
+      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients);
+      // Redirect any toppings from the incoming frontline payload into mix ingredients
+      const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i));
+      const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])];
+      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients);
       mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames);
       // Filter mix-category names out of the incoming frontline list (server may still have old data)
       // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
