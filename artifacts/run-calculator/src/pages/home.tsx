@@ -81,6 +81,7 @@ import {
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
+import { findMixPresets, type MixPreset } from "../mixPresets";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1150,6 +1151,10 @@ export default function Home() {
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
+  const currentMixPresets = useMemo<MixPreset[]>(
+    () => findMixPresets(currentRun?.brand ?? "", currentRun?.flavor ?? ""),
+    [currentRun?.brand, currentRun?.flavor]
+  );
   // Most recently ended run across the whole day — used for freezer-drain countdown
   // regardless of which run is currently being viewed.
   const lastEndedRun = dayState.runs.reduce<RunMeta | undefined>((best, r) => {
@@ -6091,10 +6096,14 @@ export default function Home() {
                           onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese1}
                           recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={mixRecipeNames}
+                          recipeNameOptions={currentMixPresets.length > 0 ? currentMixPresets.map(p => p.name) : mixRecipeNames}
                           onAddRecipeName={addMixRecipeName}
                           onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => form.setValue("app1CheeseRecipeName", val, { shouldDirty: true })}
+                          onRecipeNameChange={val => {
+                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
+                            const preset = currentMixPresets.find(p => p.name === val);
+                            if (preset) { form.setValue("app1CheeseRecipe", preset.ingredients, { shouldDirty: true }); replaceCheese1(preset.ingredients); }
+                          }}
                         />
                       )}
                       <StatRow
@@ -6147,10 +6156,14 @@ export default function Home() {
                           onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese2}
                           recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={mixRecipeNames}
+                          recipeNameOptions={currentMixPresets.length > 0 ? currentMixPresets.map(p => p.name) : mixRecipeNames}
                           onAddRecipeName={addMixRecipeName}
                           onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => form.setValue("app2CheeseRecipeName", val, { shouldDirty: true })}
+                          onRecipeNameChange={val => {
+                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
+                            const preset = currentMixPresets.find(p => p.name === val);
+                            if (preset) { form.setValue("app2CheeseRecipe", preset.ingredients, { shouldDirty: true }); replaceCheese2(preset.ingredients); }
+                          }}
                         />
                       )}
                       <StatRow
@@ -6203,10 +6216,14 @@ export default function Home() {
                           onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese3}
                           recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={mixRecipeNames}
+                          recipeNameOptions={currentMixPresets.length > 0 ? currentMixPresets.map(p => p.name) : mixRecipeNames}
                           onAddRecipeName={addMixRecipeName}
                           onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => form.setValue("app3CheeseRecipeName", val, { shouldDirty: true })}
+                          onRecipeNameChange={val => {
+                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                            const preset = currentMixPresets.find(p => p.name === val);
+                            if (preset) { form.setValue("app3CheeseRecipe", preset.ingredients, { shouldDirty: true }); replaceCheese3(preset.ingredients); }
+                          }}
                         />
                       )}
                       <StatRow
@@ -6259,10 +6276,14 @@ export default function Home() {
                           onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese4}
                           recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={mixRecipeNames}
+                          recipeNameOptions={currentMixPresets.length > 0 ? currentMixPresets.map(p => p.name) : mixRecipeNames}
                           onAddRecipeName={addMixRecipeName}
                           onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => form.setValue("app4CheeseRecipeName", val, { shouldDirty: true })}
+                          onRecipeNameChange={val => {
+                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                            const preset = currentMixPresets.find(p => p.name === val);
+                            if (preset) { form.setValue("app4CheeseRecipe", preset.ingredients, { shouldDirty: true }); replaceCheese4(preset.ingredients); }
+                          }}
                         />
                       )}
                       <Separator className="my-3 opacity-30" />

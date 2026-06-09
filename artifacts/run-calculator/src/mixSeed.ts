@@ -1,4 +1,5 @@
 import type { RecipeRow } from "./types";
+import { SEED_MIX_PRESET_NAMES } from "./mixPresets";
 
 export type MixProfile = {
   brand: string;
@@ -61,22 +62,7 @@ export const MIX_SEED: {
   ],
   frontlineRecipePresets: {},
 
-  mixRecipeNames: [
-    "Bobo's Deluxe","Bobo's Breakfast","Basha 11' Hawaiian","Basha 12' Supreme",
-    "Corner Booth Chicken Alfredo","Corner Booth Giardiniera","Corner Booth House",
-    "Corner Booth Pep & Jal","Corner Booth Spinach","Corner Booth Supreme",
-    "Hannaford Tikka Masala","Hannaford Spinach Goat Cheese","Hannaford Club","Hannaford 4Meat",
-    "Lowe's 7in Red Fajita","Lowe's 7in White Spin","Lowe's Bacon Cheeseburger",
-    "Lowe's California","Lowe's Caribbean","Lowe's Chicken Club","Lowe's Grilled Vegetable",
-    "Lowe's Red Hot","Lowe's Spinach","Lowe's 11in White Spinach",
-    "Morning Melts Americano","Morning Melts Italiano","Morning Melts Mexicano","Morning Melts Parisian",
-    "Craft Alfredo Spinach","Craft Bacon Cheeseburger","Craft Bratwurst",
-    "Craft Caribbean","Craft Chicken Club","Craft Red Hot","Craft SOB","Craft Tikka Masala",
-    "Lucia's Buffalo Chicken","Lucia's Supreme",
-    "Pinsa Margherita","Pinsa Spinach","Pinsa Tikka Masala",
-    "Nob Hill SOB","Nob Hill Bacon Cheeseburger","Nob Hill Club","Nob Hill Red Hot","Nob Hill Caribbean",
-    "Price Chopper Club","SMD Supreme",
-  ],
+  mixRecipeNames: SEED_MIX_PRESET_NAMES,
 
   profiles: [],
 };
