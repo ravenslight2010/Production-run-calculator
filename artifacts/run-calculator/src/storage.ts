@@ -192,7 +192,7 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
 }
 
-const MIX_SEED_KEY = "run-calc-mix-seed-v7";
+const MIX_SEED_KEY = "run-calc-mix-seed-v8";
 
 export function applyMixSeedIfNeeded(): void {
   if (typeof localStorage === "undefined") return;
