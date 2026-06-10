@@ -79,6 +79,7 @@ import {
   saveCheeseRecipePresets,
   applyMixSeedIfNeeded,
   applyMixSeedV14IfNeeded,
+  applyMixSeedV15IfNeeded,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -154,6 +155,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
+applyMixSeedV15IfNeeded();
 
 function StatRow({
   label,

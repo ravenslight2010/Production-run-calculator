@@ -191,6 +191,7 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
 
 const MIX_SEED_KEY = "run-calc-mix-seed-v13";
 const MIX_SEED_V14_KEY = "run-calc-mix-seed-v14";
+const MIX_SEED_V15_KEY = "run-calc-mix-seed-v15";
 
 export const SEED_MIX_RECIPE_NAMES = new Set(MIX_SEED.mixRecipeNames);
 
@@ -305,6 +306,25 @@ export function applyMixSeedIfNeeded(): void {
     saveList(MIX_INGREDIENTS_KEY, mergedMixIng);
 
     localStorage.setItem(MIX_SEED_KEY, "1");
+  } catch {}
+}
+
+/** v15: same as v14 but with expanded MIX_SEED.frontlineIngredients list (adds preset variant names) */
+export function applyMixSeedV15IfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(MIX_SEED_V15_KEY)) return;
+  try {
+    const toppingSet = new Set(MIX_SEED.frontlineIngredients);
+
+    const currentFrontline = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
+    const cleanedFrontline = currentFrontline.filter(i => !toppingSet.has(i));
+    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedFrontline);
+
+    const currentMix = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
+    const mergedMix = [...new Set([...currentMix, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
+    saveList(MIX_INGREDIENTS_KEY, mergedMix);
+
+    localStorage.setItem(MIX_SEED_V15_KEY, "1");
   } catch {}
 }
 
