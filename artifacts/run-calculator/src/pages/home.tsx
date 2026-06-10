@@ -6153,6 +6153,31 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                      {v.frontlineRecipeName.trim() && (
+                        <FrontlineRecipeCard
+                          embedded
+                          fields={frontlineFields}
+                          recipe={v.frontlineRecipe ?? []}
+                          register={form.register}
+                          ingredientOptions={frontlineIngredients}
+                          onAddIngredient={addFrontlineIngredient}
+                          onRemoveIngredient={removeFrontlineIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
+                          onRemove={removeFrontline}
+                          recipeName={v.frontlineRecipeName ?? ""}
+                          recipeNameOptions={frontlineRecipeNames}
+                          onAddRecipeName={addFrontlineRecipeName}
+                          onRemoveRecipeName={removeFrontlineRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("frontlineRecipeName", val, { shouldDirty: true });
+                            if (val.trim()) {
+                              const preset = loadFrontlineRecipePresets()[val.trim()];
+                              if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); }
+                            }
+                          }}
+                        />
+                      )}
 
                       <TypeDropdown
                         label="Applicator 1"
@@ -6175,6 +6200,62 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                      {v.app1Type.trim().toLowerCase() === "cheese" && (
+                        <CheeseRecipeCard
+                          embedded
+                          label={v.app1Type || "Applicator 1"}
+                          batches={calc.app1Batches}
+                          fields={cheese1Fields}
+                          recipe={v.app1CheeseRecipe ?? []}
+                          fieldPrefix="app1CheeseRecipe"
+                          recipeName={v.app1CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseRecipeNames}
+                          register={form.register}
+                          ingredientOptions={cheeseIngredients}
+                          onAddIngredient={addCheeseIngredient}
+                          onRemoveIngredient={removeCheeseIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese1}
+                          onAddRecipeName={addCheeseRecipeName}
+                          onRemoveRecipeName={removeCheeseRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
+                            if (val.trim()) {
+                              const preset = loadCheeseRecipePresets()[val.trim()];
+                              if (preset) { form.setValue("app1CheeseRecipe", preset, { shouldDirty: true }); replaceCheese1(preset); }
+                            }
+                          }}
+                        />
+                      )}
+                      {v.app1Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app1Type || "Applicator 1"}
+                          totalRunLbs={calc.app1Lbs}
+                          fields={cheese1Fields}
+                          recipe={v.app1CheeseRecipe ?? []}
+                          fieldPrefix="app1CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese1}
+                          recipeName={v.app1CheeseRecipeName ?? ""}
+                          recipeNameOptions={allMixRecipeOptions}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
+                            const factoryPreset = currentMixPresets.find(p => p.name === val);
+                            if (factoryPreset) { form.setValue("app1CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese1(factoryPreset.ingredients); return; }
+                            const userPreset = loadCheeseRecipePresets()[val.trim()];
+                            if (userPreset) { form.setValue("app1CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese1(userPreset); }
+                          }}
+                        />
+                      )}
 
                       <TypeDropdown
                         label="Applicator 2"
@@ -6197,6 +6278,62 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                      {v.app2Type.trim().toLowerCase() === "cheese" && (
+                        <CheeseRecipeCard
+                          embedded
+                          label={v.app2Type || "Applicator 2"}
+                          batches={calc.app2Batches}
+                          fields={cheese2Fields}
+                          recipe={v.app2CheeseRecipe ?? []}
+                          fieldPrefix="app2CheeseRecipe"
+                          recipeName={v.app2CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseRecipeNames}
+                          register={form.register}
+                          ingredientOptions={cheeseIngredients}
+                          onAddIngredient={addCheeseIngredient}
+                          onRemoveIngredient={removeCheeseIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese2}
+                          onAddRecipeName={addCheeseRecipeName}
+                          onRemoveRecipeName={removeCheeseRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
+                            if (val.trim()) {
+                              const preset = loadCheeseRecipePresets()[val.trim()];
+                              if (preset) { form.setValue("app2CheeseRecipe", preset, { shouldDirty: true }); replaceCheese2(preset); }
+                            }
+                          }}
+                        />
+                      )}
+                      {v.app2Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app2Type || "Applicator 2"}
+                          totalRunLbs={calc.app2Lbs}
+                          fields={cheese2Fields}
+                          recipe={v.app2CheeseRecipe ?? []}
+                          fieldPrefix="app2CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese2}
+                          recipeName={v.app2CheeseRecipeName ?? ""}
+                          recipeNameOptions={allMixRecipeOptions}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
+                            const factoryPreset = currentMixPresets.find(p => p.name === val);
+                            if (factoryPreset) { form.setValue("app2CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese2(factoryPreset.ingredients); return; }
+                            const userPreset = loadCheeseRecipePresets()[val.trim()];
+                            if (userPreset) { form.setValue("app2CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese2(userPreset); }
+                          }}
+                        />
+                      )}
 
                       <TypeDropdown
                         label="Applicator 3"
@@ -6219,6 +6356,62 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                      {v.app3Type.trim().toLowerCase() === "cheese" && (
+                        <CheeseRecipeCard
+                          embedded
+                          label={v.app3Type || "Applicator 3"}
+                          batches={calc.app3Batches}
+                          fields={cheese3Fields}
+                          recipe={v.app3CheeseRecipe ?? []}
+                          fieldPrefix="app3CheeseRecipe"
+                          recipeName={v.app3CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseRecipeNames}
+                          register={form.register}
+                          ingredientOptions={cheeseIngredients}
+                          onAddIngredient={addCheeseIngredient}
+                          onRemoveIngredient={removeCheeseIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese3}
+                          onAddRecipeName={addCheeseRecipeName}
+                          onRemoveRecipeName={removeCheeseRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                            if (val.trim()) {
+                              const preset = loadCheeseRecipePresets()[val.trim()];
+                              if (preset) { form.setValue("app3CheeseRecipe", preset, { shouldDirty: true }); replaceCheese3(preset); }
+                            }
+                          }}
+                        />
+                      )}
+                      {v.app3Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app3Type || "Applicator 3"}
+                          totalRunLbs={calc.app3Lbs}
+                          fields={cheese3Fields}
+                          recipe={v.app3CheeseRecipe ?? []}
+                          fieldPrefix="app3CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese3}
+                          recipeName={v.app3CheeseRecipeName ?? ""}
+                          recipeNameOptions={allMixRecipeOptions}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                            const factoryPreset = currentMixPresets.find(p => p.name === val);
+                            if (factoryPreset) { form.setValue("app3CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese3(factoryPreset.ingredients); return; }
+                            const userPreset = loadCheeseRecipePresets()[val.trim()];
+                            if (userPreset) { form.setValue("app3CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese3(userPreset); }
+                          }}
+                        />
+                      )}
 
                       <TypeDropdown
                         label="Applicator 4"
@@ -6241,6 +6434,62 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                      {v.app4Type.trim().toLowerCase() === "cheese" && (
+                        <CheeseRecipeCard
+                          embedded
+                          label={v.app4Type || "Applicator 4"}
+                          batches={calc.app4Batches}
+                          fields={cheese4Fields}
+                          recipe={v.app4CheeseRecipe ?? []}
+                          fieldPrefix="app4CheeseRecipe"
+                          recipeName={v.app4CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseRecipeNames}
+                          register={form.register}
+                          ingredientOptions={cheeseIngredients}
+                          onAddIngredient={addCheeseIngredient}
+                          onRemoveIngredient={removeCheeseIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese4}
+                          onAddRecipeName={addCheeseRecipeName}
+                          onRemoveRecipeName={removeCheeseRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                            if (val.trim()) {
+                              const preset = loadCheeseRecipePresets()[val.trim()];
+                              if (preset) { form.setValue("app4CheeseRecipe", preset, { shouldDirty: true }); replaceCheese4(preset); }
+                            }
+                          }}
+                        />
+                      )}
+                      {v.app4Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app4Type || "Applicator 4"}
+                          totalRunLbs={calc.app4Lbs}
+                          fields={cheese4Fields}
+                          recipe={v.app4CheeseRecipe ?? []}
+                          fieldPrefix="app4CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={mixIngredients}
+                          onAddIngredient={addMixIngredient}
+                          onRemoveIngredient={removeMixIngredient}
+                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese4}
+                          recipeName={v.app4CheeseRecipeName ?? ""}
+                          recipeNameOptions={allMixRecipeOptions}
+                          onAddRecipeName={addMixRecipeName}
+                          onRemoveRecipeName={removeMixRecipeName}
+                          onRecipeNameChange={val => {
+                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                            const factoryPreset = currentMixPresets.find(p => p.name === val);
+                            if (factoryPreset) { form.setValue("app4CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese4(factoryPreset.ingredients); return; }
+                            const userPreset = loadCheeseRecipePresets()[val.trim()];
+                            if (userPreset) { form.setValue("app4CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese4(userPreset); }
+                          }}
+                        />
+                      )}
 
                       <TypeDropdown
                         label="Pep Applicator 1"
@@ -6352,279 +6601,30 @@ export default function Home() {
                         testId="output-sauce-batches"
                         highlight={calc.sauceBatches > 0}
                       />
-                      {v.frontlineRecipeName.trim() && (
-                        <FrontlineRecipeCard
-                          embedded
-                          fields={frontlineFields}
-                          recipe={v.frontlineRecipe ?? []}
-                          register={form.register}
-                          ingredientOptions={frontlineIngredients}
-                          onAddIngredient={addFrontlineIngredient}
-                          onRemoveIngredient={removeFrontlineIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`frontlineRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
-                          onRemove={removeFrontline}
-                          recipeName={v.frontlineRecipeName ?? ""}
-                          recipeNameOptions={frontlineRecipeNames}
-                          onAddRecipeName={addFrontlineRecipeName}
-                          onRemoveRecipeName={removeFrontlineRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("frontlineRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadFrontlineRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); }
-                            }
-                          }}
-                        />
-                      )}
                       <StatRow
                         label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
                         value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
                         testId="output-app1-batches"
                         highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
                       />
-                      {v.app1Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
-                          embedded
-                          label={v.app1Type || "Applicator 1"}
-                          batches={calc.app1Batches}
-                          fields={cheese1Fields}
-                          recipe={v.app1CheeseRecipe ?? []}
-                          fieldPrefix="app1CheeseRecipe"
-                          recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese1}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app1CheeseRecipe", preset, { shouldDirty: true }); replaceCheese1(preset); }
-                            }
-                          }}
-                        />
-                      )}
-                      {v.app1Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app1Type || "Applicator 1"}
-                          totalRunLbs={calc.app1Lbs}
-                          fields={cheese1Fields}
-                          recipe={v.app1CheeseRecipe ?? []}
-                          fieldPrefix="app1CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese1}
-                          recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app1CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese1(factoryPreset.ingredients); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app1CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese1(userPreset); }
-                          }}
-                        />
-                      )}
                       <StatRow
                         label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
                         value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
                         testId="output-app2-batches"
                         highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
                       />
-                      {v.app2Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
-                          embedded
-                          label={v.app2Type || "Applicator 2"}
-                          batches={calc.app2Batches}
-                          fields={cheese2Fields}
-                          recipe={v.app2CheeseRecipe ?? []}
-                          fieldPrefix="app2CheeseRecipe"
-                          recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese2}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app2CheeseRecipe", preset, { shouldDirty: true }); replaceCheese2(preset); }
-                            }
-                          }}
-                        />
-                      )}
-                      {v.app2Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app2Type || "Applicator 2"}
-                          totalRunLbs={calc.app2Lbs}
-                          fields={cheese2Fields}
-                          recipe={v.app2CheeseRecipe ?? []}
-                          fieldPrefix="app2CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese2}
-                          recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app2CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese2(factoryPreset.ingredients); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app2CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese2(userPreset); }
-                          }}
-                        />
-                      )}
                       <StatRow
                         label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
                         value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
                         testId="output-app3-batches"
                         highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
                       />
-                      {v.app3Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          batches={calc.app3Batches}
-                          fields={cheese3Fields}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app3CheeseRecipe", preset, { shouldDirty: true }); replaceCheese3(preset); }
-                            }
-                          }}
-                        />
-                      )}
-                      {v.app3Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          totalRunLbs={calc.app3Lbs}
-                          fields={cheese3Fields}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app3CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese3(factoryPreset.ingredients); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app3CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese3(userPreset); }
-                          }}
-                        />
-                      )}
                       <StatRow
                         label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
                         value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
                         testId="output-app4-batches"
                         highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
                       />
-                      {v.app4Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          batches={calc.app4Batches}
-                          fields={cheese4Fields}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          fieldPrefix="app4CheeseRecipe"
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese4}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app4CheeseRecipe", preset, { shouldDirty: true }); replaceCheese4(preset); }
-                            }
-                          }}
-                        />
-                      )}
-                      {v.app4Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          totalRunLbs={calc.app4Lbs}
-                          fields={cheese4Fields}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          fieldPrefix="app4CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese4}
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app4CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese4(factoryPreset.ingredients); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app4CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese4(userPreset); }
-                          }}
-                        />
-                      )}
                       <Separator className="my-3 opacity-30" />
                       <StatRow
                         label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
