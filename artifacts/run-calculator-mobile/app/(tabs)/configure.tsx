@@ -1,17 +1,27 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CardSection, NumericField, SectionHeader, TextField } from "@/components/UI";
 import {
-  DEFAULT_DIE_TYPES,
+  CardSection,
+  NumericField,
+  RecipeEditor,
+  SectionHeader,
+  TextField,
+} from "@/components/UI";
+import {
+  DEFAULT_SETTINGS,
+  profileKey,
   useRun,
   runLabel,
+  type RecipeRow,
   type RunSettings,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
+import { findMixPresets } from "@/data/mixPresets";
 
 function toNum(s: string | undefined | null): number {
   if (s == null || s === "") return 0;
@@ -112,6 +122,7 @@ function settingsToForm(s: RunSettings): FormState {
 export default function ConfigureScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const {
     run,
     runIndex,
@@ -121,13 +132,54 @@ export default function ConfigureScreen() {
     saveTemplate,
     applyTemplate,
     deleteTemplate,
+    dieTypes,
+    cheeseIngredients,
+    doughIngredients,
+    frontlineIngredients,
+    doughRecipePresets,
+    cheeseRecipePresets,
+    frontlineRecipePresets,
+    saveRecipePreset,
+    deleteRecipePreset,
+    saveProfile,
+    applyProfile,
+    hasProfile,
+    supervisorPin,
   } = useRun();
   const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
   const [tplName, setTplName] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [pinEntry, setPinEntry] = useState("");
+  const [pinError, setPinError] = useState(false);
+
+  const lastProfileKey = useRef<string | null>(null);
 
   useEffect(() => {
-    setForm(settingsToForm(run.settings));
+    // Don't auto-apply a profile just because we switched to this run.
+    lastProfileKey.current = profileKey(
+      run.settings.brand,
+      run.settings.flavor,
+    );
   }, [run.id]);
+
+  // Keep the string form in sync whenever settings change externally
+  // (profile auto-load, preset apply, reset). Editing form fields locally
+  // doesn't touch settings until blur, so this won't clobber typing.
+  useEffect(() => {
+    setForm(settingsToForm(run.settings));
+  }, [run.settings]);
+
+  // Auto-load a saved brand/flavor profile when the combo changes to one we have.
+  useEffect(() => {
+    const b = run.settings.brand.trim();
+    const f = run.settings.flavor.trim();
+    const key = profileKey(b, f);
+    if (key === lastProfileKey.current) return;
+    lastProfileKey.current = key;
+    if (b && f && hasProfile(b, f)) {
+      applyProfile(b, f);
+    }
+  }, [run.settings.brand, run.settings.flavor, hasProfile, applyProfile]);
 
   const set = (key: keyof FormState) => (val: string) =>
     setForm((f) => ({ ...f, [key]: val }));
@@ -179,10 +231,98 @@ export default function ConfigureScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
+  // Recipe editors write directly to run settings (no string-form intermediary)
+  const cheeseNames = Object.keys(cheeseRecipePresets);
+  const doughNames = Object.keys(doughRecipePresets);
+  const frontlineNames = Object.keys(frontlineRecipePresets);
+
+  // Factory mix presets matching the current brand + flavor
+  const mixPresets = findMixPresets(run.settings.brand, run.settings.flavor);
+
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const currentLabel = runLabel(run, runIndex);
+
+  const tryUnlock = () => {
+    if (pinEntry === supervisorPin) {
+      setUnlocked(true);
+      setPinEntry("");
+      setPinError(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      setPinError(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  };
+
+  if (supervisorPin && !unlocked) {
+    return (
+      <View
+        style={[
+          styles.root,
+          styles.lockRoot,
+          { backgroundColor: colors.background, paddingTop: webTop + insets.top },
+        ]}
+      >
+        <View
+          style={[
+            styles.lockCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Feather name="lock" size={32} color={colors.primary} />
+          <Text style={[styles.lockTitle, { color: colors.foreground }]}>
+            Supervisor PIN
+          </Text>
+          <Text style={[styles.lockHint, { color: colors.mutedForeground }]}>
+            Enter the PIN to change run settings.
+          </Text>
+          <TextInput
+            style={[
+              styles.lockInput,
+              {
+                color: colors.foreground,
+                borderColor: pinError ? "#ef4444" : colors.border,
+              },
+            ]}
+            value={pinEntry}
+            onChangeText={(t) => {
+              setPinEntry(t);
+              setPinError(false);
+            }}
+            placeholder="PIN"
+            placeholderTextColor={colors.mutedForeground}
+            keyboardType="number-pad"
+            secureTextEntry
+            maxLength={8}
+            textAlign="center"
+            onSubmitEditing={tryUnlock}
+            returnKeyType="go"
+            autoFocus
+          />
+          {pinError ? (
+            <Text style={styles.lockError}>Incorrect PIN. Try again.</Text>
+          ) : null}
+          <Pressable
+            onPress={tryUnlock}
+            disabled={!pinEntry.trim()}
+            style={({ pressed }) => [
+              styles.lockBtn,
+              {
+                backgroundColor: colors.primary,
+                opacity: !pinEntry.trim() ? 0.4 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.lockBtnText, { color: colors.primaryForeground }]}>
+              Unlock
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -203,6 +343,24 @@ export default function ConfigureScreen() {
             {currentLabel}
           </Text>
         </View>
+
+        <Pressable
+          onPress={() => router.push("/master-data")}
+          style={({ pressed }) => [
+            styles.masterDataBtn,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="database" size={16} color={colors.foreground} />
+          <Text style={[styles.masterDataText, { color: colors.foreground }]}>
+            Manage Master Data
+          </Text>
+          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+        </Pressable>
 
         {/* Templates */}
         <SectionHeader title="Templates" />
@@ -340,13 +498,47 @@ export default function ConfigureScreen() {
             placeholder="6"
             unit="(buffer)"
           />
+          <Pressable
+            onPress={() => {
+              saveProfile();
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Success,
+              );
+            }}
+            disabled={!form.brand.trim() || !form.flavor.trim()}
+            style={({ pressed }) => [
+              styles.profileBtn,
+              {
+                backgroundColor: colors.secondary,
+                borderColor: colors.border,
+                opacity:
+                  !form.brand.trim() || !form.flavor.trim()
+                    ? 0.4
+                    : pressed
+                      ? 0.6
+                      : 1,
+              },
+            ]}
+          >
+            <Feather name="save" size={15} color={colors.foreground} />
+            <Text style={[styles.profileBtnText, { color: colors.foreground }]}>
+              {form.brand.trim() &&
+              form.flavor.trim() &&
+              hasProfile(form.brand, form.flavor)
+                ? "Update Profile for Brand + Flavor"
+                : "Save Profile for Brand + Flavor"}
+            </Text>
+          </Pressable>
+          <Text style={[styles.profileHint, { color: colors.mutedForeground }]}>
+            Saved settings auto-load next time you enter this brand + flavor.
+          </Text>
         </CardSection>
 
         {/* Die Type */}
         <SectionHeader title="Die Type" />
         <CardSection style={{ paddingVertical: 12 }}>
           <View style={styles.chipRow}>
-            {DEFAULT_DIE_TYPES.map((d) => {
+            {dieTypes.map((d) => {
               const active = form.dieType === d;
               return (
                 <Pressable
@@ -445,6 +637,36 @@ export default function ConfigureScreen() {
             placeholder="0"
             unit="lbs"
           />
+          <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+            Frontline recipe (overrides barrel weight when set)
+          </Text>
+          <RecipeEditor
+            rows={run.settings.frontlineRecipe}
+            onChange={(rows) => updateSettings({ frontlineRecipe: rows })}
+            ingredientOptions={frontlineIngredients}
+            name={run.settings.frontlineRecipeName}
+            onNameChange={(n) => updateSettings({ frontlineRecipeName: n })}
+            presetNames={frontlineNames}
+            onSavePreset={() =>
+              saveRecipePreset(
+                "frontline",
+                run.settings.frontlineRecipeName,
+                run.settings.frontlineRecipe,
+              )
+            }
+            onApplyPreset={(presetName) => {
+              const rows = frontlineRecipePresets[presetName];
+              if (rows)
+                updateSettings({
+                  frontlineRecipe: rows.map((r) => ({ ...r })),
+                  frontlineRecipeName: presetName,
+                });
+            }}
+            onDeletePreset={(presetName) =>
+              deleteRecipePreset("frontline", presetName)
+            }
+            effectiveLabel="Effective barrel"
+          />
         </CardSection>
 
         {/* Applicators 1–4 */}
@@ -452,6 +674,10 @@ export default function ConfigureScreen() {
           const typeKey = `app${n}Type` as keyof FormState;
           const ozKey = `app${n}OzPerPizza` as keyof FormState;
           const lbsKey = `app${n}BatchLbs` as keyof FormState;
+          const recipeKey = `app${n}CheeseRecipe` as keyof RunSettings;
+          const recipeNameKey = `app${n}CheeseRecipeName` as keyof RunSettings;
+          const rows = run.settings[recipeKey] as RecipeRow[];
+          const recipeName = run.settings[recipeNameKey] as string;
           return (
             <React.Fragment key={n}>
               <SectionHeader title={`Applicator ${n}`} />
@@ -478,6 +704,42 @@ export default function ConfigureScreen() {
                   onBlur={save}
                   placeholder="0"
                   unit="lbs"
+                />
+                <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+                  Recipe (overrides batch weight when set)
+                </Text>
+                <RecipeEditor
+                  rows={rows}
+                  onChange={(r) =>
+                    updateSettings({ [recipeKey]: r } as Partial<RunSettings>)
+                  }
+                  ingredientOptions={cheeseIngredients}
+                  name={recipeName}
+                  onNameChange={(nm) =>
+                    updateSettings({ [recipeNameKey]: nm } as Partial<RunSettings>)
+                  }
+                  presetNames={cheeseNames}
+                  onSavePreset={() =>
+                    saveRecipePreset("cheese", recipeName, rows)
+                  }
+                  onApplyPreset={(presetName) => {
+                    const preset = cheeseRecipePresets[presetName];
+                    if (preset)
+                      updateSettings({
+                        [recipeKey]: preset.map((r) => ({ ...r })),
+                        [recipeNameKey]: presetName,
+                      } as Partial<RunSettings>);
+                  }}
+                  onDeletePreset={(presetName) =>
+                    deleteRecipePreset("cheese", presetName)
+                  }
+                  factoryPresets={mixPresets}
+                  onApplyFactory={(fp) =>
+                    updateSettings({
+                      [recipeKey]: fp.ingredients.map((r) => ({ ...r })),
+                      [recipeNameKey]: fp.name,
+                    } as Partial<RunSettings>)
+                  }
                 />
               </CardSection>
             </React.Fragment>
@@ -575,6 +837,35 @@ export default function ConfigureScreen() {
             placeholder="0.0"
             unit="oz"
           />
+          <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+            Dough recipe (overrides batch weight when set)
+          </Text>
+          <RecipeEditor
+            rows={run.settings.doughRecipe}
+            onChange={(rows) => updateSettings({ doughRecipe: rows })}
+            ingredientOptions={doughIngredients}
+            name={run.settings.doughRecipeName}
+            onNameChange={(n) => updateSettings({ doughRecipeName: n })}
+            presetNames={doughNames}
+            onSavePreset={() =>
+              saveRecipePreset(
+                "dough",
+                run.settings.doughRecipeName,
+                run.settings.doughRecipe,
+              )
+            }
+            onApplyPreset={(presetName) => {
+              const rows = doughRecipePresets[presetName];
+              if (rows)
+                updateSettings({
+                  doughRecipe: rows.map((r) => ({ ...r })),
+                  doughRecipeName: presetName,
+                });
+            }}
+            onDeletePreset={(presetName) =>
+              deleteRecipePreset("dough", presetName)
+            }
+          />
         </CardSection>
 
         {/* Notes */}
@@ -603,19 +894,7 @@ export default function ConfigureScreen() {
         <Pressable
           onPress={() => {
             resetRun();
-            setForm(settingsToForm({
-              brand: "", flavor: "", dieType: "", notes: "",
-              casesNeeded: 0, pizzasPerCase: 12, casesPerSkid: 48, casesPerLayer: 6,
-              lineSpeedPPM: 0, crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 1,
-              sauceOzPerPizza: 0, sauceBarrelLbs: 0,
-              app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0,
-              app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0,
-              app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0,
-              app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0,
-              pep1Type: "", pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 25,
-              pep2Type: "", pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 25,
-              doughBatchLbs: 0, doughballWeightOz: 0,
-            }));
+            setForm(settingsToForm(DEFAULT_SETTINGS));
           }}
           style={({ pressed }) => [
             styles.resetBtn,
@@ -673,7 +952,66 @@ const styles = StyleSheet.create({
   },
   resetBtnText: { fontSize: 16, fontWeight: "600" as const },
 
+  lockRoot: { alignItems: "center", justifyContent: "center", padding: 24 },
+  lockCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    gap: 10,
+  },
+  lockTitle: { fontSize: 20, fontWeight: "700" as const, marginTop: 4 },
+  lockHint: { fontSize: 13, textAlign: "center", marginBottom: 6 },
+  lockInput: {
+    width: "100%",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    fontSize: 20,
+    letterSpacing: 4,
+  },
+  lockError: { color: "#ef4444", fontSize: 13, fontWeight: "500" as const },
+  lockBtn: {
+    width: "100%",
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  lockBtnText: { fontSize: 16, fontWeight: "700" as const },
+  masterDataBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 12,
+  },
+  masterDataText: { flex: 1, fontSize: 15, fontWeight: "600" as const },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  recipeHint: {
+    fontSize: 12,
+    marginTop: 12,
+    marginBottom: 6,
+    fontStyle: "italic",
+  },
+  profileBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    marginTop: 14,
+  },
+  profileBtnText: { fontSize: 14, fontWeight: "600" as const },
+  profileHint: { fontSize: 11, marginTop: 6, textAlign: "center" },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

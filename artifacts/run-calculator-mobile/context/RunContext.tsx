@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { MIX_SEED } from "@/data/mixSeed";
 import React, {
   createContext,
   useCallback,
@@ -9,6 +10,12 @@ import React, {
 } from "react";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
+
+// One line in an ingredient recipe (e.g. { ingredient: "Flour", lbs: 100 }).
+export interface RecipeRow {
+  ingredient: string;
+  lbs: number;
+}
 
 export interface RunSettings {
   brand: string;
@@ -24,6 +31,8 @@ export interface RunSettings {
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
+  // Minutes pizzas spend in the freezer before they can be cased
+  freezerTime: number;
   // Sauce
   sauceOzPerPizza: number;
   sauceBarrelLbs: number;
@@ -52,6 +61,20 @@ export interface RunSettings {
   // Dough
   doughBatchLbs: number;
   doughballWeightOz: number;
+  // Ingredient recipes. When a recipe has rows, its summed lbs override the
+  // flat *BatchLbs figure as the effective batch/barrel weight.
+  doughRecipeName: string;
+  doughRecipe: RecipeRow[];
+  app1CheeseRecipeName: string;
+  app1CheeseRecipe: RecipeRow[];
+  app2CheeseRecipeName: string;
+  app2CheeseRecipe: RecipeRow[];
+  app3CheeseRecipeName: string;
+  app3CheeseRecipe: RecipeRow[];
+  app4CheeseRecipeName: string;
+  app4CheeseRecipe: RecipeRow[];
+  frontlineRecipeName: string;
+  frontlineRecipe: RecipeRow[];
   // Notes
   notes: string;
 }
@@ -90,6 +113,7 @@ export interface RunCalc {
   estCompletionMs: number | null;
   sauceLbs: number;
   sauceBatches: number;
+  sauceEffBarrel: number;
   app1Lbs: number;
   app1Batches: number;
   app2Lbs: number;
@@ -104,11 +128,13 @@ export interface RunCalc {
   pep2Batches: number;
   doughLbs: number;
   doughBatches: number;
+  doughEffBatch: number;
+  timePerBatchSec: number;
   totalDowntimeSec: number;
   netElapsedSec: number;
 }
 
-const DEFAULT_SETTINGS: RunSettings = {
+export const DEFAULT_SETTINGS: RunSettings = {
   brand: "",
   flavor: "",
   dieType: "",
@@ -120,6 +146,7 @@ const DEFAULT_SETTINGS: RunSettings = {
   crustsPerCycle: 0,
   cycleSpeed: 0,
   speedAdjustment: 1.0,
+  freezerTime: 15,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,
   app1Type: "",
@@ -144,8 +171,37 @@ const DEFAULT_SETTINGS: RunSettings = {
   pep2BatchLbs: 25,
   doughBatchLbs: 0,
   doughballWeightOz: 0,
+  doughRecipeName: "",
+  doughRecipe: [],
+  app1CheeseRecipeName: "",
+  app1CheeseRecipe: [],
+  app2CheeseRecipeName: "",
+  app2CheeseRecipe: [],
+  app3CheeseRecipeName: "",
+  app3CheeseRecipe: [],
+  app4CheeseRecipeName: "",
+  app4CheeseRecipe: [],
+  frontlineRecipeName: "",
+  frontlineRecipe: [],
   notes: "",
 };
+
+// ── Master data defaults (manageable lists shared across runs) ──────────────
+export const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
+export const DEFAULT_CHEESE_INGREDIENTS = [
+  "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
+];
+export const DEFAULT_DOUGH_INGREDIENTS = [
+  "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
+];
+export const DEFAULT_FRONTLINE_INGREDIENTS = [
+  "Flour", "Water", "Salt", "Sugar", "Oil", "Yeast",
+];
+export const DEFAULT_STOP_REASONS = [
+  "Equipment jam", "Changeover", "Break", "Maintenance",
+  "Quality hold", "Staffing", "Waiting on dough",
+];
+export const DEFAULT_SUPERVISOR_PIN = "1234";
 
 const DEFAULT_PROGRESS: RunProgress = {
   skidsCompleted: 0,
@@ -186,6 +242,26 @@ function closeOutRun(run: RunState, boundaryMs: number): RunState {
   };
 }
 
+// Sum the lbs across an ingredient recipe's rows (0 when empty/missing).
+export function sumRecipe(rows: RecipeRow[] | undefined): number {
+  return (rows ?? []).reduce((acc, r) => acc + (Number(r.lbs) || 0), 0);
+}
+
+// How many physical 450 lb barrels to stage, given total sauce lbs and the
+// weight of one mixing batch. Returns null when batching into 450 lb barrels
+// doesn't apply (batch >= 450 lb, or fewer than 2 batches fit per barrel).
+export function sauceBarrelBreakdown(
+  sauceLbs: number,
+  effBarrelLbs: number,
+): { batchesPerBarrel: number; totalBarrels: number } | null {
+  if (effBarrelLbs <= 0 || effBarrelLbs >= 450 || sauceLbs <= 0) return null;
+  const batchesPerBarrel = Math.floor(450 / effBarrelLbs);
+  if (batchesPerBarrel < 2) return null;
+  const batches = sauceLbs / effBarrelLbs;
+  const totalBarrels = Math.ceil(batches / batchesPerBarrel);
+  return { batchesPerBarrel, totalBarrels };
+}
+
 export function computeCalc(state: RunState, nowMs: number): RunCalc {
   const { settings: s, progress: p } = state;
 
@@ -214,13 +290,27 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
   const bufferPizzas = s.casesPerLayer * s.pizzasPerCase;
   const pizzasForIngredients = pizzasLeft + bufferPizzas;
 
+  // Effective batch/barrel weight: a recipe's summed lbs override the flat figure.
+  const sauceEffBarrel =
+    sumRecipe(s.frontlineRecipe) > 0 ? sumRecipe(s.frontlineRecipe) : s.sauceBarrelLbs;
+  const app1EffBatch =
+    sumRecipe(s.app1CheeseRecipe) > 0 ? sumRecipe(s.app1CheeseRecipe) : s.app1BatchLbs;
+  const app2EffBatch =
+    sumRecipe(s.app2CheeseRecipe) > 0 ? sumRecipe(s.app2CheeseRecipe) : s.app2BatchLbs;
+  const app3EffBatch =
+    sumRecipe(s.app3CheeseRecipe) > 0 ? sumRecipe(s.app3CheeseRecipe) : s.app3BatchLbs;
+  const app4EffBatch =
+    sumRecipe(s.app4CheeseRecipe) > 0 ? sumRecipe(s.app4CheeseRecipe) : s.app4BatchLbs;
+  const doughEffBatch =
+    sumRecipe(s.doughRecipe) > 0 ? sumRecipe(s.doughRecipe) : s.doughBatchLbs;
+
   const sauceLbs =
     s.sauceOzPerPizza > 0
       ? (pizzasForIngredients * s.sauceOzPerPizza) / 16 + 30
       : 0;
   const sauceBatches =
-    sauceLbs > 0 && s.sauceBarrelLbs > 0
-      ? Math.ceil(sauceLbs / s.sauceBarrelLbs)
+    sauceLbs > 0 && sauceEffBarrel > 0
+      ? Math.ceil(sauceLbs / sauceEffBarrel)
       : 0;
 
   const app1Lbs =
@@ -228,28 +318,28 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       ? (pizzasForIngredients * s.app1OzPerPizza) / 16 + 20
       : 0;
   const app1Batches =
-    app1Lbs > 0 && s.app1BatchLbs > 0 ? Math.ceil(app1Lbs / s.app1BatchLbs) : 0;
+    app1Lbs > 0 && app1EffBatch > 0 ? Math.ceil(app1Lbs / app1EffBatch) : 0;
 
   const app2Lbs =
     s.app2Type && s.app2OzPerPizza > 0
       ? (pizzasForIngredients * s.app2OzPerPizza) / 16 + 20
       : 0;
   const app2Batches =
-    app2Lbs > 0 && s.app2BatchLbs > 0 ? Math.ceil(app2Lbs / s.app2BatchLbs) : 0;
+    app2Lbs > 0 && app2EffBatch > 0 ? Math.ceil(app2Lbs / app2EffBatch) : 0;
 
   const app3Lbs =
     s.app3Type && s.app3OzPerPizza > 0
       ? (pizzasForIngredients * s.app3OzPerPizza) / 16 + 20
       : 0;
   const app3Batches =
-    app3Lbs > 0 && s.app3BatchLbs > 0 ? Math.ceil(app3Lbs / s.app3BatchLbs) : 0;
+    app3Lbs > 0 && app3EffBatch > 0 ? Math.ceil(app3Lbs / app3EffBatch) : 0;
 
   const app4Lbs =
     s.app4Type && s.app4OzPerPizza > 0
       ? (pizzasForIngredients * s.app4OzPerPizza) / 16 + 20
       : 0;
   const app4Batches =
-    app4Lbs > 0 && s.app4BatchLbs > 0 ? Math.ceil(app4Lbs / s.app4BatchLbs) : 0;
+    app4Lbs > 0 && app4EffBatch > 0 ? Math.ceil(app4Lbs / app4EffBatch) : 0;
 
   // Pepperoni: lbs = (pizzas * oz/pizza) / 16 + sticks (flat buffer)
   const pep1Lbs =
@@ -272,7 +362,15 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       ? (pizzasLeft * s.doughballWeightOz) / 16
       : 0;
   const doughBatches =
-    doughLbs > 0 && s.doughBatchLbs > 0 ? Math.ceil(doughLbs / s.doughBatchLbs) : 0;
+    doughLbs > 0 && doughEffBatch > 0 ? Math.ceil(doughLbs / doughEffBatch) : 0;
+
+  // Time per dough batch cycle: pizzas yielded by one batch / ppm.
+  const pizzasPerBatch =
+    doughEffBatch > 0 && s.doughballWeightOz > 0
+      ? (doughEffBatch * 16) / s.doughballWeightOz
+      : 0;
+  const timePerBatchSec =
+    ppm > 0 && pizzasPerBatch > 0 ? (pizzasPerBatch / ppm) * 60 : 0;
 
   // Time boundary: a finished run's clock stops at endedAt; otherwise "now".
   const boundaryMs = state.endedAt ?? nowMs;
@@ -302,6 +400,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
     estCompletionMs,
     sauceLbs,
     sauceBatches,
+    sauceEffBarrel,
     app1Lbs,
     app1Batches,
     app2Lbs,
@@ -316,6 +415,8 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
     pep2Batches,
     doughLbs,
     doughBatches,
+    doughEffBatch,
+    timePerBatchSec,
     totalDowntimeSec,
     netElapsedSec,
   };
@@ -345,15 +446,75 @@ export function todayStr(): string {
     .padStart(2, "0")}-${d.getDate().toString().padStart(2, "0")}`;
 }
 
+// Saved per-product settings (brand+flavor → settings). Per-run fields like
+// progress, casesNeeded, brand/flavor are stripped before saving/applying.
+export type RunProfile = Partial<RunSettings>;
+
 interface AppState {
   runs: RunState[];
   currentIndex: number;
   shiftNotes: string;
+  runToTime: string;
   date: string;
   templates: RunTemplate[];
   history: HistoryDay[];
   autoTrack: boolean;
+  supervisorPin: string;
+  // Manageable master-data lists
+  brands: string[];
+  brandFlavors: Record<string, string[]>;
+  dieTypes: string[];
+  pepTypes: string[];
+  cheeseIngredients: string[];
+  doughIngredients: string[];
+  frontlineIngredients: string[];
+  stopReasons: string[];
+  // Per-product profiles, keyed by `${brand}__${flavor}` (lowercased/trimmed)
+  brandProfiles: Record<string, RunProfile>;
+  // Named recipe presets, keyed by preset name
+  doughRecipePresets: Record<string, RecipeRow[]>;
+  cheeseRecipePresets: Record<string, RecipeRow[]>;
+  frontlineRecipePresets: Record<string, RecipeRow[]>;
 }
+
+export function profileKey(brand: string, flavor: string): string {
+  return `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
+}
+
+// Fields that belong to one specific run and must NOT travel via a profile.
+const PER_RUN_FIELDS: (keyof RunSettings)[] = [
+  "brand",
+  "flavor",
+  "casesNeeded",
+  "notes",
+];
+
+export function stripPerRunFields(s: RunSettings): RunProfile {
+  const out: RunProfile = { ...s };
+  for (const f of PER_RUN_FIELDS) delete out[f];
+  return out;
+}
+
+// Flat string master-data lists the user can manage.
+export type MasterListKey =
+  | "brands"
+  | "dieTypes"
+  | "pepTypes"
+  | "cheeseIngredients"
+  | "doughIngredients"
+  | "frontlineIngredients"
+  | "stopReasons";
+
+export type RecipePresetKind = "dough" | "cheese" | "frontline";
+
+const PRESET_MAP_KEY: Record<
+  RecipePresetKind,
+  "doughRecipePresets" | "cheeseRecipePresets" | "frontlineRecipePresets"
+> = {
+  dough: "doughRecipePresets",
+  cheese: "cheeseRecipePresets",
+  frontline: "frontlineRecipePresets",
+};
 
 interface RunContextValue {
   run: RunState;
@@ -383,6 +544,36 @@ interface RunContextValue {
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
   suppressAutoTrack: () => void;
+  // Shift target finish time
+  runToTime: string;
+  setRunToTime: (t: string) => void;
+  // Supervisor PIN
+  supervisorPin: string;
+  setSupervisorPin: (pin: string) => void;
+  // Master data
+  brands: string[];
+  brandFlavors: Record<string, string[]>;
+  dieTypes: string[];
+  pepTypes: string[];
+  cheeseIngredients: string[];
+  doughIngredients: string[];
+  frontlineIngredients: string[];
+  stopReasons: string[];
+  addListItem: (list: MasterListKey, value: string) => void;
+  removeListItem: (list: MasterListKey, value: string) => void;
+  addFlavor: (brand: string, flavor: string) => void;
+  removeFlavor: (brand: string, flavor: string) => void;
+  // Profiles
+  brandProfiles: Record<string, RunProfile>;
+  saveProfile: () => void;
+  applyProfile: (brand: string, flavor: string) => boolean;
+  hasProfile: (brand: string, flavor: string) => boolean;
+  // Recipe presets
+  doughRecipePresets: Record<string, RecipeRow[]>;
+  cheeseRecipePresets: Record<string, RecipeRow[]>;
+  frontlineRecipePresets: Record<string, RecipeRow[]>;
+  saveRecipePreset: (kind: RecipePresetKind, name: string, rows: RecipeRow[]) => void;
+  deleteRecipePreset: (kind: RecipePresetKind, name: string) => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -391,11 +582,80 @@ const INITIAL_STATE: AppState = {
   runs: [makeNewRun()],
   currentIndex: 0,
   shiftNotes: "",
+  runToTime: "",
   date: todayStr(),
   templates: [],
   history: [],
   autoTrack: true,
+  supervisorPin: DEFAULT_SUPERVISOR_PIN,
+  brands: [...MIX_SEED.brands],
+  brandFlavors: { ...MIX_SEED.brandFlavors },
+  dieTypes: [...DEFAULT_DIE_TYPES],
+  pepTypes: [...DEFAULT_PEP_TYPES],
+  cheeseIngredients: [...DEFAULT_CHEESE_INGREDIENTS],
+  doughIngredients: [...DEFAULT_DOUGH_INGREDIENTS],
+  frontlineIngredients: [
+    ...new Set([
+      ...DEFAULT_FRONTLINE_INGREDIENTS,
+      ...MIX_SEED.frontlineIngredients,
+    ]),
+  ],
+  stopReasons: [...DEFAULT_STOP_REASONS],
+  brandProfiles: {},
+  doughRecipePresets: {},
+  cheeseRecipePresets: {},
+  frontlineRecipePresets: {},
 };
+
+// Fill any missing fields (from older persisted blobs) with defaults so the
+// rest of the app can assume a complete shape. Additive migration — keeps the
+// `run-calc-mobile-v2` key and never drops user data.
+function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...(s ?? {}),
+    doughRecipe: s?.doughRecipe ?? [],
+    app1CheeseRecipe: s?.app1CheeseRecipe ?? [],
+    app2CheeseRecipe: s?.app2CheeseRecipe ?? [],
+    app3CheeseRecipe: s?.app3CheeseRecipe ?? [],
+    app4CheeseRecipe: s?.app4CheeseRecipe ?? [],
+    frontlineRecipe: s?.frontlineRecipe ?? [],
+  };
+}
+
+function normalizeRun(r: RunState): RunState {
+  return { ...r, settings: normalizeSettings(r.settings) };
+}
+
+function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "history"> {
+  return {
+    currentIndex: parsed.currentIndex ?? 0,
+    shiftNotes: parsed.shiftNotes ?? "",
+    runToTime: parsed.runToTime ?? "",
+    date: parsed.date ?? todayStr(),
+    templates: parsed.templates ?? [],
+    autoTrack: parsed.autoTrack ?? true,
+    supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
+    brands: parsed.brands ?? [...MIX_SEED.brands],
+    brandFlavors: parsed.brandFlavors ?? { ...MIX_SEED.brandFlavors },
+    dieTypes: parsed.dieTypes ?? [...DEFAULT_DIE_TYPES],
+    pepTypes: parsed.pepTypes ?? [...DEFAULT_PEP_TYPES],
+    cheeseIngredients: parsed.cheeseIngredients ?? [...DEFAULT_CHEESE_INGREDIENTS],
+    doughIngredients: parsed.doughIngredients ?? [...DEFAULT_DOUGH_INGREDIENTS],
+    frontlineIngredients:
+      parsed.frontlineIngredients ?? [
+        ...new Set([
+          ...DEFAULT_FRONTLINE_INGREDIENTS,
+          ...MIX_SEED.frontlineIngredients,
+        ]),
+      ],
+    stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
+    brandProfiles: parsed.brandProfiles ?? {},
+    doughRecipePresets: parsed.doughRecipePresets ?? {},
+    cheeseRecipePresets: parsed.cheeseRecipePresets ?? {},
+    frontlineRecipePresets: parsed.frontlineRecipePresets ?? {},
+  };
+}
 
 export function RunContextProvider({ children }: { children: React.ReactNode }) {
   const [appState, setAppState] = useState<AppState>(INITIAL_STATE);
@@ -409,41 +669,40 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
       if (raw) {
         try {
-          const parsed = JSON.parse(raw) as AppState;
+          const parsed = JSON.parse(raw) as Partial<AppState>;
           if (parsed.runs && parsed.runs.length > 0) {
             const today = todayStr();
-            const templates = parsed.templates ?? [];
-            const history = parsed.history ?? [];
+            const base = normalizeState(parsed);
+            const history = (parsed.history ?? []).map((h) => ({
+              ...h,
+              runs: h.runs.map(normalizeRun),
+            }));
             if (parsed.date && parsed.date !== today) {
               // Calendar day rolled over: archive the prior day's runs,
               // frozen at the prior day's end so history is immutable.
               const boundaryMs = new Date(`${today}T00:00:00`).getTime();
               const archived: HistoryDay = {
                 date: parsed.date,
-                runs: parsed.runs.map((r) => closeOutRun(r, boundaryMs)),
+                runs: parsed.runs.map((r) => closeOutRun(normalizeRun(r), boundaryMs)),
               };
               const next: AppState = {
+                ...base,
                 runs: [makeNewRun()],
                 currentIndex: 0,
                 shiftNotes: "",
                 date: today,
-                templates,
                 history: [
                   archived,
                   ...history.filter((h) => h.date !== parsed.date),
                 ].slice(0, MAX_HISTORY_DAYS),
-                autoTrack: parsed.autoTrack ?? true,
               };
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
             } else {
               setAppState({
-                ...parsed,
-                shiftNotes: parsed.shiftNotes ?? "",
-                date: parsed.date ?? today,
-                templates,
+                ...base,
+                runs: parsed.runs.map(normalizeRun),
                 history,
-                autoTrack: parsed.autoTrack ?? true,
               });
             }
           }
@@ -658,6 +917,172 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     autoSuppressRef.current = Date.now() + 10 * 60 * 1000;
   }, []);
 
+  const setRunToTime = useCallback(
+    (t: string) => {
+      setAppState((prev) => {
+        const next = { ...prev, runToTime: t };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const setSupervisorPin = useCallback(
+    (pin: string) => {
+      setAppState((prev) => {
+        const next = { ...prev, supervisorPin: pin };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const addListItem = useCallback(
+    (list: MasterListKey, value: string) => {
+      const v = value.trim();
+      if (!v) return;
+      setAppState((prev) => {
+        if (prev[list].includes(v)) return prev;
+        const next = { ...prev, [list]: [...prev[list], v] };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const removeListItem = useCallback(
+    (list: MasterListKey, value: string) => {
+      setAppState((prev) => {
+        const next = { ...prev, [list]: prev[list].filter((x) => x !== value) };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const addFlavor = useCallback(
+    (brand: string, flavor: string) => {
+      const b = brand.trim();
+      const f = flavor.trim();
+      if (!b || !f) return;
+      setAppState((prev) => {
+        const cur = prev.brandFlavors[b] ?? [];
+        if (cur.includes(f)) return prev;
+        const brands = prev.brands.includes(b) ? prev.brands : [...prev.brands, b];
+        const next = {
+          ...prev,
+          brands,
+          brandFlavors: { ...prev.brandFlavors, [b]: [...cur, f] },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const removeFlavor = useCallback(
+    (brand: string, flavor: string) => {
+      setAppState((prev) => {
+        const cur = prev.brandFlavors[brand] ?? [];
+        const next = {
+          ...prev,
+          brandFlavors: {
+            ...prev.brandFlavors,
+            [brand]: cur.filter((x) => x !== flavor),
+          },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const saveProfile = useCallback(() => {
+    setAppState((prev) => {
+      const cur = prev.runs[prev.currentIndex];
+      const brand = cur.settings.brand.trim();
+      const flavor = cur.settings.flavor.trim();
+      if (!brand || !flavor) return prev;
+      const key = profileKey(brand, flavor);
+      const brands = prev.brands.includes(brand) ? prev.brands : [...prev.brands, brand];
+      const curFlavors = prev.brandFlavors[brand] ?? [];
+      const brandFlavors = curFlavors.includes(flavor)
+        ? prev.brandFlavors
+        : { ...prev.brandFlavors, [brand]: [...curFlavors, flavor] };
+      const next = {
+        ...prev,
+        brands,
+        brandFlavors,
+        brandProfiles: {
+          ...prev.brandProfiles,
+          [key]: stripPerRunFields(cur.settings),
+        },
+      };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
+
+  const applyProfile = useCallback(
+    (brand: string, flavor: string): boolean => {
+      const key = profileKey(brand, flavor);
+      const profile = appState.brandProfiles[key];
+      if (!profile) return false;
+      updateCurrentRun((r) => ({
+        ...r,
+        settings: { ...r.settings, ...profile, brand, flavor },
+      }));
+      return true;
+    },
+    [appState.brandProfiles, updateCurrentRun],
+  );
+
+  const hasProfile = useCallback(
+    (brand: string, flavor: string): boolean =>
+      !!appState.brandProfiles[profileKey(brand, flavor)],
+    [appState.brandProfiles],
+  );
+
+  const saveRecipePreset = useCallback(
+    (kind: RecipePresetKind, name: string, rows: RecipeRow[]) => {
+      const n = name.trim();
+      if (!n || rows.length === 0) return;
+      setAppState((prev) => {
+        const mapKey = PRESET_MAP_KEY[kind];
+        const next = {
+          ...prev,
+          [mapKey]: {
+            ...prev[mapKey],
+            [n]: rows.map((r) => ({ ...r })),
+          },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const deleteRecipePreset = useCallback(
+    (kind: RecipePresetKind, name: string) => {
+      setAppState((prev) => {
+        const mapKey = PRESET_MAP_KEY[kind];
+        const copy = { ...prev[mapKey] };
+        delete copy[name];
+        const next = { ...prev, [mapKey]: copy };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   // Reset the bucket marker whenever the active run changes or its running state
   // flips, so the next auto-track write fires immediately instead of being
   // blocked until the next wall-clock bucket boundary.
@@ -743,6 +1168,31 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         autoTrack: appState.autoTrack,
         setAutoTrack,
         suppressAutoTrack,
+        runToTime: appState.runToTime,
+        setRunToTime,
+        supervisorPin: appState.supervisorPin,
+        setSupervisorPin,
+        brands: appState.brands,
+        brandFlavors: appState.brandFlavors,
+        dieTypes: appState.dieTypes,
+        pepTypes: appState.pepTypes,
+        cheeseIngredients: appState.cheeseIngredients,
+        doughIngredients: appState.doughIngredients,
+        frontlineIngredients: appState.frontlineIngredients,
+        stopReasons: appState.stopReasons,
+        addListItem,
+        removeListItem,
+        addFlavor,
+        removeFlavor,
+        brandProfiles: appState.brandProfiles,
+        saveProfile,
+        applyProfile,
+        hasProfile,
+        doughRecipePresets: appState.doughRecipePresets,
+        cheeseRecipePresets: appState.cheeseRecipePresets,
+        frontlineRecipePresets: appState.frontlineRecipePresets,
+        saveRecipePreset,
+        deleteRecipePreset,
       }}
     >
       {children}

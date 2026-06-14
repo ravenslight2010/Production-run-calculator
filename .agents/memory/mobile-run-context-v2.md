@@ -43,3 +43,9 @@ Auto-track derives skids/cases once per wall-clock 5-min bucket (`autoBucketRef`
 
 **Why:** The bucket guard (`bucket === autoBucketRef.current`) would otherwise skip the first auto-write after start/stop/switch-run if it lands in the same wall-clock bucket as the previous run's last write, blocking updates until the next 5-min boundary.
 **How to apply:** Mobile auto-tracks only skids + casesOnSkid (no per-tray/per-batch rate or freezerTime exists here, unlike web). Any new lifecycle-sensitive ref needs the same reset effect.
+
+## Notification/timer effects keyed on a per-render value
+The mobile screens re-render every 1s `tick` and pass `nowMs: Date.now()` into `useNotifications`. An effect that depends on `nowMs` runs every render, so it must NOT register a `return () => clearTimeout(...)` cleanup for a banner-dismiss timer — React would clear it on the very next tick, leaving the banner stuck open. Keep timer teardown in a separate `useEffect(..., [])` unmount-only effect; clear+reschedule inline when firing.
+
+**Why:** Cleanup runs before each re-execution; with a per-render dep the timer is canceled ~1s after being set.
+**How to apply:** Also gate "complete/done" milestones on the real null/`<=0` state (e.g. `minutesRemaining !== null && <= 0`), never `(x ?? 0) <= 0` — unknown speed (`null→0`) would otherwise fire completion the instant a run starts.

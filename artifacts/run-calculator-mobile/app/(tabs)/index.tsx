@@ -9,12 +9,19 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BatchCard, CardSection, MetricCard, SectionHeader, Stepper } from "@/components/UI";
-import { useRun, runLabel, type Stoppage } from "@/context/RunContext";
+import {
+  useRun,
+  runLabel,
+  sauceBarrelBreakdown,
+  type Stoppage,
+} from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
+import { useNotifications } from "@/hooks/useNotifications";
 
 function fmtTime(min: number): string {
   if (min <= 0) return "Done";
@@ -56,18 +63,35 @@ export default function CalculatorScreen() {
     updateProgress, addStoppage, endActiveStoppage,
     addRun, switchRun, deleteRun,
     autoTrack, setAutoTrack, suppressAutoTrack,
+    runToTime, setRunToTime,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
+
+  const { showBatchDue, setShowBatchDue } = useNotifications({
+    run,
+    runIndex,
+    calc,
+    nowMs: Date.now(),
+  });
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const label = runLabel(run, runIndex);
 
+  const sauceBarrels = sauceBarrelBreakdown(calc.sauceLbs, calc.sauceEffBarrel);
+
   const batches = [
     run.settings.sauceOzPerPizza > 0 && calc.sauceLbs > 0
-      ? { name: "Sauce", batches: calc.sauceBatches, lbs: calc.sauceLbs }
+      ? {
+          name: "Sauce",
+          batches: calc.sauceBatches,
+          lbs: calc.sauceLbs,
+          sub: sauceBarrels
+            ? `${sauceBarrels.totalBarrels} barrel${sauceBarrels.totalBarrels === 1 ? "" : "s"} · ${sauceBarrels.batchesPerBarrel}/barrel`
+            : undefined,
+        }
       : null,
     run.settings.app1Type
       ? { name: run.settings.app1Type, batches: calc.app1Batches, lbs: calc.app1Lbs }
@@ -90,7 +114,12 @@ export default function CalculatorScreen() {
     run.settings.doughBatchLbs > 0
       ? { name: "Dough", batches: calc.doughBatches, lbs: calc.doughLbs }
       : null,
-  ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
+  ].filter(Boolean) as {
+    name: string;
+    batches: number;
+    lbs: number;
+    sub?: string;
+  }[];
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -170,6 +199,20 @@ export default function CalculatorScreen() {
             </Text>
           </Pressable>
         </View>
+
+        {/* Batch-due banner */}
+        {showBatchDue ? (
+          <Pressable
+            onPress={() => setShowBatchDue(false)}
+            style={[styles.batchDueBanner, { backgroundColor: colors.primary }]}
+          >
+            <Feather name="bell" size={16} color={colors.primaryForeground} />
+            <Text style={[styles.batchDueText, { color: colors.primaryForeground }]}>
+              Start next dough batch now
+            </Text>
+            <Feather name="x" size={16} color={colors.primaryForeground} />
+          </Pressable>
+        ) : null}
 
         {/* Active stoppage banner */}
         {activeStoppage ? (
@@ -252,10 +295,115 @@ export default function CalculatorScreen() {
                   name={b.name}
                   batches={b.batches}
                   lbs={b.lbs}
+                  sub={b.sub}
                   style={styles.batchItem}
                 />
               ))}
             </View>
+          </>
+        ) : null}
+
+        {/* Run to Time */}
+        {calc.pizzasLeft > 0 ? (
+          <>
+            <SectionHeader title="Run to Time" />
+            <CardSection>
+              <View style={styles.runToTimeRow}>
+                <Text style={[styles.runToTimeLabel, { color: colors.mutedForeground }]}>
+                  Run until
+                </Text>
+                <TextInput
+                  value={runToTime}
+                  onChangeText={(t) => setRunToTime(t)}
+                  placeholder="19:15"
+                  placeholderTextColor={colors.mutedForeground}
+                  keyboardType="numbers-and-punctuation"
+                  maxLength={5}
+                  style={[
+                    styles.runToTimeInput,
+                    {
+                      color: colors.foreground,
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                    },
+                  ]}
+                />
+                <Text style={[styles.runToTimeLabel, { color: colors.mutedForeground }]}>
+                  24h
+                </Text>
+              </View>
+              {(() => {
+                const m = /^(\d{1,2}):(\d{2})$/.exec(runToTime.trim());
+                if (!m) {
+                  return (
+                    <Text style={[styles.runToTimeHint, { color: colors.mutedForeground }]}>
+                      Enter a target time as HH:MM (24-hour).
+                    </Text>
+                  );
+                }
+                const hrs = Number(m[1]);
+                const mins = Number(m[2]);
+                if (hrs > 23 || mins > 59) {
+                  return (
+                    <Text style={[styles.runToTimeHint, { color: colors.mutedForeground }]}>
+                      Enter a valid 24-hour time (00:00–23:59).
+                    </Text>
+                  );
+                }
+                const now = new Date();
+                const target = new Date(now);
+                target.setHours(hrs, mins, 0, 0);
+                if (target <= now) target.setDate(target.getDate() + 1);
+                const minutesAvailable = Math.max(
+                  0,
+                  (target.getTime() - now.getTime()) / 60000,
+                );
+                const pizzasInWindow = calc.ppm > 0 ? calc.ppm * minutesAvailable : 0;
+                const casesInWindow =
+                  run.settings.pizzasPerCase > 0
+                    ? Math.floor(pizzasInWindow / run.settings.pizzasPerCase)
+                    : 0;
+                const doughLbsInWindow =
+                  run.settings.doughballWeightOz > 0
+                    ? (pizzasInWindow * run.settings.doughballWeightOz) / 16
+                    : 0;
+                const batchesToMix =
+                  calc.doughEffBatch > 0 ? doughLbsInWindow / calc.doughEffBatch : 0;
+                const h = Math.floor(minutesAvailable / 60);
+                const mm = Math.round(minutesAvailable % 60);
+                return (
+                  <View style={styles.runToTimeGrid}>
+                    <View style={styles.runToTimeStat}>
+                      <Text style={[styles.runToTimeValue, { color: colors.primary }]}>
+                        {h > 0 ? `${h}h ` : ""}
+                        {mm}m
+                      </Text>
+                      <Text style={[styles.runToTimeStatLabel, { color: colors.mutedForeground }]}>
+                        Time available
+                      </Text>
+                    </View>
+                    <View style={styles.runToTimeStat}>
+                      <Text style={[styles.runToTimeValue, { color: colors.foreground }]}>
+                        {casesInWindow}
+                      </Text>
+                      <Text style={[styles.runToTimeStatLabel, { color: colors.mutedForeground }]}>
+                        Cases in window
+                      </Text>
+                    </View>
+                    {batchesToMix > 0 ? (
+                      <View style={styles.runToTimeStat}>
+                        <Text style={[styles.runToTimeValue, { color: colors.foreground }]}>
+                          {batchesToMix.toFixed(1)}
+                        </Text>
+                        <Text style={[styles.runToTimeStatLabel, { color: colors.mutedForeground }]}>
+                          Dough batches
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })()}
+            </CardSection>
           </>
         ) : null}
 
@@ -571,6 +719,17 @@ const styles = StyleSheet.create({
   },
   headerLeft: { flex: 1, marginRight: 12 },
   elapsed: { fontSize: 12, marginTop: 2 },
+  batchDueBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+  },
+  batchDueText: { flex: 1, fontWeight: "700" as const, fontSize: 14 },
   toggleBtn: { borderRadius: 20, paddingVertical: 9, paddingHorizontal: 18 },
   toggleText: { color: "#fff", fontWeight: "700" as const, fontSize: 13, letterSpacing: 0.3 },
 
@@ -626,6 +785,33 @@ const styles = StyleSheet.create({
 
   batchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   batchItem: { flexBasis: "47%", flexGrow: 1 },
+
+  runToTimeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  runToTimeLabel: { fontSize: 13 },
+  runToTimeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 16,
+    fontVariant: ["tabular-nums"],
+    textAlign: "center",
+  },
+  runToTimeHint: { fontSize: 12, marginTop: 10 },
+  runToTimeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
+  },
+  runToTimeStat: {
+    flexBasis: "30%",
+    flexGrow: 1,
+    alignItems: "center",
+  },
+  runToTimeValue: { fontSize: 22, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  runToTimeStatLabel: { fontSize: 11, marginTop: 2 },
 
   stoppageBtn: {
     flexDirection: "row",

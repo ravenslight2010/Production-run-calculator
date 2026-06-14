@@ -1,6 +1,9 @@
+import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import React from "react";
 import {
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,10 +15,12 @@ import { SectionHeader } from "@/components/UI";
 import {
   computeCalc,
   runLabel,
+  todayStr,
   useRun,
   type RunState,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
+import { exportRunsCsv } from "@/utils/exportCsv";
 
 type RunStatus = "finished" | "current" | "upcoming";
 
@@ -234,9 +239,28 @@ export default function SummaryScreen() {
         <Text style={[styles.shiftTitle, { color: colors.foreground }]}>
           Today&apos;s Shift
         </Text>
-        <Text style={[styles.shiftCount, { color: colors.mutedForeground }]}>
-          {allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
-        </Text>
+        <View style={styles.shiftHeaderRight}>
+          <Text style={[styles.shiftCount, { color: colors.mutedForeground }]}>
+            {allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
+          </Text>
+          {allRuns.length > 0 ? (
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                exportRunsCsv(todayStr(), allRuns);
+              }}
+              style={({ pressed }) => [
+                styles.exportBtn,
+                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Feather name="share" size={13} color={colors.primary} />
+              <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+                Export CSV
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <View
@@ -339,6 +363,19 @@ export default function SummaryScreen() {
                       ppm
                     </Text>
                   </View>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      exportRunsCsv(day.date, day.runs);
+                    }}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.histExportBtn,
+                      { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                    ]}
+                  >
+                    <Feather name="share" size={15} color={colors.primary} />
+                  </Pressable>
                 </View>
               );
             })}
@@ -358,6 +395,23 @@ const styles = StyleSheet.create({
   },
   shiftTitle: { fontSize: 15, fontWeight: "600" as const },
   shiftCount: { fontSize: 13 },
+  shiftHeaderRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  exportBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  exportBtnText: { fontSize: 12, fontWeight: "600" as const },
+  histExportBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 8,
+    marginLeft: 8,
+  },
 
   statsGrid: {
     borderRadius: 14,

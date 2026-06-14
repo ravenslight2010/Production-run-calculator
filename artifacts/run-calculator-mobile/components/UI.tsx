@@ -1,3 +1,4 @@
+import { Feather } from "@expo/vector-icons";
 import React from "react";
 import {
   Platform,
@@ -10,6 +11,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import type { RecipeRow } from "@/context/RunContext";
 
 export function MetricCard({
   label,
@@ -62,11 +64,13 @@ export function BatchCard({
   name,
   batches,
   lbs,
+  sub,
   style,
 }: {
   name: string;
   batches: number;
   lbs: number;
+  sub?: string;
   style?: ViewStyle;
 }) {
   const colors = useColors();
@@ -96,6 +100,11 @@ export function BatchCard({
       <Text style={[styles.batchUnit, { color: colors.mutedForeground }]}>
         {active ? `batches · ${lbs.toFixed(0)} lbs` : "batches"}
       </Text>
+      {active && sub ? (
+        <Text style={[styles.batchUnit, { color: colors.primary, marginTop: 2 }]}>
+          {sub}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -263,6 +272,319 @@ export function CardSection({
     </View>
   );
 }
+
+export type FactoryPreset = { name: string; ingredients: RecipeRow[] };
+
+export function RecipeEditor({
+  rows,
+  onChange,
+  ingredientOptions,
+  name,
+  onNameChange,
+  presetNames,
+  onSavePreset,
+  onApplyPreset,
+  onDeletePreset,
+  effectiveLabel = "Effective batch",
+  factoryPresets,
+  onApplyFactory,
+}: {
+  rows: RecipeRow[];
+  onChange: (rows: RecipeRow[]) => void;
+  ingredientOptions: string[];
+  name: string;
+  onNameChange: (n: string) => void;
+  presetNames: string[];
+  onSavePreset: () => void;
+  onApplyPreset: (name: string) => void;
+  onDeletePreset: (name: string) => void;
+  effectiveLabel?: string;
+  factoryPresets?: FactoryPreset[];
+  onApplyFactory?: (preset: FactoryPreset) => void;
+}) {
+  const colors = useColors();
+  const total = rows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+
+  const setRow = (i: number, patch: Partial<RecipeRow>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const removeRow = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+  const addRow = (ingredient = "") =>
+    onChange([...rows, { ingredient, lbs: 0 }]);
+
+  return (
+    <View style={recipeStyles.wrap}>
+      {/* Recipe name + save preset */}
+      <View style={recipeStyles.nameRow}>
+        <TextInput
+          style={[
+            recipeStyles.nameInput,
+            { color: colors.foreground, borderColor: colors.border },
+          ]}
+          value={name}
+          onChangeText={onNameChange}
+          placeholder="Recipe name…"
+          placeholderTextColor={colors.mutedForeground}
+          autoCapitalize="words"
+        />
+        <Pressable
+          onPress={onSavePreset}
+          disabled={!name.trim() || rows.length === 0}
+          style={({ pressed }) => [
+            recipeStyles.savePresetBtn,
+            {
+              backgroundColor: colors.secondary,
+              borderColor: colors.border,
+              opacity:
+                !name.trim() || rows.length === 0 ? 0.4 : pressed ? 0.6 : 1,
+            },
+          ]}
+        >
+          <Feather name="bookmark" size={13} color={colors.foreground} />
+          <Text style={[recipeStyles.savePresetText, { color: colors.foreground }]}>
+            Save
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Preset chips */}
+      {presetNames.length > 0 ? (
+        <View style={recipeStyles.presetRow}>
+          {presetNames.map((p) => (
+            <View
+              key={p}
+              style={[
+                recipeStyles.presetChip,
+                { borderColor: colors.border, backgroundColor: colors.secondary },
+              ]}
+            >
+              <Pressable onPress={() => onApplyPreset(p)} hitSlop={4}>
+                <Text style={[recipeStyles.presetChipText, { color: colors.foreground }]}>
+                  {p}
+                </Text>
+              </Pressable>
+              <Pressable onPress={() => onDeletePreset(p)} hitSlop={6}>
+                <Feather name="x" size={12} color={colors.mutedForeground} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      {/* Factory mix presets matching brand + flavor */}
+      {factoryPresets && factoryPresets.length > 0 ? (
+        <View style={recipeStyles.factoryWrap}>
+          <Text style={[recipeStyles.factoryLabel, { color: colors.mutedForeground }]}>
+            Factory mixes for this brand + flavor
+          </Text>
+          <View style={recipeStyles.presetRow}>
+            {factoryPresets.map((fp) => (
+              <Pressable
+                key={fp.name}
+                onPress={() => onApplyFactory?.(fp)}
+                style={({ pressed }) => [
+                  recipeStyles.factoryChip,
+                  {
+                    borderColor: colors.primary,
+                    opacity: pressed ? 0.6 : 1,
+                  },
+                ]}
+              >
+                <Feather name="zap" size={11} color={colors.primary} />
+                <Text style={[recipeStyles.factoryChipText, { color: colors.foreground }]}>
+                  {fp.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {/* Ingredient rows */}
+      {rows.map((row, i) => (
+        <View key={i} style={recipeStyles.row}>
+          <TextInput
+            style={[
+              recipeStyles.ingInput,
+              { color: colors.foreground, borderColor: colors.border },
+            ]}
+            value={row.ingredient}
+            onChangeText={(t) => setRow(i, { ingredient: t })}
+            placeholder="Ingredient"
+            placeholderTextColor={colors.mutedForeground}
+            autoCapitalize="words"
+          />
+          <TextInput
+            style={[
+              recipeStyles.lbsInput,
+              { color: colors.foreground, borderColor: colors.border },
+            ]}
+            value={row.lbs > 0 ? String(row.lbs) : ""}
+            onChangeText={(t) => {
+              const n = parseFloat(t);
+              setRow(i, { lbs: isNaN(n) ? 0 : n });
+            }}
+            placeholder="0"
+            placeholderTextColor={colors.mutedForeground}
+            keyboardType="decimal-pad"
+            textAlign="right"
+            selectTextOnFocus
+          />
+          <Text style={[recipeStyles.lbsUnit, { color: colors.mutedForeground }]}>
+            lbs
+          </Text>
+          <Pressable onPress={() => removeRow(i)} hitSlop={6}>
+            <Feather name="trash-2" size={16} color="#ef4444" />
+          </Pressable>
+        </View>
+      ))}
+
+      {/* Quick-add ingredient chips */}
+      {ingredientOptions.length > 0 ? (
+        <View style={recipeStyles.quickRow}>
+          {ingredientOptions.map((opt) => (
+            <Pressable
+              key={opt}
+              onPress={() => addRow(opt)}
+              style={({ pressed }) => [
+                recipeStyles.quickChip,
+                {
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}
+            >
+              <Feather name="plus" size={11} color={colors.primary} />
+              <Text style={[recipeStyles.quickChipText, { color: colors.foreground }]}>
+                {opt}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+
+      <Pressable
+        onPress={() => addRow()}
+        style={({ pressed }) => [
+          recipeStyles.addRowBtn,
+          { borderColor: colors.primary, opacity: pressed ? 0.6 : 1 },
+        ]}
+      >
+        <Feather name="plus" size={14} color={colors.primary} />
+        <Text style={[recipeStyles.addRowText, { color: colors.primary }]}>
+          Add ingredient
+        </Text>
+      </Pressable>
+
+      <View style={[recipeStyles.totalRow, { borderTopColor: colors.border }]}>
+        <Text style={[recipeStyles.totalLabel, { color: colors.mutedForeground }]}>
+          {effectiveLabel}
+        </Text>
+        <Text style={[recipeStyles.totalValue, { color: colors.primary }]}>
+          {total > 0 ? `${total.toFixed(1)} lbs` : "—"}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const recipeStyles = StyleSheet.create({
+  wrap: { gap: 10 },
+  nameRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  nameInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+  },
+  savePresetBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  savePresetText: { fontSize: 13, fontWeight: "600" },
+  presetRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  presetChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  presetChipText: { fontSize: 12, fontWeight: "500" },
+  factoryWrap: { gap: 6 },
+  factoryLabel: {
+    fontSize: 11,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  factoryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  factoryChipText: { fontSize: 12, fontWeight: "500" },
+  row: { flexDirection: "row", alignItems: "center", gap: 8 },
+  ingInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 14,
+  },
+  lbsInput: {
+    width: 64,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    fontSize: 14,
+  },
+  lbsUnit: { fontSize: 12, width: 22 },
+  quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  quickChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  quickChipText: { fontSize: 11 },
+  addRowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderRadius: 8,
+    paddingVertical: 9,
+  },
+  addRowText: { fontSize: 13, fontWeight: "600" },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    paddingTop: 10,
+  },
+  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5 },
+  totalValue: { fontSize: 16, fontWeight: "700" },
+});
 
 const styles = StyleSheet.create({
   metricCard: {
