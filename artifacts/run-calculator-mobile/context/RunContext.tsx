@@ -219,10 +219,10 @@ export function runLabel(r: RunState, index: number): string {
   return `Run ${index + 1}`;
 }
 
-function makeNewRun(): RunState {
+function makeNewRun(overrides?: Partial<RunSettings>): RunState {
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, ...(overrides ?? {}) },
     progress: { ...DEFAULT_PROGRESS },
     stoppages: [],
     isRunning: false,
@@ -450,6 +450,16 @@ export function todayStr(): string {
 // progress, casesNeeded, brand/flavor are stripped before saving/applying.
 export type RunProfile = Partial<RunSettings>;
 
+// One planned run for a future production day.
+export interface ScheduledRun {
+  id: string;
+  brand: string;
+  flavor: string;
+  casesNeeded: number;
+  dieType: string;
+  notes: string;
+}
+
 interface AppState {
   runs: RunState[];
   currentIndex: number;
@@ -475,6 +485,9 @@ interface AppState {
   doughRecipePresets: Record<string, RecipeRow[]>;
   cheeseRecipePresets: Record<string, RecipeRow[]>;
   frontlineRecipePresets: Record<string, RecipeRow[]>;
+  mixRecipePresets: Record<string, RecipeRow[]>;
+  // Planned production keyed by date string (YYYY-MM-DD)
+  scheduled: Record<string, ScheduledRun[]>;
 }
 
 export function profileKey(brand: string, flavor: string): string {
@@ -505,15 +518,19 @@ export type MasterListKey =
   | "frontlineIngredients"
   | "stopReasons";
 
-export type RecipePresetKind = "dough" | "cheese" | "frontline";
+export type RecipePresetKind = "dough" | "cheese" | "frontline" | "mix";
 
 const PRESET_MAP_KEY: Record<
   RecipePresetKind,
-  "doughRecipePresets" | "cheeseRecipePresets" | "frontlineRecipePresets"
+  | "doughRecipePresets"
+  | "cheeseRecipePresets"
+  | "frontlineRecipePresets"
+  | "mixRecipePresets"
 > = {
   dough: "doughRecipePresets",
   cheese: "cheeseRecipePresets",
   frontline: "frontlineRecipePresets",
+  mix: "mixRecipePresets",
 };
 
 interface RunContextValue {
@@ -574,6 +591,27 @@ interface RunContextValue {
   frontlineRecipePresets: Record<string, RecipeRow[]>;
   saveRecipePreset: (kind: RecipePresetKind, name: string, rows: RecipeRow[]) => void;
   deleteRecipePreset: (kind: RecipePresetKind, name: string) => void;
+  renameRecipePreset: (
+    kind: RecipePresetKind,
+    oldName: string,
+    newName: string,
+  ) => void;
+  mixRecipePresets: Record<string, RecipeRow[]>;
+  // Rename helpers for master data
+  renameListItem: (list: MasterListKey, oldName: string, newName: string) => void;
+  renameBrand: (oldName: string, newName: string) => void;
+  renameFlavor: (brand: string, oldFlavor: string, newFlavor: string) => void;
+  // Scheduling
+  scheduled: Record<string, ScheduledRun[]>;
+  addScheduledRun: (date: string, run: Omit<ScheduledRun, "id">) => void;
+  updateScheduledRun: (
+    date: string,
+    id: string,
+    patch: Partial<Omit<ScheduledRun, "id">>,
+  ) => void;
+  removeScheduledRun: (date: string, id: string) => void;
+  clearScheduledDay: (date: string) => void;
+  applyScheduledDay: (date: string) => boolean;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -605,6 +643,8 @@ const INITIAL_STATE: AppState = {
   doughRecipePresets: {},
   cheeseRecipePresets: {},
   frontlineRecipePresets: {},
+  mixRecipePresets: {},
+  scheduled: {},
 };
 
 // Fill any missing fields (from older persisted blobs) with defaults so the
@@ -654,6 +694,8 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     doughRecipePresets: parsed.doughRecipePresets ?? {},
     cheeseRecipePresets: parsed.cheeseRecipePresets ?? {},
     frontlineRecipePresets: parsed.frontlineRecipePresets ?? {},
+    mixRecipePresets: parsed.mixRecipePresets ?? {},
+    scheduled: parsed.scheduled ?? {},
   };
 }
 
@@ -1083,6 +1125,191 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  const renameRecipePreset = useCallback(
+    (kind: RecipePresetKind, oldName: string, newName: string) => {
+      const n = newName.trim();
+      setAppState((prev) => {
+        const mapKey = PRESET_MAP_KEY[kind];
+        const map = prev[mapKey];
+        if (!n || n === oldName || !map[oldName] || map[n]) return prev;
+        const copy: Record<string, RecipeRow[]> = {};
+        for (const [k, v] of Object.entries(map)) {
+          copy[k === oldName ? n : k] = v;
+        }
+        const next = { ...prev, [mapKey]: copy };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const renameListItem = useCallback(
+    (list: MasterListKey, oldName: string, newName: string) => {
+      const n = newName.trim();
+      setAppState((prev) => {
+        if (!n || n === oldName) return prev;
+        const arr = prev[list];
+        if (!arr.includes(oldName) || arr.includes(n)) return prev;
+        const next = {
+          ...prev,
+          [list]: arr.map((x) => (x === oldName ? n : x)),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const renameBrand = useCallback(
+    (oldName: string, newName: string) => {
+      const n = newName.trim();
+      setAppState((prev) => {
+        if (!n || n === oldName) return prev;
+        if (!prev.brands.includes(oldName) || prev.brands.includes(n)) return prev;
+        const brands = prev.brands.map((b) => (b === oldName ? n : b));
+        const brandFlavors = { ...prev.brandFlavors };
+        if (brandFlavors[oldName]) {
+          brandFlavors[n] = brandFlavors[oldName];
+          delete brandFlavors[oldName];
+        }
+        const flavors = brandFlavors[n] ?? [];
+        const brandProfiles = { ...prev.brandProfiles };
+        for (const f of flavors) {
+          const oldKey = profileKey(oldName, f);
+          const newKey = profileKey(n, f);
+          if (oldKey !== newKey && brandProfiles[oldKey]) {
+            brandProfiles[newKey] = brandProfiles[oldKey];
+            delete brandProfiles[oldKey];
+          }
+        }
+        const next = { ...prev, brands, brandFlavors, brandProfiles };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const renameFlavor = useCallback(
+    (brand: string, oldFlavor: string, newFlavor: string) => {
+      const f = newFlavor.trim();
+      setAppState((prev) => {
+        if (!f || f === oldFlavor) return prev;
+        const cur = prev.brandFlavors[brand] ?? [];
+        if (!cur.includes(oldFlavor) || cur.includes(f)) return prev;
+        const brandFlavors = {
+          ...prev.brandFlavors,
+          [brand]: cur.map((x) => (x === oldFlavor ? f : x)),
+        };
+        const brandProfiles = { ...prev.brandProfiles };
+        const oldKey = profileKey(brand, oldFlavor);
+        const newKey = profileKey(brand, f);
+        if (oldKey !== newKey && brandProfiles[oldKey]) {
+          brandProfiles[newKey] = brandProfiles[oldKey];
+          delete brandProfiles[oldKey];
+        }
+        const next = { ...prev, brandFlavors, brandProfiles };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const addScheduledRun = useCallback(
+    (date: string, run: Omit<ScheduledRun, "id">) => {
+      setAppState((prev) => {
+        const item: ScheduledRun = {
+          ...run,
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        };
+        const day = prev.scheduled[date] ?? [];
+        const next = {
+          ...prev,
+          scheduled: { ...prev.scheduled, [date]: [...day, item] },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const updateScheduledRun = useCallback(
+    (date: string, id: string, patch: Partial<Omit<ScheduledRun, "id">>) => {
+      setAppState((prev) => {
+        const day = prev.scheduled[date] ?? [];
+        const next = {
+          ...prev,
+          scheduled: {
+            ...prev.scheduled,
+            [date]: day.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+          },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const removeScheduledRun = useCallback(
+    (date: string, id: string) => {
+      setAppState((prev) => {
+        const day = (prev.scheduled[date] ?? []).filter((r) => r.id !== id);
+        const scheduled = { ...prev.scheduled };
+        if (day.length === 0) delete scheduled[date];
+        else scheduled[date] = day;
+        const next = { ...prev, scheduled };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const clearScheduledDay = useCallback(
+    (date: string) => {
+      setAppState((prev) => {
+        const scheduled = { ...prev.scheduled };
+        delete scheduled[date];
+        const next = { ...prev, scheduled };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const applyScheduledDay = useCallback(
+    (date: string): boolean => {
+      let applied = false;
+      setAppState((prev) => {
+        const day = prev.scheduled[date] ?? [];
+        if (day.length === 0) return prev;
+        const runs = day.map((s) => {
+          const profile = prev.brandProfiles[profileKey(s.brand, s.flavor)] ?? {};
+          return makeNewRun({
+            ...profile,
+            brand: s.brand,
+            flavor: s.flavor,
+            casesNeeded: s.casesNeeded,
+            dieType: s.dieType || (profile.dieType ?? ""),
+            notes: s.notes,
+          });
+        });
+        applied = true;
+        const next = { ...prev, runs, currentIndex: 0 };
+        persist(next);
+        return next;
+      });
+      return applied;
+    },
+    [persist],
+  );
+
   // Reset the bucket marker whenever the active run changes or its running state
   // flips, so the next auto-track write fires immediately instead of being
   // blocked until the next wall-clock bucket boundary.
@@ -1193,6 +1420,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         frontlineRecipePresets: appState.frontlineRecipePresets,
         saveRecipePreset,
         deleteRecipePreset,
+        renameRecipePreset,
+        mixRecipePresets: appState.mixRecipePresets,
+        renameListItem,
+        renameBrand,
+        renameFlavor,
+        scheduled: appState.scheduled,
+        addScheduledRun,
+        updateScheduledRun,
+        removeScheduledRun,
+        clearScheduledDay,
+        applyScheduledDay,
       }}
     >
       {children}

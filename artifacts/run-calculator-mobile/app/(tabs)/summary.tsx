@@ -21,6 +21,7 @@ import {
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { exportRunsCsv } from "@/utils/exportCsv";
+import { shareShiftReport } from "@/utils/shiftReport";
 
 type RunStatus = "finished" | "current" | "upcoming";
 
@@ -244,21 +245,38 @@ export default function SummaryScreen() {
             {allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
           </Text>
           {allRuns.length > 0 ? (
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                exportRunsCsv(todayStr(), allRuns);
-              }}
-              style={({ pressed }) => [
-                styles.exportBtn,
-                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
-              ]}
-            >
-              <Feather name="share" size={13} color={colors.primary} />
-              <Text style={[styles.exportBtnText, { color: colors.primary }]}>
-                Export CSV
-              </Text>
-            </Pressable>
+            <>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  shareShiftReport(todayStr(), allRuns, shiftNotes);
+                }}
+                style={({ pressed }) => [
+                  styles.exportBtn,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="file-text" size={13} color={colors.primary} />
+                <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+                  Share Report
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  exportRunsCsv(todayStr(), allRuns);
+                }}
+                style={({ pressed }) => [
+                  styles.exportBtn,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="share" size={13} color={colors.primary} />
+                <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+                  Export CSV
+                </Text>
+              </Pressable>
+            </>
           ) : null}
         </View>
       </View>

@@ -288,6 +288,8 @@ export function RecipeEditor({
   effectiveLabel = "Effective batch",
   factoryPresets,
   onApplyFactory,
+  factoryLabel = "Factory mixes for this brand + flavor",
+  onSaveMix,
 }: {
   rows: RecipeRow[];
   onChange: (rows: RecipeRow[]) => void;
@@ -301,6 +303,8 @@ export function RecipeEditor({
   effectiveLabel?: string;
   factoryPresets?: FactoryPreset[];
   onApplyFactory?: (preset: FactoryPreset) => void;
+  factoryLabel?: string;
+  onSaveMix?: () => void;
 }) {
   const colors = useColors();
   const total = rows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
@@ -344,6 +348,26 @@ export function RecipeEditor({
             Save
           </Text>
         </Pressable>
+        {onSaveMix ? (
+          <Pressable
+            onPress={onSaveMix}
+            disabled={!name.trim() || rows.length === 0}
+            style={({ pressed }) => [
+              recipeStyles.savePresetBtn,
+              {
+                backgroundColor: colors.secondary,
+                borderColor: colors.primary,
+                opacity:
+                  !name.trim() || rows.length === 0 ? 0.4 : pressed ? 0.6 : 1,
+              },
+            ]}
+          >
+            <Feather name="zap" size={13} color={colors.primary} />
+            <Text style={[recipeStyles.savePresetText, { color: colors.primary }]}>
+              Save as mix
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {/* Preset chips */}
@@ -374,7 +398,7 @@ export function RecipeEditor({
       {factoryPresets && factoryPresets.length > 0 ? (
         <View style={recipeStyles.factoryWrap}>
           <Text style={[recipeStyles.factoryLabel, { color: colors.mutedForeground }]}>
-            Factory mixes for this brand + flavor
+            {factoryLabel}
           </Text>
           <View style={recipeStyles.presetRow}>
             {factoryPresets.map((fp) => (

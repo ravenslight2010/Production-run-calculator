@@ -6,7 +6,7 @@ description: Key design decisions for the expanded Expo mobile RunContext and ta
 # Mobile RunContext v2
 
 ## Storage key
-`run-calc-mobile-v2` — bumped from v1 when the data model expanded. Any further shape changes must bump to v3 (old data is silently dropped).
+`run-calc-mobile-v2` — bumped from v1 when the data model expanded. Prefer ADDITIVE migration over bumping the key: new fields are filled with defaults in `normalizeState`/`normalizeSettings` (e.g. `mixRecipePresets`, `scheduled` were added this way without dropping data). Only bump to a new key for a truly breaking, non-additive shape change.
 
 ## Multi-run shape
 State is `{ runs: RunState[], currentIndex: number }` stored as one JSON blob. Max 30 runs matches the web.

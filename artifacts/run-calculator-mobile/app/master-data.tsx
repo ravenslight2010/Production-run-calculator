@@ -24,15 +24,21 @@ function ListManager({
   items,
   onAdd,
   onRemove,
+  onRename,
   placeholder,
+  hideAdd,
 }: {
   items: string[];
   onAdd: (value: string) => void;
   onRemove: (value: string) => void;
+  onRename?: (oldName: string, newName: string) => void;
   placeholder: string;
+  hideAdd?: boolean;
 }) {
   const colors = useColors();
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   const add = () => {
     const v = draft.trim();
@@ -40,6 +46,21 @@ function ListManager({
     onAdd(v);
     setDraft("");
     tap();
+  };
+
+  const startEdit = (item: string) => {
+    setEditing(item);
+    setEditDraft(item);
+    tap();
+  };
+
+  const commitEdit = () => {
+    if (editing != null) {
+      const v = editDraft.trim();
+      if (v && v !== editing) onRename?.(editing, v);
+    }
+    setEditing(null);
+    setEditDraft("");
   };
 
   return (
@@ -50,58 +71,98 @@ function ListManager({
             None yet — add one below.
           </Text>
         ) : (
-          items.map((item) => (
-            <View
-              key={item}
-              style={[
-                styles.chip,
-                { borderColor: colors.border, backgroundColor: colors.secondary },
-              ]}
-            >
-              <Text style={[styles.chipText, { color: colors.foreground }]}>
-                {item}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  onRemove(item);
-                  tap();
-                }}
-                hitSlop={6}
+          items.map((item) =>
+            editing === item ? (
+              <View key={item} style={styles.editRow}>
+                <TextInput
+                  style={[
+                    styles.editInput,
+                    { color: colors.foreground, borderColor: colors.primary },
+                  ]}
+                  value={editDraft}
+                  onChangeText={setEditDraft}
+                  autoFocus
+                  autoCapitalize="words"
+                  onSubmitEditing={commitEdit}
+                  returnKeyType="done"
+                />
+                <Pressable onPress={commitEdit} hitSlop={6} style={styles.editIconBtn}>
+                  <Feather name="check" size={16} color={colors.primary} />
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    setEditing(null);
+                    setEditDraft("");
+                  }}
+                  hitSlop={6}
+                  style={styles.editIconBtn}
+                >
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </Pressable>
+              </View>
+            ) : (
+              <View
+                key={item}
+                style={[
+                  styles.chip,
+                  { borderColor: colors.border, backgroundColor: colors.secondary },
+                ]}
               >
-                <Feather name="x" size={13} color={colors.mutedForeground} />
-              </Pressable>
-            </View>
-          ))
+                {onRename ? (
+                  <Pressable onPress={() => startEdit(item)} hitSlop={4}>
+                    <Text style={[styles.chipText, { color: colors.foreground }]}>
+                      {item}
+                    </Text>
+                  </Pressable>
+                ) : (
+                  <Text style={[styles.chipText, { color: colors.foreground }]}>
+                    {item}
+                  </Text>
+                )}
+                <Pressable
+                  onPress={() => {
+                    onRemove(item);
+                    tap();
+                  }}
+                  hitSlop={6}
+                >
+                  <Feather name="x" size={13} color={colors.mutedForeground} />
+                </Pressable>
+              </View>
+            ),
+          )
         )}
       </View>
-      <View style={styles.addRow}>
-        <TextInput
-          style={[
-            styles.input,
-            { color: colors.foreground, borderColor: colors.border },
-          ]}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={placeholder}
-          placeholderTextColor={colors.mutedForeground}
-          autoCapitalize="words"
-          onSubmitEditing={add}
-          returnKeyType="done"
-        />
-        <Pressable
-          onPress={add}
-          disabled={!draft.trim()}
-          style={({ pressed }) => [
-            styles.addBtn,
-            {
-              backgroundColor: colors.primary,
-              opacity: !draft.trim() ? 0.4 : pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="plus" size={18} color={colors.primaryForeground} />
-        </Pressable>
-      </View>
+      {hideAdd ? null : (
+        <View style={styles.addRow}>
+          <TextInput
+            style={[
+              styles.input,
+              { color: colors.foreground, borderColor: colors.border },
+            ]}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={placeholder}
+            placeholderTextColor={colors.mutedForeground}
+            autoCapitalize="words"
+            onSubmitEditing={add}
+            returnKeyType="done"
+          />
+          <Pressable
+            onPress={add}
+            disabled={!draft.trim()}
+            style={({ pressed }) => [
+              styles.addBtn,
+              {
+                backgroundColor: colors.primary,
+                opacity: !draft.trim() ? 0.4 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Feather name="plus" size={18} color={colors.primaryForeground} />
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -120,17 +181,26 @@ export default function MasterDataScreen() {
     stopReasons,
     addListItem,
     removeListItem,
+    renameListItem,
+    renameBrand,
     addFlavor,
     removeFlavor,
+    renameFlavor,
+    mixRecipePresets,
+    deleteRecipePreset,
+    renameRecipePreset,
     supervisorPin,
     setSupervisorPin,
   } = useRun();
 
   const [pinDraft, setPinDraft] = useState("");
+  const mixNames = Object.keys(mixRecipePresets);
 
   const simpleList = (key: MasterListKey) => ({
     onAdd: (v: string) => addListItem(key, v),
     onRemove: (v: string) => removeListItem(key, v),
+    onRename: (oldName: string, newName: string) =>
+      renameListItem(key, oldName, newName),
   });
 
   const webTop = Platform.OS === "web" ? 16 : 0;
@@ -154,7 +224,9 @@ export default function MasterDataScreen() {
           <ListManager
             items={brands}
             placeholder="Add brand…"
-            {...simpleList("brands")}
+            onAdd={(v) => addListItem("brands", v)}
+            onRemove={(v) => removeListItem("brands", v)}
+            onRename={renameBrand}
           />
           {brands.map((brand) => (
             <View key={brand} style={styles.brandBlock}>
@@ -166,6 +238,7 @@ export default function MasterDataScreen() {
                 placeholder={`Add flavor for ${brand}…`}
                 onAdd={(v) => addFlavor(brand, v)}
                 onRemove={(v) => removeFlavor(brand, v)}
+                onRename={(oldF, newF) => renameFlavor(brand, oldF, newF)}
               />
             </View>
           ))}
@@ -229,6 +302,30 @@ export default function MasterDataScreen() {
             placeholder="Add stop reason…"
             {...simpleList("stopReasons")}
           />
+        </CardSection>
+
+        {/* My mix recipes */}
+        <SectionHeader title="My Mix Recipes" />
+        <CardSection>
+          <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+            Saved from the Setup tab&apos;s mix editor. Tap a name to rename.
+          </Text>
+          {mixNames.length === 0 ? (
+            <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+              None yet — save one with “Save as mix” in the Setup tab.
+            </Text>
+          ) : (
+            <ListManager
+              items={mixNames}
+              placeholder=""
+              hideAdd
+              onAdd={() => {}}
+              onRemove={(v) => deleteRecipePreset("mix", v)}
+              onRename={(oldName, newName) =>
+                renameRecipePreset("mix", oldName, newName)
+              }
+            />
+          )}
         </CardSection>
 
         {/* Supervisor PIN */}
@@ -313,6 +410,22 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   chipText: { fontSize: 13, fontWeight: "500" as const },
+  editRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexGrow: 1,
+    flexBasis: "100%",
+  },
+  editInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 13,
+  },
+  editIconBtn: { padding: 6 },
   addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
   input: {
     flex: 1,

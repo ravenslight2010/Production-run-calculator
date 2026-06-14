@@ -24,6 +24,7 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="master-data" options={{ presentation: "card" }} />
+      <Stack.Screen name="schedule" options={{ presentation: "card" }} />
     </Stack>
   );
 }

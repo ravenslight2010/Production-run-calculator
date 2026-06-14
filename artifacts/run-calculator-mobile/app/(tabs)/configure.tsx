@@ -139,6 +139,7 @@ export default function ConfigureScreen() {
     doughRecipePresets,
     cheeseRecipePresets,
     frontlineRecipePresets,
+    mixRecipePresets,
     saveRecipePreset,
     deleteRecipePreset,
     saveProfile,
@@ -236,8 +237,14 @@ export default function ConfigureScreen() {
   const doughNames = Object.keys(doughRecipePresets);
   const frontlineNames = Object.keys(frontlineRecipePresets);
 
-  // Factory mix presets matching the current brand + flavor
-  const mixPresets = findMixPresets(run.settings.brand, run.settings.flavor);
+  // Factory mix presets matching the current brand + flavor, plus the user's
+  // own saved mixes (shown together as one-tap chips in the cheese editor).
+  const factoryMixPresets = findMixPresets(run.settings.brand, run.settings.flavor);
+  const userMixPresets = Object.entries(mixRecipePresets).map(([name, ingredients]) => ({
+    name,
+    ingredients,
+  }));
+  const mixPresets = [...userMixPresets, ...factoryMixPresets];
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -358,6 +365,24 @@ export default function ConfigureScreen() {
           <Feather name="database" size={16} color={colors.foreground} />
           <Text style={[styles.masterDataText, { color: colors.foreground }]}>
             Manage Master Data
+          </Text>
+          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+        </Pressable>
+
+        <Pressable
+          onPress={() => router.push("/schedule")}
+          style={({ pressed }) => [
+            styles.masterDataBtn,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}
+        >
+          <Feather name="calendar" size={16} color={colors.foreground} />
+          <Text style={[styles.masterDataText, { color: colors.foreground }]}>
+            Production Schedule
           </Text>
           <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
         </Pressable>
@@ -734,12 +759,23 @@ export default function ConfigureScreen() {
                     deleteRecipePreset("cheese", presetName)
                   }
                   factoryPresets={mixPresets}
+                  factoryLabel={
+                    userMixPresets.length > 0
+                      ? "Your mixes + factory mixes"
+                      : "Factory mixes for this brand + flavor"
+                  }
                   onApplyFactory={(fp) =>
                     updateSettings({
                       [recipeKey]: fp.ingredients.map((r) => ({ ...r })),
                       [recipeNameKey]: fp.name,
                     } as Partial<RunSettings>)
                   }
+                  onSaveMix={() => {
+                    saveRecipePreset("mix", recipeName, rows);
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Success,
+                    );
+                  }}
                 />
               </CardSection>
             </React.Fragment>
