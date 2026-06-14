@@ -14,14 +14,32 @@ export default function FrontlineScreen() {
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const s = run.settings;
-  const batches = [
+  const applicators = [
     s.app1Type ? { name: s.app1Type, batches: calc.app1Batches, lbs: calc.app1Lbs } : null,
     s.app2Type ? { name: s.app2Type, batches: calc.app2Batches, lbs: calc.app2Lbs } : null,
     s.app3Type ? { name: s.app3Type, batches: calc.app3Batches, lbs: calc.app3Lbs } : null,
     s.app4Type ? { name: s.app4Type, batches: calc.app4Batches, lbs: calc.app4Lbs } : null,
+  ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
+  const pepperoni = [
     s.pep1Type ? { name: s.pep1Type, batches: calc.pep1Batches, lbs: calc.pep1Lbs } : null,
     s.pep2Type ? { name: s.pep2Type, batches: calc.pep2Batches, lbs: calc.pep2Lbs } : null,
   ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
+
+  const hasAny = applicators.length > 0 || pepperoni.length > 0;
+
+  const renderGrid = (rows: { name: string; batches: number; lbs: number }[]) => (
+    <View style={styles.batchGrid}>
+      {rows.map((b) => (
+        <BatchCard
+          key={b.name}
+          name={b.name}
+          batches={b.batches}
+          lbs={b.lbs}
+          style={styles.batchItem}
+        />
+      ))}
+    </View>
+  );
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -32,25 +50,30 @@ export default function FrontlineScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        <SectionHeader title="Frontline Needs" />
-        {batches.length > 0 ? (
-          <View style={styles.batchGrid}>
-            {batches.map((b) => (
-              <BatchCard
-                key={b.name}
-                name={b.name}
-                batches={b.batches}
-                lbs={b.lbs}
-                style={styles.batchItem}
-              />
-            ))}
-          </View>
+        {hasAny ? (
+          <>
+            {applicators.length > 0 ? (
+              <>
+                <SectionHeader title="Applicators" />
+                {renderGrid(applicators)}
+              </>
+            ) : null}
+            {pepperoni.length > 0 ? (
+              <>
+                <SectionHeader title="Pepperoni" />
+                {renderGrid(pepperoni)}
+              </>
+            ) : null}
+          </>
         ) : (
-          <CardSection style={{ paddingVertical: 16 }}>
-            <Text style={[styles.empty, { color: colors.mutedForeground }]}>
-              Add applicator or pepperoni types in Setup to see frontline needs.
-            </Text>
-          </CardSection>
+          <>
+            <SectionHeader title="Frontline Needs" />
+            <CardSection style={{ paddingVertical: 16 }}>
+              <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+                Add applicator or pepperoni types in Setup to see frontline needs.
+              </Text>
+            </CardSection>
+          </>
         )}
       </ScrollView>
     </View>

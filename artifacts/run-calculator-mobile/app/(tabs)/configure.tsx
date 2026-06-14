@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,7 +12,6 @@ import {
   TextField,
 } from "@/components/UI";
 import {
-  profileKey,
   useRun,
   runLabel,
   type RecipeRow,
@@ -150,9 +149,6 @@ export default function ConfigureScreen() {
     mixRecipePresets,
     saveRecipePreset,
     deleteRecipePreset,
-    saveProfile,
-    applyProfile,
-    hasProfile,
     supervisorPin,
   } = useRun();
   const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
@@ -161,34 +157,13 @@ export default function ConfigureScreen() {
   const [pinEntry, setPinEntry] = useState("");
   const [pinError, setPinError] = useState(false);
 
-  const lastProfileKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    // Don't auto-apply a profile just because we switched to this run.
-    lastProfileKey.current = profileKey(
-      run.settings.brand,
-      run.settings.flavor,
-    );
-  }, [run.id]);
-
   // Keep the string form in sync whenever settings change externally
-  // (profile auto-load, preset apply, reset). Editing form fields locally
-  // doesn't touch settings until blur, so this won't clobber typing.
+  // (profile auto-load on the Run screen, preset apply, reset). Editing form
+  // fields locally doesn't touch settings until blur, so this won't clobber
+  // typing.
   useEffect(() => {
     setForm(settingsToForm(run.settings));
   }, [run.settings]);
-
-  // Auto-load a saved brand/flavor profile when the combo changes to one we have.
-  useEffect(() => {
-    const b = run.settings.brand.trim();
-    const f = run.settings.flavor.trim();
-    const key = profileKey(b, f);
-    if (key === lastProfileKey.current) return;
-    lastProfileKey.current = key;
-    if (b && f && hasProfile(b, f)) {
-      applyProfile(b, f);
-    }
-  }, [run.settings.brand, run.settings.flavor, hasProfile, applyProfile]);
 
   const set = (key: keyof FormState) => (val: string) =>
     setForm((f) => ({ ...f, [key]: val }));
@@ -454,30 +429,9 @@ export default function ConfigureScreen() {
           </View>
         </CardSection>
 
-        {/* Run Info */}
-        <SectionHeader title="Run Info" />
+        {/* Case Packing */}
+        <SectionHeader title="Case Packing" />
         <CardSection>
-          <TextField
-            label="Brand"
-            value={form.brand}
-            onChangeText={set("brand")}
-            onBlur={save}
-            placeholder="Brand name"
-          />
-          <TextField
-            label="Flavor"
-            value={form.flavor}
-            onChangeText={set("flavor")}
-            onBlur={save}
-            placeholder="Flavor"
-          />
-          <NumericField
-            label="Cases Needed"
-            value={form.casesNeeded}
-            onChangeText={set("casesNeeded")}
-            onBlur={save}
-            placeholder="0"
-          />
           <NumericField
             label="Pizzas per Case"
             value={form.pizzasPerCase}
@@ -500,40 +454,6 @@ export default function ConfigureScreen() {
             placeholder="6"
             unit="(buffer)"
           />
-          <Pressable
-            onPress={() => {
-              saveProfile();
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success,
-              );
-            }}
-            disabled={!form.brand.trim() || !form.flavor.trim()}
-            style={({ pressed }) => [
-              styles.profileBtn,
-              {
-                backgroundColor: colors.secondary,
-                borderColor: colors.border,
-                opacity:
-                  !form.brand.trim() || !form.flavor.trim()
-                    ? 0.4
-                    : pressed
-                      ? 0.6
-                      : 1,
-              },
-            ]}
-          >
-            <Feather name="save" size={15} color={colors.foreground} />
-            <Text style={[styles.profileBtnText, { color: colors.foreground }]}>
-              {form.brand.trim() &&
-              form.flavor.trim() &&
-              hasProfile(form.brand, form.flavor)
-                ? "Update Profile for Brand + Flavor"
-                : "Save Profile for Brand + Flavor"}
-            </Text>
-          </Pressable>
-          <Text style={[styles.profileHint, { color: colors.mutedForeground }]}>
-            Saved settings auto-load next time you enter this brand + flavor.
-          </Text>
         </CardSection>
 
         {/* Die Type */}
@@ -1043,18 +963,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontStyle: "italic",
   },
-  profileBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 11,
-    marginTop: 14,
-  },
-  profileBtnText: { fontSize: 14, fontWeight: "600" as const },
-  profileHint: { fontSize: 11, marginTop: 6, textAlign: "center" },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,

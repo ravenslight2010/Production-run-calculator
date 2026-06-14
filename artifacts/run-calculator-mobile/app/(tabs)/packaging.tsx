@@ -34,6 +34,10 @@ export default function PackagingScreen() {
   const supply = computeDoughSupply(run, nowMs, run.progress.subTab);
 
   const casesCompleted = Math.max(0, run.settings.casesNeeded - calc.casesLeft);
+  const casesPerSkid = run.settings.casesPerSkid;
+  const skidNearlyFull =
+    casesPerSkid > 0 && casesPerSkid - run.progress.casesOnCurrentSkid <= 3 &&
+    run.progress.casesOnCurrentSkid < casesPerSkid;
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -159,6 +163,37 @@ export default function PackagingScreen() {
             }}
           />
         </CardSection>
+
+        {skidNearlyFull ? (
+          <View style={[styles.skidWarn, { backgroundColor: colors.warning + "22", borderColor: colors.warning }]}>
+            <Feather name="alert-triangle" size={14} color={colors.warning} />
+            <Text style={[styles.skidWarnText, { color: colors.warning }]}>
+              Skid nearly full — {casesPerSkid - run.progress.casesOnCurrentSkid} case
+              {casesPerSkid - run.progress.casesOnCurrentSkid !== 1 ? "s" : ""} to go
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Quick action — log the finished skid and start a fresh one */}
+        <Pressable
+          onPress={() => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            suppressAutoTrack();
+            updateProgress({
+              skidsCompleted: run.progress.skidsCompleted + 1,
+              casesOnCurrentSkid: 0,
+            });
+          }}
+          style={({ pressed }) => [
+            styles.skidDoneBtn,
+            { borderColor: colors.success, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Feather name="check-circle" size={16} color={colors.success} />
+          <Text style={[styles.skidDoneText, { color: colors.success }]}>
+            Skid Done — log &amp; reset
+          </Text>
+        </Pressable>
       </ScrollView>
     </View>
   );
@@ -211,4 +246,28 @@ const styles = StyleSheet.create({
   },
   autoPillText: { fontSize: 12, fontWeight: "700" as const },
   autoHint: { fontSize: 12, lineHeight: 16, marginBottom: 10, marginTop: -2 },
+
+  skidWarn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 12,
+  },
+  skidWarnText: { fontSize: 13, fontWeight: "600" as const, flex: 1 },
+
+  skidDoneBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginTop: 12,
+  },
+  skidDoneText: { fontSize: 15, fontWeight: "700" as const },
 });

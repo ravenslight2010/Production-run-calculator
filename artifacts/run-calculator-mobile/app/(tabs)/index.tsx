@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -13,10 +13,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CardSection, MetricCard, SectionHeader } from "@/components/UI";
+import { CardSection, MetricCard, NumericField, SectionHeader, TextField } from "@/components/UI";
 import {
   useRun,
   runLabel,
+  profileKey,
   computeDoughSupply,
   type DoughSupplyMode,
   type Stoppage,
@@ -47,6 +48,16 @@ function fmtElapsed(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function n2s(n: number): string {
+  return n > 0 ? n.toString() : "";
+}
+
+function toNum(s: string | undefined | null): number {
+  if (s == null || s === "") return 0;
+  const n = parseFloat(String(s).replace(",", "."));
+  return isNaN(n) ? 0 : n;
+}
+
 const STOPPAGE_TYPES: { type: Stoppage["type"]; label: string; color: string }[] = [
   { type: "jam", label: "Jam", color: "#ff3b30" },
   { type: "changeover", label: "Changeover", color: "#ff9f0a" },
@@ -66,10 +77,55 @@ export default function CalculatorScreen() {
     runToTime, setRunToTime,
     applyCarryOver,
     syncStatus,
+    updateSettings, saveProfile, applyProfile, hasProfile,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
+
+  // ── Current-run identity (brand / flavor / cases) — edited inline here, like web ──
+  const [idForm, setIdForm] = useState({
+    brand: run.settings.brand,
+    flavor: run.settings.flavor,
+    casesNeeded: n2s(run.settings.casesNeeded),
+  });
+  const lastProfileKey = useRef<string | null>(
+    profileKey(run.settings.brand, run.settings.flavor),
+  );
+
+  // Don't auto-apply a profile just because we switched runs.
+  useEffect(() => {
+    lastProfileKey.current = profileKey(run.settings.brand, run.settings.flavor);
+  }, [run.id]);
+
+  // Keep the identity form in sync when settings change externally
+  // (profile auto-load, run switch). Typing only commits on blur, so this
+  // won't clobber in-progress edits.
+  useEffect(() => {
+    setIdForm({
+      brand: run.settings.brand,
+      flavor: run.settings.flavor,
+      casesNeeded: n2s(run.settings.casesNeeded),
+    });
+  }, [run.settings.brand, run.settings.flavor, run.settings.casesNeeded]);
+
+  // Auto-load a saved brand/flavor profile when the combo changes to one we have.
+  useEffect(() => {
+    const b = run.settings.brand.trim();
+    const f = run.settings.flavor.trim();
+    const key = profileKey(b, f);
+    if (key === lastProfileKey.current) return;
+    lastProfileKey.current = key;
+    if (b && f && hasProfile(b, f)) applyProfile(b, f);
+  }, [run.settings.brand, run.settings.flavor, hasProfile, applyProfile]);
+
+  const commitId = () => {
+    updateSettings({
+      brand: idForm.brand.trim(),
+      flavor: idForm.flavor.trim(),
+      casesNeeded: toNum(idForm.casesNeeded),
+    });
+  };
 
   const nowMs = Date.now();
   const supply = computeDoughSupply(run, nowMs, doughSubTab);
@@ -116,6 +172,74 @@ export default function CalculatorScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
+        <SectionHeader title="Current Run" />
+        <CardSection>
+          <TextField
+            label="Brand"
+            value={idForm.brand}
+            onChangeText={(t) => setIdForm((f) => ({ ...f, brand: t }))}
+            onBlur={commitId}
+            placeholder="Brand name"
+          />
+          <TextField
+            label="Flavor"
+            value={idForm.flavor}
+            onChangeText={(t) => setIdForm((f) => ({ ...f, flavor: t }))}
+            onBlur={commitId}
+            placeholder="Flavor"
+          />
+          <NumericField
+            label="Cases Needed"
+            value={idForm.casesNeeded}
+            onChangeText={(t) => setIdForm((f) => ({ ...f, casesNeeded: t }))}
+            onBlur={commitId}
+            placeholder="0"
+          />
+          {toNum(idForm.casesNeeded) <= 0 ? (
+            <Text style={[styles.casesWarn, { color: colors.warning }]}>
+              ⚠ Enter cases needed to enable calculations
+            </Text>
+          ) : null}
+          <Pressable
+            onPress={() => {
+              if (!idForm.brand.trim() || !idForm.flavor.trim()) return;
+              // Commit any typed-but-unblurred identity first; the queued
+              // setAppState updater runs before saveProfile's, so the profile
+              // is keyed/saved off the latest brand+flavor.
+              commitId();
+              saveProfile();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }}
+            disabled={!idForm.brand.trim() || !idForm.flavor.trim()}
+            style={({ pressed }) => [
+              styles.profileBtn,
+              {
+                backgroundColor: colors.secondary,
+                borderColor: colors.border,
+                opacity:
+                  !idForm.brand.trim() || !idForm.flavor.trim()
+                    ? 0.4
+                    : pressed
+                      ? 0.6
+                      : 1,
+              },
+            ]}
+          >
+            <Feather name="save" size={15} color={colors.foreground} />
+            <Text style={[styles.profileBtnText, { color: colors.foreground }]}>
+              {idForm.brand.trim() &&
+              idForm.flavor.trim() &&
+              hasProfile(idForm.brand, idForm.flavor)
+                ? "Update Profile for Brand + Flavor"
+                : "Save Profile for Brand + Flavor"}
+            </Text>
+          </Pressable>
+          <Text style={[styles.profileHint, { color: colors.mutedForeground }]}>
+            Saved settings auto-load next time you enter this brand + flavor.
+          </Text>
+        </CardSection>
+
         {/* Run navigator */}
         <View style={[styles.runNav, { borderColor: colors.border, backgroundColor: colors.card }]}>
           <Pressable
@@ -645,6 +769,20 @@ function RunPickerModal({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
+
+  casesWarn: { fontSize: 12, fontWeight: "600" as const, marginTop: 10 },
+  profileBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 14,
+  },
+  profileBtnText: { fontSize: 14, fontWeight: "600" as const },
+  profileHint: { fontSize: 12, lineHeight: 16, marginTop: 8 },
 
   runNav: {
     flexDirection: "row",
