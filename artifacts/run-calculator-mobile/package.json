@@ -58,6 +58,7 @@
   "dependencies": {
     "expo-file-system": "~19.0.23",
     "expo-notifications": "~0.32.17",
-    "expo-sharing": "~14.0.8"
+    "expo-sharing": "~14.0.8",
+    "react-native-sse": "^1.2.1"
   }
 }

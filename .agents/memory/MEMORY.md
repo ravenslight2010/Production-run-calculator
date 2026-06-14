@@ -1,2 +1,3 @@
 - [Recipe print/share](recipe-print-share.md) — per-recipe card print/share button requested by user, deferred.
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
+- [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.

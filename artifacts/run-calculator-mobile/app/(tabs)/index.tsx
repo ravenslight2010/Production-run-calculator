@@ -68,6 +68,7 @@ export default function CalculatorScreen() {
     autoTrack, setAutoTrack, suppressAutoTrack,
     runToTime, setRunToTime,
     applyCarryOver,
+    syncStatus,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
@@ -176,9 +177,29 @@ export default function CalculatorScreen() {
             <Text style={[styles.navLabel, { color: colors.foreground }]} numberOfLines={1}>
               {label}
             </Text>
-            <Text style={[styles.navSub, { color: colors.mutedForeground }]}>
-              Run {runIndex + 1} of {runCount}
-            </Text>
+            <View style={styles.navSubRow}>
+              <View
+                style={[
+                  styles.syncDot,
+                  {
+                    backgroundColor:
+                      syncStatus === "online"
+                        ? colors.success
+                        : syncStatus === "connecting"
+                          ? "#ff9f0a"
+                          : colors.mutedForeground,
+                  },
+                ]}
+              />
+              <Text style={[styles.navSub, { color: colors.mutedForeground }]}>
+                Run {runIndex + 1} of {runCount}
+                {syncStatus === "online"
+                  ? " · Synced"
+                  : syncStatus === "connecting"
+                    ? " · Connecting…"
+                    : " · Offline"}
+              </Text>
+            </View>
           </Pressable>
 
           <Pressable
@@ -895,7 +916,9 @@ const styles = StyleSheet.create({
   navBtn: { padding: 12 },
   navCenter: { flex: 1, alignItems: "center", paddingVertical: 10 },
   navLabel: { fontSize: 15, fontWeight: "600" as const, textAlign: "center" },
-  navSub: { fontSize: 11, marginTop: 1 },
+  navSubRow: { flexDirection: "row", alignItems: "center", marginTop: 1, gap: 5 },
+  syncDot: { width: 6, height: 6, borderRadius: 3 },
+  navSub: { fontSize: 11 },
   navAddBtn: {
     margin: 8,
     width: 32,

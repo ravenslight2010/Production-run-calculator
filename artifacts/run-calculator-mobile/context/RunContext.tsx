@@ -8,8 +8,44 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { appStateToPayload, applyPayloadToState } from "./sync/mapping";
+import {
+  fetchToday,
+  getApiBaseUrl,
+  getOrCreateClientId,
+  openSyncStream,
+  putToday,
+  type SyncStream,
+} from "./sync/client";
+import type { SyncPayload } from "./sync/payloadTypes";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
+
+// Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
+// incoming remote payloads are deferred briefly after a local edit so they don't
+// clobber a field the user is actively changing.
+const PUSH_DEBOUNCE_MS = 800;
+const PUSH_RETRY_MS = 4000;
+const EDIT_QUIET_MS = 2500;
+
+export type SyncStatus = "connecting" | "online" | "offline";
+
+// Deterministic JSON (sorted object keys) so the same logical payload always
+// produces the same signature, used to detect real changes vs. echoes.
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, val) => {
+    if (val && typeof val === "object" && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>;
+      return Object.keys(obj)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, k) => {
+          acc[k] = obj[k];
+          return acc;
+        }, {});
+    }
+    return val;
+  });
+}
 
 // One line in an ingredient recipe (e.g. { ingredient: "Flour", lbs: 100 }).
 export interface RecipeRow {
@@ -213,7 +249,7 @@ export const DEFAULT_STOP_REASONS = [
 ];
 export const DEFAULT_SUPERVISOR_PIN = "1234";
 
-const DEFAULT_PROGRESS: RunProgress = {
+export const DEFAULT_PROGRESS: RunProgress = {
   skidsCompleted: 0,
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
@@ -650,6 +686,10 @@ interface AppState {
   mixRecipePresets: Record<string, RecipeRow[]>;
   // Planned production keyed by date string (YYYY-MM-DD)
   scheduled: Record<string, ScheduledRun[]>;
+  // Live-sync reset guard: a remote day is only accepted when its resetAt is
+  // >= this. Bumped on day-rollover so a fresh day isn't overwritten by stale
+  // remote state. 0 for first-ever installs so they accept any remote day.
+  resetAt: number;
 }
 
 export function profileKey(brand: string, flavor: string): string {
@@ -781,6 +821,8 @@ interface RunContextValue {
   removeScheduledRun: (date: string, id: string) => void;
   clearScheduledDay: (date: string) => void;
   applyScheduledDay: (date: string) => boolean;
+  // Live multi-device sync connection status.
+  syncStatus: SyncStatus;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -814,6 +856,7 @@ const INITIAL_STATE: AppState = {
   frontlineRecipePresets: {},
   mixRecipePresets: {},
   scheduled: {},
+  resetAt: 0,
 };
 
 // Fill any missing fields (from older persisted blobs) with defaults so the
@@ -869,6 +912,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     frontlineRecipePresets: parsed.frontlineRecipePresets ?? {},
     mixRecipePresets: parsed.mixRecipePresets ?? {},
     scheduled: parsed.scheduled ?? {},
+    resetAt: parsed.resetAt ?? 0,
   };
 }
 
@@ -880,8 +924,24 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const autoBucketRef = useRef<number>(-1);
   const autoSuppressRef = useRef<number>(0);
 
+  // ── Live-sync state/refs ───────────────────────────────────────────────────
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
+  const [bootDone, setBootDone] = useState(false);
+  const appStateRef = useRef(appState);
+  appStateRef.current = appState;
+  const clientIdRef = useRef<string | null>(null);
+  const lastRemoteRawRef = useRef<SyncPayload | null>(null);
+  const lastSyncSigRef = useRef<string>("");
+  const lastLocalEditRef = useRef<number>(0);
+  const pendingRemoteRef = useRef<SyncPayload | null>(null);
+  const deferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamRef = useRef<SyncStream | null>(null);
+  const syncStartedRef = useRef(false);
+
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+    AsyncStorage.getItem(STORAGE_KEY)
+      .then((raw) => {
       if (raw) {
         try {
           const parsed = JSON.parse(raw) as Partial<AppState>;
@@ -906,6 +966,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
                 currentIndex: 0,
                 shiftNotes: "",
                 date: today,
+                resetAt: boundaryMs,
                 history: [
                   archived,
                   ...history.filter((h) => h.date !== parsed.date),
@@ -925,7 +986,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           /* corrupt, keep defaults */
         }
       }
-    });
+    })
+      .finally(() => setBootDone(true));
   }, []);
 
   const persist = useCallback((state: AppState) => {
@@ -934,6 +996,138 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }, 400);
   }, []);
+
+  // Persist immediately (bypassing the debounce) — used when applying remote
+  // sync updates so they survive a quick reload.
+  const persistNow = useCallback((state: AppState) => {
+    if (saveRef.current) {
+      clearTimeout(saveRef.current);
+      saveRef.current = null;
+    }
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, []);
+
+  // Build and PUT the current state to the server. The pushed signature is only
+  // recorded AFTER a successful write, so a failed push doesn't get marked as
+  // synced (which would block the change-watcher from retrying). On failure we
+  // mark the stream offline and schedule a retry.
+  const schedulePushRef = useRef<() => void>(() => {});
+  const doPush = useCallback(() => {
+    const base = getApiBaseUrl();
+    const clientId = clientIdRef.current;
+    if (!base || !clientId) return;
+    const payload = appStateToPayload(appStateRef.current, lastRemoteRawRef.current);
+    const sig = stableStringify(payload);
+    putToday(base, clientId, payload)
+      .then(() => {
+        lastSyncSigRef.current = sig;
+        setSyncStatus((s) => (s === "offline" ? "online" : s));
+      })
+      .catch(() => {
+        setSyncStatus("offline");
+        if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = setTimeout(() => schedulePushRef.current(), PUSH_RETRY_MS);
+      });
+  }, []);
+
+  const schedulePush = useCallback(() => {
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+    pushTimerRef.current = setTimeout(() => doPush(), PUSH_DEBOUNCE_MS);
+  }, [doPush]);
+  schedulePushRef.current = schedulePush;
+
+  // Sync bootstrap: once local state has loaded, establish a clientId, pull
+  // today's payload (or seed the server if empty), then subscribe to SSE.
+  useEffect(() => {
+    if (!bootDone) return;
+    const base = getApiBaseUrl();
+    if (!base) {
+      setSyncStatus("offline");
+      return;
+    }
+    let cancelled = false;
+
+    const commitRemote = (payload: SyncPayload) => {
+      setAppState((prev) => {
+        const { patch } = applyPayloadToState(payload, prev);
+        const next = { ...prev, ...patch };
+        lastRemoteRawRef.current = payload;
+        lastSyncSigRef.current = stableStringify(appStateToPayload(next, payload));
+        persistNow(next);
+        return next;
+      });
+    };
+
+    // Defer applying a remote payload while the user is mid-edit, so a live
+    // update doesn't overwrite the field they're typing in. Re-checks until the
+    // edit window goes quiet, then applies the latest pending payload.
+    const tryApplyPending = () => {
+      if (deferTimerRef.current) {
+        clearTimeout(deferTimerRef.current);
+        deferTimerRef.current = null;
+      }
+      const since = Date.now() - lastLocalEditRef.current;
+      if (since < EDIT_QUIET_MS) {
+        deferTimerRef.current = setTimeout(tryApplyPending, EDIT_QUIET_MS - since + 50);
+        return;
+      }
+      const p = pendingRemoteRef.current;
+      if (p) {
+        pendingRemoteRef.current = null;
+        commitRemote(p);
+      }
+    };
+
+    const onRemote = (payload: SyncPayload) => {
+      pendingRemoteRef.current = payload;
+      tryApplyPending();
+    };
+
+    (async () => {
+      const clientId = await getOrCreateClientId();
+      if (cancelled) return;
+      clientIdRef.current = clientId;
+      syncStartedRef.current = true;
+      try {
+        const data = await fetchToday(base);
+        if (cancelled) return;
+        if (data) onRemote(data);
+        else doPush(); // server empty for today — seed it with our state
+      } catch {
+        if (!cancelled) setSyncStatus("offline");
+      }
+      if (cancelled) return;
+      streamRef.current = openSyncStream(base, clientId, {
+        onOpen: () => setSyncStatus("online"),
+        onPayload: (payload, senderId) => {
+          if (senderId && senderId === clientIdRef.current) return; // ignore our own echo
+          onRemote(payload);
+        },
+        onError: () => setSyncStatus("connecting"),
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      if (streamRef.current) {
+        streamRef.current.close();
+        streamRef.current = null;
+      }
+      if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+      if (deferTimerRef.current) clearTimeout(deferTimerRef.current);
+    };
+  }, [bootDone, doPush, persistNow]);
+
+  // Change-watcher: push local edits. The signature compare skips no-op renders
+  // and echoes of just-applied remote state (whose signature was pre-recorded).
+  useEffect(() => {
+    if (!syncStartedRef.current) return;
+    const sig = stableStringify(appStateToPayload(appState, lastRemoteRawRef.current));
+    if (sig === lastSyncSigRef.current) return;
+    lastLocalEditRef.current = Date.now();
+    lastSyncSigRef.current = sig;
+    schedulePush();
+  }, [appState, schedulePush]);
 
   const currentRun = appState.runs[appState.currentIndex];
 
@@ -1656,6 +1850,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         removeScheduledRun,
         clearScheduledDay,
         applyScheduledDay,
+        syncStatus,
       }}
     >
       {children}
