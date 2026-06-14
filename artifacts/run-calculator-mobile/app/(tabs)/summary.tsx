@@ -1,0 +1,351 @@
+import React from "react";
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SectionHeader } from "@/components/UI";
+import {
+  computeCalc,
+  runLabel,
+  useRun,
+  type RunState,
+} from "@/context/RunContext";
+import { useColors } from "@/hooks/useColors";
+
+type RunStatus = "finished" | "current" | "upcoming";
+
+function statusOf(r: RunState): RunStatus {
+  if (r.endedAt != null) return "finished";
+  if (r.isRunning || r.startedAt != null) return "current";
+  return "upcoming";
+}
+
+function fmtClock(ms?: number): string | null {
+  if (!ms) return null;
+  const d = new Date(ms);
+  const h = d.getHours() % 12 || 12;
+  const m = d.getMinutes().toString().padStart(2, "0");
+  return `${h}:${m} ${d.getHours() >= 12 ? "PM" : "AM"}`;
+}
+
+function fmtDuration(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${h}:${m.toString().padStart(2, "0")}`;
+}
+
+interface RunStats {
+  status: RunStatus;
+  planned: number;
+  casesMade: number;
+  pizzasMade: number;
+  ppm: number;
+  downtimeSec: number;
+  netRunSec: number;
+  start: string | null;
+  end: string | null;
+}
+
+function computeRunStats(r: RunState, now: number): RunStats {
+  const calc = computeCalc(r, now);
+  const planned = r.settings.casesNeeded;
+  const casesMade = Math.max(0, planned - calc.casesLeft);
+  return {
+    status: statusOf(r),
+    planned,
+    casesMade,
+    pizzasMade: casesMade * r.settings.pizzasPerCase,
+    ppm: calc.ppm,
+    downtimeSec: calc.totalDowntimeSec,
+    netRunSec: calc.netElapsedSec,
+    start: fmtClock(r.startedAt),
+    end: fmtClock(r.endedAt),
+  };
+}
+
+function RunCard({ run, index }: { run: RunState; index: number }) {
+  const colors = useColors();
+  const stats = computeRunStats(run, Date.now());
+  const pct = stats.planned > 0 ? Math.min(1, stats.casesMade / stats.planned) : 0;
+
+  const accent =
+    stats.status === "current"
+      ? colors.primary
+      : stats.status === "finished"
+        ? colors.success
+        : colors.mutedForeground;
+
+  return (
+    <View
+      style={[
+        styles.runCard,
+        {
+          backgroundColor: colors.card,
+          borderColor:
+            stats.status === "upcoming" ? colors.border : accent + "55",
+        },
+      ]}
+    >
+      <View style={styles.runHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.runLabel, { color: colors.foreground }]}>
+            {runLabel(run, index)}
+          </Text>
+          {stats.start ? (
+            <Text style={[styles.runTime, { color: colors.mutedForeground }]}>
+              {stats.start}
+              {stats.end ? ` → ${stats.end}` : " → running"}
+            </Text>
+          ) : null}
+        </View>
+        <View
+          style={[styles.statusPill, { backgroundColor: accent + "22" }]}
+        >
+          <Text style={[styles.statusText, { color: accent }]}>
+            {stats.status}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.statRow}>
+        {[
+          { label: "Cases", val: stats.casesMade > 0 ? stats.casesMade.toLocaleString() : "—" },
+          { label: "Planned", val: stats.planned > 0 ? stats.planned.toLocaleString() : "—" },
+          {
+            label: "PPM",
+            val: stats.ppm > 0 ? Math.round(stats.ppm).toString() : "—",
+            color: stats.ppm > 0 ? colors.success : colors.mutedForeground,
+          },
+        ].map((s) => (
+          <View
+            key={s.label}
+            style={[styles.statBox, { backgroundColor: colors.secondary }]}
+          >
+            <Text style={[styles.statBoxLabel, { color: colors.mutedForeground }]}>
+              {s.label}
+            </Text>
+            <Text
+              style={[
+                styles.statBoxVal,
+                { color: s.color ?? colors.foreground },
+              ]}
+            >
+              {s.val}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {stats.status !== "upcoming" ? (
+        <View style={styles.progressWrap}>
+          <View style={styles.progressLabels}>
+            <Text style={[styles.progressText, { color: colors.mutedForeground }]}>
+              {stats.casesMade} / {stats.planned} cases
+            </Text>
+            <Text style={[styles.progressText, { color: colors.mutedForeground }]}>
+              {Math.round(pct * 100)}%
+            </Text>
+          </View>
+          <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${pct * 100}%`, backgroundColor: accent },
+              ]}
+            />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export default function SummaryScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { allRuns, tick, shiftNotes, setShiftNotes } = useRun();
+
+  const webTop = Platform.OS === "web" ? 67 : 0;
+  const webBottom = Platform.OS === "web" ? 34 : 0;
+
+  const now = Date.now();
+  void tick; // re-render on tick
+  const allStats = allRuns.map((r) => computeRunStats(r, now));
+
+  const totalCases = allStats.reduce((a, s) => a + s.casesMade, 0);
+  const totalPizzas = allStats.reduce((a, s) => a + s.pizzasMade, 0);
+  const totalNetSec = allStats.reduce((a, s) => a + s.netRunSec, 0);
+  const totalDownSec = allStats.reduce((a, s) => a + s.downtimeSec, 0);
+  const todayPPM =
+    totalNetSec > 0 ? Math.round(totalPizzas / (totalNetSec / 60)) : 0;
+
+  const shiftStats = [
+    { label: "Cases Made", val: totalCases.toLocaleString(), color: colors.foreground },
+    { label: "Net Run Time", val: fmtDuration(totalNetSec), color: colors.foreground },
+    {
+      label: "Downtime",
+      val: fmtDuration(totalDownSec),
+      color: totalDownSec > 0 ? colors.warning : colors.foreground,
+    },
+    {
+      label: "Today PPM",
+      val: todayPPM > 0 ? todayPPM.toString() : "—",
+      color: todayPPM > 0 ? colors.success : colors.mutedForeground,
+    },
+  ];
+
+  return (
+    <ScrollView
+      style={{ backgroundColor: colors.background }}
+      contentContainerStyle={{
+        padding: 16,
+        paddingTop: webTop + 8,
+        paddingBottom: insets.bottom + webBottom + 100,
+      }}
+    >
+      <View style={styles.shiftHeader}>
+        <Text style={[styles.shiftTitle, { color: colors.foreground }]}>
+          Today&apos;s Shift
+        </Text>
+        <Text style={[styles.shiftCount, { color: colors.mutedForeground }]}>
+          {allRuns.length} {allRuns.length === 1 ? "run" : "runs"}
+        </Text>
+      </View>
+
+      <View
+        style={[
+          styles.statsGrid,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        {shiftStats.map((s, i) => (
+          <View
+            key={s.label}
+            style={[
+              styles.statsCell,
+              {
+                borderColor: colors.border,
+                borderRightWidth: i % 2 === 0 ? StyleSheet.hairlineWidth : 0,
+                borderBottomWidth: i < 2 ? StyleSheet.hairlineWidth : 0,
+              },
+            ]}
+          >
+            <Text style={[styles.statsCellLabel, { color: colors.mutedForeground }]}>
+              {s.label.toUpperCase()}
+            </Text>
+            <Text style={[styles.statsCellVal, { color: s.color }]}>{s.val}</Text>
+          </View>
+        ))}
+      </View>
+
+      <SectionHeader title="Runs" />
+      <View style={{ gap: 12 }}>
+        {allRuns.map((r, i) => (
+          <RunCard key={r.id} run={r} index={i} />
+        ))}
+      </View>
+
+      <SectionHeader title="Shift Notes" />
+      <View
+        style={[
+          styles.notesCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <TextInput
+          style={[styles.notesInput, { color: colors.foreground }]}
+          value={shiftNotes}
+          onChangeText={setShiftNotes}
+          placeholder="Handoff notes, issues, observations…"
+          placeholderTextColor={colors.mutedForeground}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
+      </View>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  shiftHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  shiftTitle: { fontSize: 15, fontWeight: "600" as const },
+  shiftCount: { fontSize: 13 },
+
+  statsGrid: {
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    overflow: "hidden",
+  },
+  statsCell: { width: "50%", paddingHorizontal: 16, paddingVertical: 14 },
+  statsCellLabel: {
+    fontSize: 9,
+    fontWeight: "600" as const,
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  statsCellVal: { fontSize: 26, fontWeight: "800" as const },
+
+  runCard: { borderRadius: 16, borderWidth: 1, padding: 14 },
+  runHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 8,
+  },
+  runLabel: { fontSize: 15, fontWeight: "700" as const },
+  runTime: { fontSize: 11, marginTop: 2 },
+  statusPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+
+  statRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  statBox: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  statBoxLabel: {
+    fontSize: 9,
+    fontWeight: "600" as const,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  statBoxVal: { fontSize: 18, fontWeight: "800" as const },
+
+  progressWrap: { gap: 5 },
+  progressLabels: { flexDirection: "row", justifyContent: "space-between" },
+  progressText: { fontSize: 11, fontWeight: "600" as const },
+  progressTrack: { height: 6, borderRadius: 999, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 999 },
+
+  notesCard: { borderRadius: 12, borderWidth: 1, padding: 12 },
+  notesInput: {
+    fontSize: 15,
+    minHeight: 90,
+    padding: Platform.OS === "web" ? 4 : 0,
+  },
+});

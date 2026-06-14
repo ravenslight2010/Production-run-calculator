@@ -171,7 +171,7 @@ function makeNewRun(): RunState {
   };
 }
 
-function computeCalc(state: RunState, nowMs: number): RunCalc {
+export function computeCalc(state: RunState, nowMs: number): RunCalc {
   const { settings: s, progress: p } = state;
 
   const casesLeft = Math.max(
@@ -259,6 +259,9 @@ function computeCalc(state: RunState, nowMs: number): RunCalc {
   const doughBatches =
     doughLbs > 0 && s.doughBatchLbs > 0 ? Math.ceil(doughLbs / s.doughBatchLbs) : 0;
 
+  // Time boundary: a finished run's clock stops at endedAt; otherwise "now".
+  const boundaryMs = state.endedAt ?? nowMs;
+
   // Downtime
   const completedStoppages = state.stoppages.filter((s) => s.endedAt != null);
   const activeStoppage = state.stoppages.find((s) => s.endedAt == null);
@@ -266,12 +269,13 @@ function computeCalc(state: RunState, nowMs: number): RunCalc {
     (acc, s) => acc + (s.endedAt! - s.startedAt) / 1000,
     0,
   );
+  // An open stoppage only accrues up to the run's boundary (now, or end time).
   const activeDowntimeSec = activeStoppage
-    ? (nowMs - activeStoppage.startedAt) / 1000
+    ? Math.max(0, (boundaryMs - activeStoppage.startedAt) / 1000)
     : 0;
   const totalDowntimeSec = completedDowntimeSec + activeDowntimeSec;
   const grossElapsedSec = state.startedAt
-    ? (nowMs - state.startedAt) / 1000
+    ? Math.max(0, (boundaryMs - state.startedAt) / 1000)
     : 0;
   const netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec);
 
@@ -305,6 +309,7 @@ function computeCalc(state: RunState, nowMs: number): RunCalc {
 interface AppState {
   runs: RunState[];
   currentIndex: number;
+  shiftNotes: string;
 }
 
 interface RunContextValue {
@@ -325,6 +330,8 @@ interface RunContextValue {
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
   resetRun: () => void;
+  shiftNotes: string;
+  setShiftNotes: (notes: string) => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -332,6 +339,7 @@ const RunContext = createContext<RunContextValue | null>(null);
 const INITIAL_STATE: AppState = {
   runs: [makeNewRun()],
   currentIndex: 0,
+  shiftNotes: "",
 };
 
 export function RunContextProvider({ children }: { children: React.ReactNode }) {
@@ -346,7 +354,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         try {
           const parsed = JSON.parse(raw) as AppState;
           if (parsed.runs && parsed.runs.length > 0) {
-            setAppState(parsed);
+            setAppState({ ...parsed, shiftNotes: parsed.shiftNotes ?? "" });
           }
         } catch {
           /* corrupt, keep defaults */
@@ -406,6 +414,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         ...r,
         isRunning: true,
         startedAt: r.startedAt ?? Date.now(),
+        endedAt: undefined,
       })),
     [updateCurrentRun],
   );
@@ -443,7 +452,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     setAppState((prev) => {
       const newRun = makeNewRun();
       const runs = [...prev.runs, newRun];
-      const next = { runs, currentIndex: runs.length - 1 };
+      const next = { ...prev, runs, currentIndex: runs.length - 1 };
       persist(next);
       return next;
     });
@@ -467,7 +476,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         if (prev.runs.length <= 1) return prev;
         const runs = prev.runs.filter((_, i) => i !== index);
         const currentIndex = Math.min(prev.currentIndex, runs.length - 1);
-        const next = { runs, currentIndex };
+        const next = { ...prev, runs, currentIndex };
         persist(next);
         return next;
       });
@@ -478,6 +487,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const resetRun = useCallback(() => {
     updateCurrentRun(() => makeNewRun());
   }, [updateCurrentRun]);
+
+  const setShiftNotes = useCallback(
+    (notes: string) => {
+      setAppState((prev) => {
+        const next = { ...prev, shiftNotes: notes };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
   const activeStoppage = currentRun?.stoppages.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
@@ -502,6 +522,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         switchRun,
         deleteRun,
         resetRun,
+        shiftNotes: appState.shiftNotes,
+        setShiftNotes,
       }}
     >
       {children}

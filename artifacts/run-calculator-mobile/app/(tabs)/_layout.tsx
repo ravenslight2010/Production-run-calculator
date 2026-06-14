@@ -56,6 +56,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="summary"
+        options={{
+          title: "Summary",
+          tabBarIcon: ({ color }) => <Feather name="list" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="configure"
         options={{
           title: "Setup",
