@@ -1,6 +1,5 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -13,7 +12,6 @@ import {
   TextField,
 } from "@/components/UI";
 import {
-  DEFAULT_SETTINGS,
   profileKey,
   useRun,
   runLabel,
@@ -134,12 +132,10 @@ function settingsToForm(s: RunSettings): FormState {
 export default function ConfigureScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const {
     run,
     runIndex,
     updateSettings,
-    resetRun,
     templates,
     saveTemplate,
     applyTemplate,
@@ -367,42 +363,6 @@ export default function ConfigureScreen() {
             {currentLabel}
           </Text>
         </View>
-
-        <Pressable
-          onPress={() => router.push("/master-data")}
-          style={({ pressed }) => [
-            styles.masterDataBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="database" size={16} color={colors.foreground} />
-          <Text style={[styles.masterDataText, { color: colors.foreground }]}>
-            Manage Master Data
-          </Text>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </Pressable>
-
-        <Pressable
-          onPress={() => router.push("/schedule")}
-          style={({ pressed }) => [
-            styles.masterDataBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="calendar" size={16} color={colors.foreground} />
-          <Text style={[styles.masterDataText, { color: colors.foreground }]}>
-            Production Schedule
-          </Text>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </Pressable>
 
         {/* Templates */}
         <SectionHeader title="Templates" />
@@ -978,7 +938,7 @@ export default function ConfigureScreen() {
           />
         </CardSection>
 
-        {/* Save + Reset */}
+        {/* Save */}
         <Pressable
           onPress={save}
           style={({ pressed }) => [
@@ -987,21 +947,6 @@ export default function ConfigureScreen() {
           ]}
         >
           <Text style={styles.saveBtnText}>Save Settings</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={() => {
-            resetRun();
-            setForm(settingsToForm(DEFAULT_SETTINGS));
-          }}
-          style={({ pressed }) => [
-            styles.resetBtn,
-            { borderColor: "#ef4444", opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Text style={[styles.resetBtnText, { color: "#ef4444" }]}>
-            Reset This Run
-          </Text>
         </Pressable>
       </KeyboardAwareScrollViewCompat>
     </View>

@@ -13,13 +13,11 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BatchCard, CardSection, MetricCard, SectionHeader, Stepper } from "@/components/UI";
+import { CardSection, MetricCard, SectionHeader } from "@/components/UI";
 import {
   useRun,
   runLabel,
-  sauceBarrelBreakdown,
   computeDoughSupply,
-  liveFreezerMin,
   type DoughSupplyMode,
   type Stoppage,
 } from "@/context/RunContext";
@@ -60,12 +58,11 @@ export default function CalculatorScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    run, calc, tick,
+    run, calc,
     runIndex, runCount, allRuns,
     activeStoppage, startRun, endRun,
     updateProgress, addStoppage, endActiveStoppage,
     addRun, switchRun, deleteRun,
-    autoTrack, setAutoTrack, suppressAutoTrack,
     runToTime, setRunToTime,
     applyCarryOver,
     syncStatus,
@@ -73,17 +70,9 @@ export default function CalculatorScreen() {
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
-  const setDoughSubTab = (m: DoughSupplyMode) => updateProgress({ subTab: m });
 
   const nowMs = Date.now();
-  const freezerTime = run.settings.freezerTime;
-  const freezerMin = liveFreezerMin(run, nowMs);
-  const freezerRemaining = Math.max(0, freezerTime - freezerMin);
-  const showFreezer = run.startedAt != null && freezerTime > 0;
-
   const supply = computeDoughSupply(run, nowMs, doughSubTab);
-  const supplyConfigured =
-    run.settings.doughballsPerTray > 0 || run.settings.crustsPerStack > 0;
 
   // Smart carry-over of leftover dough/crusts into the next run.
   const hasNextRun = runIndex < runCount - 1;
@@ -112,46 +101,10 @@ export default function CalculatorScreen() {
 
   const label = runLabel(run, runIndex);
 
-  const sauceBarrels = sauceBarrelBreakdown(calc.sauceLbs, calc.sauceEffBarrel);
-
-  const batches = [
-    run.settings.sauceOzPerPizza > 0 && calc.sauceLbs > 0
-      ? {
-          name: "Sauce",
-          batches: calc.sauceBatches,
-          lbs: calc.sauceLbs,
-          sub: sauceBarrels
-            ? `${sauceBarrels.totalBarrels} barrel${sauceBarrels.totalBarrels === 1 ? "" : "s"} · ${sauceBarrels.batchesPerBarrel}/barrel`
-            : undefined,
-        }
-      : null,
-    run.settings.app1Type
-      ? { name: run.settings.app1Type, batches: calc.app1Batches, lbs: calc.app1Lbs }
-      : null,
-    run.settings.app2Type
-      ? { name: run.settings.app2Type, batches: calc.app2Batches, lbs: calc.app2Lbs }
-      : null,
-    run.settings.app3Type
-      ? { name: run.settings.app3Type, batches: calc.app3Batches, lbs: calc.app3Lbs }
-      : null,
-    run.settings.app4Type
-      ? { name: run.settings.app4Type, batches: calc.app4Batches, lbs: calc.app4Lbs }
-      : null,
-    run.settings.pep1Type
-      ? { name: run.settings.pep1Type, batches: calc.pep1Batches, lbs: calc.pep1Lbs }
-      : null,
-    run.settings.pep2Type
-      ? { name: run.settings.pep2Type, batches: calc.pep2Batches, lbs: calc.pep2Lbs }
-      : null,
-    run.settings.doughBatchLbs > 0
-      ? { name: "Dough", batches: calc.doughBatches, lbs: calc.doughLbs }
-      : null,
-  ].filter(Boolean) as {
-    name: string;
-    batches: number;
-    lbs: number;
-    sub?: string;
-  }[];
+  // Other runs in today's lineup that haven't been finished yet.
+  const upcomingRuns = allRuns
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => i !== runIndex && r.endedAt == null);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -341,33 +294,6 @@ export default function CalculatorScreen() {
           </View>
         ) : null}
 
-        {/* Freezer countdown */}
-        {showFreezer ? (
-          <View style={[styles.freezerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.freezerLeft}>
-              <Feather name="clock" size={16} color={colors.primary} />
-              <View>
-                <Text style={[styles.freezerLabel, { color: colors.mutedForeground }]}>
-                  FREEZER
-                </Text>
-                <Text style={[styles.freezerValue, { color: colors.foreground }]}>
-                  {freezerRemaining > 0
-                    ? `${fmtTime(freezerRemaining)} until full`
-                    : "Fully staged"}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.freezerRight}>
-              <Text style={[styles.freezerCases, { color: colors.primary }]}>
-                {supply.casesOnLine}
-              </Text>
-              <Text style={[styles.freezerCasesLabel, { color: colors.mutedForeground }]}>
-                cases on line
-              </Text>
-            </View>
-          </View>
-        ) : null}
-
         {/* Live metrics */}
         <SectionHeader title="Live" />
         <View style={styles.metricsRow}>
@@ -395,25 +321,6 @@ export default function CalculatorScreen() {
             />
           </View>
         </View>
-
-        {/* Material batches */}
-        {batches.length > 0 ? (
-          <>
-            <SectionHeader title="Material Needs" />
-            <View style={styles.batchGrid}>
-              {batches.map((b) => (
-                <BatchCard
-                  key={b.name}
-                  name={b.name}
-                  batches={b.batches}
-                  lbs={b.lbs}
-                  sub={b.sub}
-                  style={styles.batchItem}
-                />
-              ))}
-            </View>
-          </>
-        ) : null}
 
         {/* Run to Time */}
         {calc.pizzasLeft > 0 ? (
@@ -519,204 +426,38 @@ export default function CalculatorScreen() {
           </>
         ) : null}
 
-        {/* Dough / crust supply tracking */}
-        {supplyConfigured ? (
+        {/* Upcoming runs */}
+        {upcomingRuns.length > 0 ? (
           <>
-            <View style={styles.supplyHeader}>
-              <Text style={[styles.progressTitle, { color: colors.mutedForeground }]}>
-                SUPPLY
-              </Text>
-              <View style={[styles.supplyToggle, { borderColor: colors.border }]}>
-                {(["dough", "crusts"] as DoughSupplyMode[]).map((m) => {
-                  const active = doughSubTab === m;
-                  return (
-                    <Pressable
-                      key={m}
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        setDoughSubTab(m);
-                      }}
-                      style={[
-                        styles.supplyToggleBtn,
-                        { backgroundColor: active ? colors.primary : "transparent" },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.supplyToggleText,
-                          { color: active ? "#000" : colors.mutedForeground },
-                        ]}
-                      >
-                        {m === "dough" ? "Dough" : "Crusts"}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-            <CardSection>
-              <View style={styles.supplyStatusRow}>
-                <Text style={[styles.supplyStatusLabel, { color: colors.mutedForeground }]}>
-                  Status
-                </Text>
-                {(() => {
-                  const shortInt = Math.ceil(supply.doughShortCases);
-                  const bufferInt = Math.floor(supply.buffer);
-                  if (shortInt > 0) {
-                    return (
-                      <View style={[styles.supplyPill, { backgroundColor: colors.destructive }]}>
-                        <Feather name="alert-triangle" size={12} color="#fff" />
-                        <Text style={styles.supplyPillText}>
-                          Short {shortInt} case{shortInt !== 1 ? "s" : ""}
-                        </Text>
-                      </View>
-                    );
-                  }
-                  if (bufferInt > 0) {
-                    return (
-                      <View style={[styles.supplyPill, { backgroundColor: colors.success }]}>
-                        <Feather name="check" size={12} color="#fff" />
-                        <Text style={styles.supplyPillText}>
-                          {bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
-                        </Text>
-                      </View>
-                    );
-                  }
-                  return (
-                    <View style={[styles.supplyPill, { backgroundColor: colors.secondary }]}>
-                      <Text style={[styles.supplyPillText, { color: colors.foreground }]}>
-                        Balanced
-                      </Text>
-                    </View>
-                  );
-                })()}
-              </View>
-              <View style={styles.metricsRow}>
-                <MetricCard
-                  label={doughSubTab === "crusts" ? "Stacks to Stage" : "Trays to Stage"}
-                  value={supply.stacksNeededTotal.toString()}
-                  highlight={supply.stacksNeededTotal > 0}
-                  style={styles.metricBig}
-                />
-                <View style={styles.metricCol}>
-                  <MetricCard label="Cases Left to Run" value={supply.casesLeftToRun.toString()} />
-                  <MetricCard
-                    label={doughSubTab === "crusts" ? "Cases to Open" : "Cases on Line"}
-                    value={(doughSubTab === "crusts"
-                      ? supply.casesLeftToOpen
-                      : supply.casesOnLine
-                    ).toString()}
-                  />
-                </View>
-              </View>
-              <Text style={[styles.supplyHint, { color: colors.mutedForeground }]}>
-                On hand covers{" "}
-                {run.settings.pizzasPerCase > 0
-                  ? Math.floor(supply.doughOnHand / run.settings.pizzasPerCase)
-                  : 0}{" "}
-                cases ·{" "}
-                {doughSubTab === "crusts"
-                  ? `${supply.casesLeftToOpen} cases to open`
-                  : `${supply.casesOnLine} cases on line`}
-              </Text>
+            <SectionHeader title="Upcoming Runs" />
+            <CardSection style={{ paddingVertical: 6 }}>
+              {upcomingRuns.map(({ r, i }) => (
+                <Pressable
+                  key={r.id}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    switchRun(i);
+                  }}
+                  style={({ pressed }) => [
+                    styles.upcomingRow,
+                    { borderBottomColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.upcomingLabel, { color: colors.foreground }]} numberOfLines={1}>
+                      {runLabel(r, i)}
+                    </Text>
+                    <Text style={[styles.upcomingSub, { color: colors.mutedForeground }]}>
+                      {r.settings.casesNeeded > 0 ? `${r.settings.casesNeeded} cases` : "Not configured"}
+                      {r.isRunning ? "  ● Running" : ""}
+                    </Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                </Pressable>
+              ))}
             </CardSection>
           </>
         ) : null}
-
-        {/* Progress steppers */}
-        <View style={styles.progressHeader}>
-          <Text style={[styles.progressTitle, { color: colors.mutedForeground }]}>
-            PROGRESS
-          </Text>
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              setAutoTrack(!autoTrack);
-            }}
-            style={({ pressed }) => [
-              styles.autoPill,
-              {
-                backgroundColor: autoTrack ? colors.primary : colors.secondary,
-                borderColor: autoTrack ? colors.primary : colors.border,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Feather
-              name="zap"
-              size={12}
-              color={autoTrack ? "#000" : colors.mutedForeground}
-            />
-            <Text
-              style={[
-                styles.autoPillText,
-                { color: autoTrack ? "#000" : colors.mutedForeground },
-              ]}
-            >
-              Auto {autoTrack ? "On" : "Off"}
-            </Text>
-          </Pressable>
-        </View>
-        {autoTrack ? (
-          <Text style={[styles.autoHint, { color: colors.mutedForeground }]}>
-            Skids &amp; cases update automatically from run time. Tap a stepper to take
-            over for 10 min.
-          </Text>
-        ) : null}
-        <CardSection>
-          <Stepper
-            label="Skids Completed"
-            value={run.progress.skidsCompleted}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ skidsCompleted: Math.max(0, run.progress.skidsCompleted - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ skidsCompleted: run.progress.skidsCompleted + 1 });
-            }}
-          />
-          <Stepper
-            label="Cases on Skid"
-            value={run.progress.casesOnCurrentSkid}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ casesOnCurrentSkid: Math.max(0, run.progress.casesOnCurrentSkid - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ casesOnCurrentSkid: run.progress.casesOnCurrentSkid + 1 });
-            }}
-          />
-          <Stepper
-            label="Trays on Line"
-            value={run.progress.traysOnLine}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              updateProgress({ traysOnLine: Math.max(0, run.progress.traysOnLine - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              updateProgress({ traysOnLine: run.progress.traysOnLine + 1 });
-            }}
-          />
-          <Stepper
-            label="Dough Batches Ready"
-            value={run.progress.batchesReady}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              updateProgress({ batchesReady: Math.max(0, run.progress.batchesReady - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              updateProgress({ batchesReady: run.progress.batchesReady + 1 });
-            }}
-          />
-        </CardSection>
 
         {/* Log stoppage button */}
         {run.isRunning && !activeStoppage ? (
@@ -962,17 +703,6 @@ const styles = StyleSheet.create({
   },
   stoppageBannerText: { color: "#000", fontWeight: "700" as const, fontSize: 13 },
 
-  carryOverRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 12,
-    marginTop: 10,
-  },
-  carryOverText: { fontSize: 14, fontWeight: "500" as const },
-
   carryCard: {
     borderRadius: 12,
     borderWidth: 1,
@@ -1001,89 +731,9 @@ const styles = StyleSheet.create({
   },
   carryDismissText: { fontWeight: "600" as const, fontSize: 14 },
 
-  freezerCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 14,
-    marginTop: 12,
-  },
-  freezerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  freezerLabel: { fontSize: 11, fontWeight: "600" as const, letterSpacing: 1 },
-  freezerValue: { fontSize: 15, fontWeight: "700" as const, marginTop: 2 },
-  freezerRight: { alignItems: "flex-end" },
-  freezerCases: { fontSize: 22, fontWeight: "700" as const, fontVariant: ["tabular-nums"] },
-  freezerCasesLabel: { fontSize: 11, marginTop: 1 },
-
-  supplyHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 22,
-    marginBottom: 10,
-  },
-  supplyToggle: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderRadius: 999,
-    padding: 2,
-  },
-  supplyToggleBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  supplyToggleText: { fontSize: 12, fontWeight: "700" as const },
-  supplyStatusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  supplyStatusLabel: { fontSize: 13, fontWeight: "500" as const },
-  supplyPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  supplyPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
-  supplyHint: { fontSize: 12, lineHeight: 16, marginTop: 12 },
-
-  progressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 22,
-    marginBottom: 10,
-  },
-  progressTitle: {
-    fontSize: 11,
-    fontWeight: "600" as const,
-    letterSpacing: 1,
-  },
-  autoPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  autoPillText: { fontSize: 12, fontWeight: "700" as const },
-  autoHint: { fontSize: 12, lineHeight: 16, marginBottom: 10, marginTop: -2 },
-
   metricsRow: { flexDirection: "row", gap: 10 },
   metricBig: { flex: 1.3 },
   metricCol: { flex: 1, gap: 10 },
-
-  batchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  batchItem: { flexBasis: "47%", flexGrow: 1 },
 
   runToTimeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   runToTimeLabel: { fontSize: 13 },
@@ -1111,6 +761,16 @@ const styles = StyleSheet.create({
   },
   runToTimeValue: { fontSize: 22, fontWeight: "700", fontVariant: ["tabular-nums"] },
   runToTimeStatLabel: { fontSize: 11, marginTop: 2 },
+
+  upcomingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  upcomingLabel: { fontSize: 15, fontWeight: "600" as const },
+  upcomingSub: { fontSize: 12, marginTop: 2 },
 
   stoppageBtn: {
     flexDirection: "row",
