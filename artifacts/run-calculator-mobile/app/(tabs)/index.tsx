@@ -55,6 +55,7 @@ export default function CalculatorScreen() {
     activeStoppage, startRun, endRun,
     updateProgress, addStoppage, endActiveStoppage,
     addRun, switchRun, deleteRun,
+    autoTrack, setAutoTrack, suppressAutoTrack,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
@@ -259,17 +260,57 @@ export default function CalculatorScreen() {
         ) : null}
 
         {/* Progress steppers */}
-        <SectionHeader title="Progress" />
+        <View style={styles.progressHeader}>
+          <Text style={[styles.progressTitle, { color: colors.mutedForeground }]}>
+            PROGRESS
+          </Text>
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync();
+              setAutoTrack(!autoTrack);
+            }}
+            style={({ pressed }) => [
+              styles.autoPill,
+              {
+                backgroundColor: autoTrack ? colors.primary : colors.secondary,
+                borderColor: autoTrack ? colors.primary : colors.border,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Feather
+              name="zap"
+              size={12}
+              color={autoTrack ? "#000" : colors.mutedForeground}
+            />
+            <Text
+              style={[
+                styles.autoPillText,
+                { color: autoTrack ? "#000" : colors.mutedForeground },
+              ]}
+            >
+              Auto {autoTrack ? "On" : "Off"}
+            </Text>
+          </Pressable>
+        </View>
+        {autoTrack ? (
+          <Text style={[styles.autoHint, { color: colors.mutedForeground }]}>
+            Skids &amp; cases update automatically from run time. Tap a stepper to take
+            over for 10 min.
+          </Text>
+        ) : null}
         <CardSection>
           <Stepper
             label="Skids Completed"
             value={run.progress.skidsCompleted}
             onDecrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({ skidsCompleted: Math.max(0, run.progress.skidsCompleted - 1) });
             }}
             onIncrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({ skidsCompleted: run.progress.skidsCompleted + 1 });
             }}
           />
@@ -278,10 +319,12 @@ export default function CalculatorScreen() {
             value={run.progress.casesOnCurrentSkid}
             onDecrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({ casesOnCurrentSkid: Math.max(0, run.progress.casesOnCurrentSkid - 1) });
             }}
             onIncrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({ casesOnCurrentSkid: run.progress.casesOnCurrentSkid + 1 });
             }}
           />
@@ -552,6 +595,30 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   carryOverText: { fontSize: 14, fontWeight: "500" as const },
+
+  progressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  progressTitle: {
+    fontSize: 11,
+    fontWeight: "600" as const,
+    letterSpacing: 1,
+  },
+  autoPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  autoPillText: { fontSize: 12, fontWeight: "700" as const },
+  autoHint: { fontSize: 12, lineHeight: 16, marginBottom: 10, marginTop: -2 },
 
   metricsRow: { flexDirection: "row", gap: 10 },
   metricBig: { flex: 1.3 },

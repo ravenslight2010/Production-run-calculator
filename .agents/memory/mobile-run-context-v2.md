@@ -37,3 +37,9 @@ Any elapsed/downtime math in `computeCalc` must cap at `endedAt ?? now`, never `
 On calendar-day rollover (load-time check: `parsed.date !== todayStr()`), archived runs must be passed through `closeOutRun(run, boundaryMs)` where `boundaryMs = midnight of today`. This sets `endedAt` on still-running runs and closes open stoppages.
 
 **Why:** History recomputes each archived run with the live `now`. Without freezing, any run that was running at midnight keeps accruing time forever, so historical PPM/net-time drift on every app launch. Also persist the rollover result immediately (`AsyncStorage.setItem`, not just the debounced `persist`) so the new date/empty runs/history survive a relaunch.
+
+## Auto-track bucket marker must reset on run transitions
+Auto-track derives skids/cases once per wall-clock 5-min bucket (`autoBucketRef`) while running, gated by an `autoTrack` flag and a 10-min manual-edit suppression window (`autoSuppressRef`, set by `suppressAutoTrack()` from the skids/cases steppers only). A dedicated effect resets `autoBucketRef` to `-1` on `currentRun.id`/`currentRun.isRunning` change.
+
+**Why:** The bucket guard (`bucket === autoBucketRef.current`) would otherwise skip the first auto-write after start/stop/switch-run if it lands in the same wall-clock bucket as the previous run's last write, blocking updates until the next 5-min boundary.
+**How to apply:** Mobile auto-tracks only skids + casesOnSkid (no per-tray/per-batch rate or freezerTime exists here, unlike web). Any new lifecycle-sensitive ref needs the same reset effect.

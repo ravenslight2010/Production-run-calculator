@@ -352,6 +352,7 @@ interface AppState {
   date: string;
   templates: RunTemplate[];
   history: HistoryDay[];
+  autoTrack: boolean;
 }
 
 interface RunContextValue {
@@ -379,6 +380,9 @@ interface RunContextValue {
   saveTemplate: (name: string) => void;
   applyTemplate: (id: string) => void;
   deleteTemplate: (id: string) => void;
+  autoTrack: boolean;
+  setAutoTrack: (on: boolean) => void;
+  suppressAutoTrack: () => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -390,6 +394,7 @@ const INITIAL_STATE: AppState = {
   date: todayStr(),
   templates: [],
   history: [],
+  autoTrack: true,
 };
 
 export function RunContextProvider({ children }: { children: React.ReactNode }) {
@@ -397,6 +402,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const [tick, setTick] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoBucketRef = useRef<number>(-1);
+  const autoSuppressRef = useRef<number>(0);
 
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
@@ -425,6 +432,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
                   archived,
                   ...history.filter((h) => h.date !== parsed.date),
                 ].slice(0, MAX_HISTORY_DAYS),
+                autoTrack: parsed.autoTrack ?? true,
               };
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -435,6 +443,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
                 date: parsed.date ?? today,
                 templates,
                 history,
+                autoTrack: parsed.autoTrack ?? true,
               });
             }
           }
@@ -634,6 +643,73 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  const setAutoTrack = useCallback(
+    (on: boolean) => {
+      setAppState((prev) => {
+        const next = { ...prev, autoTrack: on };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const suppressAutoTrack = useCallback(() => {
+    autoSuppressRef.current = Date.now() + 10 * 60 * 1000;
+  }, []);
+
+  // Reset the bucket marker whenever the active run changes or its running state
+  // flips, so the next auto-track write fires immediately instead of being
+  // blocked until the next wall-clock bucket boundary.
+  useEffect(() => {
+    autoBucketRef.current = -1;
+  }, [currentRun?.id, currentRun?.isRunning]);
+
+  // Auto-track: once per 5-minute bucket while running, derive skids completed
+  // and cases on the current skid from expected output (net elapsed × ppm).
+  // Suppressed for 10 minutes after the user manually edits either stepper, so
+  // it never fights a supervisor who is taking over. Tray/batch are not auto-
+  // tracked because the mobile model has no per-tray/per-batch consumption rate.
+  useEffect(() => {
+    if (!appState.autoTrack) return;
+    const r = appState.runs[appState.currentIndex];
+    if (!r?.isRunning) return;
+    if (Date.now() < autoSuppressRef.current) return;
+    const c = computeCalc(r, Date.now());
+    if (
+      c.ppm <= 0 ||
+      r.settings.casesPerSkid <= 0 ||
+      r.settings.pizzasPerCase <= 0
+    )
+      return;
+    const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+    if (bucket === autoBucketRef.current) return;
+    autoBucketRef.current = bucket;
+
+    const expectedCases = Math.floor(
+      ((c.netElapsedSec / 60) * c.ppm) / r.settings.pizzasPerCase,
+    );
+    const maxSkids =
+      r.settings.casesNeeded > 0
+        ? Math.floor(r.settings.casesNeeded / r.settings.casesPerSkid)
+        : Number.MAX_SAFE_INTEGER;
+    const skids = Math.min(
+      maxSkids,
+      Math.floor(expectedCases / r.settings.casesPerSkid),
+    );
+    const casesOnSkid = Math.min(
+      r.settings.casesPerSkid,
+      expectedCases % r.settings.casesPerSkid,
+    );
+    if (
+      skids !== r.progress.skidsCompleted ||
+      casesOnSkid !== r.progress.casesOnCurrentSkid
+    ) {
+      updateProgress({ skidsCompleted: skids, casesOnCurrentSkid: casesOnSkid });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+
   const activeStoppage = currentRun?.stoppages.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
 
@@ -664,6 +740,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         saveTemplate,
         applyTemplate,
         deleteTemplate,
+        autoTrack: appState.autoTrack,
+        setAutoTrack,
+        suppressAutoTrack,
       }}
     >
       {children}
