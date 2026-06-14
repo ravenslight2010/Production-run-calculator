@@ -112,7 +112,7 @@ export default function CalculatorScreen() {
             style={({ pressed }) => [
               styles.toggleBtn,
               {
-                backgroundColor: run.isRunning ? colors.destructive : colors.success,
+                backgroundColor: run.isRunning ? "#ef4444" : colors.success,
                 opacity: pressed ? 0.7 : 1,
               },
             ]}
