@@ -71,7 +71,8 @@ export default function CalculatorScreen() {
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
-  const [doughSubTab, setDoughSubTab] = useState<DoughSupplyMode>("dough");
+  const doughSubTab: DoughSupplyMode = run.progress.subTab;
+  const setDoughSubTab = (m: DoughSupplyMode) => updateProgress({ subTab: m });
 
   const nowMs = Date.now();
   const freezerTime = run.settings.freezerTime;

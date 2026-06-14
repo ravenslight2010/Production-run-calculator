@@ -90,6 +90,7 @@ export interface RunProgress {
   traysOnLine: number;
   batchesReady: number;
   carryOverDone: boolean;
+  subTab: "dough" | "crusts";
 }
 
 export interface Stoppage {
@@ -218,6 +219,7 @@ const DEFAULT_PROGRESS: RunProgress = {
   traysOnLine: 0,
   batchesReady: 0,
   carryOverDone: false,
+  subTab: "dough",
 };
 
 export function runLabel(r: RunState, index: number): string {
@@ -322,48 +324,68 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       ? Math.ceil(sauceLbs / sauceEffBarrel)
       : 0;
 
+  // Applicators whose type name contains "mix" arrive pre-made, so they need
+  // no on-site batches (matches web computeSummaryStats).
+  const app1IsMix = (s.app1Type ?? "").trim().toLowerCase().includes("mix");
+  const app2IsMix = (s.app2Type ?? "").trim().toLowerCase().includes("mix");
+  const app3IsMix = (s.app3Type ?? "").trim().toLowerCase().includes("mix");
+  const app4IsMix = (s.app4Type ?? "").trim().toLowerCase().includes("mix");
+
   const app1Lbs =
     s.app1Type && s.app1OzPerPizza > 0
       ? (pizzasForIngredients * s.app1OzPerPizza) / 16 + 20
       : 0;
   const app1Batches =
-    app1Lbs > 0 && app1EffBatch > 0 ? Math.ceil(app1Lbs / app1EffBatch) : 0;
+    !app1IsMix && app1Lbs > 0 && app1EffBatch > 0
+      ? Math.ceil(app1Lbs / app1EffBatch)
+      : 0;
 
   const app2Lbs =
     s.app2Type && s.app2OzPerPizza > 0
       ? (pizzasForIngredients * s.app2OzPerPizza) / 16 + 20
       : 0;
   const app2Batches =
-    app2Lbs > 0 && app2EffBatch > 0 ? Math.ceil(app2Lbs / app2EffBatch) : 0;
+    !app2IsMix && app2Lbs > 0 && app2EffBatch > 0
+      ? Math.ceil(app2Lbs / app2EffBatch)
+      : 0;
 
   const app3Lbs =
     s.app3Type && s.app3OzPerPizza > 0
       ? (pizzasForIngredients * s.app3OzPerPizza) / 16 + 20
       : 0;
   const app3Batches =
-    app3Lbs > 0 && app3EffBatch > 0 ? Math.ceil(app3Lbs / app3EffBatch) : 0;
+    !app3IsMix && app3Lbs > 0 && app3EffBatch > 0
+      ? Math.ceil(app3Lbs / app3EffBatch)
+      : 0;
 
   const app4Lbs =
     s.app4Type && s.app4OzPerPizza > 0
       ? (pizzasForIngredients * s.app4OzPerPizza) / 16 + 20
       : 0;
   const app4Batches =
-    app4Lbs > 0 && app4EffBatch > 0 ? Math.ceil(app4Lbs / app4EffBatch) : 0;
+    !app4IsMix && app4Lbs > 0 && app4EffBatch > 0
+      ? Math.ceil(app4Lbs / app4EffBatch)
+      : 0;
 
-  // Pepperoni: lbs = (pizzas * oz/pizza) / 16 + sticks (flat buffer)
+  // Pepperoni: lbs = (pizzas * oz/pizza) / 16 + sticks (flat buffer).
+  // Default pepperoni types ship pre-made, so they need no batches (matches web).
   const pep1Lbs =
     s.pep1Type && s.pep1OzPerPizza > 0
       ? (pizzasForIngredients * s.pep1OzPerPizza) / 16 + s.pep1Sticks
       : 0;
   const pep1Batches =
-    pep1Lbs > 0 && s.pep1BatchLbs > 0 ? Math.ceil(pep1Lbs / s.pep1BatchLbs) : 0;
+    !DEFAULT_PEP_TYPES.includes(s.pep1Type ?? "") && pep1Lbs > 0 && s.pep1BatchLbs > 0
+      ? Math.ceil(pep1Lbs / s.pep1BatchLbs)
+      : 0;
 
   const pep2Lbs =
     s.pep2Type && s.pep2OzPerPizza > 0
       ? (pizzasForIngredients * s.pep2OzPerPizza) / 16 + s.pep2Sticks
       : 0;
   const pep2Batches =
-    pep2Lbs > 0 && s.pep2BatchLbs > 0 ? Math.ceil(pep2Lbs / s.pep2BatchLbs) : 0;
+    !DEFAULT_PEP_TYPES.includes(s.pep2Type ?? "") && pep2Lbs > 0 && s.pep2BatchLbs > 0
+      ? Math.ceil(pep2Lbs / s.pep2BatchLbs)
+      : 0;
 
   // Dough
   const doughLbs =
@@ -811,7 +833,11 @@ function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
 }
 
 function normalizeRun(r: RunState): RunState {
-  return { ...r, settings: normalizeSettings(r.settings) };
+  return {
+    ...r,
+    settings: normalizeSettings(r.settings),
+    progress: { ...DEFAULT_PROGRESS, ...r.progress },
+  };
 }
 
 function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "history"> {
