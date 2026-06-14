@@ -133,10 +133,16 @@ import {
   CircleDot,
   Sparkles,
   CalendarPlus,
+  CalendarDays,
   ListChecks,
   PauseCircle,
   Share2,
   Copy,
+  Activity,
+  Package,
+  Warehouse,
+  Boxes,
+  Menu,
 } from "lucide-react";
 
 import {
@@ -152,10 +158,140 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
 applyMixSeedV15IfNeeded();
+
+type NeedRow = { label: string; value: string; sub?: string };
+
+function buildNeedRows(vals: FormValues): {
+  dough: NeedRow[];
+  sauce: NeedRow[];
+  applicators: NeedRow[];
+  pep: NeedRow[];
+  all: NeedRow[];
+} {
+  const s = computeSummaryStats(vals);
+  const dough: NeedRow[] = [];
+  const sauce: NeedRow[] = [];
+  const applicators: NeedRow[] = [];
+  const pep: NeedRow[] = [];
+  {
+    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+    const effYield =
+      dRecipeLbs > 0 && vals.targetDoughballWeight > 0
+        ? (dRecipeLbs * 16) / vals.targetDoughballWeight
+        : vals.doughBatchYield;
+    if (effYield > 0 && vals.targetDoughballWeight > 0) {
+      const batches = Math.ceil(s.totalPizzas / effYield);
+      if (batches > 0) dough.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
+    }
+  }
+  if (s.sauceBatches > 0) {
+    const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
+    sauce.push(bd
+      ? { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` }
+      : { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
+  }
+  const apps = [
+    { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
+    { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
+    { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
+    { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
+  ];
+  for (const a of apps) {
+    if (!a.type) continue;
+    const isMix = a.type.trim().toLowerCase().includes("mix");
+    if (isMix && a.lbs > 0) applicators.push({ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" });
+    else if (!isMix && a.batches > 0) applicators.push({ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" });
+  }
+  if (s.pep1Type && s.pep1Lbs > 0) {
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
+    pep.push({ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" });
+  }
+  if (s.pep2Type && s.pep2Lbs > 0) {
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
+    pep.push({ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" });
+  }
+  return { dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] };
+}
+
+function NeedsList({ rows }: { rows: NeedRow[] }) {
+  if (rows.length === 0)
+    return <p className="text-xs text-muted-foreground italic">No data</p>;
+  return (
+    <div className="space-y-1.5">
+      {rows.map((row, i) => (
+        <div key={i} className="flex items-baseline justify-between gap-2 text-sm">
+          <span className="text-muted-foreground truncate">{row.label}</span>
+          <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
+            {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
+  const map = new Map<string, { num: number; unit: string; order: number }>();
+  let order = 0;
+  const add = (label: string, num: number, unit: string) => {
+    const key = `${label}__${unit}`;
+    const ex = map.get(key);
+    if (ex) ex.num += num;
+    else map.set(key, { num, unit, order: order++ });
+  };
+  for (const vals of valsList) {
+    const s = computeSummaryStats(vals);
+    const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
+    const effYield =
+      dRecipeLbs > 0 && vals.targetDoughballWeight > 0
+        ? (dRecipeLbs * 16) / vals.targetDoughballWeight
+        : vals.doughBatchYield;
+    if (effYield > 0 && vals.targetDoughballWeight > 0) {
+      const batches = Math.ceil(s.totalPizzas / effYield);
+      if (batches > 0) add("Dough", batches, "batches");
+    }
+    if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+    const apps = [
+      { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
+      { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
+      { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
+      { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
+    ];
+    for (const a of apps) {
+      if (!a.type) continue;
+      const isMix = a.type.trim().toLowerCase().includes("mix");
+      if (isMix && a.lbs > 0) add(a.type, a.lbs, "lbs");
+      else if (!isMix && a.batches > 0) add(a.type, a.batches, "batches");
+    }
+    if (s.pep1Type && s.pep1Lbs > 0) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
+      if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
+      else add(s.pep1Type, s.pep1Batches, "batches");
+    }
+    if (s.pep2Type && s.pep2Lbs > 0) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
+      if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs");
+      else add(s.pep2Type, s.pep2Batches, "batches");
+    }
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[1].order - b[1].order)
+    .map(([key, val]) => ({
+      label: key.slice(0, key.lastIndexOf("__")),
+      value: fmtNum(val.num, val.unit === "batches" ? 2 : 1),
+      sub: val.unit,
+    }));
+}
 
 function StatRow({
   label,
@@ -1445,7 +1581,7 @@ export default function Home() {
   const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
-  const [activeTab, setActiveTab] = useState("dough");
+  const [activeTab, setActiveTab] = useState("run");
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -5037,13 +5173,40 @@ export default function Home() {
               {isSupervisor ? <ShieldCheck className="w-3.5 h-3.5 shrink-0" /> : <Lock className="w-3.5 h-3.5 shrink-0" />}
               <span className="hidden sm:inline">{isSupervisor ? "Supervisor" : "Operator"}</span>
             </button>
+            {/* Header overflow menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title="More"
+                  className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                >
+                  <Menu className="w-4 h-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setActiveTab("stoppages")}>
+                  <OctagonX className="w-4 h-4 mr-2" /> Stoppages
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("summary")}>
+                  <BarChart2 className="w-4 h-4 mr-2" /> Summary
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("setup")}>
+                  <Settings className="w-4 h-4 mr-2" /> Setup
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
+                  <ShieldCheck className="w-4 h-4 mr-2" /> Settings
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </header>
 
         <Form {...form}>
           <form>
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
-              {/* ─── ALWAYS VISIBLE: status banners + line settings + progress ─── */}
+              {/* ─── RUN ─── */}
+              <TabsContent value="run">
                 {/* Ended-run banner */}
                 {currentRun?.endedAt && (() => {
                   const emptyMs = Number(v.freezerTime) * 60000;
@@ -5166,6 +5329,97 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Carry-over surplus to next run (moved from Current Progress) */}
+                {(() => {
+                  const nextRun = dayState.runs[dayState.currentIndex + 1];
+                  if (!nextRun) return null;
+                  if (v.carryOverDone) return null;
+                  const excessPizzas = calc.buffer * v.pizzasPerCase;
+                  if (excessPizzas < 1 || calc.perTray <= 0) return null;
+                  const excessBatches = calc.perBatch > 0 ? Math.floor(excessPizzas / calc.perBatch) : 0;
+                  const afterBatches = excessBatches > 0 ? excessPizzas - excessBatches * calc.perBatch : excessPizzas;
+                  const excessTrays = Math.floor(afterBatches / calc.perTray);
+                  if (excessTrays === 0 && excessBatches === 0) return null;
+                  const nextLabel = `${nextRun.brand ?? ""}${nextRun.flavor ? ` – ${nextRun.flavor}` : ""}`.trim() || `Run ${dayState.currentIndex + 2}`;
+                  return (
+                    <div className="mb-4 rounded-lg border border-amber-600/40 bg-amber-950/20 px-3 py-2.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2">
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
+                          <p className="text-xs text-amber-300 leading-snug">
+                            <span className="font-semibold">{doughSubTab === "crusts" ? "Surplus crusts" : "Surplus dough"}</span> exceeds this run
+                            {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} {doughSubTab === "crusts" ? `stack${excessTrays !== 1 ? "s" : ""}` : `tray${excessTrays !== 1 ? "s" : ""}`}</span></span>}
+                            {excessBatches > 0 && doughSubTab !== "crusts" && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
+                            . Carry to <span className="font-semibold">{nextLabel}</span>?
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
+                          className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 mt-0.5"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const existing = loadRunValues(nextRun.id);
+                            saveRunValues(nextRun.id, {
+                              ...existing,
+                              traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
+                              batchesReady: (existing.batchesReady ?? 0) + excessBatches,
+                            });
+                            form.setValue("carryOverDone", true, { shouldDirty: true });
+                            navigator.vibrate?.(15);
+                          }}
+                          className="flex-1 py-1.5 rounded-md bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 text-xs font-semibold transition-colors"
+                        >
+                          Carry over →
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
+                          className="px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground text-xs transition-colors hover:bg-muted/30"
+                        >
+                          Skip
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Upcoming runs */}
+                {(() => {
+                  const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
+                  if (upcoming.length === 0) return null;
+                  return (
+                    <div className="mt-4 rounded-xl border border-border/40 bg-card/50 p-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3">Upcoming Runs</p>
+                      <div className="space-y-2">
+                        {upcoming.map((r, i) => {
+                          const idx = dayState.currentIndex + 1 + i;
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => switchToRun(idx)}
+                              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-muted/30 border border-border/40 hover:bg-muted/50 transition-colors text-left"
+                            >
+                              <span className="text-sm font-medium text-foreground truncate">{runLabel(r)}</span>
+                              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </TabsContent>
+
+              {/* ─── SETUP ─── */}
+              <TabsContent value="setup">
                 {isSupervisor && (
                 <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
@@ -5334,7 +5588,10 @@ export default function Home() {
                     </div>
                 </details>
                 )}
+              </TabsContent>
 
+              {/* ─── PACKAGING ─── */}
+              <TabsContent value="packaging">
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-1 pt-3 px-4">
                       <div className="flex items-center justify-between">
@@ -5437,122 +5694,6 @@ export default function Home() {
                           Skid Done — log &amp; reset
                         </button>
                       )}
-                      {/* Carry-over surplus to next run */}
-                      {(() => {
-                        const nextRun = dayState.runs[dayState.currentIndex + 1];
-                        if (!nextRun) return null;
-                        if (v.carryOverDone) return null;
-                        const excessPizzas = calc.buffer * v.pizzasPerCase;
-                        if (excessPizzas < 1 || calc.perTray <= 0) return null;
-                        // Decompose surplus: full batches first (larger unit), then trays from the remainder
-                        const excessBatches = calc.perBatch > 0 ? Math.floor(excessPizzas / calc.perBatch) : 0;
-                        const afterBatches = excessBatches > 0 ? excessPizzas - excessBatches * calc.perBatch : excessPizzas;
-                        const excessTrays = Math.floor(afterBatches / calc.perTray);
-                        if (excessTrays === 0 && excessBatches === 0) return null;
-                        const nextLabel = `${nextRun.brand ?? ""}${nextRun.flavor ? ` – ${nextRun.flavor}` : ""}`.trim() || `Run ${dayState.currentIndex + 2}`;
-                        return (
-                          <div className="rounded-lg border border-amber-600/40 bg-amber-950/20 px-3 py-2.5 space-y-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-start gap-2">
-                                <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 shrink-0" />
-                                <p className="text-xs text-amber-300 leading-snug">
-                                  <span className="font-semibold">{doughSubTab === "crusts" ? "Surplus crusts" : "Surplus dough"}</span> exceeds this run
-                                  {excessTrays > 0 && <span> — <span className="font-semibold">{excessTrays} {doughSubTab === "crusts" ? `stack${excessTrays !== 1 ? "s" : ""}` : `tray${excessTrays !== 1 ? "s" : ""}`}</span></span>}
-                                  {excessBatches > 0 && doughSubTab !== "crusts" && <span> + <span className="font-semibold">{excessBatches} batch{excessBatches !== 1 ? "es" : ""}</span></span>}
-                                  . Carry to <span className="font-semibold">{nextLabel}</span>?
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
-                                className="text-muted-foreground/50 hover:text-muted-foreground shrink-0 mt-0.5"
-                              >
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                            <div className="flex gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const existing = loadRunValues(nextRun.id);
-                                  saveRunValues(nextRun.id, {
-                                    ...existing,
-                                    traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
-                                    batchesReady: (existing.batchesReady ?? 0) + excessBatches,
-                                  });
-                                  form.setValue("carryOverDone", true, { shouldDirty: true });
-                                  navigator.vibrate?.(15);
-                                }}
-                                className="flex-1 py-1.5 rounded-md bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/40 text-amber-300 text-xs font-semibold transition-colors"
-                              >
-                                Carry over →
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => form.setValue("carryOverDone", true, { shouldDirty: true })}
-                                className="px-3 py-1.5 rounded-md border border-border/50 text-muted-foreground text-xs transition-colors hover:bg-muted/30"
-                              >
-                                Skip
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                      {(() => {
-                        const s = autoTrackSuggestion;
-                        const suppressed = Date.now() < autoSuppressUntilRef.current;
-                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
-                        const suggestedTrays = calc.traysNeeded > 0
-                          ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
-                          : null;
-                        const suggestedBatches = calc.batchesNeeded > 0
-                          ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
-                          : null;
-                        const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
-                        const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
-                        return (
-                          <>
-                            <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
-                              <div>
-                                <StepperField
-                                  control={form.control}
-                                  name="traysOnLine"
-                                  label={trayAutoActive
-                                    ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
-                                    : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
-                                  max={74}
-                                  suggestion={!trayAutoActive ? suggestedTrays : null}
-                                  onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
-                                  onManualChange={onManual}
-                                />
-                                {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
-                                  <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
-                                    <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
-                                  </p>
-                                )}
-                              </div>
-                              {doughSubTab !== "crusts" && (
-                                <div>
-                                  <StepperField
-                                    control={form.control}
-                                    name="batchesReady"
-                                    label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
-                                    max={3}
-                                    suggestion={!batchAutoActive ? suggestedBatches : null}
-                                    onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
-                                    onManualChange={onManual}
-                                  />
-                                  {v.batchesReady >= 3 && (
-                                    <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
-                                      <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()}
                       {/* Freezer countdowns */}
                       {Number(v.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
                         <Separator className="opacity-30 my-1" />
@@ -5605,132 +5746,196 @@ export default function Home() {
                     </CardContent>
                   </Card>
 
-                  {/* ── Ingredient Needs ─────────────────────────────── */}
-                  {(() => {
-                    type NeedRow = { label: string; value: string; sub?: string };
-                    function buildNeeds(vals: FormValues): NeedRow[] {
-                      const s = computeSummaryStats(vals);
-                      const rows: NeedRow[] = [];
-                      // Dough
-                      {
-                        const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
-                        const effYield =
-                          dRecipeLbs > 0 && vals.targetDoughballWeight > 0
-                            ? (dRecipeLbs * 16) / vals.targetDoughballWeight
-                            : vals.doughBatchYield;
-                        if (effYield > 0 && vals.targetDoughballWeight > 0) {
-                          const batches = Math.ceil(s.totalPizzas / effYield);
-                          if (batches > 0) rows.push({ label: "Dough", value: fmtNum(batches, 1), sub: "batches" });
-                        }
-                      }
-                      // Sauce
-                      if (s.sauceBatches > 0) {
-                        const bd = sauceBarrelBreakdown(s.sauceBatches, s.sauceEffBarrel);
-                        rows.push(bd
-                          ? { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: `batches · ${bd.totalBarrels} barrels` }
-                          : { label: "Sauce", value: fmtNum(s.sauceBatches, 2), sub: "barrels" });
-                      }
-                      // Applicators
-                      const apps = [
-                        { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
-                        { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
-                        { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
-                        { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
-                      ];
-                      for (const a of apps) {
-                        if (!a.type) continue;
-                        const isMix = a.type.trim().toLowerCase().includes("mix");
-                        if (isMix && a.lbs > 0) rows.push({ label: a.type, value: fmtNum(a.lbs, 1), sub: "lbs" });
-                        else if (!isMix && a.batches > 0) rows.push({ label: a.type, value: fmtNum(a.batches, 2), sub: "batches" });
-                      }
-                      // Pep — standard types tracked in lbs, custom types tracked in batches
-                      if (s.pep1Type && s.pep1Lbs > 0) {
-                        const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
-                        rows.push({ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" });
-                      }
-                      if (s.pep2Type && s.pep2Lbs > 0) {
-                        const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
-                        rows.push({ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" });
-                      }
-                      return rows;
-                    }
+                  {/* Output metrics */}
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="bg-muted/20 rounded-lg p-3 text-center">
+                      <p className="text-3xl font-mono font-bold tabular-nums text-emerald-400">{fmtNum(calc.casesCompleted, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Cases done</p>
+                    </div>
+                    <div className="bg-muted/20 rounded-lg p-3 text-center">
+                      <p className="text-3xl font-mono font-bold tabular-nums">{fmtNum(calc.casesLeftToRun, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Cases left</p>
+                    </div>
+                    <div className="bg-muted/20 rounded-lg p-3 text-center">
+                      <p className="text-3xl font-mono font-bold tabular-nums">{fmtNum(calc.casesOnLine, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">On line</p>
+                    </div>
+                  </div>
+              </TabsContent>
 
-                    const curNeeds = buildNeeds(v);
-                    const nextRun = dayState.runs[dayState.currentIndex + 1];
-                    const nextVals = nextRun ? loadRunValues(nextRun.id) : null;
-                    const nextNeeds = nextVals ? buildNeeds(nextVals) : null;
+              {/* ─── SAUCE ─── */}
+              <TabsContent value="sauce">
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                  <CardHeader className="pb-2 pt-4 px-5">
+                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Droplets className="w-4 h-4" /> Sauce Needs
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <NeedsList rows={buildNeedRows(v).sauce} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-                    if (curNeeds.length === 0 && !nextNeeds) return null;
+              {/* ─── FRONTLINE ─── */}
+              <TabsContent value="frontline">
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                  <CardHeader className="pb-2 pt-4 px-5">
+                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Boxes className="w-4 h-4" /> Applicators &amp; Pepperoni
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 space-y-4">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Applicators</p>
+                      <NeedsList rows={buildNeedRows(v).applicators} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Pepperoni</p>
+                      <NeedsList rows={buildNeedRows(v).pep} />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-                    function NeedsColumn({ title, color, needs, brand, flavor }: { title: string; color: string; needs: NeedRow[]; brand?: string; flavor?: string }) {
-                      return (
-                        <div className="flex-1 min-w-0">
-                          <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${color}`}>{title}</div>
-                          {(brand || flavor) && (
-                            <div className="text-xs font-semibold text-foreground/70 truncate mb-2">{[brand, flavor].filter(Boolean).join(" – ")}</div>
-                          )}
-                          {needs.length === 0 ? (
-                            <p className="text-xs text-muted-foreground italic">No data</p>
-                          ) : (
-                            <div className="space-y-1.5">
-                              {needs.map((row, i) => (
-                                <div key={i} className="flex items-baseline justify-between gap-2 text-xs">
-                                  <span className="text-muted-foreground truncate">{row.label}</span>
-                                  <span className="font-bold tabular-nums text-foreground whitespace-nowrap">{row.value} <span className="font-normal text-muted-foreground">{row.sub}</span></span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="mt-4 rounded-xl border border-border/40 bg-card/50 p-4">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <AlertTriangle className="w-3 h-3" /> Ingredient Needs
-                        </p>
-                        <div className="flex gap-5">
-                          <NeedsColumn
-                            title="This Run"
-                            color="text-primary"
-                            needs={curNeeds}
-                            brand={currentRun?.brand}
-                            flavor={currentRun?.flavor}
-                          />
-                          {nextNeeds && (
-                            <>
-                              <div className="w-px bg-border/40 shrink-0" />
-                              <NeedsColumn
-                                title="Up Next"
-                                color="text-amber-400"
-                                needs={nextNeeds}
-                                brand={nextRun?.brand}
-                                flavor={nextRun?.flavor}
-                              />
-                            </>
-                          )}
-                        </div>
+              {/* ─── WAREHOUSE ─── */}
+              <TabsContent value="warehouse">
+                {(() => {
+                  const activeRuns = dayState.runs.filter(r => !r.endedAt);
+                  const valsList = activeRuns.map(r => loadRunValues(r.id));
+                  const agg = aggregateNeedRows(valsList);
+                  return (
+                    <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4">
+                        <NeedsList rows={agg} />
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                  <CardHeader className="pb-2 pt-4 px-5">
+                    <div className="flex items-center justify-between gap-2">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <CalendarDays className="w-4 h-4" /> Production Schedule
+                      </CardTitle>
+                      <button
+                        type="button"
+                        onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <CalendarPlus className="w-3.5 h-3.5" /> Manage
+                      </button>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    {scheduledDays.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-3">No upcoming days scheduled. Tap Manage to plan future production.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {scheduledDays.map(day => (
+                          <div key={day.date} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md bg-muted/20 border border-border/30 text-sm">
+                            <span className="font-medium">{day.date}</span>
+                            <span className="text-xs text-muted-foreground">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>
+                          </div>
+                        ))}
                       </div>
-                    );
-                  })()}
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-3 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
-                <TabsTrigger value="dough" data-testid="tab-dough" className="flex items-center gap-1 px-1 sm:px-3">
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+                <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
+                  <Activity className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] truncate">Run</span>
+                </TabsTrigger>
+                <TabsTrigger value="dough" data-testid="tab-dough" className="flex flex-col items-center gap-0.5 px-1">
                   <Layers className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Dough/Crusts</span>
+                  <span className="text-[10px] truncate">Dough</span>
                 </TabsTrigger>
-                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex items-center gap-1 px-1 sm:px-3">
+                <TabsTrigger value="sauce" data-testid="tab-sauce" className="flex flex-col items-center gap-0.5 px-1">
                   <Droplets className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Frontline</span>
+                  <span className="text-[10px] truncate">Sauce</span>
                 </TabsTrigger>
-                <TabsTrigger value="summary" data-testid="tab-summary" className="flex items-center gap-1 px-1 sm:px-3">
-                  <BarChart2 className="w-4 h-4 shrink-0" />
-                  <span className="hidden sm:inline truncate">Summary</span>
+                <TabsTrigger value="frontline" data-testid="tab-frontline" className="flex flex-col items-center gap-0.5 px-1">
+                  <Boxes className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] truncate">Front</span>
+                </TabsTrigger>
+                <TabsTrigger value="packaging" data-testid="tab-packaging" className="flex flex-col items-center gap-0.5 px-1">
+                  <Package className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] truncate">Pack</span>
+                </TabsTrigger>
+                <TabsTrigger value="warehouse" data-testid="tab-warehouse" className="flex flex-col items-center gap-0.5 px-1">
+                  <Warehouse className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] truncate">Whse</span>
                 </TabsTrigger>
               </TabsList>
 
               {/* ─── DOUGH ─── */}
               <TabsContent value="dough">
+                {/* Supply progress steppers (moved from Current Progress) */}
+                <div className="mb-4">
+                  {(() => {
+                    const s = autoTrackSuggestion;
+                    const suppressed = Date.now() < autoSuppressUntilRef.current;
+                    const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
+                    const suggestedTrays = calc.traysNeeded > 0
+                      ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
+                      : null;
+                    const suggestedBatches = calc.batchesNeeded > 0
+                      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
+                      : null;
+                    const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
+                    const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
+                    return (
+                      <>
+                        <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
+                          <div>
+                            <StepperField
+                              control={form.control}
+                              name="traysOnLine"
+                              label={trayAutoActive
+                                ? (doughSubTab === "crusts" ? "Total Stacks Ready · Auto" : "Total Trays on Line · Auto")
+                                : (doughSubTab === "crusts" ? "Total Stacks Ready" : "Total Trays on Line")}
+                              max={74}
+                              suggestion={!trayAutoActive ? suggestedTrays : null}
+                              onSuggest={() => form.setValue("traysOnLine", suggestedTrays ?? v.traysOnLine, { shouldDirty: true })}
+                              onManualChange={onManual}
+                            />
+                            {v.traysOnLine >= 74 && doughSubTab !== "crusts" && (
+                              <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
+                              </p>
+                            )}
+                          </div>
+                          {doughSubTab !== "crusts" && (
+                            <div>
+                              <StepperField
+                                control={form.control}
+                                name="batchesReady"
+                                label={batchAutoActive ? "Batches of Dough Ready · Auto" : "Batches of Dough Ready"}
+                                max={3}
+                                suggestion={!batchAutoActive ? suggestedBatches : null}
+                                onSuggest={() => form.setValue("batchesReady", suggestedBatches ?? v.batchesReady, { shouldDirty: true })}
+                                onManualChange={onManual}
+                              />
+                              {v.batchesReady >= 3 && (
+                                <p className="text-[11px] text-amber-400 font-semibold flex items-center gap-1 mt-1">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
                 <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 {/* ── Crust run ── */}
                 {doughSubTab === "crusts" && (
@@ -6101,8 +6306,8 @@ export default function Home() {
                 </fieldset>
               </TabsContent>
 
-              {/* ─── FRONTLINE ─── */}
-              <TabsContent value="frontline">
+              {/* ─── SETUP (recipe editors) ─── */}
+              <TabsContent value="setup">
                 {!isSupervisor && (
                   <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-md bg-muted/40 border border-border/50 text-xs text-muted-foreground">
                     <Lock className="w-3.5 h-3.5 shrink-0" />
@@ -6644,93 +6849,8 @@ export default function Home() {
                 </fieldset>
               </TabsContent>
 
-              {/* ─── SUMMARY ─── */}
-              <TabsContent value="summary">
-                {/* Shift notes */}
-                <div className="mb-4">
-                  <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>
-                  <textarea
-                    value={dayState.shiftNotes ?? ""}
-                    onChange={e => {
-                      const updated = { ...dayState, shiftNotes: e.target.value };
-                      setDayState(updated);
-                      saveDayState(updated);
-                    }}
-                    onFocus={e => e.target.select()}
-                    placeholder="Handoff notes, issues, observations for this shift…"
-                    rows={3}
-                    className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
-                  />
-                </div>
-                {/* ── Today's Shift Totals + Benchmark ── */}
-                {(() => {
-                  const todayFinished = dayState.runs.filter(r => r.startedAt && r.endedAt);
-                  if (todayFinished.length === 0 && histBenchmarkPpm === null) return null;
-                  const todayTotalCases = todayFinished.reduce((acc, r) => {
-                    const vals = loadRunValues(r.id);
-                    return acc + (r.actualCases ?? computeSummaryStats(vals).totalCases);
-                  }, 0);
-                  const todayNetSec = todayFinished.reduce((acc, r) => {
-                    const gross = (r.endedAt! - r.startedAt!) / 1000;
-                    const dt = (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                    return acc + Math.max(0, gross - dt);
-                  }, 0);
-                  const todayDowntimeSec = todayFinished.reduce((acc, r) => {
-                    return acc + (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                  }, 0);
-                  const todayTotalPizzas = todayFinished.reduce((acc, r) => {
-                    const vals = loadRunValues(r.id);
-                    const cases = r.actualCases ?? computeSummaryStats(vals).totalCases;
-                    return acc + cases * (vals.pizzasPerCase ?? 0);
-                  }, 0);
-                  const todayPpm = todayNetSec > 0 && todayTotalPizzas > 0 ? Math.round(todayTotalPizzas / (todayNetSec / 60)) : null;
-                  const benchDiff = todayPpm !== null && histBenchmarkPpm !== null ? todayPpm - histBenchmarkPpm : null;
-                  return (
-                    <div className="mb-5 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
-                      <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-primary shrink-0" />
-                        <span className="text-sm font-bold">Today's Shift</span>
-                        {todayFinished.length > 0 && <span className="text-xs text-muted-foreground">{todayFinished.length} run{todayFinished.length !== 1 ? "s" : ""} finished</span>}
-                      </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border/30">
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Cases Made</div>
-                          <div className="text-2xl font-black tabular-nums">{todayTotalCases > 0 ? fmtComma(todayTotalCases) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Net Run Time</div>
-                          <div className="text-2xl font-black tabular-nums">{todayNetSec > 0 ? fmtTime(todayNetSec) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Downtime</div>
-                          <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
-                        </div>
-                        <div className="px-5 py-4">
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's PPM</div>
-                          <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {todayPpm !== null ? todayPpm : "—"}
-                          </div>
-                          {histBenchmarkPpm !== null && (
-                            <div className="text-[10px] text-muted-foreground mt-0.5">
-                              avg {histBenchmarkPpm} PPM
-                              {benchDiff !== null && (
-                                <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                                  {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      {histBenchmarkPpm !== null && todayPpm === null && (
-                        <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
-                          Historical average: <span className="font-bold text-foreground">{histBenchmarkPpm} PPM</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
+              {/* ─── STOPPAGES ─── */}
+              <TabsContent value="stoppages">
                 {/* ── Stoppage Log ── */}
                 {currentRun && (() => {
                   const stoppages = currentRun.stoppages ?? [];
@@ -6876,6 +6996,95 @@ export default function Home() {
                     </div>
                   );
                 })()}
+              </TabsContent>
+
+              {/* ─── SUMMARY ─── */}
+              <TabsContent value="summary">
+                {/* Shift notes */}
+                <div className="mb-4">
+                  <label className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70 block mb-1.5">Shift Notes</label>
+                  <textarea
+                    value={dayState.shiftNotes ?? ""}
+                    onChange={e => {
+                      const updated = { ...dayState, shiftNotes: e.target.value };
+                      setDayState(updated);
+                      saveDayState(updated);
+                    }}
+                    onFocus={e => e.target.select()}
+                    placeholder="Handoff notes, issues, observations for this shift…"
+                    rows={3}
+                    className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-sm resize-none outline-none focus:border-primary/60 placeholder:text-muted-foreground/40"
+                  />
+                </div>
+                {/* ── Today's Shift Totals + Benchmark ── */}
+                {(() => {
+                  const todayFinished = dayState.runs.filter(r => r.startedAt && r.endedAt);
+                  if (todayFinished.length === 0 && histBenchmarkPpm === null) return null;
+                  const todayTotalCases = todayFinished.reduce((acc, r) => {
+                    const vals = loadRunValues(r.id);
+                    return acc + (r.actualCases ?? computeSummaryStats(vals).totalCases);
+                  }, 0);
+                  const todayNetSec = todayFinished.reduce((acc, r) => {
+                    const gross = (r.endedAt! - r.startedAt!) / 1000;
+                    const dt = (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                    return acc + Math.max(0, gross - dt);
+                  }, 0);
+                  const todayDowntimeSec = todayFinished.reduce((acc, r) => {
+                    return acc + (r.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                  }, 0);
+                  const todayTotalPizzas = todayFinished.reduce((acc, r) => {
+                    const vals = loadRunValues(r.id);
+                    const cases = r.actualCases ?? computeSummaryStats(vals).totalCases;
+                    return acc + cases * (vals.pizzasPerCase ?? 0);
+                  }, 0);
+                  const todayPpm = todayNetSec > 0 && todayTotalPizzas > 0 ? Math.round(todayTotalPizzas / (todayNetSec / 60)) : null;
+                  const benchDiff = todayPpm !== null && histBenchmarkPpm !== null ? todayPpm - histBenchmarkPpm : null;
+                  return (
+                    <div className="mb-5 rounded-xl border border-border/50 bg-card/50 overflow-hidden">
+                      <div className="px-5 py-3 border-b border-border/30 flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 text-primary shrink-0" />
+                        <span className="text-sm font-bold">Today's Shift</span>
+                        {todayFinished.length > 0 && <span className="text-xs text-muted-foreground">{todayFinished.length} run{todayFinished.length !== 1 ? "s" : ""} finished</span>}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-border/30">
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Cases Made</div>
+                          <div className="text-2xl font-black tabular-nums">{todayTotalCases > 0 ? fmtComma(todayTotalCases) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Net Run Time</div>
+                          <div className="text-2xl font-black tabular-nums">{todayNetSec > 0 ? fmtTime(todayNetSec) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Downtime</div>
+                          <div className={`text-2xl font-black tabular-nums ${todayDowntimeSec > 0 ? "text-orange-400" : "text-muted-foreground"}`}>{todayDowntimeSec > 0 ? fmtTime(todayDowntimeSec) : "—"}</div>
+                        </div>
+                        <div className="px-5 py-4">
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Today's PPM</div>
+                          <div className={`text-2xl font-black tabular-nums ${benchDiff === null ? "" : benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {todayPpm !== null ? todayPpm : "—"}
+                          </div>
+                          {histBenchmarkPpm !== null && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              avg {histBenchmarkPpm} PPM
+                              {benchDiff !== null && (
+                                <span className={`ml-1 font-semibold ${benchDiff >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                  {benchDiff >= 0 ? `▲ +${benchDiff}` : `▼ ${benchDiff}`}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {histBenchmarkPpm !== null && todayPpm === null && (
+                        <div className="px-5 py-3 border-t border-border/20 text-xs text-muted-foreground">
+                          Historical average: <span className="font-bold text-foreground">{histBenchmarkPpm} PPM</span> across {history.reduce((a, d) => a + d.runs.filter(r => r.startedAt && r.endedAt).length, 0)} finished runs
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
 
                 {(() => {
                   const finishedRuns = dayState.runs.filter(r => !!r.endedAt);
@@ -6905,7 +7114,7 @@ export default function Home() {
                     return (
                       <Card
                         className={`border-border/50 shadow-md ${!readOnly ? "cursor-pointer transition-colors hover:bg-accent/30" : ""} ${isCurrent ? "bg-primary/10 border-primary/40" : isFinished ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card/50"}`}
-                        onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("info"); } }}
+                        onClick={readOnly ? undefined : () => { const idx = dayState.runs.indexOf(run); if (idx !== -1) { switchToRun(idx); setActiveTab("run"); } }}
                       >
                         <CardHeader className="pb-2 pt-4 px-5">
                           <div className="flex items-center justify-between gap-2">
