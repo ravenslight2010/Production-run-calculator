@@ -13,6 +13,7 @@ const STORAGE_KEY = "run-calc-mobile-v2";
 export interface RunSettings {
   brand: string;
   flavor: string;
+  dieType: string;
   casesNeeded: number;
   pizzasPerCase: number;
   casesPerSkid: number;
@@ -110,6 +111,7 @@ export interface RunCalc {
 const DEFAULT_SETTINGS: RunSettings = {
   brand: "",
   flavor: "",
+  dieType: "",
   casesNeeded: 0,
   pizzasPerCase: 12,
   casesPerSkid: 48,
@@ -168,6 +170,19 @@ function makeNewRun(): RunState {
     progress: { ...DEFAULT_PROGRESS },
     stoppages: [],
     isRunning: false,
+  };
+}
+
+// Freeze a run at a time boundary so archived history is immutable: stop the
+// clock, close any open stoppages, and clear the running flag.
+function closeOutRun(run: RunState, boundaryMs: number): RunState {
+  return {
+    ...run,
+    isRunning: false,
+    endedAt: run.endedAt ?? (run.startedAt != null ? boundaryMs : undefined),
+    stoppages: run.stoppages.map((s) =>
+      s.endedAt == null ? { ...s, endedAt: boundaryMs } : s,
+    ),
   };
 }
 
@@ -306,10 +321,37 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
   };
 }
 
+export const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
+
+export interface RunTemplate {
+  id: string;
+  name: string;
+  settings: RunSettings;
+  createdAt: number;
+}
+
+export interface HistoryDay {
+  date: string;
+  runs: RunState[];
+}
+
+const MAX_TEMPLATES = 20;
+const MAX_HISTORY_DAYS = 14;
+
+export function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${(d.getMonth() + 1)
+    .toString()
+    .padStart(2, "0")}-${d.getDate().toString().padStart(2, "0")}`;
+}
+
 interface AppState {
   runs: RunState[];
   currentIndex: number;
   shiftNotes: string;
+  date: string;
+  templates: RunTemplate[];
+  history: HistoryDay[];
 }
 
 interface RunContextValue {
@@ -332,6 +374,11 @@ interface RunContextValue {
   resetRun: () => void;
   shiftNotes: string;
   setShiftNotes: (notes: string) => void;
+  templates: RunTemplate[];
+  history: HistoryDay[];
+  saveTemplate: (name: string) => void;
+  applyTemplate: (id: string) => void;
+  deleteTemplate: (id: string) => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -340,6 +387,9 @@ const INITIAL_STATE: AppState = {
   runs: [makeNewRun()],
   currentIndex: 0,
   shiftNotes: "",
+  date: todayStr(),
+  templates: [],
+  history: [],
 };
 
 export function RunContextProvider({ children }: { children: React.ReactNode }) {
@@ -354,7 +404,39 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         try {
           const parsed = JSON.parse(raw) as AppState;
           if (parsed.runs && parsed.runs.length > 0) {
-            setAppState({ ...parsed, shiftNotes: parsed.shiftNotes ?? "" });
+            const today = todayStr();
+            const templates = parsed.templates ?? [];
+            const history = parsed.history ?? [];
+            if (parsed.date && parsed.date !== today) {
+              // Calendar day rolled over: archive the prior day's runs,
+              // frozen at the prior day's end so history is immutable.
+              const boundaryMs = new Date(`${today}T00:00:00`).getTime();
+              const archived: HistoryDay = {
+                date: parsed.date,
+                runs: parsed.runs.map((r) => closeOutRun(r, boundaryMs)),
+              };
+              const next: AppState = {
+                runs: [makeNewRun()],
+                currentIndex: 0,
+                shiftNotes: "",
+                date: today,
+                templates,
+                history: [
+                  archived,
+                  ...history.filter((h) => h.date !== parsed.date),
+                ].slice(0, MAX_HISTORY_DAYS),
+              };
+              setAppState(next);
+              AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            } else {
+              setAppState({
+                ...parsed,
+                shiftNotes: parsed.shiftNotes ?? "",
+                date: parsed.date ?? today,
+                templates,
+                history,
+              });
+            }
           }
         } catch {
           /* corrupt, keep defaults */
@@ -499,6 +581,59 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  const saveTemplate = useCallback(
+    (name: string) => {
+      setAppState((prev) => {
+        const cur = prev.runs[prev.currentIndex];
+        const tpl: RunTemplate = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          name: name.trim() || `Template ${prev.templates.length + 1}`,
+          settings: { ...cur.settings },
+          createdAt: Date.now(),
+        };
+        const next = {
+          ...prev,
+          templates: [tpl, ...prev.templates].slice(0, MAX_TEMPLATES),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const applyTemplate = useCallback(
+    (id: string) => {
+      setAppState((prev) => {
+        const tpl = prev.templates.find((t) => t.id === id);
+        if (!tpl) return prev;
+        const runs = [...prev.runs];
+        runs[prev.currentIndex] = {
+          ...runs[prev.currentIndex],
+          settings: { ...tpl.settings },
+        };
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const deleteTemplate = useCallback(
+    (id: string) => {
+      setAppState((prev) => {
+        const next = {
+          ...prev,
+          templates: prev.templates.filter((t) => t.id !== id),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   const activeStoppage = currentRun?.stoppages.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
 
@@ -524,6 +659,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         resetRun,
         shiftNotes: appState.shiftNotes,
         setShiftNotes,
+        templates: appState.templates,
+        history: appState.history,
+        saveTemplate,
+        applyTemplate,
+        deleteTemplate,
       }}
     >
       {children}

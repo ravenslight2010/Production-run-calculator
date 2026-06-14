@@ -1,10 +1,16 @@
+import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, NumericField, SectionHeader, TextField } from "@/components/UI";
-import { useRun, runLabel, type RunSettings } from "@/context/RunContext";
+import {
+  DEFAULT_DIE_TYPES,
+  useRun,
+  runLabel,
+  type RunSettings,
+} from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 function toNum(s: string | undefined | null): number {
@@ -16,6 +22,7 @@ function toNum(s: string | undefined | null): number {
 interface FormState {
   brand: string;
   flavor: string;
+  dieType: string;
   casesNeeded: string;
   pizzasPerCase: string;
   casesPerSkid: string;
@@ -65,6 +72,7 @@ function settingsToForm(s: RunSettings): FormState {
   return {
     brand: s.brand,
     flavor: s.flavor,
+    dieType: s.dieType ?? "",
     casesNeeded: n2s(s.casesNeeded),
     pizzasPerCase: n2s(s.pizzasPerCase),
     casesPerSkid: n2s(s.casesPerSkid),
@@ -104,8 +112,18 @@ function settingsToForm(s: RunSettings): FormState {
 export default function ConfigureScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, runIndex, updateSettings, resetRun } = useRun();
+  const {
+    run,
+    runIndex,
+    updateSettings,
+    resetRun,
+    templates,
+    saveTemplate,
+    applyTemplate,
+    deleteTemplate,
+  } = useRun();
   const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
+  const [tplName, setTplName] = useState("");
 
   useEffect(() => {
     setForm(settingsToForm(run.settings));
@@ -123,6 +141,7 @@ export default function ConfigureScreen() {
     updateSettings({
       brand: form.brand.trim(),
       flavor: form.flavor.trim(),
+      dieType: form.dieType.trim(),
       casesNeeded: toNum(form.casesNeeded),
       pizzasPerCase: toNum(form.pizzasPerCase) || 12,
       casesPerSkid: toNum(form.casesPerSkid) || 48,
@@ -185,6 +204,96 @@ export default function ConfigureScreen() {
           </Text>
         </View>
 
+        {/* Templates */}
+        <SectionHeader title="Templates" />
+        <CardSection style={{ paddingVertical: 12 }}>
+          {templates.length === 0 ? (
+            <Text style={[styles.tplEmpty, { color: colors.mutedForeground }]}>
+              Save this run&apos;s settings as a template to reuse them on future runs.
+            </Text>
+          ) : (
+            <View style={{ gap: 8, marginBottom: 12 }}>
+              {templates.map((t) => (
+                <View
+                  key={t.id}
+                  style={[styles.tplRow, { borderColor: colors.border }]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[styles.tplName, { color: colors.foreground }]}
+                      numberOfLines={1}
+                    >
+                      {t.name}
+                    </Text>
+                    <Text
+                      style={[styles.tplMeta, { color: colors.mutedForeground }]}
+                      numberOfLines={1}
+                    >
+                      {[t.settings.brand, t.settings.flavor]
+                        .filter(Boolean)
+                        .join(" · ") || "Untitled run"}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => {
+                      applyTemplate(t.id);
+                      setForm(settingsToForm(t.settings));
+                      Haptics.notificationAsync(
+                        Haptics.NotificationFeedbackType.Success,
+                      );
+                    }}
+                    style={({ pressed }) => [
+                      styles.tplApply,
+                      { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+                    ]}
+                  >
+                    <Text style={styles.tplApplyText}>Load</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      deleteTemplate(t.id);
+                      Haptics.selectionAsync();
+                    }}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.tplDelete,
+                      { opacity: pressed ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Feather name="trash-2" size={16} color="#ef4444" />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+          <View style={styles.tplSaveRow}>
+            <TextInput
+              style={[
+                styles.tplInput,
+                { color: colors.foreground, borderColor: colors.border },
+              ]}
+              value={tplName}
+              onChangeText={setTplName}
+              placeholder="Template name (optional)"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="words"
+            />
+            <Pressable
+              onPress={() => {
+                saveTemplate(tplName);
+                setTplName("");
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              }}
+              style={({ pressed }) => [
+                styles.tplSaveBtn,
+                { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+              ]}
+            >
+              <Text style={styles.tplSaveBtnText}>Save Current</Text>
+            </Pressable>
+          </View>
+        </CardSection>
+
         {/* Run Info */}
         <SectionHeader title="Run Info" />
         <CardSection>
@@ -231,6 +340,43 @@ export default function ConfigureScreen() {
             placeholder="6"
             unit="(buffer)"
           />
+        </CardSection>
+
+        {/* Die Type */}
+        <SectionHeader title="Die Type" />
+        <CardSection style={{ paddingVertical: 12 }}>
+          <View style={styles.chipRow}>
+            {DEFAULT_DIE_TYPES.map((d) => {
+              const active = form.dieType === d;
+              return (
+                <Pressable
+                  key={d}
+                  onPress={() => {
+                    const next = active ? "" : d;
+                    setForm((f) => ({ ...f, dieType: next }));
+                    updateSettings({ dieType: next });
+                    Haptics.selectionAsync();
+                  }}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor: active ? colors.primary : colors.border,
+                      backgroundColor: active ? colors.primary + "22" : "transparent",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      { color: active ? colors.primary : colors.foreground },
+                    ]}
+                  >
+                    {d}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </CardSection>
 
         {/* Line Speed */}
@@ -458,7 +604,7 @@ export default function ConfigureScreen() {
           onPress={() => {
             resetRun();
             setForm(settingsToForm({
-              brand: "", flavor: "", notes: "",
+              brand: "", flavor: "", dieType: "", notes: "",
               casesNeeded: 0, pizzasPerCase: 12, casesPerSkid: 48, casesPerLayer: 6,
               lineSpeedPPM: 0, crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 1,
               sauceOzPerPizza: 0, sauceBarrelLbs: 0,
@@ -526,4 +672,48 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   resetBtnText: { fontSize: 16, fontWeight: "600" as const },
+
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  chipText: { fontSize: 14, fontWeight: "600" as const },
+
+  tplEmpty: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  tplRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  tplName: { fontSize: 15, fontWeight: "600" as const },
+  tplMeta: { fontSize: 12, marginTop: 1 },
+  tplApply: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  tplApplyText: { color: "#000", fontSize: 13, fontWeight: "700" as const },
+  tplDelete: { padding: 4 },
+  tplSaveRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  tplInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "web" ? 8 : 10,
+    fontSize: 15,
+  },
+  tplSaveBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  tplSaveBtnText: { color: "#000", fontSize: 13, fontWeight: "700" as const },
 });

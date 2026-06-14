@@ -32,3 +32,8 @@ Any elapsed/downtime math in `computeCalc` must cap at `endedAt ?? now`, never `
 
 **Why:** The Summary tab sums per-run `netElapsedSec`/`totalDowntimeSec`; an unbounded finished-run clock made shift totals drift over time.
 **How to apply:** When adding new time-based stats, derive from the run's boundary, and clear `endedAt` on resume so status/timing stay consistent.
+
+## History archive must freeze runs at the day boundary
+On calendar-day rollover (load-time check: `parsed.date !== todayStr()`), archived runs must be passed through `closeOutRun(run, boundaryMs)` where `boundaryMs = midnight of today`. This sets `endedAt` on still-running runs and closes open stoppages.
+
+**Why:** History recomputes each archived run with the live `now`. Without freezing, any run that was running at midnight keeps accruing time forever, so historical PPM/net-time drift on every app launch. Also persist the rollover result immediately (`AsyncStorage.setItem`, not just the debounced `persist`) so the new date/empty runs/history survive a relaunch.

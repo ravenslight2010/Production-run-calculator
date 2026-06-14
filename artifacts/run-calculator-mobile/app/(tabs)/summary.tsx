@@ -39,6 +39,16 @@ function fmtDuration(sec: number): string {
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
+function fmtDate(s: string): string {
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return dt.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 interface RunStats {
   status: RunStatus;
   planned: number;
@@ -93,9 +103,21 @@ function RunCard({ run, index }: { run: RunState; index: number }) {
     >
       <View style={styles.runHeader}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.runLabel, { color: colors.foreground }]}>
-            {runLabel(run, index)}
-          </Text>
+          <View style={styles.labelRow}>
+            <Text
+              style={[styles.runLabel, { color: colors.foreground }]}
+              numberOfLines={1}
+            >
+              {runLabel(run, index)}
+            </Text>
+            {run.settings.dieType ? (
+              <View style={[styles.dieBadge, { borderColor: colors.border }]}>
+                <Text style={[styles.dieText, { color: colors.mutedForeground }]}>
+                  {run.settings.dieType}
+                </Text>
+              </View>
+            ) : null}
+          </View>
           {stats.start ? (
             <Text style={[styles.runTime, { color: colors.mutedForeground }]}>
               {stats.start}
@@ -168,7 +190,7 @@ function RunCard({ run, index }: { run: RunState; index: number }) {
 export default function SummaryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, tick, shiftNotes, setShiftNotes } = useRun();
+  const { allRuns, tick, shiftNotes, setShiftNotes, history } = useRun();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -268,6 +290,61 @@ export default function SummaryScreen() {
           textAlignVertical="top"
         />
       </View>
+
+      {history.length > 0 ? (
+        <>
+          <SectionHeader title="History" />
+          <View style={{ gap: 10 }}>
+            {history.map((day) => {
+              const dStats = day.runs.map((r) => computeRunStats(r, now));
+              const cases = dStats.reduce((a, s) => a + s.casesMade, 0);
+              const pizzas = dStats.reduce((a, s) => a + s.pizzasMade, 0);
+              const net = dStats.reduce((a, s) => a + s.netRunSec, 0);
+              const ppm = net > 0 ? Math.round(pizzas / (net / 60)) : 0;
+              return (
+                <View
+                  key={day.date}
+                  style={[
+                    styles.histCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.histDate, { color: colors.foreground }]}>
+                      {fmtDate(day.date)}
+                    </Text>
+                    <Text style={[styles.histMeta, { color: colors.mutedForeground }]}>
+                      {day.runs.length} {day.runs.length === 1 ? "run" : "runs"} ·{" "}
+                      {fmtDuration(net)} run time
+                    </Text>
+                  </View>
+                  <View style={styles.histStat}>
+                    <Text style={[styles.histVal, { color: colors.foreground }]}>
+                      {cases.toLocaleString()}
+                    </Text>
+                    <Text style={[styles.histValLabel, { color: colors.mutedForeground }]}>
+                      cases
+                    </Text>
+                  </View>
+                  <View style={styles.histStat}>
+                    <Text
+                      style={[
+                        styles.histVal,
+                        { color: ppm > 0 ? colors.success : colors.mutedForeground },
+                      ]}
+                    >
+                      {ppm > 0 ? ppm : "—"}
+                    </Text>
+                    <Text style={[styles.histValLabel, { color: colors.mutedForeground }]}>
+                      ppm
+                    </Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
     </ScrollView>
   );
 }
@@ -306,8 +383,20 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 8,
   },
-  runLabel: { fontSize: 15, fontWeight: "700" as const },
+  labelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  runLabel: { fontSize: 15, fontWeight: "700" as const, flexShrink: 1 },
   runTime: { fontSize: 11, marginTop: 2 },
+  dieBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  dieText: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+    letterSpacing: 0.3,
+  },
   statusPill: {
     paddingHorizontal: 9,
     paddingVertical: 3,
@@ -347,5 +436,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     minHeight: 90,
     padding: Platform.OS === "web" ? 4 : 0,
+  },
+
+  histCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+  },
+  histDate: { fontSize: 15, fontWeight: "700" as const },
+  histMeta: { fontSize: 12, marginTop: 2 },
+  histStat: { alignItems: "center", minWidth: 48 },
+  histVal: { fontSize: 18, fontWeight: "800" as const },
+  histValLabel: {
+    fontSize: 9,
+    fontWeight: "600" as const,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginTop: 1,
   },
 });
