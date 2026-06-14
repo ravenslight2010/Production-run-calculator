@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -90,7 +91,8 @@ function StoppageRow({ stoppage, tick }: { stoppage: Stoppage; tick: number }) {
 export default function StoppagesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, runIndex, tick, activeStoppage, addStoppage, endActiveStoppage } = useRun();
+  const { run, runIndex, tick, activeStoppage, addStoppage, addPastStoppage, endActiveStoppage } =
+    useRun();
   const [showModal, setShowModal] = useState(false);
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -230,47 +232,247 @@ export default function StoppagesScreen() {
           addStoppage(type);
           setShowModal(false);
         }}
+        onAddPast={(type, startedAt, endedAt, reason) => {
+          addPastStoppage(type, startedAt, endedAt, reason);
+          setShowModal(false);
+        }}
       />
     </View>
   );
+}
+
+// Parse "HH:MM" (24h) into a today-anchored epoch ms, or null if invalid.
+function parseTimeToMs(input: string): number | null {
+  const m = input.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  const d = new Date();
+  d.setHours(h, min, 0, 0);
+  return d.getTime();
 }
 
 function AddStoppageModal({
   visible,
   onClose,
   onAdd,
+  onAddPast,
 }: {
   visible: boolean;
   onClose: () => void;
   onAdd: (type: Stoppage["type"]) => void;
+  onAddPast: (
+    type: Stoppage["type"],
+    startedAt: number,
+    endedAt: number,
+    reason?: string,
+  ) => void;
 }) {
   const colors = useColors();
+  const [showPast, setShowPast] = useState(false);
+  const [pastType, setPastType] = useState<Stoppage["type"]>("jam");
+  const [startStr, setStartStr] = useState("");
+  const [endStr, setEndStr] = useState("");
+  const [reason, setReason] = useState("");
+
+  const startMs = parseTimeToMs(startStr);
+  const endMs = parseTimeToMs(endStr);
+  const pastValid = startMs != null && endMs != null && endMs > startMs;
+
+  const resetPast = () => {
+    setShowPast(false);
+    setPastType("jam");
+    setStartStr("");
+    setEndStr("");
+    setReason("");
+  };
+
+  const handleClose = () => {
+    resetPast();
+    onClose();
+  };
+
+  const submitPast = () => {
+    if (!pastValid) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    onAddPast(pastType, startMs!, endMs!, reason.trim() || undefined);
+    resetPast();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <Pressable style={styles.overlay} onPress={handleClose}>
         <Pressable style={[styles.sheet, { backgroundColor: colors.card }]} onPress={() => {}}>
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
-          <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Log Stoppage</Text>
-          <View style={styles.typeGrid}>
-            {STOPPAGE_TYPES.map((t) => (
+          <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
+            {showPast ? "Log Past Stoppage" : "Log Stoppage"}
+          </Text>
+
+          {!showPast ? (
+            <>
+              <View style={styles.typeGrid}>
+                {STOPPAGE_TYPES.map((t) => (
+                  <Pressable
+                    key={t.type}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      onAdd(t.type);
+                    }}
+                    style={({ pressed }) => [
+                      styles.typeBtn,
+                      {
+                        backgroundColor: TYPE_COLORS[t.type],
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={styles.typeBtnText}>{t.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <Pressable
-                key={t.type}
                 onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  onAdd(t.type);
+                  Haptics.selectionAsync();
+                  setShowPast(true);
                 }}
                 style={({ pressed }) => [
-                  styles.typeBtn,
-                  {
-                    backgroundColor: TYPE_COLORS[t.type],
-                    opacity: pressed ? 0.75 : 1,
-                  },
+                  styles.pastLink,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
                 ]}
               >
-                <Text style={styles.typeBtnText}>{t.label}</Text>
+                <Feather name="clock" size={15} color={colors.mutedForeground} />
+                <Text style={[styles.pastLinkText, { color: colors.foreground }]}>
+                  Log a past stoppage
+                </Text>
               </Pressable>
-            ))}
-          </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.pastTypeRow}>
+                {STOPPAGE_TYPES.map((t) => {
+                  const active = pastType === t.type;
+                  return (
+                    <Pressable
+                      key={t.type}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setPastType(t.type);
+                      }}
+                      style={[
+                        styles.pastTypeChip,
+                        {
+                          backgroundColor: active ? TYPE_COLORS[t.type] : "transparent",
+                          borderColor: active ? TYPE_COLORS[t.type] : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pastTypeChipText,
+                          { color: active ? "#fff" : colors.mutedForeground },
+                        ]}
+                      >
+                        {t.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.pastTimeRow}>
+                <View style={styles.pastTimeField}>
+                  <Text style={[styles.pastLabel, { color: colors.mutedForeground }]}>
+                    Start (HH:MM)
+                  </Text>
+                  <TextInput
+                    value={startStr}
+                    onChangeText={setStartStr}
+                    placeholder="13:00"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numbers-and-punctuation"
+                    style={[
+                      styles.pastInput,
+                      { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+                    ]}
+                  />
+                </View>
+                <View style={styles.pastTimeField}>
+                  <Text style={[styles.pastLabel, { color: colors.mutedForeground }]}>
+                    End (HH:MM)
+                  </Text>
+                  <TextInput
+                    value={endStr}
+                    onChangeText={setEndStr}
+                    placeholder="13:20"
+                    placeholderTextColor={colors.mutedForeground}
+                    keyboardType="numbers-and-punctuation"
+                    style={[
+                      styles.pastInput,
+                      { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              <Text style={[styles.pastLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
+                Reason (optional)
+              </Text>
+              <TextInput
+                value={reason}
+                onChangeText={setReason}
+                placeholder="What happened?"
+                placeholderTextColor={colors.mutedForeground}
+                style={[
+                  styles.pastInput,
+                  { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background, marginTop: 6 },
+                ]}
+              />
+
+              {startStr.length > 0 && endStr.length > 0 && !pastValid ? (
+                <Text style={[styles.pastError, { color: colors.destructive }]}>
+                  End time must be a valid 24-hour time after the start time.
+                </Text>
+              ) : null}
+
+              <View style={styles.pastActions}>
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setShowPast(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.pastBack,
+                    { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.pastBackText, { color: colors.mutedForeground }]}>
+                    Back
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={!pastValid}
+                  onPress={submitPast}
+                  style={({ pressed }) => [
+                    styles.pastSave,
+                    {
+                      backgroundColor: pastValid ? colors.primary : colors.secondary,
+                      opacity: pressed ? 0.8 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.pastSaveText,
+                      { color: pastValid ? "#000" : colors.mutedForeground },
+                    ]}
+                  >
+                    Add Stoppage
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -409,4 +611,54 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   typeBtnText: { color: "#fff", fontWeight: "700" as const, fontSize: 16 },
+
+  pastLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 12,
+  },
+  pastLinkText: { fontSize: 14, fontWeight: "600" as const },
+
+  pastTypeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
+  pastTypeChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  pastTypeChipText: { fontSize: 13, fontWeight: "700" as const },
+
+  pastTimeRow: { flexDirection: "row", gap: 12, marginTop: 16 },
+  pastTimeField: { flex: 1 },
+  pastLabel: { fontSize: 12, fontWeight: "500" as const, marginBottom: 6 },
+  pastInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+  },
+  pastError: { fontSize: 12, marginTop: 10 },
+
+  pastActions: { flexDirection: "row", gap: 12, marginTop: 20 },
+  pastBack: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 13,
+    paddingHorizontal: 22,
+    alignItems: "center",
+  },
+  pastBackText: { fontSize: 15, fontWeight: "600" as const },
+  pastSave: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: "center",
+  },
+  pastSaveText: { fontSize: 15, fontWeight: "700" as const },
 });

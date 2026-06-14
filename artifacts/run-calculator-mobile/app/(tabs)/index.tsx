@@ -18,6 +18,9 @@ import {
   useRun,
   runLabel,
   sauceBarrelBreakdown,
+  computeDoughSupply,
+  liveFreezerMin,
+  type DoughSupplyMode,
   type Stoppage,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
@@ -64,9 +67,36 @@ export default function CalculatorScreen() {
     addRun, switchRun, deleteRun,
     autoTrack, setAutoTrack, suppressAutoTrack,
     runToTime, setRunToTime,
+    applyCarryOver,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
+  const [doughSubTab, setDoughSubTab] = useState<DoughSupplyMode>("dough");
+
+  const nowMs = Date.now();
+  const freezerTime = run.settings.freezerTime;
+  const freezerMin = liveFreezerMin(run, nowMs);
+  const freezerRemaining = Math.max(0, freezerTime - freezerMin);
+  const showFreezer = run.startedAt != null && freezerTime > 0;
+
+  const supply = computeDoughSupply(run, nowMs, doughSubTab);
+  const supplyConfigured =
+    run.settings.doughballsPerTray > 0 || run.settings.crustsPerStack > 0;
+
+  // Smart carry-over of leftover dough/crusts into the next run.
+  const hasNextRun = runIndex < runCount - 1;
+  const carryOver = (() => {
+    if (run.progress.carryOverDone) return null;
+    const excessPizzas = supply.buffer * run.settings.pizzasPerCase;
+    if (excessPizzas < 1 || supply.perTray <= 0) return null;
+    const excessBatches =
+      supply.perBatch > 0 ? Math.floor(excessPizzas / supply.perBatch) : 0;
+    const afterBatches =
+      excessBatches > 0 ? excessPizzas - excessBatches * supply.perBatch : excessPizzas;
+    const excessTrays = Math.floor(afterBatches / supply.perTray);
+    if (excessTrays === 0 && excessBatches === 0) return null;
+    return { excessTrays, excessBatches };
+  })();
 
   const { showBatchDue, setShowBatchDue } = useNotifications({
     run,
@@ -230,31 +260,91 @@ export default function CalculatorScreen() {
           </Pressable>
         ) : null}
 
-        {/* Carry-over done */}
-        {run.settings.casesNeeded > 0 && (
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              updateProgress({ carryOverDone: !run.progress.carryOverDone });
-            }}
-            style={[
-              styles.carryOverRow,
-              {
-                borderColor: run.progress.carryOverDone ? colors.success : colors.border,
-                backgroundColor: colors.card,
-              },
-            ]}
-          >
-            <Feather
-              name={run.progress.carryOverDone ? "check-square" : "square"}
-              size={18}
-              color={run.progress.carryOverDone ? colors.success : colors.mutedForeground}
-            />
-            <Text style={[styles.carryOverText, { color: run.progress.carryOverDone ? colors.success : colors.mutedForeground }]}>
-              Carry-over applied
+        {/* Smart carry-over prompt */}
+        {carryOver && hasNextRun ? (
+          <View style={[styles.carryCard, { backgroundColor: colors.card, borderColor: colors.success }]}>
+            <View style={styles.carryHeader}>
+              <Feather name="corner-down-right" size={16} color={colors.success} />
+              <Text style={[styles.carryTitle, { color: colors.success }]}>
+                Carry over leftover {doughSubTab === "crusts" ? "crusts" : "dough"}?
+              </Text>
+            </View>
+            <Text style={[styles.carryBody, { color: colors.foreground }]}>
+              {carryOver.excessTrays > 0 ? (
+                <Text style={styles.carryStrong}>
+                  {carryOver.excessTrays}{" "}
+                  {doughSubTab === "crusts"
+                    ? `stack${carryOver.excessTrays !== 1 ? "s" : ""}`
+                    : `tray${carryOver.excessTrays !== 1 ? "s" : ""}`}
+                </Text>
+              ) : null}
+              {carryOver.excessTrays > 0 && carryOver.excessBatches > 0 && doughSubTab !== "crusts"
+                ? " + "
+                : ""}
+              {carryOver.excessBatches > 0 && doughSubTab !== "crusts" ? (
+                <Text style={styles.carryStrong}>
+                  {carryOver.excessBatches} batch{carryOver.excessBatches !== 1 ? "es" : ""}
+                </Text>
+              ) : null}
+              {" left over — add to the next run."}
             </Text>
-          </Pressable>
-        )}
+            <View style={styles.carryActions}>
+              <Pressable
+                onPress={() => {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  applyCarryOver(carryOver.excessTrays, carryOver.excessBatches);
+                }}
+                style={({ pressed }) => [
+                  styles.carryAccept,
+                  { backgroundColor: colors.success, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Text style={styles.carryAcceptText}>Carry Over</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  updateProgress({ carryOverDone: true });
+                }}
+                style={({ pressed }) => [
+                  styles.carryDismiss,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Text style={[styles.carryDismissText, { color: colors.mutedForeground }]}>
+                  Dismiss
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Freezer countdown */}
+        {showFreezer ? (
+          <View style={[styles.freezerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.freezerLeft}>
+              <Feather name="clock" size={16} color={colors.primary} />
+              <View>
+                <Text style={[styles.freezerLabel, { color: colors.mutedForeground }]}>
+                  FREEZER
+                </Text>
+                <Text style={[styles.freezerValue, { color: colors.foreground }]}>
+                  {freezerRemaining > 0
+                    ? `${fmtTime(freezerRemaining)} until full`
+                    : "Fully staged"}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.freezerRight}>
+              <Text style={[styles.freezerCases, { color: colors.primary }]}>
+                {supply.casesOnLine}
+              </Text>
+              <Text style={[styles.freezerCasesLabel, { color: colors.mutedForeground }]}>
+                cases on line
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {/* Live metrics */}
         <SectionHeader title="Live" />
@@ -403,6 +493,110 @@ export default function CalculatorScreen() {
                   </View>
                 );
               })()}
+            </CardSection>
+          </>
+        ) : null}
+
+        {/* Dough / crust supply tracking */}
+        {supplyConfigured ? (
+          <>
+            <View style={styles.supplyHeader}>
+              <Text style={[styles.progressTitle, { color: colors.mutedForeground }]}>
+                SUPPLY
+              </Text>
+              <View style={[styles.supplyToggle, { borderColor: colors.border }]}>
+                {(["dough", "crusts"] as DoughSupplyMode[]).map((m) => {
+                  const active = doughSubTab === m;
+                  return (
+                    <Pressable
+                      key={m}
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        setDoughSubTab(m);
+                      }}
+                      style={[
+                        styles.supplyToggleBtn,
+                        { backgroundColor: active ? colors.primary : "transparent" },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.supplyToggleText,
+                          { color: active ? "#000" : colors.mutedForeground },
+                        ]}
+                      >
+                        {m === "dough" ? "Dough" : "Crusts"}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+            <CardSection>
+              <View style={styles.supplyStatusRow}>
+                <Text style={[styles.supplyStatusLabel, { color: colors.mutedForeground }]}>
+                  Status
+                </Text>
+                {(() => {
+                  const shortInt = Math.ceil(supply.doughShortCases);
+                  const bufferInt = Math.floor(supply.buffer);
+                  if (shortInt > 0) {
+                    return (
+                      <View style={[styles.supplyPill, { backgroundColor: colors.destructive }]}>
+                        <Feather name="alert-triangle" size={12} color="#fff" />
+                        <Text style={styles.supplyPillText}>
+                          Short {shortInt} case{shortInt !== 1 ? "s" : ""}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  if (bufferInt > 0) {
+                    return (
+                      <View style={[styles.supplyPill, { backgroundColor: colors.success }]}>
+                        <Feather name="check" size={12} color="#fff" />
+                        <Text style={styles.supplyPillText}>
+                          {bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <View style={[styles.supplyPill, { backgroundColor: colors.secondary }]}>
+                      <Text style={[styles.supplyPillText, { color: colors.foreground }]}>
+                        Balanced
+                      </Text>
+                    </View>
+                  );
+                })()}
+              </View>
+              <View style={styles.metricsRow}>
+                <MetricCard
+                  label={doughSubTab === "crusts" ? "Stacks to Stage" : "Trays to Stage"}
+                  value={supply.stacksNeededTotal.toString()}
+                  highlight={supply.stacksNeededTotal > 0}
+                  style={styles.metricBig}
+                />
+                <View style={styles.metricCol}>
+                  <MetricCard label="Cases Left to Run" value={supply.casesLeftToRun.toString()} />
+                  <MetricCard
+                    label={doughSubTab === "crusts" ? "Cases to Open" : "Cases on Line"}
+                    value={(doughSubTab === "crusts"
+                      ? supply.casesLeftToOpen
+                      : supply.casesOnLine
+                    ).toString()}
+                  />
+                </View>
+              </View>
+              <Text style={[styles.supplyHint, { color: colors.mutedForeground }]}>
+                On hand covers{" "}
+                {run.settings.pizzasPerCase > 0
+                  ? Math.floor(supply.doughOnHand / run.settings.pizzasPerCase)
+                  : 0}{" "}
+                cases ·{" "}
+                {doughSubTab === "crusts"
+                  ? `${supply.casesLeftToOpen} cases to open`
+                  : `${supply.casesOnLine} cases on line`}
+              </Text>
             </CardSection>
           </>
         ) : null}
@@ -754,6 +948,87 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   carryOverText: { fontSize: 14, fontWeight: "500" as const },
+
+  carryCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+    gap: 10,
+  },
+  carryHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  carryTitle: { fontSize: 14, fontWeight: "700" as const },
+  carryBody: { fontSize: 14, lineHeight: 20 },
+  carryStrong: { fontWeight: "700" as const },
+  carryActions: { flexDirection: "row", gap: 10, marginTop: 2 },
+  carryAccept: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  carryAcceptText: { color: "#000", fontWeight: "700" as const, fontSize: 14 },
+  carryDismiss: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingVertical: 11,
+    paddingHorizontal: 18,
+    alignItems: "center",
+  },
+  carryDismissText: { fontWeight: "600" as const, fontSize: 14 },
+
+  freezerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+  },
+  freezerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+  freezerLabel: { fontSize: 11, fontWeight: "600" as const, letterSpacing: 1 },
+  freezerValue: { fontSize: 15, fontWeight: "700" as const, marginTop: 2 },
+  freezerRight: { alignItems: "flex-end" },
+  freezerCases: { fontSize: 22, fontWeight: "700" as const, fontVariant: ["tabular-nums"] },
+  freezerCasesLabel: { fontSize: 11, marginTop: 1 },
+
+  supplyHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  supplyToggle: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderRadius: 999,
+    padding: 2,
+  },
+  supplyToggleBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  supplyToggleText: { fontSize: 12, fontWeight: "700" as const },
+  supplyStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  supplyStatusLabel: { fontSize: 13, fontWeight: "500" as const },
+  supplyPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  supplyPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
+  supplyHint: { fontSize: 12, lineHeight: 16, marginTop: 12 },
 
   progressHeader: {
     flexDirection: "row",

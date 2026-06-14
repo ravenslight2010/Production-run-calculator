@@ -72,6 +72,13 @@ interface FormState {
   // Dough
   doughBatchLbs: string;
   doughballWeightOz: string;
+  // Dough/crust supply tracking
+  doughballsPerTray: string;
+  crustsPerStack: string;
+  crustsPerCase: string;
+  doughBatchYield: string;
+  // Freezer
+  freezerTime: string;
 }
 
 function n2s(n: number): string {
@@ -116,6 +123,11 @@ function settingsToForm(s: RunSettings): FormState {
     pep2BatchLbs: s.pep2BatchLbs > 0 ? s.pep2BatchLbs.toString() : "25",
     doughBatchLbs: n2s(s.doughBatchLbs),
     doughballWeightOz: n2s(s.doughballWeightOz),
+    doughballsPerTray: n2s(s.doughballsPerTray),
+    crustsPerStack: n2s(s.crustsPerStack),
+    crustsPerCase: n2s(s.crustsPerCase),
+    doughBatchYield: n2s(s.doughBatchYield),
+    freezerTime: n2s(s.freezerTime),
   };
 }
 
@@ -228,6 +240,11 @@ export default function ConfigureScreen() {
       pep2BatchLbs: toNum(form.pep2BatchLbs) || 25,
       doughBatchLbs: toNum(form.doughBatchLbs),
       doughballWeightOz: toNum(form.doughballWeightOz),
+      doughballsPerTray: toNum(form.doughballsPerTray),
+      crustsPerStack: toNum(form.crustsPerStack),
+      crustsPerCase: toNum(form.crustsPerCase),
+      doughBatchYield: toNum(form.doughBatchYield),
+      freezerTime: toNum(form.freezerTime),
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -873,6 +890,35 @@ export default function ConfigureScreen() {
             placeholder="0.0"
             unit="oz"
           />
+          <NumericField
+            label="Doughballs per Tray"
+            value={form.doughballsPerTray}
+            onChangeText={set("doughballsPerTray")}
+            onBlur={save}
+            placeholder="0"
+          />
+          <NumericField
+            label="Crusts per Stack"
+            value={form.crustsPerStack}
+            onChangeText={set("crustsPerStack")}
+            onBlur={save}
+            placeholder="0"
+          />
+          <NumericField
+            label="Crusts per Case"
+            value={form.crustsPerCase}
+            onChangeText={set("crustsPerCase")}
+            onBlur={save}
+            placeholder="0"
+          />
+          <NumericField
+            label="Dough Batch Yield"
+            value={form.doughBatchYield}
+            onChangeText={set("doughBatchYield")}
+            onBlur={save}
+            placeholder="0"
+            unit="pizzas"
+          />
           <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
             Dough recipe (overrides batch weight when set)
           </Text>
@@ -902,6 +948,22 @@ export default function ConfigureScreen() {
               deleteRecipePreset("dough", presetName)
             }
           />
+        </CardSection>
+
+        {/* Freezer */}
+        <SectionHeader title="Freezer" />
+        <CardSection>
+          <NumericField
+            label="Freezer Time"
+            value={form.freezerTime}
+            onChangeText={set("freezerTime")}
+            onBlur={save}
+            placeholder="15"
+            unit="min"
+          />
+          <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+            Minutes pizzas spend in the freezer before they can be cased.
+          </Text>
         </CardSection>
 
         {/* Notes */}

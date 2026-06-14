@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SectionHeader } from "@/components/UI";
 import {
   computeCalc,
+  historicalBenchmarkPpm,
   runLabel,
   todayStr,
   useRun,
@@ -212,6 +213,9 @@ export default function SummaryScreen() {
   const todayPPM =
     totalNetSec > 0 ? Math.round(totalPizzas / (totalNetSec / 60)) : 0;
 
+  const benchmark = historicalBenchmarkPpm(history);
+  const benchDiff = benchmark != null && todayPPM > 0 ? todayPPM - benchmark.ppm : null;
+
   const shiftStats = [
     { label: "Cases Made", val: totalCases.toLocaleString(), color: colors.foreground },
     { label: "Net Run Time", val: fmtDuration(totalNetSec), color: colors.foreground },
@@ -306,6 +310,43 @@ export default function SummaryScreen() {
           </View>
         ))}
       </View>
+
+      {benchmark != null ? (
+        <View
+          style={[
+            styles.benchCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.benchLeft}>
+            <Feather name="trending-up" size={15} color={colors.mutedForeground} />
+            <Text style={[styles.benchText, { color: colors.mutedForeground }]}>
+              Historical average: {benchmark.ppm} PPM across {benchmark.count} finished{" "}
+              {benchmark.count === 1 ? "run" : "runs"}
+            </Text>
+          </View>
+          {benchDiff != null ? (
+            <View
+              style={[
+                styles.benchPill,
+                {
+                  backgroundColor:
+                    benchDiff >= 0 ? colors.success : colors.destructive,
+                },
+              ]}
+            >
+              <Feather
+                name={benchDiff >= 0 ? "arrow-up" : "arrow-down"}
+                size={12}
+                color="#fff"
+              />
+              <Text style={styles.benchPillText}>
+                {Math.abs(benchDiff)} PPM
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       <SectionHeader title="Runs" />
       <View style={{ gap: 12 }}>
@@ -446,6 +487,28 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statsCellVal: { fontSize: 26, fontWeight: "800" as const },
+
+  benchCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+  },
+  benchLeft: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
+  benchText: { fontSize: 13, flex: 1 },
+  benchPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  benchPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
 
   runCard: { borderRadius: 16, borderWidth: 1, padding: 14 },
   runHeader: {

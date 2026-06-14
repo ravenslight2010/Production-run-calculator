@@ -61,6 +61,11 @@ export interface RunSettings {
   // Dough
   doughBatchLbs: number;
   doughballWeightOz: number;
+  // Dough/crust supply tracking
+  doughballsPerTray: number;
+  crustsPerStack: number;
+  crustsPerCase: number;
+  doughBatchYield: number;
   // Ingredient recipes. When a recipe has rows, its summed lbs override the
   // flat *BatchLbs figure as the effective batch/barrel weight.
   doughRecipeName: string;
@@ -171,6 +176,10 @@ export const DEFAULT_SETTINGS: RunSettings = {
   pep2BatchLbs: 25,
   doughBatchLbs: 0,
   doughballWeightOz: 0,
+  doughballsPerTray: 0,
+  crustsPerStack: 0,
+  crustsPerCase: 0,
+  doughBatchYield: 0,
   doughRecipeName: "",
   doughRecipe: [],
   app1CheeseRecipeName: "",
@@ -422,6 +431,137 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
   };
 }
 
+// Minutes pizzas have been accruing in the freezer for the current run.
+// 0 before start, capped at freezerTime, and frozen at endedAt once finished.
+export function liveFreezerMin(state: RunState, nowMs: number): number {
+  if (!state.startedAt) return 0;
+  const freezerTime = state.settings.freezerTime;
+  if (state.endedAt != null) return freezerTime;
+  const elapsed = (nowMs - state.startedAt) / 60000;
+  return Math.min(elapsed, freezerTime);
+}
+
+export type DoughSupplyMode = "dough" | "crusts";
+
+export interface DoughSupply {
+  perTray: number;
+  perBatch: number;
+  casesOnLine: number;
+  casesLeftToRun: number;
+  totalPizzasLeft: number;
+  doughOnHand: number;
+  doughDeficit: number;
+  batchesNeeded: number;
+  traysNeeded: number;
+  casesLeftToOpen: number;
+  stacksNeededTotal: number;
+  buffer: number;
+  doughShortCases: number;
+}
+
+// Dough/crust supply math — matches the web spreadsheet formulas exactly.
+export function computeDoughSupply(
+  state: RunState,
+  nowMs: number,
+  mode: DoughSupplyMode,
+): DoughSupply {
+  const { settings: v, progress: p } = state;
+
+  const ppm =
+    v.crustsPerCycle > 0 && v.cycleSpeed > 0
+      ? v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment
+      : v.lineSpeedPPM;
+
+  const perTray = mode === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
+
+  // Effective batch yield: derive from recipe when recipe + doughball weight set.
+  const doughRecipeLbs = sumRecipe(v.doughRecipe);
+  const effectiveDoughBatchYield =
+    doughRecipeLbs > 0 && v.doughballWeightOz > 0
+      ? (doughRecipeLbs * 16) / v.doughballWeightOz
+      : v.doughBatchYield;
+  const perBatch = effectiveDoughBatchYield;
+
+  const freezerTime = liveFreezerMin(state, nowMs);
+  const casesOnLine =
+    ppm > 0 && v.pizzasPerCase > 0
+      ? Math.floor((ppm * freezerTime) / v.pizzasPerCase)
+      : 0;
+
+  const casesLeftToRun =
+    v.casesNeeded -
+    p.skidsCompleted * v.casesPerSkid -
+    p.casesOnCurrentSkid -
+    casesOnLine +
+    v.casesPerLayer;
+
+  const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
+  const doughOnHand =
+    p.traysOnLine * perTray + p.batchesReady * effectiveDoughBatchYield;
+  const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
+  const batchesNeeded =
+    effectiveDoughBatchYield > 0 ? doughDeficit / effectiveDoughBatchYield : 0;
+  const traysNeeded = perTray > 0 ? doughDeficit / perTray : 0;
+  const pizzasNetOfStaged = Math.max(0, totalPizzasLeft - p.traysOnLine * perTray);
+  const casesLeftToOpen =
+    v.crustsPerCase > 0 ? Math.ceil(pizzasNetOfStaged / v.crustsPerCase) : 0;
+  const stacksNeededTotal =
+    perTray > 0 ? Math.ceil(pizzasNetOfStaged / perTray) : 0;
+  const buffer =
+    v.pizzasPerCase > 0
+      ? Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase
+      : 0;
+  const doughShortCases =
+    v.pizzasPerCase > 0 ? doughDeficit / v.pizzasPerCase : 0;
+
+  return {
+    perTray,
+    perBatch,
+    casesOnLine,
+    casesLeftToRun,
+    totalPizzasLeft,
+    doughOnHand,
+    doughDeficit,
+    batchesNeeded,
+    traysNeeded,
+    casesLeftToOpen,
+    stacksNeededTotal,
+    buffer,
+    doughShortCases,
+  };
+}
+
+// Average PPM across all finished runs in history (excludes pause-type downtime).
+// Returns null when there are no qualifying finished runs.
+export function historicalBenchmarkPpm(history: HistoryDay[]): {
+  ppm: number;
+  count: number;
+} | null {
+  const ppms: number[] = [];
+  for (const day of history) {
+    for (const run of day.runs) {
+      if (!run.startedAt || !run.endedAt) continue;
+      const grossSec = (run.endedAt - run.startedAt) / 1000;
+      const dtSec = (run.stoppages ?? [])
+        .filter((s) => s.endedAt != null)
+        .reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+      const netSec = Math.max(0, grossSec - dtSec);
+      if (netSec < 60) continue;
+      const calc = computeCalc(run, run.endedAt);
+      const planned = run.settings.casesNeeded;
+      const cases = Math.max(0, planned - calc.casesLeft);
+      const ppc = run.settings.pizzasPerCase;
+      if (cases > 0 && ppc > 0)
+        ppms.push(Math.round((cases * ppc) / (netSec / 60)));
+    }
+  }
+  if (ppms.length === 0) return null;
+  return {
+    ppm: Math.round(ppms.reduce((a, b) => a + b, 0) / ppms.length),
+    count: ppms.length,
+  };
+}
+
 export const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
 
 export interface RunTemplate {
@@ -547,6 +687,13 @@ interface RunContextValue {
   endRun: () => void;
   addStoppage: (type: Stoppage["type"], reason?: string) => void;
   endActiveStoppage: () => void;
+  addPastStoppage: (
+    type: Stoppage["type"],
+    startedAt: number,
+    endedAt: number,
+    reason?: string,
+  ) => void;
+  applyCarryOver: (excessTrays: number, excessBatches: number) => void;
   addRun: () => void;
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
@@ -838,6 +985,56 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         ),
       })),
     [updateCurrentRun],
+  );
+
+  // Log a completed stoppage with explicit start/end times (for past events).
+  const addPastStoppage = useCallback(
+    (type: Stoppage["type"], startedAt: number, endedAt: number, reason?: string) => {
+      const s: Stoppage = {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        type,
+        startedAt,
+        endedAt,
+        reason,
+      };
+      updateCurrentRun((r) => ({
+        ...r,
+        stoppages: [...r.stoppages, s].sort((a, b) => a.startedAt - b.startedAt),
+      }));
+    },
+    [updateCurrentRun],
+  );
+
+  // Carry leftover dough/crusts into the next run: add surplus trays + batches
+  // to the following run's staged supply and mark this run's carry-over done.
+  const applyCarryOver = useCallback(
+    (excessTrays: number, excessBatches: number) => {
+      setAppState((prev) => {
+        const runs = [...prev.runs];
+        const cur = runs[prev.currentIndex];
+        if (!cur) return prev;
+        runs[prev.currentIndex] = {
+          ...cur,
+          progress: { ...cur.progress, carryOverDone: true },
+        };
+        const nextIdx = prev.currentIndex + 1;
+        const nextRun = runs[nextIdx];
+        if (nextRun) {
+          runs[nextIdx] = {
+            ...nextRun,
+            progress: {
+              ...nextRun.progress,
+              traysOnLine: nextRun.progress.traysOnLine + excessTrays,
+              batchesReady: nextRun.progress.batchesReady + excessBatches,
+            },
+          };
+        }
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
   );
 
   const addRun = useCallback(() => {
@@ -1381,6 +1578,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         endRun,
         addStoppage,
         endActiveStoppage,
+        addPastStoppage,
+        applyCarryOver,
         addRun,
         switchRun,
         deleteRun,
