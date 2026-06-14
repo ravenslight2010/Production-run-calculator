@@ -1,7 +1,7 @@
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useState } from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { KeyboardAwareScrollViewCompat } from "react-native-keyboard-controller";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, NumericField, SectionHeader, TextField } from "@/components/UI";
 import { useRun, type RunSettings } from "@/context/RunContext";
