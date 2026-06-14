@@ -4,22 +4,33 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, NumericField, SectionHeader, TextField } from "@/components/UI";
-import { useRun, type RunSettings } from "@/context/RunContext";
+import { useRun, runLabel, type RunSettings } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
-function toNum(s: string): number {
-  const n = parseFloat(s.replace(",", "."));
+function toNum(s: string | undefined | null): number {
+  if (s == null || s === "") return 0;
+  const n = parseFloat(String(s).replace(",", "."));
   return isNaN(n) ? 0 : n;
 }
 
 interface FormState {
-  label: string;
+  brand: string;
+  flavor: string;
   casesNeeded: string;
   pizzasPerCase: string;
   casesPerSkid: string;
+  casesPerLayer: string;
+  notes: string;
+  // Line speed (machine params — PPM = crustsPerCycle * cycleSpeed * speedAdjustment)
+  crustsPerCycle: string;
+  cycleSpeed: string;
+  speedAdjustment: string;
+  // Direct PPM fallback (used when crustsPerCycle = 0)
   lineSpeedPPM: string;
+  // Sauce
   sauceOzPerPizza: string;
   sauceBarrelLbs: string;
+  // Applicators 1–4
   app1Type: string;
   app1OzPerPizza: string;
   app1BatchLbs: string;
@@ -32,57 +43,94 @@ interface FormState {
   app4Type: string;
   app4OzPerPizza: string;
   app4BatchLbs: string;
+  // Pepperoni 1–2
+  pep1Type: string;
+  pep1OzPerPizza: string;
+  pep1Sticks: string;
+  pep1BatchLbs: string;
+  pep2Type: string;
+  pep2OzPerPizza: string;
+  pep2Sticks: string;
+  pep2BatchLbs: string;
+  // Dough
   doughBatchLbs: string;
   doughballWeightOz: string;
 }
 
-function settingsToForm(s: RunSettings, label: string): FormState {
+function n2s(n: number): string {
+  return n > 0 ? n.toString() : "";
+}
+
+function settingsToForm(s: RunSettings): FormState {
   return {
-    label,
-    casesNeeded: s.casesNeeded > 0 ? s.casesNeeded.toString() : "",
-    pizzasPerCase: s.pizzasPerCase > 0 ? s.pizzasPerCase.toString() : "",
-    casesPerSkid: s.casesPerSkid > 0 ? s.casesPerSkid.toString() : "",
-    lineSpeedPPM: s.lineSpeedPPM > 0 ? s.lineSpeedPPM.toString() : "",
-    sauceOzPerPizza: s.sauceOzPerPizza > 0 ? s.sauceOzPerPizza.toString() : "",
-    sauceBarrelLbs: s.sauceBarrelLbs > 0 ? s.sauceBarrelLbs.toString() : "",
+    brand: s.brand,
+    flavor: s.flavor,
+    casesNeeded: n2s(s.casesNeeded),
+    pizzasPerCase: n2s(s.pizzasPerCase),
+    casesPerSkid: n2s(s.casesPerSkid),
+    casesPerLayer: n2s(s.casesPerLayer),
+    notes: s.notes,
+    crustsPerCycle: n2s(s.crustsPerCycle),
+    cycleSpeed: n2s(s.cycleSpeed),
+    speedAdjustment: s.speedAdjustment !== 1 ? s.speedAdjustment.toString() : "1",
+    lineSpeedPPM: n2s(s.lineSpeedPPM),
+    sauceOzPerPizza: n2s(s.sauceOzPerPizza),
+    sauceBarrelLbs: n2s(s.sauceBarrelLbs),
     app1Type: s.app1Type,
-    app1OzPerPizza: s.app1OzPerPizza > 0 ? s.app1OzPerPizza.toString() : "",
-    app1BatchLbs: s.app1BatchLbs > 0 ? s.app1BatchLbs.toString() : "",
+    app1OzPerPizza: n2s(s.app1OzPerPizza),
+    app1BatchLbs: n2s(s.app1BatchLbs),
     app2Type: s.app2Type,
-    app2OzPerPizza: s.app2OzPerPizza > 0 ? s.app2OzPerPizza.toString() : "",
-    app2BatchLbs: s.app2BatchLbs > 0 ? s.app2BatchLbs.toString() : "",
+    app2OzPerPizza: n2s(s.app2OzPerPizza),
+    app2BatchLbs: n2s(s.app2BatchLbs),
     app3Type: s.app3Type,
-    app3OzPerPizza: s.app3OzPerPizza > 0 ? s.app3OzPerPizza.toString() : "",
-    app3BatchLbs: s.app3BatchLbs > 0 ? s.app3BatchLbs.toString() : "",
+    app3OzPerPizza: n2s(s.app3OzPerPizza),
+    app3BatchLbs: n2s(s.app3BatchLbs),
     app4Type: s.app4Type,
-    app4OzPerPizza: s.app4OzPerPizza > 0 ? s.app4OzPerPizza.toString() : "",
-    app4BatchLbs: s.app4BatchLbs > 0 ? s.app4BatchLbs.toString() : "",
-    doughBatchLbs: s.doughBatchLbs > 0 ? s.doughBatchLbs.toString() : "",
-    doughballWeightOz: s.doughballWeightOz > 0 ? s.doughballWeightOz.toString() : "",
+    app4OzPerPizza: n2s(s.app4OzPerPizza),
+    app4BatchLbs: n2s(s.app4BatchLbs),
+    pep1Type: s.pep1Type,
+    pep1OzPerPizza: n2s(s.pep1OzPerPizza),
+    pep1Sticks: n2s(s.pep1Sticks),
+    pep1BatchLbs: s.pep1BatchLbs > 0 ? s.pep1BatchLbs.toString() : "25",
+    pep2Type: s.pep2Type,
+    pep2OzPerPizza: n2s(s.pep2OzPerPizza),
+    pep2Sticks: n2s(s.pep2Sticks),
+    pep2BatchLbs: s.pep2BatchLbs > 0 ? s.pep2BatchLbs.toString() : "25",
+    doughBatchLbs: n2s(s.doughBatchLbs),
+    doughballWeightOz: n2s(s.doughballWeightOz),
   };
 }
 
 export default function ConfigureScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateSettings, updateLabel, resetRun } = useRun();
-  const [form, setForm] = useState<FormState>(() =>
-    settingsToForm(run.settings, run.label),
-  );
+  const { run, runIndex, updateSettings, resetRun } = useRun();
+  const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
 
   useEffect(() => {
-    setForm(settingsToForm(run.settings, run.label));
+    setForm(settingsToForm(run.settings));
   }, [run.id]);
 
   const set = (key: keyof FormState) => (val: string) =>
     setForm((f) => ({ ...f, [key]: val }));
 
+  const computedPPM =
+    toNum(form.crustsPerCycle) > 0 && toNum(form.cycleSpeed) > 0
+      ? toNum(form.crustsPerCycle) * toNum(form.cycleSpeed) * (toNum(form.speedAdjustment) || 1)
+      : null;
+
   const save = () => {
-    updateLabel(form.label || "Run 1");
     updateSettings({
+      brand: form.brand.trim(),
+      flavor: form.flavor.trim(),
       casesNeeded: toNum(form.casesNeeded),
       pizzasPerCase: toNum(form.pizzasPerCase) || 12,
       casesPerSkid: toNum(form.casesPerSkid) || 48,
+      casesPerLayer: toNum(form.casesPerLayer) || 6,
+      notes: form.notes.trim(),
+      crustsPerCycle: toNum(form.crustsPerCycle),
+      cycleSpeed: toNum(form.cycleSpeed),
+      speedAdjustment: toNum(form.speedAdjustment) || 1,
       lineSpeedPPM: toNum(form.lineSpeedPPM),
       sauceOzPerPizza: toNum(form.sauceOzPerPizza),
       sauceBarrelLbs: toNum(form.sauceBarrelLbs),
@@ -98,6 +146,14 @@ export default function ConfigureScreen() {
       app4Type: form.app4Type.trim(),
       app4OzPerPizza: toNum(form.app4OzPerPizza),
       app4BatchLbs: toNum(form.app4BatchLbs),
+      pep1Type: form.pep1Type.trim(),
+      pep1OzPerPizza: toNum(form.pep1OzPerPizza),
+      pep1Sticks: toNum(form.pep1Sticks),
+      pep1BatchLbs: toNum(form.pep1BatchLbs) || 25,
+      pep2Type: form.pep2Type.trim(),
+      pep2OzPerPizza: toNum(form.pep2OzPerPizza),
+      pep2Sticks: toNum(form.pep2Sticks),
+      pep2BatchLbs: toNum(form.pep2BatchLbs) || 25,
       doughBatchLbs: toNum(form.doughBatchLbs),
       doughballWeightOz: toNum(form.doughballWeightOz),
     });
@@ -107,10 +163,11 @@ export default function ConfigureScreen() {
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
+  const currentLabel = runLabel(run, runIndex);
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <KeyboardAwareScrollViewCompat
-        bottomOffset={20}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.content,
@@ -118,15 +175,32 @@ export default function ConfigureScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Run header */}
+        <View style={[styles.runHeader, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.runHeaderLabel, { color: colors.mutedForeground }]}>
+            CONFIGURING
+          </Text>
+          <Text style={[styles.runHeaderName, { color: colors.primary }]}>
+            {currentLabel}
+          </Text>
+        </View>
+
         {/* Run Info */}
         <SectionHeader title="Run Info" />
         <CardSection>
           <TextField
-            label="Run Label"
-            value={form.label}
-            onChangeText={set("label")}
+            label="Brand"
+            value={form.brand}
+            onChangeText={set("brand")}
             onBlur={save}
-            placeholder="Run 1"
+            placeholder="Brand name"
+          />
+          <TextField
+            label="Flavor"
+            value={form.flavor}
+            onChangeText={set("flavor")}
+            onBlur={save}
+            placeholder="Flavor"
           />
           <NumericField
             label="Cases Needed"
@@ -149,19 +223,61 @@ export default function ConfigureScreen() {
             onBlur={save}
             placeholder="48"
           />
+          <NumericField
+            label="Cases per Layer"
+            value={form.casesPerLayer}
+            onChangeText={set("casesPerLayer")}
+            onBlur={save}
+            placeholder="6"
+            unit="(buffer)"
+          />
         </CardSection>
 
         {/* Line Speed */}
         <SectionHeader title="Line Speed" />
         <CardSection>
           <NumericField
-            label="Pizzas per Minute"
-            value={form.lineSpeedPPM}
-            onChangeText={set("lineSpeedPPM")}
+            label="Crusts per Cycle"
+            value={form.crustsPerCycle}
+            onChangeText={set("crustsPerCycle")}
             onBlur={save}
             placeholder="0"
-            unit="ppm"
           />
+          <NumericField
+            label="Cycle Speed"
+            value={form.cycleSpeed}
+            onChangeText={set("cycleSpeed")}
+            onBlur={save}
+            placeholder="0.0"
+            unit="cyc/min"
+          />
+          <NumericField
+            label="Speed Adjustment"
+            value={form.speedAdjustment}
+            onChangeText={set("speedAdjustment")}
+            onBlur={save}
+            placeholder="1.0"
+            unit="×"
+          />
+          {computedPPM !== null ? (
+            <View style={[styles.computedRow, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.computedLabel, { color: colors.mutedForeground }]}>
+                Computed PPM
+              </Text>
+              <Text style={[styles.computedValue, { color: colors.primary }]}>
+                {computedPPM.toFixed(1)}
+              </Text>
+            </View>
+          ) : (
+            <NumericField
+              label="Direct PPM"
+              value={form.lineSpeedPPM}
+              onChangeText={set("lineSpeedPPM")}
+              onBlur={save}
+              placeholder="0"
+              unit="ppm"
+            />
+          )}
         </CardSection>
 
         {/* Sauce */}
@@ -185,7 +301,7 @@ export default function ConfigureScreen() {
           />
         </CardSection>
 
-        {/* Applicators */}
+        {/* Applicators 1–4 */}
         {[1, 2, 3, 4].map((n) => {
           const typeKey = `app${n}Type` as keyof FormState;
           const ozKey = `app${n}OzPerPizza` as keyof FormState;
@@ -199,7 +315,7 @@ export default function ConfigureScreen() {
                   value={form[typeKey] as string}
                   onChangeText={set(typeKey)}
                   onBlur={save}
-                  placeholder="Cheese / Mix / Pep / …"
+                  placeholder="Cheese / Mix / …"
                 />
                 <NumericField
                   label="Oz per Pizza"
@@ -222,6 +338,78 @@ export default function ConfigureScreen() {
           );
         })}
 
+        {/* Pepperoni 1 */}
+        <SectionHeader title="Pepperoni 1" />
+        <CardSection>
+          <TextField
+            label="Type"
+            value={form.pep1Type}
+            onChangeText={set("pep1Type")}
+            onBlur={save}
+            placeholder="Pep - Cured / Pep - Natural"
+          />
+          <NumericField
+            label="Oz per Pizza"
+            value={form.pep1OzPerPizza}
+            onChangeText={set("pep1OzPerPizza")}
+            onBlur={save}
+            placeholder="0.0"
+            unit="oz"
+          />
+          <NumericField
+            label="Sticks (flat buffer)"
+            value={form.pep1Sticks}
+            onChangeText={set("pep1Sticks")}
+            onBlur={save}
+            placeholder="0"
+            unit="sticks"
+          />
+          <NumericField
+            label="Batch Weight"
+            value={form.pep1BatchLbs}
+            onChangeText={set("pep1BatchLbs")}
+            onBlur={save}
+            placeholder="25"
+            unit="lbs"
+          />
+        </CardSection>
+
+        {/* Pepperoni 2 */}
+        <SectionHeader title="Pepperoni 2" />
+        <CardSection>
+          <TextField
+            label="Type"
+            value={form.pep2Type}
+            onChangeText={set("pep2Type")}
+            onBlur={save}
+            placeholder="Pep - Cured / Pep - Natural"
+          />
+          <NumericField
+            label="Oz per Pizza"
+            value={form.pep2OzPerPizza}
+            onChangeText={set("pep2OzPerPizza")}
+            onBlur={save}
+            placeholder="0.0"
+            unit="oz"
+          />
+          <NumericField
+            label="Sticks (flat buffer)"
+            value={form.pep2Sticks}
+            onChangeText={set("pep2Sticks")}
+            onBlur={save}
+            placeholder="0"
+            unit="sticks"
+          />
+          <NumericField
+            label="Batch Weight"
+            value={form.pep2BatchLbs}
+            onChangeText={set("pep2BatchLbs")}
+            onBlur={save}
+            placeholder="25"
+            unit="lbs"
+          />
+        </CardSection>
+
         {/* Dough */}
         <SectionHeader title="Dough" />
         <CardSection>
@@ -243,6 +431,18 @@ export default function ConfigureScreen() {
           />
         </CardSection>
 
+        {/* Notes */}
+        <SectionHeader title="Notes" />
+        <CardSection>
+          <TextField
+            label="Notes"
+            value={form.notes}
+            onChangeText={set("notes")}
+            onBlur={save}
+            placeholder="Any notes for this run…"
+          />
+        </CardSection>
+
         {/* Save + Reset */}
         <Pressable
           onPress={save}
@@ -258,22 +458,26 @@ export default function ConfigureScreen() {
           onPress={() => {
             resetRun();
             setForm(settingsToForm({
-              casesNeeded: 0, pizzasPerCase: 12, casesPerSkid: 48, lineSpeedPPM: 0,
+              brand: "", flavor: "", notes: "",
+              casesNeeded: 0, pizzasPerCase: 12, casesPerSkid: 48, casesPerLayer: 6,
+              lineSpeedPPM: 0, crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 1,
               sauceOzPerPizza: 0, sauceBarrelLbs: 0,
               app1Type: "", app1OzPerPizza: 0, app1BatchLbs: 0,
               app2Type: "", app2OzPerPizza: 0, app2BatchLbs: 0,
               app3Type: "", app3OzPerPizza: 0, app3BatchLbs: 0,
               app4Type: "", app4OzPerPizza: 0, app4BatchLbs: 0,
+              pep1Type: "", pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 25,
+              pep2Type: "", pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 25,
               doughBatchLbs: 0, doughballWeightOz: 0,
-            }, "Run 1"));
+            }));
           }}
           style={({ pressed }) => [
             styles.resetBtn,
-            { borderColor: colors.destructive, opacity: pressed ? 0.7 : 1 },
+            { borderColor: "#ef4444", opacity: pressed ? 0.7 : 1 },
           ]}
         >
-          <Text style={[styles.resetBtnText, { color: colors.destructive }]}>
-            Reset Run
+          <Text style={[styles.resetBtnText, { color: "#ef4444" }]}>
+            Reset This Run
           </Text>
         </Pressable>
       </KeyboardAwareScrollViewCompat>
@@ -284,6 +488,28 @@ export default function ConfigureScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
+
+  runHeader: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 4,
+    alignItems: "center",
+    gap: 2,
+  },
+  runHeaderLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 1 },
+  runHeaderName: { fontSize: 17, fontWeight: "700" as const },
+
+  computedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    justifyContent: "space-between",
+  },
+  computedLabel: { fontSize: 16, fontWeight: "500" as const },
+  computedValue: { fontSize: 22, fontWeight: "700" as const },
+
   saveBtn: {
     borderRadius: 12,
     paddingVertical: 14,
@@ -297,6 +523,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 10,
     borderWidth: 1,
+    marginBottom: 8,
   },
   resetBtnText: { fontSize: 16, fontWeight: "600" as const },
 });

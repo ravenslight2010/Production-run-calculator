@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRun, type Stoppage } from "@/context/RunContext";
+import { useRun, runLabel, type Stoppage } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 const TYPE_COLORS: Record<Stoppage["type"], string> = {
@@ -42,13 +42,7 @@ function fmtTime(ms: number): string {
   return `${h}:${min} ${d.getHours() >= 12 ? "PM" : "AM"}`;
 }
 
-function StoppageRow({
-  stoppage,
-  tick,
-}: {
-  stoppage: Stoppage;
-  tick: number;
-}) {
+function StoppageRow({ stoppage, tick }: { stoppage: Stoppage; tick: number }) {
   const colors = useColors();
   const isActive = stoppage.endedAt == null;
   const durationSec = isActive
@@ -96,12 +90,13 @@ function StoppageRow({
 export default function StoppagesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, tick, activeStoppage, addStoppage, endActiveStoppage } = useRun();
+  const { run, runIndex, tick, activeStoppage, addStoppage, endActiveStoppage } = useRun();
   const [showModal, setShowModal] = useState(false);
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
+  const label = runLabel(run, runIndex);
   const sorted = [...run.stoppages].reverse();
   const totalDowntimeSec = run.stoppages
     .filter((s) => s.endedAt != null)
@@ -109,6 +104,17 @@ export default function StoppagesScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
+      {/* Run label chip */}
+      <View style={[styles.runChip, { backgroundColor: colors.card, borderColor: colors.border, marginTop: webTop + 12 }]}>
+        <Feather name="layers" size={13} color={colors.mutedForeground} />
+        <Text style={[styles.runChipText, { color: colors.mutedForeground }]}>
+          {label}
+        </Text>
+        {run.isRunning && (
+          <View style={[styles.runDot, { backgroundColor: colors.success }]} />
+        )}
+      </View>
+
       {/* Active stoppage card */}
       {activeStoppage ? (
         <View
@@ -117,8 +123,8 @@ export default function StoppagesScreen() {
             {
               backgroundColor: colors.card,
               borderColor: TYPE_COLORS[activeStoppage.type],
-              marginTop: webTop + 12,
               marginHorizontal: 16,
+              marginTop: 10,
             },
           ]}
         >
@@ -166,7 +172,7 @@ export default function StoppagesScreen() {
         contentContainerStyle={[
           styles.list,
           {
-            paddingTop: activeStoppage ? 12 : webTop + 12,
+            paddingTop: activeStoppage ? 12 : 12,
             paddingBottom: 90 + webBottom + insets.bottom,
           },
         ]}
@@ -244,9 +250,7 @@ function AddStoppageModal({
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={[styles.sheet, { backgroundColor: colors.card }]} onPress={() => {}}>
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
-          <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
-            Log Stoppage
-          </Text>
+          <Text style={[styles.sheetTitle, { color: colors.foreground }]}>Log Stoppage</Text>
           <View style={styles.typeGrid}>
             {STOPPAGE_TYPES.map((t) => (
               <Pressable
@@ -275,6 +279,22 @@ function AddStoppageModal({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+
+  runChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    marginHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    marginBottom: 4,
+  },
+  runChipText: { fontSize: 13, fontWeight: "500" as const },
+  runDot: { width: 6, height: 6, borderRadius: 3 },
+
   list: { paddingHorizontal: 16, gap: 8 },
   row: {
     flexDirection: "row",
@@ -302,6 +322,7 @@ const styles = StyleSheet.create({
   rowRight: { alignItems: "flex-end", paddingRight: 14, gap: 4 },
   activeDot: { width: 8, height: 8, borderRadius: 4 },
   duration: { fontSize: 14, fontWeight: "600" as const },
+
   summary: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -312,6 +333,7 @@ const styles = StyleSheet.create({
   },
   summaryText: { fontSize: 13, fontWeight: "500" as const, letterSpacing: 0.3 },
   summaryValue: { fontSize: 15, fontWeight: "700" as const },
+
   activeCard: {
     borderRadius: 14,
     padding: 16,
@@ -332,6 +354,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   endBtnText: { fontWeight: "600" as const, fontSize: 15 },
+
   empty: {
     alignItems: "center",
     justifyContent: "center",
@@ -340,6 +363,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontWeight: "600" as const },
   emptyText: { fontSize: 14, textAlign: "center" },
+
   fab: {
     position: "absolute",
     right: 20,
@@ -356,6 +380,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   fabText: { color: "#000", fontWeight: "700" as const, fontSize: 15 },
+
   overlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
