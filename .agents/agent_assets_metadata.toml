@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "18MIO8--IrFdcR33-o4tE"
+uri = "file://artifacts/run-calculator-mobile/assets/images/icon.png"
+type = "image"
+title = "pizza-run-calculator-icon"
