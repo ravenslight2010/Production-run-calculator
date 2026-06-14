@@ -5825,10 +5825,14 @@ export default function Home() {
                       </CardTitle>
                       <button
                         type="button"
-                        onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
+                        onClick={() => {
+                          if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
+                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                        }}
+                        title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
                       >
-                        <CalendarPlus className="w-3.5 h-3.5" /> Manage
+                        {isSupervisor ? <CalendarPlus className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />} Manage
                       </button>
                     </div>
                   </CardHeader>
