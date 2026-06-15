@@ -5779,21 +5779,73 @@ export default function Home() {
 
               {/* ─── FRONTLINE ─── */}
               <TabsContent value="frontline">
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+                  <div className="h-1 bg-primary w-full" />
                   <CardHeader className="pb-2 pt-4 px-5">
                     <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <Boxes className="w-4 h-4" /> Applicators &amp; Pepperoni
+                      <Boxes className="w-4 h-4" /> Batches Needed
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="px-4 pb-4 space-y-4">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Applicators</p>
-                      <NeedsList rows={buildNeedRows(v).applicators} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Pepperoni</p>
-                      <NeedsList rows={buildNeedRows(v).pep} />
-                    </div>
+                  <CardContent className="px-5 pb-5">
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Based on{" "}
+                      <span className="font-mono text-foreground">
+                        {fmtNum(calc.casesLeftToRun, 0)}
+                      </span>{" "}
+                      cases ×{" "}
+                      <span className="font-mono text-foreground">
+                        {v.pizzasPerCase}
+                      </span>{" "}
+                      pizzas/case
+                    </p>
+                    <StatRow
+                      label="Sauce"
+                      value={(() => {
+                        const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
+                        return bd
+                          ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
+                          : fmtNum(calc.sauceBatches, 2) + " batches";
+                      })()}
+                      testId="output-sauce-batches"
+                      highlight={calc.sauceBatches > 0}
+                    />
+                    <StatRow
+                      label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
+                      value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
+                      testId="output-app1-batches"
+                      highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
+                    />
+                    <StatRow
+                      label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
+                      value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
+                      testId="output-app2-batches"
+                      highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
+                    />
+                    <StatRow
+                      label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
+                      value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
+                      testId="output-app3-batches"
+                      highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
+                    />
+                    <StatRow
+                      label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
+                      value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
+                      testId="output-app4-batches"
+                      highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
+                    />
+                    <Separator className="my-3 opacity-30" />
+                    <StatRow
+                      label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
+                      value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
+                      testId="output-pep1-batches"
+                      highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
+                    />
+                    <StatRow
+                      label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
+                      value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
+                      testId="output-pep2-batches"
+                      highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -6778,76 +6830,6 @@ export default function Home() {
                         </>
                       )}
                     </CardContent>}
-                  </Card>
-
-                  <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
-                    <div className="h-1 bg-primary w-full" />
-                    <CardHeader className="pb-2 pt-4 px-5">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Batches Needed
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-5 pb-5">
-                      <p className="text-xs text-muted-foreground mb-4">
-                        Based on{" "}
-                        <span className="font-mono text-foreground">
-                          {fmtNum(calc.casesLeftToRun, 0)}
-                        </span>{" "}
-                        cases ×{" "}
-                        <span className="font-mono text-foreground">
-                          {v.pizzasPerCase}
-                        </span>{" "}
-                        pizzas/case
-                      </p>
-                      <StatRow
-                        label="Sauce"
-                        value={(() => {
-                          const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
-                          return bd
-                            ? `${fmtNum(calc.sauceBatches, 2)} batches · ${bd.batchesPerBarrel}/barrel → ${bd.totalBarrels} barrels`
-                            : fmtNum(calc.sauceBatches, 2) + " batches";
-                        })()}
-                        testId="output-sauce-batches"
-                        highlight={calc.sauceBatches > 0}
-                      />
-                      <StatRow
-                        label={v.app1Type ? `App 1 — ${v.app1Type}` : "Applicator 1"}
-                        value={v.app1Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app1Lbs, 1) + " lbs" : fmtNum(calc.app1Batches, 2) + " batches"}
-                        testId="output-app1-batches"
-                        highlight={v.app1Type.trim().toLowerCase().includes("mix") ? calc.app1Lbs > 0 : calc.app1Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app2Type ? `App 2 — ${v.app2Type}` : "Applicator 2"}
-                        value={v.app2Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app2Lbs, 1) + " lbs" : fmtNum(calc.app2Batches, 2) + " batches"}
-                        testId="output-app2-batches"
-                        highlight={v.app2Type.trim().toLowerCase().includes("mix") ? calc.app2Lbs > 0 : calc.app2Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app3Type ? `App 3 — ${v.app3Type}` : "Applicator 3"}
-                        value={v.app3Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app3Lbs, 1) + " lbs" : fmtNum(calc.app3Batches, 2) + " batches"}
-                        testId="output-app3-batches"
-                        highlight={v.app3Type.trim().toLowerCase().includes("mix") ? calc.app3Lbs > 0 : calc.app3Batches > 0}
-                      />
-                      <StatRow
-                        label={v.app4Type ? `App 4 — ${v.app4Type}` : "Applicator 4"}
-                        value={v.app4Type.trim().toLowerCase().includes("mix") ? fmtNum(calc.app4Lbs, 1) + " lbs" : fmtNum(calc.app4Batches, 2) + " batches"}
-                        testId="output-app4-batches"
-                        highlight={v.app4Type.trim().toLowerCase().includes("mix") ? calc.app4Lbs > 0 : calc.app4Batches > 0}
-                      />
-                      <Separator className="my-3 opacity-30" />
-                      <StatRow
-                        label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
-                        testId="output-pep1-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
-                      />
-                      <StatRow
-                        label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                        value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
-                        testId="output-pep2-batches"
-                        highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
-                      />
-                    </CardContent>
                   </Card>
                 </div>
                 </fieldset>

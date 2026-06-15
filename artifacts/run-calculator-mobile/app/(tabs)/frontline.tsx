@@ -2,7 +2,7 @@ import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BatchCard, CardSection, SectionHeader } from "@/components/UI";
-import { useRun } from "@/context/RunContext";
+import { useRun, sauceBarrelBreakdown } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function FrontlineScreen() {
@@ -25,7 +25,10 @@ export default function FrontlineScreen() {
     s.pep2Type ? { name: s.pep2Type, batches: calc.pep2Batches, lbs: calc.pep2Lbs } : null,
   ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
 
-  const hasAny = applicators.length > 0 || pepperoni.length > 0;
+  const hasSauce = s.sauceOzPerPizza > 0 && calc.sauceLbs > 0;
+  const sauceBarrels = sauceBarrelBreakdown(calc.sauceLbs, calc.sauceEffBarrel);
+
+  const hasAny = hasSauce || applicators.length > 0 || pepperoni.length > 0;
 
   const renderGrid = (rows: { name: string; batches: number; lbs: number }[]) => (
     <View style={styles.batchGrid}>
@@ -52,6 +55,25 @@ export default function FrontlineScreen() {
       >
         {hasAny ? (
           <>
+            <SectionHeader title="Batches Needed" />
+            <Text style={[styles.basis, { color: colors.mutedForeground }]}>
+              Based on {Math.round(calc.casesLeft)} cases × {s.pizzasPerCase} pizzas/case
+            </Text>
+            {hasSauce ? (
+              <>
+                <SectionHeader title="Sauce" />
+                <BatchCard
+                  name="Sauce"
+                  batches={calc.sauceBatches}
+                  lbs={calc.sauceLbs}
+                  sub={
+                    sauceBarrels
+                      ? `${sauceBarrels.totalBarrels} barrel${sauceBarrels.totalBarrels === 1 ? "" : "s"} · ${sauceBarrels.batchesPerBarrel}/barrel`
+                      : undefined
+                  }
+                />
+              </>
+            ) : null}
             {applicators.length > 0 ? (
               <>
                 <SectionHeader title="Applicators" />
@@ -85,5 +107,6 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16 },
   batchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   batchItem: { flexBasis: "47%", flexGrow: 1 },
+  basis: { fontSize: 12, marginBottom: 4 },
   empty: { fontSize: 13, fontStyle: "italic" },
 });
