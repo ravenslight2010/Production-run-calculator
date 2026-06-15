@@ -5095,18 +5095,6 @@ export default function Home() {
             <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="hidden sm:flex text-[10px] font-semibold items-center gap-1 text-emerald-400 pointer-events-none">
               <Check className="w-3 h-3" /> Saved
             </span>
-            {/* Manage Lists button — supervisor only, icon-only on xs */}
-            {isSupervisor && (
-              <button
-                type="button"
-                onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}
-                title="Manage lists & settings"
-                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
-              >
-                <Settings className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">Manage</span>
-              </button>
-            )}
             {/* Screens / cast button */}
             <button
               type="button"
