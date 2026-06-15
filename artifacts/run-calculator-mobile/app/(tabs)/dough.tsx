@@ -1,4 +1,3 @@
-import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -84,42 +83,6 @@ export default function DoughScreen() {
               </View>
             </View>
             <CardSection>
-              <View style={styles.supplyStatusRow}>
-                <Text style={[styles.supplyStatusLabel, { color: colors.mutedForeground }]}>
-                  Status
-                </Text>
-                {(() => {
-                  const shortInt = Math.ceil(supply.doughShortCases);
-                  const bufferInt = Math.floor(supply.buffer);
-                  if (shortInt > 0) {
-                    return (
-                      <View style={[styles.supplyPill, { backgroundColor: colors.destructive }]}>
-                        <Feather name="alert-triangle" size={12} color="#fff" />
-                        <Text style={styles.supplyPillText}>
-                          Short {shortInt} case{shortInt !== 1 ? "s" : ""}
-                        </Text>
-                      </View>
-                    );
-                  }
-                  if (bufferInt > 0) {
-                    return (
-                      <View style={[styles.supplyPill, { backgroundColor: colors.success }]}>
-                        <Feather name="check" size={12} color="#fff" />
-                        <Text style={styles.supplyPillText}>
-                          {bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
-                        </Text>
-                      </View>
-                    );
-                  }
-                  return (
-                    <View style={[styles.supplyPill, { backgroundColor: colors.secondary }]}>
-                      <Text style={[styles.supplyPillText, { color: colors.foreground }]}>
-                        Balanced
-                      </Text>
-                    </View>
-                  );
-                })()}
-              </View>
               <View style={styles.metricsRow}>
                 <MetricCard
                   label={doughSubTab === "crusts" ? "Stacks to Stage" : "Trays to Stage"}
@@ -127,16 +90,6 @@ export default function DoughScreen() {
                   highlight={supply.stacksNeededTotal > 0}
                   style={styles.metricBig}
                 />
-                <View style={styles.metricCol}>
-                  <MetricCard label="Cases Left to Run" value={supply.casesLeftToRun.toString()} />
-                  <MetricCard
-                    label={doughSubTab === "crusts" ? "Cases to Open" : "Cases on Line"}
-                    value={(doughSubTab === "crusts"
-                      ? supply.casesLeftToOpen
-                      : supply.casesOnLine
-                    ).toString()}
-                  />
-                </View>
               </View>
               <Text style={[styles.supplyHint, { color: colors.mutedForeground }]}>
                 On hand covers{" "}
@@ -213,25 +166,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   supplyToggleText: { fontSize: 12, fontWeight: "700" as const },
-  supplyStatusRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  supplyStatusLabel: { fontSize: 13, fontWeight: "500" as const },
-  supplyPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  supplyPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
   supplyHint: { fontSize: 12, lineHeight: 16, marginTop: 12 },
 
   metricsRow: { flexDirection: "row", gap: 10 },
   metricBig: { flex: 1.3 },
-  metricCol: { flex: 1, gap: 10 },
 });

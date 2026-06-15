@@ -446,6 +446,63 @@ export default function CalculatorScreen() {
           </View>
         </View>
 
+        {/* Run Details (moved from Dough tab) — sub-view aware */}
+        <SectionHeader title="Run Details" />
+        <CardSection>
+          <View style={styles.runDetailStatusRow}>
+            <Text style={[styles.runDetailStatusLabel, { color: colors.mutedForeground }]}>
+              {doughSubTab === "crusts" ? "Crust Supply" : "Dough Status"}
+            </Text>
+            {(() => {
+              const shortInt = Math.ceil(supply.doughShortCases);
+              const bufferInt = Math.floor(supply.buffer);
+              if (shortInt > 0) {
+                return (
+                  <View style={[styles.runDetailPill, { backgroundColor: colors.destructive }]}>
+                    <Feather name="alert-triangle" size={12} color="#fff" />
+                    <Text style={styles.runDetailPillText}>
+                      Short {shortInt} case{shortInt !== 1 ? "s" : ""}
+                    </Text>
+                  </View>
+                );
+              }
+              if (bufferInt > 0) {
+                return (
+                  <View style={[styles.runDetailPill, { backgroundColor: colors.success }]}>
+                    <Feather name="check" size={12} color="#fff" />
+                    <Text style={styles.runDetailPillText}>
+                      {bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
+                    </Text>
+                  </View>
+                );
+              }
+              return (
+                <View style={[styles.runDetailPill, { backgroundColor: colors.secondary }]}>
+                  <Text style={[styles.runDetailPillText, { color: colors.foreground }]}>
+                    Balanced
+                  </Text>
+                </View>
+              );
+            })()}
+          </View>
+          <View style={styles.metricsRow}>
+            <MetricCard
+              label="Cases Left to Run"
+              value={supply.casesLeftToRun.toString()}
+              highlight={supply.casesLeftToRun > 0}
+              style={styles.metricHalf}
+            />
+            <MetricCard
+              label={doughSubTab === "crusts" ? "Cases to Open" : "Cases on Line"}
+              value={(doughSubTab === "crusts"
+                ? supply.casesLeftToOpen
+                : supply.casesOnLine
+              ).toString()}
+              style={styles.metricHalf}
+            />
+          </View>
+        </CardSection>
+
         {/* Run to Time */}
         {calc.pizzasLeft > 0 ? (
           <>
@@ -872,6 +929,23 @@ const styles = StyleSheet.create({
   metricsRow: { flexDirection: "row", gap: 10 },
   metricBig: { flex: 1.3 },
   metricCol: { flex: 1, gap: 10 },
+  metricHalf: { flex: 1 },
+  runDetailStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  runDetailStatusLabel: { fontSize: 13, fontWeight: "500" as const },
+  runDetailPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  runDetailPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
 
   runToTimeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   runToTimeLabel: { fontSize: 13 },

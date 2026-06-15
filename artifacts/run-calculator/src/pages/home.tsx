@@ -5390,6 +5390,107 @@ export default function Home() {
                   );
                 })()}
 
+                {/* Run Details (moved from Dough tab) — sub-view aware */}
+                {doughSubTab === "crusts" ? (
+                  <Card className="bg-card/50 border-border/50 shadow-md mt-4">
+                    <CardHeader className="pb-1 pt-3 px-4">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Run Details
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} testId="output-crust-cases-left" highlight />
+                      <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
+                      <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} testId="output-cases-on-line" />
+                      <div className="flex items-center justify-between py-1.5">
+                        <span className="text-sm text-muted-foreground">Crust Supply</span>
+                        {calc.doughShortCases > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
+                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
+                          </span>
+                        ) : calc.buffer > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
+                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
+                            +{fmtNum(calc.buffer, 1)} cases ahead
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                            Balanced
+                          </span>
+                        )}
+                      </div>
+                      <StatRow label="Cases on Last Skid" value={fmtNum(calc.casesOnLastSkid, 0)} />
+                      <Separator className="my-3 opacity-30" />
+                      <StatRow label="Stacks Per Skid" value={fmtNum(calc.traysPerSkid, 2)} />
+                      <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
+                      <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
+                      <StatRow label="PPM" value={fmtNum(calc.ppm, 1)} testId="output-ppm-crust" />
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="bg-card/50 border-border/50 shadow-md mt-4">
+                    <CardHeader className="pb-1 pt-3 px-4">
+                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        Run Details
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3">
+                      <StatRow
+                        label="Cases Left to Run"
+                        value={fmtNum(calc.casesLeftToRun, 0)}
+                        testId="output-dough-cases-left"
+                      />
+                      <StatRow
+                        label="Approx. Cases on Line"
+                        value={fmtNum(calc.casesOnLine, 0)}
+                        testId="output-cases-on-line"
+                      />
+                      <div className="flex items-center justify-between py-1.5" data-testid="output-dough-status">
+                        <span className="text-sm text-muted-foreground">Dough Status</span>
+                        {calc.doughShortCases > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
+                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
+                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
+                          </span>
+                        ) : calc.buffer > 0 ? (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
+                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
+                            +{fmtNum(calc.buffer, 1)} cases ahead
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
+                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                            Balanced
+                          </span>
+                        )}
+                      </div>
+                      <StatRow
+                        label="Cases on Last Skid"
+                        value={fmtNum(calc.casesOnLastSkid, 0)}
+                        testId="output-last-skid-cases"
+                      />
+                      <Separator className="my-3 opacity-30" />
+                      <StatRow
+                        label="Trays Per Skid"
+                        value={fmtNum(calc.traysPerSkid, 2)}
+                        testId="output-trays-per-skid"
+                      />
+                      <StatRow
+                        label="Trays Per Batch"
+                        value={fmtNum(calc.traysPerBatch, 2)}
+                        testId="output-trays-per-batch"
+                      />
+                      <StatRow
+                        label="Batches Per Skid"
+                        value={fmtNum(calc.batchesPerSkid, 2)}
+                        testId="output-batches-per-skid"
+                      />
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Upcoming runs */}
                 {(() => {
                   const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
@@ -6016,44 +6117,6 @@ export default function Home() {
                         </div>
                       </CardContent>
                     </Card>
-
-                    <Card className="bg-card/50 border-border/50 shadow-md">
-                      <CardHeader className="pb-1 pt-3 px-4">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                          Run Details
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-3">
-                        <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} testId="output-crust-cases-left" highlight />
-                        <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
-                        <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} testId="output-cases-on-line" />
-                        <div className="flex items-center justify-between py-1.5">
-                          <span className="text-sm text-muted-foreground">Crust Supply</span>
-                          {calc.doughShortCases > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                              <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
-                              SHORT {fmtNum(calc.doughShortCases, 1)} cases
-                            </span>
-                          ) : calc.buffer > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
-                              <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
-                              +{fmtNum(calc.buffer, 1)} cases ahead
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                              <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                              Balanced
-                            </span>
-                          )}
-                        </div>
-                        <StatRow label="Cases on Last Skid" value={fmtNum(calc.casesOnLastSkid, 0)} />
-                        <Separator className="my-3 opacity-30" />
-                        <StatRow label="Stacks Per Skid" value={fmtNum(calc.traysPerSkid, 2)} />
-                        <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
-                        <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
-                        <StatRow label="PPM" value={fmtNum(calc.ppm, 1)} testId="output-ppm-crust" />
-                      </CardContent>
-                    </Card>
                   </div>
                 )}
 
@@ -6079,66 +6142,6 @@ export default function Home() {
                           <p className="text-xs text-muted-foreground mt-0.5">Trays needed</p>
                         </div>
                       </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-card/50 border-border/50 shadow-md">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Run Details
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-3">
-                      <StatRow
-                        label="Cases Left to Run"
-                        value={fmtNum(calc.casesLeftToRun, 0)}
-                        testId="output-dough-cases-left"
-                      />
-                      <StatRow
-                        label="Approx. Cases on Line"
-                        value={fmtNum(calc.casesOnLine, 0)}
-                        testId="output-cases-on-line"
-                      />
-                      <div className="flex items-center justify-between py-1.5" data-testid="output-dough-status">
-                        <span className="text-sm text-muted-foreground">Dough Status</span>
-                        {calc.doughShortCases > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
-                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
-                          </span>
-                        ) : calc.buffer > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
-                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
-                            +{fmtNum(calc.buffer, 1)} cases ahead
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                            Balanced
-                          </span>
-                        )}
-                      </div>
-                      <StatRow
-                        label="Cases on Last Skid"
-                        value={fmtNum(calc.casesOnLastSkid, 0)}
-                        testId="output-last-skid-cases"
-                      />
-                      <Separator className="my-3 opacity-30" />
-                      <StatRow
-                        label="Trays Per Skid"
-                        value={fmtNum(calc.traysPerSkid, 2)}
-                        testId="output-trays-per-skid"
-                      />
-                      <StatRow
-                        label="Trays Per Batch"
-                        value={fmtNum(calc.traysPerBatch, 2)}
-                        testId="output-trays-per-batch"
-                      />
-                      <StatRow
-                        label="Batches Per Skid"
-                        value={fmtNum(calc.batchesPerSkid, 2)}
-                        testId="output-batches-per-skid"
-                      />
                     </CardContent>
                   </Card>
                 </div>
