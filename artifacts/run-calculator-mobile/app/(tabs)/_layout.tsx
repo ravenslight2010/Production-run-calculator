@@ -14,6 +14,7 @@ const MENU_ITEMS: {
 }[] = [
   { label: "Stoppages", icon: "clock", route: "/stoppages", desc: "Log and review downtime" },
   { label: "Summary", icon: "list", route: "/summary", desc: "Shift totals and export" },
+  { label: "Schedule", icon: "calendar", route: "/schedule", desc: "Plan future production days" },
   { label: "Setup", icon: "sliders", route: "/configure", desc: "Run config and recipes" },
   { label: "Settings", icon: "settings", route: "/settings", desc: "App options and master data" },
 ];

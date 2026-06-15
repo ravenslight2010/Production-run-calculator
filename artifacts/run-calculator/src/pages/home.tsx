@@ -5107,23 +5107,6 @@ export default function Home() {
                 <span className="hidden sm:inline">Manage</span>
               </button>
             )}
-            {/* Schedule future days — supervisor only */}
-            {isSupervisor && (
-              <button
-                type="button"
-                onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}
-                title="Schedule future production days"
-                className="relative flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border border-border text-muted-foreground bg-muted/30 hover:bg-muted/60 transition-colors"
-              >
-                <CalendarPlus className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">Schedule</span>
-                {scheduledDays.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold flex items-center justify-center leading-none">
-                    {scheduledDays.length}
-                  </span>
-                )}
-              </button>
-            )}
             {/* Screens / cast button */}
             <button
               type="button"
@@ -5191,6 +5174,16 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
+                {isSupervisor && (
+                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
+                    <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
+                    {scheduledDays.length > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center leading-none">
+                        {scheduledDays.length}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => setActiveTab("setup")}>
                   <Settings className="w-4 h-4 mr-2" /> Setup
                 </DropdownMenuItem>

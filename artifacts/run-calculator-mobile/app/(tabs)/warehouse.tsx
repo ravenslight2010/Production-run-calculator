@@ -1,7 +1,5 @@
-import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
 import { useRun, computeCalc, todayStr } from "@/context/RunContext";
@@ -20,7 +18,6 @@ function fmtDate(s: string): string {
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { allRuns, scheduled } = useRun();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -123,24 +120,6 @@ export default function WarehouseScreen() {
             })
           )}
         </CardSection>
-
-        <Pressable
-          onPress={() => router.push("/schedule")}
-          style={({ pressed }) => [
-            styles.scheduleBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              opacity: pressed ? 0.7 : 1,
-            },
-          ]}
-        >
-          <Feather name="calendar" size={16} color={colors.foreground} />
-          <Text style={[styles.scheduleBtnText, { color: colors.foreground }]}>
-            Edit Production Schedule
-          </Text>
-          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-        </Pressable>
       </ScrollView>
     </View>
   );
@@ -175,16 +154,4 @@ const styles = StyleSheet.create({
   dayTitle: { fontSize: 15, fontWeight: "700" as const },
   dayCount: { fontSize: 12 },
   dayRun: { fontSize: 13, marginTop: 2 },
-
-  scheduleBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginTop: 16,
-  },
-  scheduleBtnText: { flex: 1, fontSize: 15, fontWeight: "600" as const },
 });
