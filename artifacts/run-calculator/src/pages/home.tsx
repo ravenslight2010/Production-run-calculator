@@ -3665,6 +3665,111 @@ export default function Home() {
     );
   }
 
+  if (screenMode === "sauce") {
+    const bd = sauceBarrelBreakdown(calc.sauceBatches, calc.sauceEffBarrel);
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-8 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Droplets className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Sauce Station</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        {/* Run name + status */}
+        <div className="flex items-center gap-4 flex-wrap">
+          <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
+          {v.casesNeeded > 0 && (
+            <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
+              {fmtComma(calc.casesLeftToRun)} <span className="text-lg">cases left</span>
+            </span>
+          )}
+        </div>
+
+        {/* Big sauce display */}
+        {calc.sauceBatches > 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border border-border bg-card p-12">
+            <p className="text-lg font-bold uppercase tracking-widest text-muted-foreground">Sauce Needed</p>
+            <p className="text-[10rem] font-black tabular-nums leading-none text-primary">{fmtNum(calc.sauceBatches, 2)}</p>
+            <p className="text-3xl font-bold text-muted-foreground">batches</p>
+            {bd && (
+              <div className="flex items-center gap-8 text-center mt-4">
+                <div>
+                  <p className="text-sm text-muted-foreground uppercase tracking-wider">Batches / Barrel</p>
+                  <p className="text-5xl font-black tabular-nums">{bd.batchesPerBarrel}</p>
+                </div>
+                <p className="text-4xl text-muted-foreground font-light">→</p>
+                <div>
+                  <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Barrels</p>
+                  <p className="text-5xl font-black tabular-nums text-primary">{bd.totalBarrels}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
+            <p className="text-2xl text-muted-foreground">No sauce configured for this run</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (screenMode === "warehouse") {
+    const activeRuns = dayState.runs.filter(r => !r.endedAt);
+    const valsList = activeRuns.map(r => loadRunValues(r.id));
+    const agg = aggregateNeedRows(valsList);
+    return (
+      <div className="min-h-screen bg-background text-foreground flex flex-col p-8 gap-6 select-none">
+        {/* Top bar */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Warehouse className="w-6 h-6 text-primary" />
+            <span className="text-base font-bold text-muted-foreground uppercase tracking-widest">Warehouse</span>
+          </div>
+          <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
+        </div>
+
+        <h1 className="text-4xl font-black">Total Ingredient Needs — {activeRuns.length} active run{activeRuns.length !== 1 ? "s" : ""}</h1>
+
+        {/* Aggregate ingredient grid */}
+        {agg.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 flex-1 content-start">
+            {agg.map((row, i) => (
+              <div key={i} className="rounded-2xl bg-card border border-border p-6 flex flex-col justify-center gap-1">
+                <p className="text-sm font-semibold uppercase tracking-wider text-muted-foreground truncate">{row.label}</p>
+                <p className="text-5xl font-black tabular-nums text-foreground">{row.value}</p>
+                {row.sub && <p className="text-base text-muted-foreground font-semibold">{row.sub}</p>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center rounded-2xl border border-border bg-card">
+            <p className="text-2xl text-muted-foreground">No active runs with ingredient needs</p>
+          </div>
+        )}
+
+        {/* Upcoming production schedule */}
+        {scheduledDays.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Upcoming Production</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {scheduledDays.map(day => (
+                <div key={day.date} className="rounded-2xl bg-card border border-border p-5 flex items-center justify-between gap-3">
+                  <span className="text-2xl font-black">{day.date}</span>
+                  <span className="text-lg text-muted-foreground font-semibold">{day.runCount} run{day.runCount !== 1 ? "s" : ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (screenMode === "summary") {
     const finished = dayState.runs.filter(r => !!r.endedAt);
     const totalCases = finished.reduce((s, r) => s + (computeSummaryStats(loadRunValues(r.id)).totalCases), 0);
@@ -4023,11 +4128,25 @@ export default function Home() {
             url: `${base}?screen=dough`,
           },
           {
+            key: "sauce",
+            icon: <Droplets className="w-5 h-5 text-rose-400" />,
+            title: "Sauce Station",
+            desc: "Sauce display — batches and barrel breakdown for remaining cases",
+            url: `${base}?screen=sauce`,
+          },
+          {
             key: "frontline",
             icon: <Layers className="w-5 h-5 text-orange-400" />,
             title: "Frontline Station",
             desc: "Topping line display — sauce, cheese, applicators, pep amounts",
             url: `${base}?screen=frontline`,
+          },
+          {
+            key: "warehouse",
+            icon: <Warehouse className="w-5 h-5 text-amber-400" />,
+            title: "Warehouse",
+            desc: "Total ingredient needs across all active runs + upcoming schedule",
+            url: `${base}?screen=warehouse`,
           },
           {
             key: "backline",
