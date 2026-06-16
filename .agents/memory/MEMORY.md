@@ -10,3 +10,4 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
+- [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave firing before profile loads; saveProfile guard + seed self-heal; never use numeric-scan for "real data" (pep batch defaults=25).
