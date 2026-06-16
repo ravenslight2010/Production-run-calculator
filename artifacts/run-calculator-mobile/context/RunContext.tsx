@@ -6,6 +6,7 @@ import {
   SPEC_PEP_TYPES,
   SPEC_CHEESE_INGREDIENTS,
   SPEC_PROFILES,
+  SPEC_DIE_TYPES,
   DOUGH_RECIPES,
   DOUGH_BRAND_SPECS,
   SAUCE_RECIPES,
@@ -35,6 +36,8 @@ import type { SyncPayload } from "./sync/payloadTypes";
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
+// One-time marker for backfilling die sizes onto existing brand/flavor profiles.
+const DIE_SEED_KEY = "run-calc-mobile-die-v1";
 // One-time marker for seeding the imported dough recipes + brand/flavor ties.
 const DOUGH_SEED_KEY = "run-calc-mobile-dough-v1";
 // One-time marker for seeding the imported sauce recipes + brand/flavor ties.
@@ -641,7 +644,7 @@ export function historicalBenchmarkPpm(history: HistoryDay[]): {
   };
 }
 
-export const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
+export const DEFAULT_DIE_TYPES = ["7in", "9in", "11in", "12in", "Argus", "Mystic"];
 
 export interface RunTemplate {
   id: string;
@@ -741,7 +744,10 @@ function applySpecSeed(state: AppState): AppState {
   }
   const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
   for (const [k, v] of Object.entries(SPEC_PROFILES)) {
-    if (!brandProfiles[k]) brandProfiles[k] = v;
+    if (!brandProfiles[k]) {
+      const die = SPEC_DIE_TYPES[k];
+      brandProfiles[k] = die ? { ...v, dieType: die } : v;
+    }
   }
   return {
     ...state,
@@ -752,6 +758,28 @@ function applySpecSeed(state: AppState): AppState {
       state.cheeseIngredients,
       SPEC_CHEESE_INGREDIENTS,
     ),
+    brandProfiles,
+  };
+}
+
+/**
+ * Backfill the die size onto existing brand/flavor profiles, sourced from the
+ * CRUST field of the pizza spec sheets. Only fills a profile when its dieType is
+ * empty, so user edits are never clobbered. Also ensures the die-type option
+ * list includes any newly seeded sizes (e.g. "9in"). Mirrors the web seed.
+ */
+function applyDieSeed(state: AppState): AppState {
+  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
+  for (const [k, die] of Object.entries(SPEC_DIE_TYPES)) {
+    const prof = brandProfiles[k];
+    if (!prof) continue;
+    const cur = prof.dieType;
+    if (typeof cur === "string" && cur.trim()) continue;
+    brandProfiles[k] = { ...prof, dieType: die };
+  }
+  return {
+    ...state,
+    dieTypes: mergeInsensitive(state.dieTypes, DEFAULT_DIE_TYPES),
     brandProfiles,
   };
 }
@@ -1246,19 +1274,26 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     if (!bootDone) return;
     let cancelled = false;
     (async () => {
-      const [specDone, doughDone, sauceDone, cheeseDone] = await Promise.all([
-        AsyncStorage.getItem(SPEC_SEED_KEY),
-        AsyncStorage.getItem(DOUGH_SEED_KEY),
-        AsyncStorage.getItem(SAUCE_SEED_KEY),
-        AsyncStorage.getItem(CHEESE_SEED_KEY),
-      ]);
-      if (cancelled || (specDone && doughDone && sauceDone && cheeseDone)) return;
+      const [specDone, doughDone, sauceDone, cheeseDone, dieDone] =
+        await Promise.all([
+          AsyncStorage.getItem(SPEC_SEED_KEY),
+          AsyncStorage.getItem(DOUGH_SEED_KEY),
+          AsyncStorage.getItem(SAUCE_SEED_KEY),
+          AsyncStorage.getItem(CHEESE_SEED_KEY),
+          AsyncStorage.getItem(DIE_SEED_KEY),
+        ]);
+      if (
+        cancelled ||
+        (specDone && doughDone && sauceDone && cheeseDone && dieDone)
+      )
+        return;
       setAppState((prev) => {
         let next = prev;
         if (!specDone) next = applySpecSeed(next);
         if (!doughDone) next = applyDoughSeed(next);
         if (!sauceDone) next = applySauceSeed(next);
         if (!cheeseDone) next = applyCheeseSeed(next);
+        if (!dieDone) next = applyDieSeed(next);
         persistNow(next);
         return next;
       });
@@ -1266,6 +1301,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       if (!doughDone) AsyncStorage.setItem(DOUGH_SEED_KEY, "1");
       if (!sauceDone) AsyncStorage.setItem(SAUCE_SEED_KEY, "1");
       if (!cheeseDone) AsyncStorage.setItem(CHEESE_SEED_KEY, "1");
+      if (!dieDone) AsyncStorage.setItem(DIE_SEED_KEY, "1");
     })();
     return () => {
       cancelled = true;

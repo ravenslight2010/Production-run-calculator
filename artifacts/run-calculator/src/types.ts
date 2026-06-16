@@ -230,7 +230,7 @@ export const DEFAULT_INGREDIENT_TYPES = [
 export const PEP_TYPES_KEY = "run-calc-pep-types";
 export const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
 export const DIE_TYPES_KEY = "run-calc-die-types";
-export const DEFAULT_DIE_TYPES = ["7in", "11in", "12in", "Argus", "Mystic"];
+export const DEFAULT_DIE_TYPES = ["7in", "9in", "11in", "12in", "Argus", "Mystic"];
 export const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 export const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",

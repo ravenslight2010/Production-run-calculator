@@ -32,6 +32,8 @@ import {
   DEFAULT_PEP_TYPES,
   CHEESE_INGREDIENTS_KEY,
   DEFAULT_CHEESE_INGREDIENTS,
+  DIE_TYPES_KEY,
+  DEFAULT_DIE_TYPES,
   MAX_HISTORY_DAYS,
   type FormValues,
   type DayState,
@@ -50,6 +52,7 @@ import {
   SPEC_PEP_TYPES,
   SPEC_CHEESE_INGREDIENTS,
   SPEC_PROFILES,
+  SPEC_DIE_TYPES,
   DOUGH_RECIPES,
   DOUGH_BRAND_SPECS,
   SAUCE_RECIPES,
@@ -435,10 +438,52 @@ export function applySpecProfilesSeedIfNeeded(): void {
     for (const p of SPEC_PROFILES) {
       const key = PROFILE_KEY(p.brand, p.flavor);
       if (localStorage.getItem(key)) continue;
-      localStorage.setItem(key, JSON.stringify(p.values));
+      const die = SPEC_DIE_TYPES[key];
+      const values = die ? { ...p.values, dieType: die } : p.values;
+      localStorage.setItem(key, JSON.stringify(values));
     }
 
     localStorage.setItem(SPEC_PROFILES_SEED_KEY, "1");
+  } catch {}
+}
+
+const DIE_TYPES_SEED_KEY = "run-calc-die-types-v1";
+
+/**
+ * Backfill the die size onto existing brand/flavor profiles, sourced from the
+ * CRUST field of the pizza spec sheets. Only fills a profile when its dieType is
+ * empty, so user edits are never clobbered. Also ensures the die-type option
+ * list includes any newly seeded sizes (e.g. "9in"). Runs once, guarded by a
+ * version marker.
+ */
+export function applyDieTypesSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(DIE_TYPES_SEED_KEY)) return;
+  try {
+    saveList(
+      DIE_TYPES_KEY,
+      mergeListInsensitive(
+        loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
+        DEFAULT_DIE_TYPES,
+      ),
+    );
+
+    for (const [key, die] of Object.entries(SPEC_DIE_TYPES)) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      let values: Record<string, unknown>;
+      try {
+        values = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const cur = values.dieType;
+      if (typeof cur === "string" && cur.trim()) continue;
+      values.dieType = die;
+      localStorage.setItem(key, JSON.stringify(values));
+    }
+
+    localStorage.setItem(DIE_TYPES_SEED_KEY, "1");
   } catch {}
 }
 

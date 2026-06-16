@@ -81,6 +81,7 @@ import {
   applyMixSeedV14IfNeeded,
   applyMixSeedV15IfNeeded,
   applySpecProfilesSeedIfNeeded,
+  applyDieTypesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
   applySauceSpecsSeedIfNeeded,
   applyCheeseSpecsSeedIfNeeded,
@@ -173,6 +174,7 @@ applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
 applyMixSeedV15IfNeeded();
 applySpecProfilesSeedIfNeeded();
+applyDieTypesSeedIfNeeded();
 applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
 applyCheeseSpecsSeedIfNeeded();
