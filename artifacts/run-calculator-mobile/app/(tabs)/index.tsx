@@ -206,7 +206,7 @@ export default function CalculatorScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: webTop, paddingBottom: 90 + webBottom + insets.bottom },
+          { paddingTop: webTop, paddingBottom: 166 + webBottom + insets.bottom },
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -418,37 +418,6 @@ export default function CalculatorScreen() {
             style={({ pressed }) => [styles.navAddBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.7 : 1 }]}
           >
             <Feather name="plus" size={16} color="#000" />
-          </Pressable>
-        </View>
-
-        {/* Start/Stop row */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            {run.isRunning && (
-              <Text style={[styles.elapsed, { color: colors.mutedForeground }]}>
-                {fmtElapsed(calc.netElapsedSec)} net ·{" "}
-                {calc.totalDowntimeSec > 0
-                  ? `${fmtElapsed(calc.totalDowntimeSec)} down`
-                  : "no downtime"}
-              </Text>
-            )}
-          </View>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              run.isRunning ? endRun() : startRun();
-            }}
-            style={({ pressed }) => [
-              styles.toggleBtn,
-              {
-                backgroundColor: run.isRunning ? "#ef4444" : colors.success,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Text style={styles.toggleText}>
-              {run.isRunning ? "■ STOP" : "▶ START"}
-            </Text>
           </Pressable>
         </View>
 
@@ -804,25 +773,6 @@ export default function CalculatorScreen() {
           </Card>
         ) : null}
 
-        {/* Log stoppage button */}
-        {run.isRunning && !activeStoppage ? (
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setShowModal(true);
-            }}
-            style={({ pressed }) => [
-              styles.stoppageBtn,
-              { borderColor: colors.warning, opacity: pressed ? 0.7 : 1 },
-            ]}
-          >
-            <Feather name="pause-circle" size={18} color={colors.warning} />
-            <Text style={[styles.stoppageBtnText, { color: colors.warning }]}>
-              Log Stoppage
-            </Text>
-          </Pressable>
-        ) : null}
-
         {/* Run notes */}
         {run.settings.notes ? (
           <View style={[styles.notesCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -833,6 +783,158 @@ export default function CalculatorScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {/* Persistent run-control bar — stays put while the page scrolls */}
+      {(() => {
+        const ended = run.endedAt != null;
+        const casesNeeded = run.settings.casesNeeded;
+        const casesCompleted =
+          run.progress.skidsCompleted * run.settings.casesPerSkid +
+          run.progress.casesOnCurrentSkid;
+        const pct =
+          casesNeeded > 0
+            ? Math.min(100, (casesCompleted / casesNeeded) * 100)
+            : 0;
+        const tabBarH = Platform.OS === "web" ? 84 : 49 + insets.bottom;
+        return (
+          <View
+            style={[
+              styles.controlBar,
+              {
+                bottom: tabBarH,
+                backgroundColor: colors.card,
+                borderTopColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.controlKpi}>
+              {casesNeeded > 0 ? (
+                <>
+                  <View style={styles.controlKpiTop}>
+                    <Text
+                      style={[styles.controlKpiValue, { color: colors.foreground }]}
+                      numberOfLines={1}
+                    >
+                      {casesCompleted}
+                      <Text style={{ color: colors.mutedForeground }}>
+                        /{casesNeeded}
+                      </Text>
+                    </Text>
+                    <Text style={[styles.controlKpiPct, { color: colors.primary }]}>
+                      {Math.round(pct)}%
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.controlKpiTrack,
+                      { backgroundColor: colors.secondary },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.controlKpiFill,
+                        { backgroundColor: colors.primary, width: `${pct}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text
+                    style={[styles.controlKpiSub, { color: colors.mutedForeground }]}
+                    numberOfLines={1}
+                  >
+                    {run.isRunning
+                      ? `${fmtElapsed(calc.netElapsedSec)} net · ${
+                          calc.ppm > 0 ? calc.ppm.toFixed(1) + " ppm" : "— ppm"
+                        }`
+                      : ended
+                        ? "Run ended"
+                        : "Cases completed"}
+                  </Text>
+                </>
+              ) : (
+                <Text
+                  style={[styles.controlKpiSub, { color: colors.mutedForeground }]}
+                  numberOfLines={2}
+                >
+                  Enter cases needed to track progress
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.controlActions}>
+              {activeStoppage ? (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                    endActiveStoppage();
+                  }}
+                  style={({ pressed }) => [
+                    styles.ctrlBtn,
+                    styles.ctrlBtnWide,
+                    { backgroundColor: colors.warning, opacity: pressed ? 0.75 : 1 },
+                  ]}
+                >
+                  <Feather name="play" size={16} color="#000" />
+                  <Text style={[styles.ctrlBtnText, { color: "#000" }]}>
+                    End {activeStoppage.type}
+                  </Text>
+                </Pressable>
+              ) : run.isRunning ? (
+                <>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setShowModal(true);
+                    }}
+                    style={({ pressed }) => [
+                      styles.ctrlBtn,
+                      {
+                        borderWidth: 1,
+                        borderColor: colors.warning,
+                        opacity: pressed ? 0.6 : 1,
+                      },
+                    ]}
+                  >
+                    <Feather name="pause-circle" size={16} color={colors.warning} />
+                    <Text style={[styles.ctrlBtnText, { color: colors.warning }]}>
+                      Stop
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      endRun();
+                    }}
+                    style={({ pressed }) => [
+                      styles.ctrlBtn,
+                      { backgroundColor: "#ef4444", opacity: pressed ? 0.75 : 1 },
+                    ]}
+                  >
+                    <Feather name="square" size={14} color="#fff" />
+                    <Text style={[styles.ctrlBtnText, { color: "#fff" }]}>End</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    startRun();
+                  }}
+                  style={({ pressed }) => [
+                    styles.ctrlBtn,
+                    styles.ctrlBtnWide,
+                    { backgroundColor: colors.success, opacity: pressed ? 0.8 : 1 },
+                  ]}
+                >
+                  <Feather name="play" size={16} color="#000" />
+                  <Text style={[styles.ctrlBtnText, { color: "#000" }]}>
+                    Start Run
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        );
+      })()}
 
       <StoppageModal
         visible={showModal}
@@ -1217,6 +1319,50 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   stoppageBtnText: { fontSize: 15, fontFamily: FONTS.semibold },
+
+  controlBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+  },
+  controlKpi: { flex: 1, gap: 4 },
+  controlKpiTop: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+  },
+  controlKpiValue: {
+    fontSize: 20,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
+  controlKpiPct: { fontSize: 13, fontFamily: FONTS.semibold },
+  controlKpiTrack: { height: 6, borderRadius: 999, overflow: "hidden" },
+  controlKpiFill: { height: "100%", borderRadius: 999 },
+  controlKpiSub: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+  },
+  controlActions: { flexDirection: "row", gap: 8, alignItems: "center" },
+  ctrlBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+  },
+  ctrlBtnWide: { paddingHorizontal: 22 },
+  ctrlBtnText: { fontSize: 14, fontFamily: FONTS.bold },
 
   notesCard: {
     borderRadius: 4,

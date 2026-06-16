@@ -5116,6 +5116,25 @@ export default function Home() {
               )}
             </div>
 
+            {/* Glanceable case progress — persistent across tabs, mirrors mobile control-bar KPI */}
+            {v.casesNeeded > 0 && (
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-sm font-bold font-mono tabular-nums text-foreground shrink-0">
+                  {fmtComma(calc.casesCompleted)}
+                  <span className="text-muted-foreground">/{fmtComma(v.casesNeeded)}</span>
+                </span>
+                <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-500"
+                    style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-xs font-semibold text-primary shrink-0 tabular-nums">
+                  {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
+                </span>
+              </div>
+            )}
+
             {/* Estimated time to finish — shown while running or paused */}
             {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
               const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
