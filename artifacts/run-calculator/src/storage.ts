@@ -24,6 +24,7 @@ import {
   MIX_INGREDIENTS_KEY,
   DEFAULT_MIX_INGREDIENTS,
   CHEESE_RECIPE_PRESETS_KEY,
+  CHEESE_RECIPE_NAMES_KEY,
   MIX_RECIPE_NAMES_KEY,
   INGREDIENT_TYPES_KEY,
   DEFAULT_INGREDIENT_TYPES,
@@ -53,6 +54,8 @@ import {
   DOUGH_BRAND_SPECS,
   SAUCE_RECIPES,
   SAUCE_BRAND_SPECS,
+  CHEESE_RECIPES,
+  CHEESE_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
 
@@ -575,5 +578,78 @@ export function applySauceSpecsSeedIfNeeded(): void {
     }
 
     localStorage.setItem(SAUCE_SPECS_SEED_KEY, "1");
+  } catch {}
+}
+
+const CHEESE_SPECS_SEED_KEY = "run-calc-cheese-specs-v1";
+
+/**
+ * Seed cheese RECIPES + SPECS imported from the cheese-mix sheets. Tier 1 adds
+ * every cheese mix to the cheese recipe library (presets, names, ingredient
+ * list) so each mix is selectable in the App 1-4 cheese dropdowns. Tier 2 ties
+ * a brand+flavor to its specific mix on the stored profile, on the cheese
+ * applicator slot the sheet specifies (app 1-4) — only when that slot has no
+ * cheese recipe yet, so user edits are never clobbered. Batch totals are
+ * auto-summed from the recipe and are not seeded. Runs once, guarded by a
+ * version marker.
+ */
+export function applyCheeseSpecsSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(CHEESE_SPECS_SEED_KEY)) return;
+  try {
+    // ── Tier 1: cheese recipe library ──
+    const presets = loadCheeseRecipePresets();
+    for (const [name, rows] of Object.entries(CHEESE_RECIPES)) {
+      if (!presets[name]) presets[name] = rows.map(r => ({ ...r }));
+    }
+    saveCheeseRecipePresets(presets);
+
+    saveList(
+      CHEESE_RECIPE_NAMES_KEY,
+      mergeListInsensitive(
+        loadList(CHEESE_RECIPE_NAMES_KEY, []),
+        Object.keys(CHEESE_RECIPES),
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    const allCheeseIngredients = [
+      ...new Set(
+        Object.values(CHEESE_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
+      ),
+    ];
+    saveList(
+      CHEESE_INGREDIENTS_KEY,
+      mergeListInsensitive(
+        loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
+        allCheeseIngredients,
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    // ── Tier 2: brand+flavor → cheese mix ties on stored profiles ──
+    const bf = loadBrandFlavors();
+    for (const spec of CHEESE_BRAND_SPECS) {
+      const rows = CHEESE_RECIPES[spec.recipe];
+      if (!rows) continue;
+      const slot = spec.app >= 1 && spec.app <= 4 ? spec.app : 1;
+      const nameField = `app${slot}CheeseRecipeName`;
+      const recipeField = `app${slot}CheeseRecipe`;
+      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
+      for (const flavor of flavors) {
+        const key = PROFILE_KEY(spec.brand, flavor);
+        let prof: Record<string, unknown> = {};
+        try {
+          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+        } catch {
+          prof = {};
+        }
+        const existing = prof[recipeField] as unknown[] | undefined;
+        if (Array.isArray(existing) && existing.length > 0) continue;
+        prof[nameField] = spec.recipe;
+        prof[recipeField] = rows.map(r => ({ ...r }));
+        localStorage.setItem(key, JSON.stringify(prof));
+      }
+    }
+
+    localStorage.setItem(CHEESE_SPECS_SEED_KEY, "1");
   } catch {}
 }

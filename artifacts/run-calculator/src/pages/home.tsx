@@ -83,6 +83,7 @@ import {
   applySpecProfilesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
   applySauceSpecsSeedIfNeeded,
+  applyCheeseSpecsSeedIfNeeded,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -174,6 +175,7 @@ applyMixSeedV15IfNeeded();
 applySpecProfilesSeedIfNeeded();
 applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
+applyCheeseSpecsSeedIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
 

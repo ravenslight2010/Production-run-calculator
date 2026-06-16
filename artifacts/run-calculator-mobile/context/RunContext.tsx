@@ -10,6 +10,8 @@ import {
   DOUGH_BRAND_SPECS,
   SAUCE_RECIPES,
   SAUCE_BRAND_SPECS,
+  CHEESE_RECIPES,
+  CHEESE_BRAND_SPECS,
 } from "@/data/specSeed";
 import React, {
   createContext,
@@ -37,6 +39,8 @@ const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 const DOUGH_SEED_KEY = "run-calc-mobile-dough-v1";
 // One-time marker for seeding the imported sauce recipes + brand/flavor ties.
 const SAUCE_SEED_KEY = "run-calc-mobile-sauce-v1";
+// One-time marker for seeding the imported cheese recipes + brand/flavor ties.
+const CHEESE_SEED_KEY = "run-calc-mobile-cheese-v1";
 
 // Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
 // incoming remote payloads are deferred briefly after a local edit so they don't
@@ -864,6 +868,64 @@ function applySauceSeed(state: AppState): AppState {
   return { ...state, frontlineRecipePresets, frontlineIngredients, brandProfiles };
 }
 
+/**
+ * Additively seed the imported cheese recipes + brand/flavor ties. Tier 1 adds
+ * every cheese mix to the cheese recipe library (presets + ingredient list) so
+ * each mix is selectable in the App 1-4 cheese dropdowns. Tier 2 ties a
+ * brand+flavor to its specific mix on the brand profile, on the cheese
+ * applicator slot the sheet specifies (app 1-4) — only when that slot has no
+ * cheese recipe yet, so user edits are never clobbered. Batch totals are
+ * auto-summed from the recipe and are not seeded. Mirrors the web seed.
+ */
+function applyCheeseSeed(state: AppState): AppState {
+  // ── Tier 1: cheese recipe library ──
+  const cheeseRecipePresets: Record<string, RecipeRow[]> = {
+    ...state.cheeseRecipePresets,
+  };
+  for (const [name, rows] of Object.entries(CHEESE_RECIPES)) {
+    if (!cheeseRecipePresets[name]) {
+      cheeseRecipePresets[name] = rows.map((r) => ({ ...r }));
+    }
+  }
+  const allCheeseIngredients = [
+    ...new Set(
+      Object.values(CHEESE_RECIPES).flatMap((rows) =>
+        rows.map((r) => r.ingredient),
+      ),
+    ),
+  ];
+  const cheeseIngredients = mergeInsensitive(
+    state.cheeseIngredients,
+    allCheeseIngredients,
+  );
+
+  // ── Tier 2: brand+flavor → cheese mix ties on brand profiles ──
+  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
+  for (const spec of CHEESE_BRAND_SPECS) {
+    const rows = CHEESE_RECIPES[spec.recipe];
+    if (!rows) continue;
+    const slot = spec.app >= 1 && spec.app <= 4 ? spec.app : 1;
+    const nameField = `app${slot}CheeseRecipeName` as keyof RunProfile;
+    const recipeField = `app${slot}CheeseRecipe` as keyof RunProfile;
+    const flavors = spec.flavor
+      ? [spec.flavor]
+      : (state.brandFlavors[spec.brand] ?? []);
+    for (const flavor of flavors) {
+      const key = profileKey(spec.brand, flavor);
+      const prof = brandProfiles[key] ?? {};
+      const existing = prof[recipeField] as RecipeRow[] | undefined;
+      if (Array.isArray(existing) && existing.length > 0) continue;
+      brandProfiles[key] = {
+        ...prof,
+        [nameField]: spec.recipe,
+        [recipeField]: rows.map((r) => ({ ...r })),
+      };
+    }
+  }
+
+  return { ...state, cheeseRecipePresets, cheeseIngredients, brandProfiles };
+}
+
 // Fields that belong to one specific run and must NOT travel via a profile.
 const PER_RUN_FIELDS: (keyof RunSettings)[] = [
   "brand",
@@ -1184,23 +1246,26 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     if (!bootDone) return;
     let cancelled = false;
     (async () => {
-      const [specDone, doughDone, sauceDone] = await Promise.all([
+      const [specDone, doughDone, sauceDone, cheeseDone] = await Promise.all([
         AsyncStorage.getItem(SPEC_SEED_KEY),
         AsyncStorage.getItem(DOUGH_SEED_KEY),
         AsyncStorage.getItem(SAUCE_SEED_KEY),
+        AsyncStorage.getItem(CHEESE_SEED_KEY),
       ]);
-      if (cancelled || (specDone && doughDone && sauceDone)) return;
+      if (cancelled || (specDone && doughDone && sauceDone && cheeseDone)) return;
       setAppState((prev) => {
         let next = prev;
         if (!specDone) next = applySpecSeed(next);
         if (!doughDone) next = applyDoughSeed(next);
         if (!sauceDone) next = applySauceSeed(next);
+        if (!cheeseDone) next = applyCheeseSeed(next);
         persistNow(next);
         return next;
       });
       if (!specDone) AsyncStorage.setItem(SPEC_SEED_KEY, "1");
       if (!doughDone) AsyncStorage.setItem(DOUGH_SEED_KEY, "1");
       if (!sauceDone) AsyncStorage.setItem(SAUCE_SEED_KEY, "1");
+      if (!cheeseDone) AsyncStorage.setItem(CHEESE_SEED_KEY, "1");
     })();
     return () => {
       cancelled = true;
