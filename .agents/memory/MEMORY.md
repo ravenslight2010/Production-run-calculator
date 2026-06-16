@@ -1,4 +1,5 @@
 - [Recipe print/share](recipe-print-share.md) — per-recipe card print/share button requested by user, deferred.
+- [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
 - [Spec-import seed pattern](spec-import-seed-pattern.md) — two-tier additive marker-guarded recipe imports (dough/sauce/cheese), kept at web+mobile parity.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, or a later seed races ahead and the spec seed's skip-if-absent guard drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.

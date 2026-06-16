@@ -11,7 +11,7 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Bobo's Deluxe Veggie Mix",
       "ingredients": [
         {
-          "ingredient": "Red Onion, FR Strips",
+          "ingredient": "FR Red Onion Strips",
           "lbs": 0.4
         },
         {
@@ -76,7 +76,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.75
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -186,7 +186,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.375
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -297,7 +297,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.8
         },
         {
-          "ingredient": "Bacon - NATURAL tri meats tm3514u or c&f 061anub40",
+          "ingredient": "Bacon, NATURAL Tri Meats tm3514u or c&f 061anub40",
           "lbs": 0.5
         }
       ]
@@ -350,11 +350,11 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Lowes Chicken Club",
       "ingredients": [
         {
-          "ingredient": "Tomatoes, Diced",
+          "ingredient": "Diced Tomatoes",
           "lbs": 1.25
         },
         {
-          "ingredient": "Bacon, NATURAL tri meats tm3514u or c&f 061anub40",
+          "ingredient": "Bacon, NATURAL Tri Meats tm3514u or c&f 061anub40",
           "lbs": 0.7
         },
         {
@@ -408,7 +408,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.07
         },
         {
-          "ingredient": "Chicken, Diced House of Raeford 28501 or c&f 001mpdc40",
+          "ingredient": "Chicken, Diced c&f - 001mpdc40 or House of Raeford - 28501",
           "lbs": 2.43
         }
       ]
@@ -440,7 +440,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.35
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -617,7 +617,7 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Craft Club Mix",
       "ingredients": [
         {
-          "ingredient": "Tomatoes, FR Diced",
+          "ingredient": "FR Tomatoes Diced",
           "lbs": 1
         },
         {
@@ -653,7 +653,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.25
         },
         {
-          "ingredient": "Bacon tri meats tm3514u or c&f 001anub40",
+          "ingredient": "Bacon Tri Meats tm3514u or c&f 001anub40",
           "lbs": 0.5
         }
       ]
@@ -668,11 +668,11 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.74
         },
         {
-          "ingredient": "Tomatoes, Diced",
+          "ingredient": "Diced Tomatoes",
           "lbs": 0.71
         },
         {
-          "ingredient": "Red Onion, FR Strips",
+          "ingredient": "FR Red Onion Strips",
           "lbs": 0.71
         },
         {
@@ -707,7 +707,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.37
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -739,7 +739,7 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Lucia's Buffalo Chicken Mix",
       "ingredients": [
         {
-          "ingredient": "Diced Chicken c&f 001mpdc40 or House of Raeford 28501",
+          "ingredient": "Chicken, Diced c&f - 001mpdc40 or House of Raeford - 28501",
           "lbs": 2.4
         },
         {
@@ -754,7 +754,7 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Lucias Red Fajita Mix",
       "ingredients": [
         {
-          "ingredient": "Red Onion Strips, FR",
+          "ingredient": "FR Red Onion Strips",
           "lbs": 0.75
         },
         {
@@ -762,7 +762,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.75
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -793,7 +793,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.525
         },
         {
-          "ingredient": "1/8 green pepper",
+          "ingredient": "1/8 Green Pepper",
           "lbs": 0
         },
         {
@@ -840,11 +840,11 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.74
         },
         {
-          "ingredient": "Tomatoes, Diced",
+          "ingredient": "Diced Tomatoes",
           "lbs": 0.71
         },
         {
-          "ingredient": "Red Onion, FR Strips",
+          "ingredient": "FR Red Onion Strips",
           "lbs": 0.71
         },
         {
@@ -882,7 +882,7 @@ import type { RecipeRow } from "@/context/RunContext";
       "name": "Craft Club Mix",
       "ingredients": [
         {
-          "ingredient": "Tomatoes, Diced",
+          "ingredient": "Diced Tomatoes",
           "lbs": 1
         },
         {
@@ -918,7 +918,7 @@ import type { RecipeRow } from "@/context/RunContext";
           "lbs": 0.25
         },
         {
-          "ingredient": "Bacon tri meats tm3514u or c&f 001anub40",
+          "ingredient": "Bacon Tri Meats tm3514u or c&f 001anub40",
           "lbs": 0.5
         }
       ]
