@@ -33,7 +33,9 @@ export default function PackagingScreen() {
   const showFreezer = run.startedAt != null && freezerTime > 0;
   const supply = computeDoughSupply(run, nowMs, run.progress.subTab);
 
-  const casesCompleted = Math.max(0, run.settings.casesNeeded - calc.casesLeft);
+  const casesCompleted =
+    run.progress.skidsCompleted * run.settings.casesPerSkid +
+    run.progress.casesOnCurrentSkid;
   const casesPerSkid = run.settings.casesPerSkid;
   const skidNearlyFull =
     casesPerSkid > 0 && casesPerSkid - run.progress.casesOnCurrentSkid <= 3 &&
