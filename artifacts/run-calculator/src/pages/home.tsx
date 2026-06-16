@@ -6500,7 +6500,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Sauce"
                         value={v.frontlineRecipeName}
-                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const preset = loadFrontlineRecipePresets()[val.trim()]; if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); } } }}
                         options={frontlineRecipeNames}
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
