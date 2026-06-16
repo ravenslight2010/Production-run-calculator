@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CardSection, MetricCard, NumericField, SectionHeader, TextField } from "@/components/UI";
+import { CardSection, MetricCard, NumericField, SectionHeader } from "@/components/UI";
 import {
   useRun,
   runLabel,
@@ -78,6 +78,7 @@ export default function CalculatorScreen() {
     applyCarryOver,
     syncStatus,
     updateSettings, saveProfile, applyProfile, hasProfile,
+    brands, brandFlavors, addListItem, addFlavor,
   } = useRun();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
@@ -125,6 +126,37 @@ export default function CalculatorScreen() {
       flavor: idForm.flavor.trim(),
       casesNeeded: toNum(idForm.casesNeeded),
     });
+  };
+
+  // Brand/flavor are picked from saved lists (like web), which drives the
+  // profile + die auto-load effect above. New entries can be typed/added.
+  const [newBrand, setNewBrand] = useState("");
+  const [newFlavor, setNewFlavor] = useState("");
+
+  const selectBrand = (b: string) => {
+    Haptics.selectionAsync();
+    setIdForm((f) => ({ ...f, brand: b }));
+    updateSettings({ brand: b });
+  };
+  const selectFlavor = (fl: string) => {
+    Haptics.selectionAsync();
+    setIdForm((f) => ({ ...f, flavor: fl }));
+    updateSettings({ flavor: fl });
+  };
+  const addNewBrand = () => {
+    const v = newBrand.trim();
+    if (!v) return;
+    if (!brands.includes(v)) addListItem("brands", v);
+    setNewBrand("");
+    selectBrand(v);
+  };
+  const addNewFlavor = () => {
+    const v = newFlavor.trim();
+    const b = idForm.brand.trim();
+    if (!v || !b) return;
+    if (!(brandFlavors[b] ?? []).includes(v)) addFlavor(b, v);
+    setNewFlavor("");
+    selectFlavor(v);
   };
 
   const nowMs = Date.now();
@@ -175,20 +207,105 @@ export default function CalculatorScreen() {
         {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
         <SectionHeader title="Current Run" />
         <CardSection>
-          <TextField
-            label="Brand"
-            value={idForm.brand}
-            onChangeText={(t) => setIdForm((f) => ({ ...f, brand: t }))}
-            onBlur={commitId}
-            placeholder="Brand name"
-          />
-          <TextField
-            label="Flavor"
-            value={idForm.flavor}
-            onChangeText={(t) => setIdForm((f) => ({ ...f, flavor: t }))}
-            onBlur={commitId}
-            placeholder="Flavor"
-          />
+          <Text style={[styles.idLabel, { color: colors.mutedForeground }]}>Brand</Text>
+          {brands.length > 0 ? (
+            <View style={styles.chipWrap}>
+              {brands.map((b) => {
+                const active = idForm.brand === b;
+                return (
+                  <Pressable
+                    key={b}
+                    onPress={() => selectBrand(b)}
+                    style={[
+                      styles.chip,
+                      {
+                        borderColor: active ? colors.primary : colors.border,
+                        backgroundColor: active ? colors.primary + "22" : colors.secondary,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.chipText, { color: active ? colors.primary : colors.foreground }]}>
+                      {b}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+          <View style={styles.addRow}>
+            <TextInput
+              style={[styles.addInput, { color: colors.foreground, borderColor: colors.border }]}
+              value={newBrand}
+              onChangeText={setNewBrand}
+              onSubmitEditing={addNewBrand}
+              placeholder="Add a brand…"
+              placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="words"
+              returnKeyType="done"
+            />
+            <Pressable
+              onPress={addNewBrand}
+              disabled={!newBrand.trim()}
+              style={[styles.addBtn, { borderColor: colors.border, opacity: newBrand.trim() ? 1 : 0.4 }]}
+            >
+              <Feather name="plus" size={16} color={colors.foreground} />
+            </Pressable>
+          </View>
+
+          <Text style={[styles.idLabel, { color: colors.mutedForeground, marginTop: 16 }]}>Flavor</Text>
+          {idForm.brand.trim() ? (
+            <>
+              {(brandFlavors[idForm.brand.trim()] ?? []).length > 0 ? (
+                <View style={styles.chipWrap}>
+                  {(brandFlavors[idForm.brand.trim()] ?? []).map((fl) => {
+                    const active = idForm.flavor === fl;
+                    return (
+                      <Pressable
+                        key={fl}
+                        onPress={() => selectFlavor(fl)}
+                        style={[
+                          styles.chip,
+                          {
+                            borderColor: active ? colors.primary : colors.border,
+                            backgroundColor: active ? colors.primary + "22" : colors.secondary,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.chipText, { color: active ? colors.primary : colors.foreground }]}>
+                          {fl}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={[styles.idEmpty, { color: colors.mutedForeground }]}>
+                  No saved flavors — add one below.
+                </Text>
+              )}
+              <View style={styles.addRow}>
+                <TextInput
+                  style={[styles.addInput, { color: colors.foreground, borderColor: colors.border }]}
+                  value={newFlavor}
+                  onChangeText={setNewFlavor}
+                  onSubmitEditing={addNewFlavor}
+                  placeholder="Add a flavor…"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="words"
+                  returnKeyType="done"
+                />
+                <Pressable
+                  onPress={addNewFlavor}
+                  disabled={!newFlavor.trim()}
+                  style={[styles.addBtn, { borderColor: colors.border, opacity: newFlavor.trim() ? 1 : 0.4 }]}
+                >
+                  <Feather name="plus" size={16} color={colors.foreground} />
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <Text style={[styles.idEmpty, { color: colors.mutedForeground }]}>Pick a brand first.</Text>
+          )}
           <NumericField
             label="Cases Needed"
             value={idForm.casesNeeded}
@@ -828,6 +945,39 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16 },
 
   casesWarn: { fontSize: 12, fontWeight: "600" as const, marginTop: 10 },
+  idLabel: {
+    fontSize: 11,
+    fontWeight: "700" as const,
+    textTransform: "uppercase" as const,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  chipWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  chipText: { fontSize: 13, fontWeight: "500" as const },
+  addRow: { flexDirection: "row", gap: 8, marginTop: 10, alignItems: "center" },
+  addInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+  },
+  addBtn: {
+    width: 42,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
+  idEmpty: { fontSize: 13, fontStyle: "italic" as const, paddingVertical: 4 },
   profileBtn: {
     flexDirection: "row",
     alignItems: "center",
