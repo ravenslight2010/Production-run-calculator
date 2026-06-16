@@ -159,6 +159,7 @@ export interface Stoppage {
   startedAt: number;
   endedAt?: number;
   reason?: string;
+  notes?: string;
 }
 
 export interface RunState {
@@ -169,6 +170,8 @@ export interface RunState {
   startedAt?: number;
   endedAt?: number;
   isRunning: boolean;
+  actualCases?: number;
+  wasteLbs?: number;
 }
 
 export interface RunCalc {
@@ -1005,13 +1008,21 @@ interface RunContextValue {
   updateProgress: (partial: Partial<RunProgress>) => void;
   startRun: () => void;
   endRun: () => void;
-  addStoppage: (type: Stoppage["type"], reason?: string) => void;
+  addStoppage: (type: Stoppage["type"], reason?: string, notes?: string) => void;
   endActiveStoppage: () => void;
+  updateActiveStoppage: (
+    partial: Partial<Pick<Stoppage, "reason" | "notes">>,
+  ) => void;
   addPastStoppage: (
     type: Stoppage["type"],
     startedAt: number,
     endedAt: number,
     reason?: string,
+    notes?: string,
+  ) => void;
+  updateRunMeta: (
+    id: string,
+    partial: Partial<Pick<RunState, "actualCases" | "wasteLbs">>,
   ) => void;
   applyCarryOver: (excessTrays: number, excessBatches: number) => void;
   addRun: () => void;
@@ -1485,12 +1496,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const addStoppage = useCallback(
-    (type: Stoppage["type"], reason?: string) => {
+    (type: Stoppage["type"], reason?: string, notes?: string) => {
       const s: Stoppage = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
         type,
         startedAt: Date.now(),
         reason,
+        notes,
       };
       updateCurrentRun((r) => ({ ...r, stoppages: [...r.stoppages, s] }));
     },
@@ -1508,15 +1520,34 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [updateCurrentRun],
   );
 
+  // Annotate the in-progress stoppage (reason / notes) while it is running.
+  const updateActiveStoppage = useCallback(
+    (partial: Partial<Pick<Stoppage, "reason" | "notes">>) =>
+      updateCurrentRun((r) => ({
+        ...r,
+        stoppages: r.stoppages.map((s) =>
+          s.endedAt == null ? { ...s, ...partial } : s,
+        ),
+      })),
+    [updateCurrentRun],
+  );
+
   // Log a completed stoppage with explicit start/end times (for past events).
   const addPastStoppage = useCallback(
-    (type: Stoppage["type"], startedAt: number, endedAt: number, reason?: string) => {
+    (
+      type: Stoppage["type"],
+      startedAt: number,
+      endedAt: number,
+      reason?: string,
+      notes?: string,
+    ) => {
       const s: Stoppage = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
         type,
         startedAt,
         endedAt,
         reason,
+        notes,
       };
       updateCurrentRun((r) => ({
         ...r,
@@ -1524,6 +1555,19 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       }));
     },
     [updateCurrentRun],
+  );
+
+  // Update post-run metadata (actual cases produced + waste lbs) on any run by id.
+  const updateRunMeta = useCallback(
+    (id: string, partial: Partial<Pick<RunState, "actualCases" | "wasteLbs">>) => {
+      setAppState((prev) => {
+        const runs = prev.runs.map((r) => (r.id === id ? { ...r, ...partial } : r));
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
   );
 
   // Carry leftover dough/crusts into the next run: add surplus trays + batches
@@ -2099,7 +2143,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         endRun,
         addStoppage,
         endActiveStoppage,
+        updateActiveStoppage,
         addPastStoppage,
+        updateRunMeta,
         applyCarryOver,
         addRun,
         switchRun,

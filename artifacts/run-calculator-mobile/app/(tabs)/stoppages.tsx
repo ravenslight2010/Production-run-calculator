@@ -75,6 +75,14 @@ function StoppageRow({ stoppage, tick }: { stoppage: Stoppage; tick: number }) {
             {stoppage.reason}
           </Text>
         ) : null}
+        {stoppage.notes ? (
+          <Text
+            style={[styles.rowNotes, { color: colors.mutedForeground }]}
+            numberOfLines={3}
+          >
+            {stoppage.notes}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.rowRight}>
         {isActive ? (
@@ -91,8 +99,16 @@ function StoppageRow({ stoppage, tick }: { stoppage: Stoppage; tick: number }) {
 export default function StoppagesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, runIndex, tick, activeStoppage, addStoppage, addPastStoppage, endActiveStoppage } =
-    useRun();
+  const {
+    run,
+    runIndex,
+    tick,
+    activeStoppage,
+    addStoppage,
+    addPastStoppage,
+    endActiveStoppage,
+    updateActiveStoppage,
+  } = useRun();
   const [showModal, setShowModal] = useState(false);
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -147,6 +163,21 @@ export default function StoppagesScreen() {
               {fmtDuration((Date.now() - activeStoppage.startedAt) / 1000)}
             </Text>
           </View>
+          <TextInput
+            value={activeStoppage.notes ?? ""}
+            onChangeText={(t) => updateActiveStoppage({ notes: t })}
+            placeholder="Add a note (optional)…"
+            placeholderTextColor={colors.mutedForeground}
+            multiline
+            style={[
+              styles.activeNoteInput,
+              {
+                borderColor: colors.border,
+                color: colors.foreground,
+                backgroundColor: colors.background,
+              },
+            ]}
+          />
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
@@ -232,8 +263,8 @@ export default function StoppagesScreen() {
           addStoppage(type);
           setShowModal(false);
         }}
-        onAddPast={(type, startedAt, endedAt, reason) => {
-          addPastStoppage(type, startedAt, endedAt, reason);
+        onAddPast={(type, startedAt, endedAt, reason, notes) => {
+          addPastStoppage(type, startedAt, endedAt, reason, notes);
           setShowModal(false);
         }}
       />
@@ -267,6 +298,7 @@ function AddStoppageModal({
     startedAt: number,
     endedAt: number,
     reason?: string,
+    notes?: string,
   ) => void;
 }) {
   const colors = useColors();
@@ -275,6 +307,7 @@ function AddStoppageModal({
   const [startStr, setStartStr] = useState("");
   const [endStr, setEndStr] = useState("");
   const [reason, setReason] = useState("");
+  const [notes, setNotes] = useState("");
 
   const startMs = parseTimeToMs(startStr);
   const endMs = parseTimeToMs(endStr);
@@ -286,6 +319,7 @@ function AddStoppageModal({
     setStartStr("");
     setEndStr("");
     setReason("");
+    setNotes("");
   };
 
   const handleClose = () => {
@@ -296,7 +330,13 @@ function AddStoppageModal({
   const submitPast = () => {
     if (!pastValid) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    onAddPast(pastType, startMs!, endMs!, reason.trim() || undefined);
+    onAddPast(
+      pastType,
+      startMs!,
+      endMs!,
+      reason.trim() || undefined,
+      notes.trim() || undefined,
+    );
     resetPast();
   };
 
@@ -429,6 +469,22 @@ function AddStoppageModal({
                 ]}
               />
 
+              <Text style={[styles.pastLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
+                Notes (optional)
+              </Text>
+              <TextInput
+                value={notes}
+                onChangeText={setNotes}
+                placeholder="Extra detail…"
+                placeholderTextColor={colors.mutedForeground}
+                multiline
+                style={[
+                  styles.pastInput,
+                  styles.pastNotesInput,
+                  { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background, marginTop: 6 },
+                ]}
+              />
+
               {startStr.length > 0 && endStr.length > 0 && !pastValid ? (
                 <Text style={[styles.pastError, { color: colors.destructive }]}>
                   End time must be a valid 24-hour time after the start time.
@@ -521,6 +577,7 @@ const styles = StyleSheet.create({
   rowMid: { flex: 1, paddingVertical: 14 },
   rowTime: { fontSize: 14, fontWeight: "500" as const },
   rowReason: { fontSize: 12, marginTop: 2 },
+  rowNotes: { fontSize: 11, marginTop: 2, fontStyle: "italic" as const },
   rowRight: { alignItems: "flex-end", paddingRight: 14, gap: 4 },
   activeDot: { width: 8, height: 8, borderRadius: 4 },
   duration: { fontSize: 14, fontWeight: "600" as const },
@@ -546,6 +603,15 @@ const styles = StyleSheet.create({
   activePill: { borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12 },
   activePillText: { color: "#fff", fontWeight: "700" as const, fontSize: 12 },
   activeDuration: { fontSize: 20, fontWeight: "700" as const },
+  activeNoteInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    minHeight: 44,
+    textAlignVertical: "top",
+  },
   endBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -643,6 +709,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 16,
   },
+  pastNotesInput: { minHeight: 60, textAlignVertical: "top" as const },
   pastError: { fontSize: 12, marginTop: 10 },
 
   pastActions: { flexDirection: "row", gap: 12, marginTop: 20 },

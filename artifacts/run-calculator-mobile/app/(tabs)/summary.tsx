@@ -87,8 +87,22 @@ function computeRunStats(r: RunState, now: number): RunStats {
 
 function RunCard({ run, index }: { run: RunState; index: number }) {
   const colors = useColors();
+  const { updateRunMeta } = useRun();
   const stats = computeRunStats(run, Date.now());
   const pct = stats.planned > 0 ? Math.min(1, stats.casesMade / stats.planned) : 0;
+
+  const [actualStr, setActualStr] = React.useState(
+    run.actualCases != null ? String(run.actualCases) : "",
+  );
+  const [wasteStr, setWasteStr] = React.useState(
+    run.wasteLbs != null ? String(run.wasteLbs) : "",
+  );
+  const caseDelta = run.actualCases != null ? run.actualCases - stats.planned : null;
+  const wasteBase = run.actualCases ?? stats.planned;
+  const lbsPerCase =
+    run.wasteLbs != null && run.wasteLbs > 0 && wasteBase > 0
+      ? run.wasteLbs / wasteBase
+      : null;
 
   const accent =
     stats.status === "current"
@@ -169,6 +183,94 @@ function RunCard({ run, index }: { run: RunState; index: number }) {
           </View>
         ))}
       </View>
+
+      {stats.status === "finished" ? (
+        <View style={styles.metaRow}>
+          <View style={styles.metaField}>
+            <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>
+              Actual Cases
+            </Text>
+            <View style={styles.metaInputRow}>
+              <TextInput
+                style={[
+                  styles.metaInput,
+                  {
+                    backgroundColor: colors.secondary,
+                    color: colors.foreground,
+                    borderColor: colors.border,
+                  },
+                ]}
+                value={actualStr}
+                placeholder={stats.planned > 0 ? String(stats.planned) : "0"}
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="number-pad"
+                selectTextOnFocus
+                onChangeText={(t) => {
+                  const cleaned = t.replace(/[^0-9]/g, "");
+                  setActualStr(cleaned);
+                  updateRunMeta(run.id, {
+                    actualCases: cleaned === "" ? undefined : Number(cleaned),
+                  });
+                }}
+              />
+              {caseDelta != null ? (
+                <Text
+                  style={[
+                    styles.metaDelta,
+                    { color: caseDelta >= 0 ? colors.success : colors.warning },
+                  ]}
+                >
+                  {caseDelta >= 0 ? `+${caseDelta}` : caseDelta}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <View style={styles.metaField}>
+            <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>
+              Waste (lbs)
+            </Text>
+            <View style={styles.metaInputRow}>
+              <TextInput
+                style={[
+                  styles.metaInput,
+                  {
+                    backgroundColor: colors.secondary,
+                    color: colors.foreground,
+                    borderColor: colors.border,
+                  },
+                ]}
+                value={wasteStr}
+                placeholder="0"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="decimal-pad"
+                selectTextOnFocus
+                onChangeText={(t) => {
+                  let cleaned = t.replace(/[^0-9.]/g, "");
+                  const firstDot = cleaned.indexOf(".");
+                  if (firstDot !== -1) {
+                    cleaned =
+                      cleaned.slice(0, firstDot + 1) +
+                      cleaned.slice(firstDot + 1).replace(/\./g, "");
+                  }
+                  setWasteStr(cleaned);
+                  const n = cleaned === "" || cleaned === "." ? undefined : Number(cleaned);
+                  updateRunMeta(run.id, {
+                    wasteLbs: n != null && Number.isFinite(n) ? n : undefined,
+                  });
+                }}
+              />
+              {(run.wasteLbs ?? 0) > 0 ? (
+                <Feather name="alert-triangle" size={14} color={colors.warning} />
+              ) : null}
+            </View>
+            {lbsPerCase != null ? (
+              <Text style={[styles.metaSub, { color: colors.mutedForeground }]}>
+                {lbsPerCase.toFixed(2)} lbs/case
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
 
       {stats.status !== "upcoming" ? (
         <View style={styles.progressWrap}>
@@ -559,6 +661,37 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   statBoxVal: { fontSize: 18, fontWeight: "800" as const },
+
+  metaRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+  metaField: { flex: 1 },
+  metaLabel: {
+    fontSize: 9,
+    fontWeight: "700" as const,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  metaInputRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  metaInput: {
+    flex: 1,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    fontSize: 14,
+    fontWeight: "600" as const,
+    fontVariant: ["tabular-nums"],
+  },
+  metaDelta: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+    fontVariant: ["tabular-nums"],
+  },
+  metaSub: {
+    fontSize: 10,
+    marginTop: 3,
+    fontVariant: ["tabular-nums"],
+  },
 
   progressWrap: { gap: 5 },
   progressLabels: { flexDirection: "row", justifyContent: "space-between" },
