@@ -176,6 +176,7 @@ export interface RunState {
 
 export interface RunCalc {
   casesLeft: number;
+  casesLeftToRun: number;
   pizzasLeft: number;
   ppm: number;
   minutesRemaining: number | null;
@@ -360,9 +361,23 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
     estCompletionMs = nowMs + minutesRemaining * 60 * 1000;
   }
 
-  // Ingredient calculations (matching web formula: include buffer layer)
-  const bufferPizzas = s.casesPerLayer * s.pizzasPerCase;
-  const pizzasForIngredients = pizzasLeft + bufferPizzas;
+  // Frontline ingredients (match web computeCalc exactly): base on
+  // casesLeftToRun — which nets out cases already on the line and adds a
+  // casesPerLayer buffer — then add a second casesPerLayer buffer to the
+  // ingredient pizza total (web doubles the layer buffer for sauce/apps/peps).
+  const freezerMin = liveFreezerMin(state, nowMs);
+  const casesOnLine =
+    ppm > 0 && s.pizzasPerCase > 0
+      ? Math.floor((ppm * freezerMin) / s.pizzasPerCase)
+      : 0;
+  const casesLeftToRun =
+    s.casesNeeded -
+    p.skidsCompleted * s.casesPerSkid -
+    p.casesOnCurrentSkid -
+    casesOnLine +
+    s.casesPerLayer;
+  const pizzasForIngredients =
+    casesLeftToRun * s.pizzasPerCase + s.casesPerLayer * s.pizzasPerCase;
 
   // Effective batch/barrel weight: a recipe's summed lbs override the flat figure.
   const sauceEffBarrel =
@@ -384,7 +399,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const sauceBatches =
     sauceLbs > 0 && sauceEffBarrel > 0
-      ? Math.ceil(sauceLbs / sauceEffBarrel)
+      ? sauceLbs / sauceEffBarrel
       : 0;
 
   // Applicators whose type name contains "mix" arrive pre-made, so they need
@@ -400,7 +415,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const app1Batches =
     !app1IsMix && app1Lbs > 0 && app1EffBatch > 0
-      ? Math.ceil(app1Lbs / app1EffBatch)
+      ? app1Lbs / app1EffBatch
       : 0;
 
   const app2Lbs =
@@ -409,7 +424,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const app2Batches =
     !app2IsMix && app2Lbs > 0 && app2EffBatch > 0
-      ? Math.ceil(app2Lbs / app2EffBatch)
+      ? app2Lbs / app2EffBatch
       : 0;
 
   const app3Lbs =
@@ -418,7 +433,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const app3Batches =
     !app3IsMix && app3Lbs > 0 && app3EffBatch > 0
-      ? Math.ceil(app3Lbs / app3EffBatch)
+      ? app3Lbs / app3EffBatch
       : 0;
 
   const app4Lbs =
@@ -427,7 +442,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const app4Batches =
     !app4IsMix && app4Lbs > 0 && app4EffBatch > 0
-      ? Math.ceil(app4Lbs / app4EffBatch)
+      ? app4Lbs / app4EffBatch
       : 0;
 
   // Pepperoni: lbs = (pizzas * oz/pizza) / 16 + sticks (flat buffer).
@@ -438,7 +453,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const pep1Batches =
     !DEFAULT_PEP_TYPES.includes(s.pep1Type ?? "") && pep1Lbs > 0 && s.pep1BatchLbs > 0
-      ? Math.ceil(pep1Lbs / s.pep1BatchLbs)
+      ? pep1Lbs / s.pep1BatchLbs
       : 0;
 
   const pep2Lbs =
@@ -447,7 +462,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
       : 0;
   const pep2Batches =
     !DEFAULT_PEP_TYPES.includes(s.pep2Type ?? "") && pep2Lbs > 0 && s.pep2BatchLbs > 0
-      ? Math.ceil(pep2Lbs / s.pep2BatchLbs)
+      ? pep2Lbs / s.pep2BatchLbs
       : 0;
 
   // Dough
@@ -488,6 +503,7 @@ export function computeCalc(state: RunState, nowMs: number): RunCalc {
 
   return {
     casesLeft,
+    casesLeftToRun,
     pizzasLeft,
     ppm,
     minutesRemaining,

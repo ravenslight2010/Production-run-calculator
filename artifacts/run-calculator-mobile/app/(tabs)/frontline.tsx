@@ -81,7 +81,7 @@ export default function FrontlineScreen() {
         <SectionHeader title="Batches Needed" />
         <CardSection style={{ paddingVertical: 6 }}>
           <Text style={[styles.basis, { color: colors.mutedForeground }]}>
-            Based on {Math.round(calc.casesLeft)} cases × {s.pizzasPerCase} pizzas/case
+            Based on {Math.round(calc.casesLeftToRun)} cases × {s.pizzasPerCase} pizzas/case
           </Text>
           <StatRow label="Sauce" value={sauceValue} highlight={calc.sauceBatches > 0} />
           {apps.map((a, i) => (
