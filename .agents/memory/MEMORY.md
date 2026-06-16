@@ -2,7 +2,7 @@
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
 - [Spec-import seed pattern](spec-import-seed-pattern.md) — two-tier additive marker-guarded recipe imports (dough/sauce/cheese), kept at web+mobile parity.
-- [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, or a later seed races ahead and the spec seed's skip-if-absent guard drops fields.
+- [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
 - [Frontline is sauce](frontline-is-sauce.md) — the internal "frontline" recipe system IS the UI's "Sauce Recipe"; seed sauces into frontline plumbing (presets + frontlineRecipeName/frontlineRecipe), no new field.
 - [Cast-to-Screens](cast-screens.md) — web-only station displays via `?screen=` param; parity exception (no mobile equivalent).
@@ -10,4 +10,4 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
-- [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave firing before profile loads; saveProfile guard + seed self-heal; never use numeric-scan for "real data" (pep batch defaults=25).
+- [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave before profile loads; saveProfile guard + seed self-heal; no numeric-scan for real-data.

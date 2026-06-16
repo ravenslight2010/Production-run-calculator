@@ -149,16 +149,13 @@ export function profileHasRealData(brand: string, flavor: string): boolean {
 
 export function saveProfile(brand: string, flavor: string, values: FormValues): void {
   if (!brand && !flavor) return;
-  // Never let a blank/default form overwrite a profile that already holds real
-  // data. This guards against an autosave (or run switch) firing before the
-  // profile has been loaded into the form, which would zero out the seeded
-  // dough/sauce/cheese for the currently selected brand+flavor.
-  if (
-    !profileObjHasRealData(values as unknown as Record<string, unknown>) &&
-    profileHasRealData(brand, flavor)
-  ) {
-    return;
-  }
+  // Never persist a blank/default form as a brand+flavor profile. A profile only
+  // holds recipe/topping/template data; an all-empty form is always the result of
+  // an autosave (or run switch / sync reset) firing before the profile has loaded
+  // into the form. Writing it would zero out the seeded dough/sauce/cheese/toppings
+  // for the selected brand+flavor — and unlike the previous guard, this refuses the
+  // write even when the existing profile briefly looks empty (race during heal).
+  if (!profileObjHasRealData(values as unknown as Record<string, unknown>)) return;
   const doughVals = { ...values } as Record<string, unknown>;
   CRUST_FIELDS.forEach((f) => delete doughVals[f]);
   PROGRESS_FIELDS.forEach((f) => delete doughVals[f]);
@@ -421,7 +418,7 @@ export function applyMixSeedV14IfNeeded(): void {
   } catch {}
 }
 
-const SPEC_PROFILES_SEED_KEY = "run-calc-spec-profiles-v2";
+const SPEC_PROFILES_SEED_KEY = "run-calc-spec-profiles-v3";
 
 /** Case-insensitive merge that keeps the existing label when a duplicate appears. */
 function mergeListInsensitive(existing: string[], additions: string[]): string[] {
@@ -485,7 +482,8 @@ export function applySpecProfilesSeedIfNeeded(): void {
         // Keep profiles that hold real user data; recreate ones that are
         // missing, blank/clobbered, or unparseable (corrupt → fall through).
         try {
-          if (profileObjHasRealData(JSON.parse(existingRaw) as Record<string, unknown>)) continue;
+          const parsed = JSON.parse(existingRaw) as Record<string, unknown>;
+          if (profileObjHasRealData(parsed)) continue;
         } catch {
           // unparseable: fall through and recreate from seed
         }
@@ -499,7 +497,7 @@ export function applySpecProfilesSeedIfNeeded(): void {
   } catch {}
 }
 
-const DIE_TYPES_SEED_KEY = "run-calc-die-types-v2";
+const DIE_TYPES_SEED_KEY = "run-calc-die-types-v3";
 
 /**
  * Backfill the die size onto existing brand/flavor profiles, sourced from the
@@ -539,7 +537,7 @@ export function applyDieTypesSeedIfNeeded(): void {
   } catch {}
 }
 
-const DOUGH_SPECS_SEED_KEY = "run-calc-dough-specs-v2";
+const DOUGH_SPECS_SEED_KEY = "run-calc-dough-specs-v3";
 
 /**
  * Seed dough RECIPES + SPECS imported from the dough mixing-procedure sheets.
@@ -609,7 +607,7 @@ export function applyDoughSpecsSeedIfNeeded(): void {
   } catch {}
 }
 
-const SAUCE_SPECS_SEED_KEY = "run-calc-sauce-specs-v2";
+const SAUCE_SPECS_SEED_KEY = "run-calc-sauce-specs-v3";
 
 /**
  * Seed sauce RECIPES + SPECS imported from the sauce procedure sheets. The app
@@ -678,7 +676,7 @@ export function applySauceSpecsSeedIfNeeded(): void {
   } catch {}
 }
 
-const CHEESE_SPECS_SEED_KEY = "run-calc-cheese-specs-v2";
+const CHEESE_SPECS_SEED_KEY = "run-calc-cheese-specs-v3";
 
 /**
  * Seed cheese RECIPES + SPECS imported from the cheese-mix sheets. Tier 1 adds
