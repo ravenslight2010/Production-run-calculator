@@ -6,6 +6,8 @@ import {
   SPEC_PEP_TYPES,
   SPEC_CHEESE_INGREDIENTS,
   SPEC_PROFILES,
+  DOUGH_RECIPES,
+  DOUGH_BRAND_SPECS,
 } from "@/data/specSeed";
 import React, {
   createContext,
@@ -29,6 +31,8 @@ import type { SyncPayload } from "./sync/payloadTypes";
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
+// One-time marker for seeding the imported dough recipes + brand/flavor ties.
+const DOUGH_SEED_KEY = "run-calc-mobile-dough-v1";
 
 // Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
 // incoming remote payloads are deferred briefly after a local edit so they don't
@@ -744,6 +748,62 @@ function applySpecSeed(state: AppState): AppState {
   };
 }
 
+/**
+ * Additively seed the imported dough recipes + brand/flavor ties. Tier 1 adds
+ * every dough recipe to the recipe library (presets + ingredient list). Tier 2
+ * ties an unambiguous brand+flavor to its dough recipe and doughball weight on
+ * the brand profile — only when the profile has no dough recipe yet, so user
+ * edits are never clobbered. Yield/per-tray are auto-formulated and not seeded.
+ * Mirrors the web seed.
+ */
+function applyDoughSeed(state: AppState): AppState {
+  // ── Tier 1: dough recipe library ──
+  const doughRecipePresets: Record<string, RecipeRow[]> = {
+    ...state.doughRecipePresets,
+  };
+  for (const [name, rows] of Object.entries(DOUGH_RECIPES)) {
+    if (!doughRecipePresets[name]) {
+      doughRecipePresets[name] = rows.map((r) => ({ ...r }));
+    }
+  }
+  const allDoughIngredients = [
+    ...new Set(
+      Object.values(DOUGH_RECIPES).flatMap((rows) =>
+        rows.map((r) => r.ingredient),
+      ),
+    ),
+  ];
+  const doughIngredients = mergeInsensitive(
+    state.doughIngredients,
+    allDoughIngredients,
+  );
+
+  // ── Tier 2: unambiguous brand → dough ties on brand profiles ──
+  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
+  for (const spec of DOUGH_BRAND_SPECS) {
+    const rows = DOUGH_RECIPES[spec.recipe];
+    if (!rows) continue;
+    const flavors = spec.flavor
+      ? [spec.flavor]
+      : (state.brandFlavors[spec.brand] ?? []);
+    for (const flavor of flavors) {
+      const key = profileKey(spec.brand, flavor);
+      const prof = brandProfiles[key] ?? {};
+      if (Array.isArray(prof.doughRecipe) && prof.doughRecipe.length > 0) {
+        continue;
+      }
+      brandProfiles[key] = {
+        ...prof,
+        doughRecipeName: spec.recipe,
+        doughRecipe: rows.map((r) => ({ ...r })),
+        doughballWeightOz: spec.oz,
+      };
+    }
+  }
+
+  return { ...state, doughRecipePresets, doughIngredients, brandProfiles };
+}
+
 // Fields that belong to one specific run and must NOT travel via a profile.
 const PER_RUN_FIELDS: (keyof RunSettings)[] = [
   "brand",
@@ -1055,20 +1115,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, []);
 
-  // One-time seed of the imported pizza-spec presets after boot. Additive and
-  // guarded by a marker so user-deleted brands/flavors/profiles never reappear.
+  // One-time seed of the imported pizza-spec presets and dough recipes after
+  // boot. Both are additive and marker-guarded so user-deleted brands/flavors/
+  // profiles never reappear. They run in a SINGLE ordered flow — spec first,
+  // then dough — so the dough seed never creates a dough-only profile key that
+  // would make the spec seed's "only if absent" guard skip the spec fields.
   useEffect(() => {
     if (!bootDone) return;
     let cancelled = false;
-    AsyncStorage.getItem(SPEC_SEED_KEY).then((done) => {
-      if (done || cancelled) return;
+    (async () => {
+      const [specDone, doughDone] = await Promise.all([
+        AsyncStorage.getItem(SPEC_SEED_KEY),
+        AsyncStorage.getItem(DOUGH_SEED_KEY),
+      ]);
+      if (cancelled || (specDone && doughDone)) return;
       setAppState((prev) => {
-        const next = applySpecSeed(prev);
+        let next = prev;
+        if (!specDone) next = applySpecSeed(next);
+        if (!doughDone) next = applyDoughSeed(next);
         persistNow(next);
         return next;
       });
-      AsyncStorage.setItem(SPEC_SEED_KEY, "1");
-    });
+      if (!specDone) AsyncStorage.setItem(SPEC_SEED_KEY, "1");
+      if (!doughDone) AsyncStorage.setItem(DOUGH_SEED_KEY, "1");
+    })();
     return () => {
       cancelled = true;
     };

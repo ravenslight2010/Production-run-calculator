@@ -1293,3 +1293,37 @@ import type { RunProfile } from "@/context/RunContext";
   },
   };
   
+
+  // ── Dough recipes imported from attached_assets/*Dough*Mixing_Procedure*.xlsx.
+  // Ingredient lbs are at the 200-lb-flour (4-bag) batch scale. Yield and
+  // per-tray counts are auto-formulated by the app, so they are NOT imported.
+  export const DOUGH_RECIPES: Record<string, { ingredient: string; lbs: number }[]> = {
+    "Aldo's": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 89 }, { ingredient: "Corn Oil", lbs: 16 }, { ingredient: "Honey", lbs: 2 }, { ingredient: "Fresh Compressed Yeast", lbs: 2 }, { ingredient: "Salt", lbs: 1 }, { ingredient: "Garlic Powder", lbs: 0.5 }],
+    "Brand & Corky's": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 103.8 }, { ingredient: "Corn Oil", lbs: 10 }, { ingredient: "Baking Powder", lbs: 7 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sugar", lbs: 3 }, { ingredient: "Salt", lbs: 1.7 }],
+    "CRB": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 97.4 }, { ingredient: "Sunflower Oil", lbs: 16 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Honey", lbs: 2 }, { ingredient: "Salt", lbs: 1 }, { ingredient: "Garlic Powder", lbs: 0.5 }],
+    "Lowe's French Fry": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 101.5 }, { ingredient: "25029 French Fries", lbs: 18 }, { ingredient: "Sunflower Oil", lbs: 12 }, { ingredient: "Honey", lbs: 9 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Salt", lbs: 1 }],
+    "Lucia's French Fry": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 101.5 }, { ingredient: "25029 French Fries", lbs: 18 }, { ingredient: "Sunflower Oil", lbs: 12 }, { ingredient: "Honey", lbs: 9 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Salt", lbs: 1 }],
+    "Malted Barley": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 77.4 }, { ingredient: "Malted Barley", lbs: 22 }, { ingredient: "Honey", lbs: 10 }, { ingredient: "Olive Oil", lbs: 7.5 }, { ingredient: "Fresh Compressed Yeast", lbs: 6 }, { ingredient: "Sea Salt", lbs: 1 }],
+    "Margherita": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 98.8 }, { ingredient: "Corn Oil", lbs: 10 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sugar", lbs: 3 }, { ingredient: "Cream of Tartar", lbs: 2.1 }, { ingredient: "Salt", lbs: 1.7 }, { ingredient: "Sodium Bicarbonate", lbs: 1.4 }],
+    "Masa (Lowe's Natural)": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 121 }, { ingredient: "Masa Flour", lbs: 25 }, { ingredient: "Sugar", lbs: 7.5 }, { ingredient: "Corn Oil", lbs: 6.25 }, { ingredient: "Cream of Tartar", lbs: 3.75 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sodium Bicarbonate", lbs: 2.5 }, { ingredient: "Sea Salt", lbs: 2.5 }],
+    "Masa (Hannaford & Lucia)": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 121 }, { ingredient: "Masa Flour", lbs: 25 }, { ingredient: "Sugar", lbs: 7.5 }, { ingredient: "Corn Oil", lbs: 6.25 }, { ingredient: "Baking Powder", lbs: 6.25 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sea Salt", lbs: 2.5 }, { ingredient: "Dough Conditioner UFI-U1420", lbs: 1.75 }],
+    "Member's Selection Artisan": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Repco Enrichment Concentrate", lbs: 0.03125 }, { ingredient: "Water", lbs: 103.8 }, { ingredient: "Corn Oil", lbs: 10 }, { ingredient: "Baking Powder", lbs: 3.5 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sugar", lbs: 3 }, { ingredient: "Salt", lbs: 1.7 }],
+    "Microwavable Lucia's": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 81 }, { ingredient: "Butter Alternative", lbs: 25 }, { ingredient: "Sugar", lbs: 11 }, { ingredient: "Corn Oil", lbs: 10 }, { ingredient: "Fresh Compressed Yeast", lbs: 6 }, { ingredient: "Baking Powder", lbs: 5.25 }, { ingredient: "Salt", lbs: 2.25 }, { ingredient: "Safe Pro 3.1 Dough Conditioner", lbs: 1.5 }],
+    "Modified Malted Barley": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 75 }, { ingredient: "Spent Grain (Chopped Fine)", lbs: 22 }, { ingredient: "Sunflower Oil", lbs: 20 }, { ingredient: "Honey", lbs: 3 }, { ingredient: "Fresh Compressed Yeast", lbs: 3 }, { ingredient: "Sea Salt", lbs: 1.3 }, { ingredient: "Garlic Powder", lbs: 0.7 }],
+    "Naan": [{ ingredient: "ADM Wheat Flour", lbs: 200 }, { ingredient: "Water", lbs: 86 }, { ingredient: "Liquid Milk", lbs: 16 }, { ingredient: "Soybean Oil", lbs: 15 }, { ingredient: "Yogurt", lbs: 8 }, { ingredient: "Fresh Compressed Yeast", lbs: 4 }, { ingredient: "Salt", lbs: 3.75 }, { ingredient: "Sugar", lbs: 2 }],
+  };
+
+  // Unambiguous brand→dough ties. Picking the brand+flavor auto-fills the dough
+  // recipe and doughball weight (oz). Omit `flavor` to apply to all flavors of
+  // the brand. Ambiguous brands (multiple doughs by flavor) are left to manual
+  // selection from the recipe library.
+  export const DOUGH_BRAND_SPECS: { brand: string; flavor?: string; recipe: string; oz: number }[] = [
+    { brand: "Aldo's", recipe: "Aldo's", oz: 7.7 },
+    { brand: "Costco", recipe: "CRB", oz: 9.6 },
+    { brand: "Corner Booth", recipe: "CRB", oz: 8.25 },
+    { brand: "SMD", recipe: "CRB", oz: 7.6 },
+    { brand: "Price Chopper", recipe: "Malted Barley", oz: 13.8 },
+    { brand: "Morning Melts", recipe: "Microwavable Lucia's", oz: 5.5 },
+    { brand: "Brand", flavor: "MR07CH24", recipe: "Brand & Corky's", oz: 6.2 },
+    { brand: "Brand", flavor: "MR12CH14", recipe: "Brand & Corky's", oz: 14.2 },
+  ];

@@ -12,6 +12,10 @@ import {
   BRANDS_KEY,
   FLAVORS_KEY,
   DOUGH_RECIPE_PRESETS_KEY,
+  DOUGH_RECIPE_NAMES_KEY,
+  DEFAULT_DOUGH_RECIPE_NAMES,
+  DOUGH_INGREDIENTS_KEY,
+  DEFAULT_DOUGH_INGREDIENTS,
   FRONTLINE_RECIPE_PRESETS_KEY,
   FRONTLINE_RECIPE_NAMES_KEY,
   FRONTLINE_INGREDIENTS_KEY,
@@ -44,6 +48,8 @@ import {
   SPEC_PEP_TYPES,
   SPEC_CHEESE_INGREDIENTS,
   SPEC_PROFILES,
+  DOUGH_RECIPES,
+  DOUGH_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
 
@@ -427,5 +433,75 @@ export function applySpecProfilesSeedIfNeeded(): void {
     }
 
     localStorage.setItem(SPEC_PROFILES_SEED_KEY, "1");
+  } catch {}
+}
+
+const DOUGH_SPECS_SEED_KEY = "run-calc-dough-specs-v1";
+
+/**
+ * Seed dough RECIPES + SPECS imported from the dough mixing-procedure sheets.
+ * Tier 1 adds every dough recipe to the recipe library (presets, names,
+ * ingredient list). Tier 2 ties an unambiguous brand+flavor to its dough recipe
+ * and doughball weight on the stored profile — only when the profile has no
+ * dough recipe yet, so user edits are never clobbered. Yield and per-tray counts
+ * are auto-formulated by the app and are intentionally not seeded. Runs once,
+ * guarded by a version marker.
+ */
+export function applyDoughSpecsSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(DOUGH_SPECS_SEED_KEY)) return;
+  try {
+    // ── Tier 1: dough recipe library ──
+    const presets = loadDoughRecipePresets();
+    for (const [name, rows] of Object.entries(DOUGH_RECIPES)) {
+      if (!presets[name]) presets[name] = { rows: rows.map(r => ({ ...r })) };
+    }
+    saveDoughRecipePresets(presets);
+
+    saveList(
+      DOUGH_RECIPE_NAMES_KEY,
+      mergeListInsensitive(
+        loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES),
+        Object.keys(DOUGH_RECIPES),
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    const allDoughIngredients = [
+      ...new Set(
+        Object.values(DOUGH_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
+      ),
+    ];
+    saveList(
+      DOUGH_INGREDIENTS_KEY,
+      mergeListInsensitive(
+        loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
+        allDoughIngredients,
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    // ── Tier 2: unambiguous brand → dough ties on stored profiles ──
+    const bf = loadBrandFlavors();
+    for (const spec of DOUGH_BRAND_SPECS) {
+      const rows = DOUGH_RECIPES[spec.recipe];
+      if (!rows) continue;
+      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
+      for (const flavor of flavors) {
+        const key = PROFILE_KEY(spec.brand, flavor);
+        let prof: Record<string, unknown> = {};
+        try {
+          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+        } catch {
+          prof = {};
+        }
+        const existing = prof.doughRecipe as unknown[] | undefined;
+        if (Array.isArray(existing) && existing.length > 0) continue;
+        prof.doughRecipeName = spec.recipe;
+        prof.doughRecipe = rows.map(r => ({ ...r }));
+        prof.targetDoughballWeight = spec.oz;
+        localStorage.setItem(key, JSON.stringify(prof));
+      }
+    }
+
+    localStorage.setItem(DOUGH_SPECS_SEED_KEY, "1");
   } catch {}
 }
