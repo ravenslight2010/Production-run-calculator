@@ -803,6 +803,7 @@ export default function ConfigureScreen() {
             Dough recipe (overrides batch weight when set)
           </Text>
           <RecipeEditor
+            batchScale
             rows={run.settings.doughRecipe}
             onChange={(rows) => updateSettings({ doughRecipe: rows })}
             ingredientOptions={doughIngredients}

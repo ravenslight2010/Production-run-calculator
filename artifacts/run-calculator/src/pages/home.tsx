@@ -748,6 +748,15 @@ function DoughRecipeCard({
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   const totalBatchWeight = totalLbsPerBatch * Math.max(1, batchesNeeded);
   const [confirmIdx, setConfirmIdx] = useState<number | null>(null);
+  // Batch-size scaler: shows the recipe weights at a different batch size.
+  // "4" is the base recipe (1×); other sizes scale the displayed weights.
+  const SCALE_OPTIONS: { label: string; value: number }[] = [
+    { label: "½", value: 0.5 },
+    { label: "4", value: 1 },
+    { label: "5", value: 1.25 },
+    { label: "6", value: 1.5 },
+  ];
+  const [batchScale, setBatchScale] = useState(1);
   // Recipe yield: how many doughballs does the batch make at the target weight?
   const recipeYield = targetWeight > 0 ? (totalLbsPerBatch * 16) / targetWeight : 0;
   // Run yield: what the line actually produced (from doughBatchYield field)
@@ -763,14 +772,20 @@ function DoughRecipeCard({
             Dough Recipe
           </CardTitle>
           <div className="flex-1 max-w-xs">
-            <IngredientSelect
-              value={recipeName}
-              onChange={onRecipeNameChange}
-              options={recipeNameOptions}
-              onAddOption={onAddRecipeName}
-              onRemoveOption={onRemoveRecipeName}
-              placeholder="Recipe name…"
-            />
+            {batchScale === 1 ? (
+              <IngredientSelect
+                value={recipeName}
+                onChange={onRecipeNameChange}
+                options={recipeNameOptions}
+                onAddOption={onAddRecipeName}
+                onRemoveOption={onRemoveRecipeName}
+                placeholder="Recipe name…"
+              />
+            ) : (
+              <div className="h-9 flex items-center px-2 text-sm text-muted-foreground truncate">
+                {recipeName || "Recipe"}
+              </div>
+            )}
           </div>
           <span className="text-xs text-muted-foreground shrink-0">
             <span className="font-mono text-foreground">{batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"}</span> batches needed
@@ -823,6 +838,32 @@ function DoughRecipeCard({
           )}
         </div>
 
+        {/* Batch-size scaler */}
+        <div className="flex items-center flex-wrap gap-2 mb-3">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Batch Size</span>
+          <div className="flex gap-1 rounded-lg bg-muted/30 p-1">
+            {SCALE_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setBatchScale(opt.value)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                  batchScale === opt.value
+                    ? "bg-orange-500 text-white"
+                    : "text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {batchScale !== 1 && (
+            <span className="text-[10px] text-muted-foreground">
+              ×{batchScale} — view only (switch to 4 to edit)
+            </span>
+          )}
+        </div>
+
         {/* Ingredient rows */}
         {fields.length === 0 ? (
           <p className="text-xs text-muted-foreground mb-3">
@@ -838,23 +879,37 @@ function DoughRecipeCard({
             <div className="space-y-1.5">
               {fields.map((field, idx) => (
                 <div key={field.id} className={`grid gap-x-1 sm:gap-x-2 items-center ${confirmIdx === idx ? "grid-cols-[minmax(0,1fr)_88px_auto] sm:grid-cols-[1fr_120px_auto]" : "grid-cols-[minmax(0,1fr)_88px_32px] sm:grid-cols-[1fr_120px_32px]"}`}>
-                  <IngredientSelect
-                    value={recipe[idx]?.ingredient ?? ""}
-                    onChange={val => onSetIngredient(idx, val)}
-                    options={ingredientOptions}
-                    onAddOption={onAddIngredient}
-                    onRemoveOption={onRemoveIngredient}
-                  />
-                  <input
-                    {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
-                    type="number"
-                    min="0"
-                    step="0.1"
-                    placeholder="0"
-                    onFocus={e => e.target.select()}
-                    className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
-                  />
-                  {confirmIdx === idx ? (
+                  {batchScale === 1 ? (
+                    <IngredientSelect
+                      value={recipe[idx]?.ingredient ?? ""}
+                      onChange={val => onSetIngredient(idx, val)}
+                      options={ingredientOptions}
+                      onAddOption={onAddIngredient}
+                      onRemoveOption={onRemoveIngredient}
+                    />
+                  ) : (
+                    <div className="h-8 flex items-center px-1.5 sm:px-2 text-xs sm:text-sm text-muted-foreground truncate">
+                      {recipe[idx]?.ingredient || "—"}
+                    </div>
+                  )}
+                  {batchScale === 1 ? (
+                    <input
+                      {...register(`doughRecipe.${idx}.lbs`, { valueAsNumber: true })}
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="0"
+                      onFocus={e => e.target.select()}
+                      className="h-8 px-1.5 sm:px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm text-right font-mono outline-none focus:border-primary/60 w-full"
+                    />
+                  ) : (
+                    <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/40 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-muted-foreground w-full">
+                      {fmtNum(Number(recipe[idx]?.lbs ?? 0) * batchScale, 1)}
+                    </div>
+                  )}
+                  {batchScale !== 1 ? (
+                    <span />
+                  ) : confirmIdx === idx ? (
                     <div className="flex items-center gap-1">
                       <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onClick={() => { onRemove(idx); setConfirmIdx(null); }}>Yes</button>
                       <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onClick={() => setConfirmIdx(null)}>No</button>
@@ -874,19 +929,21 @@ function DoughRecipeCard({
             <div className="grid grid-cols-[minmax(0,1fr)_88px_32px] gap-x-1 sm:grid-cols-[1fr_120px_32px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
               <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
               <span className="text-xs font-mono text-right font-semibold text-foreground">
-                {fmtNum(totalLbsPerBatch, 1)} lbs
+                {fmtNum(totalLbsPerBatch * batchScale, 1)} lbs
               </span>
               <span />
             </div>
           </div>
         )}
-        <button
-          type="button"
-          onClick={onAppend}
-          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add Ingredient
-        </button>
+        {batchScale === 1 && (
+          <button
+            type="button"
+            onClick={onAppend}
+            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Ingredient
+          </button>
+        )}
       </CardContent>
     </Card>
   );

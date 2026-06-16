@@ -290,6 +290,7 @@ export function RecipeEditor({
   onApplyFactory,
   factoryLabel = "Factory mixes for this brand + flavor",
   onSaveMix,
+  batchScale = false,
 }: {
   rows: RecipeRow[];
   onChange: (rows: RecipeRow[]) => void;
@@ -305,9 +306,20 @@ export function RecipeEditor({
   onApplyFactory?: (preset: FactoryPreset) => void;
   factoryLabel?: string;
   onSaveMix?: () => void;
+  batchScale?: boolean;
 }) {
   const colors = useColors();
   const total = rows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+  // Batch-size scaler: "4" is the base recipe (1×); other sizes scale the
+  // displayed weights for quick reference. Editing is only allowed at base.
+  const SCALE_OPTIONS: { label: string; value: number }[] = [
+    { label: "½", value: 0.5 },
+    { label: "4", value: 1 },
+    { label: "5", value: 1.25 },
+    { label: "6", value: 1.5 },
+  ];
+  const [scale, setScale] = React.useState(1);
+  const effScale = batchScale ? scale : 1;
 
   const setRow = (i: number, patch: Partial<RecipeRow>) =>
     onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -318,6 +330,7 @@ export function RecipeEditor({
   return (
     <View style={recipeStyles.wrap}>
       {/* Recipe name + save preset */}
+      {effScale === 1 ? (
       <View style={recipeStyles.nameRow}>
         <TextInput
           style={[
@@ -369,9 +382,10 @@ export function RecipeEditor({
           </Pressable>
         ) : null}
       </View>
+      ) : null}
 
       {/* Preset chips */}
-      {presetNames.length > 0 ? (
+      {effScale === 1 && presetNames.length > 0 ? (
         <View style={recipeStyles.presetRow}>
           {presetNames.map((p) => (
             <View
@@ -395,7 +409,7 @@ export function RecipeEditor({
       ) : null}
 
       {/* Factory mix presets matching brand + flavor */}
-      {factoryPresets && factoryPresets.length > 0 ? (
+      {effScale === 1 && factoryPresets && factoryPresets.length > 0 ? (
         <View style={recipeStyles.factoryWrap}>
           <Text style={[recipeStyles.factoryLabel, { color: colors.mutedForeground }]}>
             {factoryLabel}
@@ -423,6 +437,44 @@ export function RecipeEditor({
         </View>
       ) : null}
 
+      {/* Batch-size scaler */}
+      {batchScale ? (
+        <View style={recipeStyles.scaleRow}>
+          <Text style={[recipeStyles.scaleLabel, { color: colors.mutedForeground }]}>
+            Batch size
+          </Text>
+          <View style={[recipeStyles.scaleGroup, { backgroundColor: colors.secondary }]}>
+            {SCALE_OPTIONS.map((opt) => {
+              const active = scale === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  onPress={() => setScale(opt.value)}
+                  style={[
+                    recipeStyles.scaleBtn,
+                    active && { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      recipeStyles.scaleBtnText,
+                      { color: active ? "#fff" : colors.foreground },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {scale !== 1 ? (
+            <Text style={[recipeStyles.scaleHint, { color: colors.mutedForeground }]}>
+              ×{scale} · view only
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Ingredient rows */}
       {rows.map((row, i) => (
         <View key={i} style={recipeStyles.row}>
@@ -436,34 +488,53 @@ export function RecipeEditor({
             placeholder="Ingredient"
             placeholderTextColor={colors.mutedForeground}
             autoCapitalize="words"
+            editable={effScale === 1}
           />
-          <TextInput
-            style={[
-              recipeStyles.lbsInput,
-              { color: colors.foreground, borderColor: colors.border },
-            ]}
-            value={row.lbs > 0 ? String(row.lbs) : ""}
-            onChangeText={(t) => {
-              const n = parseFloat(t);
-              setRow(i, { lbs: isNaN(n) ? 0 : n });
-            }}
-            placeholder="0"
-            placeholderTextColor={colors.mutedForeground}
-            keyboardType="decimal-pad"
-            textAlign="right"
-            selectTextOnFocus
-          />
+          {effScale === 1 ? (
+            <TextInput
+              style={[
+                recipeStyles.lbsInput,
+                { color: colors.foreground, borderColor: colors.border },
+              ]}
+              value={row.lbs > 0 ? String(row.lbs) : ""}
+              onChangeText={(t) => {
+                const n = parseFloat(t);
+                setRow(i, { lbs: isNaN(n) ? 0 : n });
+              }}
+              placeholder="0"
+              placeholderTextColor={colors.mutedForeground}
+              keyboardType="decimal-pad"
+              textAlign="right"
+              selectTextOnFocus
+            />
+          ) : (
+            <View
+              style={[
+                recipeStyles.lbsInput,
+                recipeStyles.lbsReadonly,
+                { borderColor: colors.border },
+              ]}
+            >
+              <Text style={{ color: colors.mutedForeground, fontSize: 14 }}>
+                {(Number(row.lbs) || 0) > 0
+                  ? ((Number(row.lbs) || 0) * effScale).toFixed(1)
+                  : "0"}
+              </Text>
+            </View>
+          )}
           <Text style={[recipeStyles.lbsUnit, { color: colors.mutedForeground }]}>
             lbs
           </Text>
-          <Pressable onPress={() => removeRow(i)} hitSlop={6}>
-            <Feather name="trash-2" size={16} color="#ef4444" />
-          </Pressable>
+          {effScale === 1 ? (
+            <Pressable onPress={() => removeRow(i)} hitSlop={6}>
+              <Feather name="trash-2" size={16} color="#ef4444" />
+            </Pressable>
+          ) : null}
         </View>
       ))}
 
       {/* Quick-add ingredient chips */}
-      {ingredientOptions.length > 0 ? (
+      {effScale === 1 && ingredientOptions.length > 0 ? (
         <View style={recipeStyles.quickRow}>
           {ingredientOptions.map((opt) => (
             <Pressable
@@ -486,25 +557,27 @@ export function RecipeEditor({
         </View>
       ) : null}
 
-      <Pressable
-        onPress={() => addRow()}
-        style={({ pressed }) => [
-          recipeStyles.addRowBtn,
-          { borderColor: colors.primary, opacity: pressed ? 0.6 : 1 },
-        ]}
-      >
-        <Feather name="plus" size={14} color={colors.primary} />
-        <Text style={[recipeStyles.addRowText, { color: colors.primary }]}>
-          Add ingredient
-        </Text>
-      </Pressable>
+      {effScale === 1 ? (
+        <Pressable
+          onPress={() => addRow()}
+          style={({ pressed }) => [
+            recipeStyles.addRowBtn,
+            { borderColor: colors.primary, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Feather name="plus" size={14} color={colors.primary} />
+          <Text style={[recipeStyles.addRowText, { color: colors.primary }]}>
+            Add ingredient
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={[recipeStyles.totalRow, { borderTopColor: colors.border }]}>
         <Text style={[recipeStyles.totalLabel, { color: colors.mutedForeground }]}>
           {effectiveLabel}
         </Text>
         <Text style={[recipeStyles.totalValue, { color: colors.primary }]}>
-          {total > 0 ? `${total.toFixed(1)} lbs` : "—"}
+          {total > 0 ? `${(total * effScale).toFixed(1)} lbs` : "—"}
         </Text>
       </View>
     </View>
@@ -576,7 +649,21 @@ const recipeStyles = StyleSheet.create({
     paddingVertical: 7,
     fontSize: 14,
   },
+  lbsReadonly: { alignItems: "flex-end", justifyContent: "center" },
   lbsUnit: { fontSize: 12, width: 22 },
+  scaleRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  scaleLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 },
+  scaleGroup: { flexDirection: "row", borderRadius: 10, padding: 3, gap: 3 },
+  scaleBtn: {
+    minWidth: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 7,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  scaleBtnText: { fontSize: 13, fontWeight: "700" },
+  scaleHint: { fontSize: 11 },
   quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   quickChip: {
     flexDirection: "row",
