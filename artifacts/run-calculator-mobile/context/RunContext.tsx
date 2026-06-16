@@ -1,5 +1,12 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MIX_SEED } from "@/data/mixSeed";
+import {
+  SPEC_BRANDS,
+  SPEC_BRAND_FLAVORS,
+  SPEC_PEP_TYPES,
+  SPEC_CHEESE_INGREDIENTS,
+  SPEC_PROFILES,
+} from "@/data/specSeed";
 import React, {
   createContext,
   useCallback,
@@ -20,6 +27,8 @@ import {
 import type { SyncPayload } from "./sync/payloadTypes";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
+// One-time marker for seeding the imported pizza-spec brand/flavor presets.
+const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 
 // Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
 // incoming remote payloads are deferred briefly after a local edit so they don't
@@ -696,6 +705,45 @@ export function profileKey(brand: string, flavor: string): string {
   return `${brand.toLowerCase().trim()}__${flavor.toLowerCase().trim()}`;
 }
 
+/** Case-insensitive merge that keeps the existing label when a duplicate appears. */
+function mergeInsensitive(existing: string[], additions: string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const x of existing) seen.set(x.toLowerCase(), x);
+  for (const a of additions) {
+    const k = a.toLowerCase();
+    if (!seen.has(k)) seen.set(k, a);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Additively merge the imported pizza-spec presets into state: new brands,
+ * flavors, pepperoni/cheese option lists, and a brand profile per brand+flavor
+ * (only when absent, so user edits are never clobbered). Mirrors the web seed.
+ */
+function applySpecSeed(state: AppState): AppState {
+  const brands = mergeInsensitive(state.brands, SPEC_BRANDS).sort();
+  const brandFlavors: Record<string, string[]> = { ...state.brandFlavors };
+  for (const [b, fl] of Object.entries(SPEC_BRAND_FLAVORS)) {
+    brandFlavors[b] = mergeInsensitive(brandFlavors[b] ?? [], fl);
+  }
+  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
+  for (const [k, v] of Object.entries(SPEC_PROFILES)) {
+    if (!brandProfiles[k]) brandProfiles[k] = v;
+  }
+  return {
+    ...state,
+    brands,
+    brandFlavors,
+    pepTypes: mergeInsensitive(state.pepTypes, SPEC_PEP_TYPES),
+    cheeseIngredients: mergeInsensitive(
+      state.cheeseIngredients,
+      SPEC_CHEESE_INGREDIENTS,
+    ),
+    brandProfiles,
+  };
+}
+
 // Fields that belong to one specific run and must NOT travel via a profile.
 const PER_RUN_FIELDS: (keyof RunSettings)[] = [
   "brand",
@@ -1006,6 +1054,25 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     }
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, []);
+
+  // One-time seed of the imported pizza-spec presets after boot. Additive and
+  // guarded by a marker so user-deleted brands/flavors/profiles never reappear.
+  useEffect(() => {
+    if (!bootDone) return;
+    let cancelled = false;
+    AsyncStorage.getItem(SPEC_SEED_KEY).then((done) => {
+      if (done || cancelled) return;
+      setAppState((prev) => {
+        const next = applySpecSeed(prev);
+        persistNow(next);
+        return next;
+      });
+      AsyncStorage.setItem(SPEC_SEED_KEY, "1");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bootDone, persistNow]);
 
   // Build and PUT the current state to the server. The pushed signature is only
   // recorded AFTER a successful write, so a failed push doesn't get marked as

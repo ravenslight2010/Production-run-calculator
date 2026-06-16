@@ -80,6 +80,7 @@ import {
   applyMixSeedIfNeeded,
   applyMixSeedV14IfNeeded,
   applyMixSeedV15IfNeeded,
+  applySpecProfilesSeedIfNeeded,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -168,6 +169,7 @@ import {
 applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
 applyMixSeedV15IfNeeded();
+applySpecProfilesSeedIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
 

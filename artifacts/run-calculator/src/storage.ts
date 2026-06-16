@@ -20,6 +20,12 @@ import {
   DEFAULT_MIX_INGREDIENTS,
   CHEESE_RECIPE_PRESETS_KEY,
   MIX_RECIPE_NAMES_KEY,
+  INGREDIENT_TYPES_KEY,
+  DEFAULT_INGREDIENT_TYPES,
+  PEP_TYPES_KEY,
+  DEFAULT_PEP_TYPES,
+  CHEESE_INGREDIENTS_KEY,
+  DEFAULT_CHEESE_INGREDIENTS,
   MAX_HISTORY_DAYS,
   type FormValues,
   type DayState,
@@ -31,6 +37,14 @@ import {
   type CrustField,
 } from "./types";
 import { MIX_SEED } from "./mixSeed";
+import {
+  SPEC_BRANDS,
+  SPEC_BRAND_FLAVORS,
+  SPEC_APP_TYPES,
+  SPEC_PEP_TYPES,
+  SPEC_CHEESE_INGREDIENTS,
+  SPEC_PROFILES,
+} from "./specSeed";
 import { genId, todayStr } from "./utils";
 
 export function loadList(key: string, fallback: string[]): string[] {
@@ -346,5 +360,72 @@ export function applyMixSeedV14IfNeeded(): void {
     saveList(MIX_INGREDIENTS_KEY, mergedMix);
 
     localStorage.setItem(MIX_SEED_V14_KEY, "1");
+  } catch {}
+}
+
+const SPEC_PROFILES_SEED_KEY = "run-calc-spec-profiles-v1";
+
+/** Case-insensitive merge that keeps the existing label when a duplicate appears. */
+function mergeListInsensitive(existing: string[], additions: string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const x of existing) seen.set(x.toLowerCase(), x);
+  for (const a of additions) {
+    const k = a.toLowerCase();
+    if (!seen.has(k)) seen.set(k, a);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Seed brand/flavor PRESETS imported from the pizza spec spreadsheets. Adds the
+ * new brands, flavors, applicator/pepperoni/cheese option lists, and writes a
+ * stored profile per brand+flavor (only when one does not already exist, so user
+ * edits are never clobbered). Runs once, guarded by a version marker.
+ */
+export function applySpecProfilesSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(SPEC_PROFILES_SEED_KEY)) return;
+  try {
+    const mergedBrands = mergeListInsensitive(
+      loadList(BRANDS_KEY, []),
+      SPEC_BRANDS,
+    ).sort();
+    saveList(BRANDS_KEY, mergedBrands);
+
+    const bf = loadBrandFlavors();
+    for (const [brand, flavors] of Object.entries(SPEC_BRAND_FLAVORS)) {
+      bf[brand] = mergeListInsensitive(bf[brand] ?? [], flavors);
+    }
+    saveBrandFlavors(bf);
+
+    saveList(
+      INGREDIENT_TYPES_KEY,
+      mergeListInsensitive(
+        loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
+        SPEC_APP_TYPES,
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+    saveList(
+      PEP_TYPES_KEY,
+      mergeListInsensitive(
+        loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+        SPEC_PEP_TYPES,
+      ),
+    );
+    saveList(
+      CHEESE_INGREDIENTS_KEY,
+      mergeListInsensitive(
+        loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
+        SPEC_CHEESE_INGREDIENTS,
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    for (const p of SPEC_PROFILES) {
+      const key = PROFILE_KEY(p.brand, p.flavor);
+      if (localStorage.getItem(key)) continue;
+      localStorage.setItem(key, JSON.stringify(p.values));
+    }
+
+    localStorage.setItem(SPEC_PROFILES_SEED_KEY, "1");
   } catch {}
 }
