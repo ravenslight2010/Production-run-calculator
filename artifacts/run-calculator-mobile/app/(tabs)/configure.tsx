@@ -17,6 +17,7 @@ import {
   type RecipeRow,
   type RunSettings,
 } from "@/context/RunContext";
+import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { findMixPresets } from "@/data/mixPresets";
 
@@ -886,8 +887,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 2,
   },
-  runHeaderLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 1 },
-  runHeaderName: { fontSize: 17, fontWeight: "700" as const },
+  runHeaderLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 1, fontFamily: FONTS.semibold },
+  runHeaderName: { fontSize: 17, fontWeight: "700" as const, fontFamily: FONTS.bold },
 
   computedRow: {
     flexDirection: "row",
@@ -896,8 +897,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     justifyContent: "space-between",
   },
-  computedLabel: { fontSize: 16, fontWeight: "500" as const },
-  computedValue: { fontSize: 22, fontWeight: "700" as const },
+  computedLabel: { fontSize: 16, fontWeight: "500" as const, fontFamily: FONTS.medium },
+  computedValue: {
+    fontSize: 22,
+    fontWeight: "700" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
 
   saveBtn: {
     borderRadius: 12,
@@ -905,7 +911,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 24,
   },
-  saveBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" as const },
+  saveBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" as const, fontFamily: FONTS.bold },
   resetBtn: {
     borderRadius: 12,
     paddingVertical: 14,
@@ -914,7 +920,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 8,
   },
-  resetBtnText: { fontSize: 16, fontWeight: "600" as const },
+  resetBtnText: { fontSize: 16, fontWeight: "600" as const, fontFamily: FONTS.semibold },
 
   lockRoot: { alignItems: "center", justifyContent: "center", padding: 24 },
   lockCard: {
@@ -926,8 +932,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  lockTitle: { fontSize: 20, fontWeight: "700" as const, marginTop: 4 },
-  lockHint: { fontSize: 13, textAlign: "center", marginBottom: 6 },
+  lockTitle: { fontSize: 20, fontWeight: "700" as const, marginTop: 4, fontFamily: FONTS.bold },
+  lockHint: { fontSize: 13, textAlign: "center", marginBottom: 6, fontFamily: FONTS.regular },
   lockInput: {
     width: "100%",
     borderWidth: 1,
@@ -936,8 +942,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 20,
     letterSpacing: 4,
+    fontFamily: FONTS.mono,
   },
-  lockError: { color: "#ef4444", fontSize: 13, fontWeight: "500" as const },
+  lockError: { color: "#ef4444", fontSize: 13, fontWeight: "500" as const, fontFamily: FONTS.medium },
   lockBtn: {
     width: "100%",
     borderRadius: 10,
@@ -945,7 +952,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 4,
   },
-  lockBtnText: { fontSize: 16, fontWeight: "700" as const },
+  lockBtnText: { fontSize: 16, fontWeight: "700" as const, fontFamily: FONTS.bold },
   masterDataBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -956,13 +963,14 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 12,
   },
-  masterDataText: { flex: 1, fontSize: 15, fontWeight: "600" as const },
+  masterDataText: { flex: 1, fontSize: 15, fontWeight: "600" as const, fontFamily: FONTS.semibold },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   recipeHint: {
     fontSize: 12,
     marginTop: 12,
     marginBottom: 6,
     fontStyle: "italic",
+    fontFamily: FONTS.regular,
   },
   chip: {
     paddingHorizontal: 14,
@@ -970,9 +978,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  chipText: { fontSize: 14, fontWeight: "600" as const },
+  chipText: { fontSize: 14, fontWeight: "600" as const, fontFamily: FONTS.semibold },
 
-  tplEmpty: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
+  tplEmpty: { fontSize: 13, lineHeight: 18, marginBottom: 12, fontFamily: FONTS.regular },
   tplRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -982,14 +990,14 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
-  tplName: { fontSize: 15, fontWeight: "600" as const },
-  tplMeta: { fontSize: 12, marginTop: 1 },
+  tplName: { fontSize: 15, fontWeight: "600" as const, fontFamily: FONTS.semibold },
+  tplMeta: { fontSize: 12, marginTop: 1, fontFamily: FONTS.regular },
   tplApply: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 8,
   },
-  tplApplyText: { color: "#000", fontSize: 13, fontWeight: "700" as const },
+  tplApplyText: { color: "#000", fontSize: 13, fontWeight: "700" as const, fontFamily: FONTS.bold },
   tplDelete: { padding: 4 },
   tplSaveRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   tplInput: {
@@ -999,11 +1007,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === "web" ? 8 : 10,
     fontSize: 15,
+    fontFamily: FONTS.regular,
   },
   tplSaveBtn: {
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
   },
-  tplSaveBtnText: { color: "#000", fontSize: 13, fontWeight: "700" as const },
+  tplSaveBtnText: { color: "#000", fontSize: 13, fontWeight: "700" as const, fontFamily: FONTS.bold },
 });

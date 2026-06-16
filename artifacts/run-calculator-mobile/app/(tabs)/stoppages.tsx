@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRun, runLabel, type Stoppage } from "@/context/RunContext";
+import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 
 const TYPE_COLORS: Record<Stoppage["type"], string> = {
@@ -550,7 +551,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 4,
   },
-  runChipText: { fontSize: 13, fontWeight: "500" as const },
+  runChipText: { fontSize: 13, fontWeight: "500" as const, fontFamily: FONTS.medium },
   runDot: { width: 6, height: 6, borderRadius: 3 },
 
   list: { paddingHorizontal: 16, gap: 8 },
@@ -573,14 +574,20 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     fontSize: 10,
     letterSpacing: 0.5,
+    fontFamily: FONTS.bold,
   },
   rowMid: { flex: 1, paddingVertical: 14 },
-  rowTime: { fontSize: 14, fontWeight: "500" as const },
-  rowReason: { fontSize: 12, marginTop: 2 },
-  rowNotes: { fontSize: 11, marginTop: 2, fontStyle: "italic" as const },
+  rowTime: { fontSize: 14, fontWeight: "500" as const, fontFamily: FONTS.medium },
+  rowReason: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
+  rowNotes: { fontSize: 11, marginTop: 2, fontStyle: "italic" as const, fontFamily: FONTS.regular },
   rowRight: { alignItems: "flex-end", paddingRight: 14, gap: 4 },
   activeDot: { width: 8, height: 8, borderRadius: 4 },
-  duration: { fontSize: 14, fontWeight: "600" as const },
+  duration: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+  },
 
   summary: {
     flexDirection: "row",
@@ -590,8 +597,13 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     marginBottom: 12,
   },
-  summaryText: { fontSize: 13, fontWeight: "500" as const, letterSpacing: 0.3 },
-  summaryValue: { fontSize: 15, fontWeight: "700" as const },
+  summaryText: { fontSize: 13, fontWeight: "500" as const, letterSpacing: 0.3, fontFamily: FONTS.medium },
+  summaryValue: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
 
   activeCard: {
     borderRadius: 14,
@@ -601,8 +613,13 @@ const styles = StyleSheet.create({
   },
   activeTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   activePill: { borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12 },
-  activePillText: { color: "#fff", fontWeight: "700" as const, fontSize: 12 },
-  activeDuration: { fontSize: 20, fontWeight: "700" as const },
+  activePillText: { color: "#fff", fontWeight: "700" as const, fontSize: 12, fontFamily: FONTS.bold },
+  activeDuration: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
   activeNoteInput: {
     borderWidth: 1,
     borderRadius: 10,
@@ -611,6 +628,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     minHeight: 44,
     textAlignVertical: "top",
+    fontFamily: FONTS.regular,
   },
   endBtn: {
     flexDirection: "row",
@@ -621,7 +639,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     justifyContent: "center",
   },
-  endBtnText: { fontWeight: "600" as const, fontSize: 15 },
+  endBtnText: { fontWeight: "600" as const, fontSize: 15, fontFamily: FONTS.semibold },
 
   empty: {
     alignItems: "center",
@@ -629,8 +647,8 @@ const styles = StyleSheet.create({
     paddingTop: 80,
     gap: 10,
   },
-  emptyTitle: { fontSize: 18, fontWeight: "600" as const },
-  emptyText: { fontSize: 14, textAlign: "center" },
+  emptyTitle: { fontSize: 18, fontWeight: "600" as const, fontFamily: FONTS.semibold },
+  emptyText: { fontSize: 14, textAlign: "center", fontFamily: FONTS.regular },
 
   fab: {
     position: "absolute",
@@ -647,7 +665,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  fabText: { color: "#000", fontWeight: "700" as const, fontSize: 15 },
+  fabText: { color: "#000", fontWeight: "700" as const, fontSize: 15, fontFamily: FONTS.bold },
 
   overlay: {
     flex: 1,
@@ -667,7 +685,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 20,
   },
-  sheetTitle: { fontSize: 18, fontWeight: "700" as const, marginBottom: 20, textAlign: "center" },
+  sheetTitle: { fontSize: 18, fontWeight: "700" as const, marginBottom: 20, textAlign: "center", fontFamily: FONTS.bold },
   typeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, justifyContent: "center" },
   typeBtn: {
     borderRadius: 12,
@@ -676,7 +694,7 @@ const styles = StyleSheet.create({
     minWidth: "45%",
     alignItems: "center",
   },
-  typeBtnText: { color: "#fff", fontWeight: "700" as const, fontSize: 16 },
+  typeBtnText: { color: "#fff", fontWeight: "700" as const, fontSize: 16, fontFamily: FONTS.bold },
 
   pastLink: {
     flexDirection: "row",
@@ -688,7 +706,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: 12,
   },
-  pastLinkText: { fontSize: 14, fontWeight: "600" as const },
+  pastLinkText: { fontSize: 14, fontWeight: "600" as const, fontFamily: FONTS.semibold },
 
   pastTypeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
   pastTypeChip: {
@@ -697,20 +715,22 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     paddingHorizontal: 14,
   },
-  pastTypeChipText: { fontSize: 13, fontWeight: "700" as const },
+  pastTypeChipText: { fontSize: 13, fontWeight: "700" as const, fontFamily: FONTS.bold },
 
   pastTimeRow: { flexDirection: "row", gap: 12, marginTop: 16 },
   pastTimeField: { flex: 1 },
-  pastLabel: { fontSize: 12, fontWeight: "500" as const, marginBottom: 6 },
+  pastLabel: { fontSize: 12, fontWeight: "500" as const, marginBottom: 6, fontFamily: FONTS.medium },
   pastInput: {
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 16,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
   },
   pastNotesInput: { minHeight: 60, textAlignVertical: "top" as const },
-  pastError: { fontSize: 12, marginTop: 10 },
+  pastError: { fontSize: 12, marginTop: 10, fontFamily: FONTS.regular },
 
   pastActions: { flexDirection: "row", gap: 12, marginTop: 20 },
   pastBack: {
@@ -720,12 +740,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     alignItems: "center",
   },
-  pastBackText: { fontSize: 15, fontWeight: "600" as const },
+  pastBackText: { fontSize: 15, fontWeight: "600" as const, fontFamily: FONTS.semibold },
   pastSave: {
     flex: 1,
     borderRadius: 10,
     paddingVertical: 13,
     alignItems: "center",
   },
-  pastSaveText: { fontSize: 15, fontWeight: "700" as const },
+  pastSaveText: { fontSize: 15, fontWeight: "700" as const, fontFamily: FONTS.bold },
 });

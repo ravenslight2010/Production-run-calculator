@@ -13,7 +13,14 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CardSection, MetricCard, NumericField, SectionHeader } from "@/components/UI";
+import {
+  Card,
+  MetricCard,
+  NumericField,
+  SectionHeader,
+  StatRow,
+} from "@/components/UI";
+import { FONTS } from "@/constants/fonts";
 import {
   useRun,
   runLabel,
@@ -205,8 +212,7 @@ export default function CalculatorScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
-        <SectionHeader title="Current Run" />
-        <CardSection>
+        <Card title="Current Run" icon="package" style={styles.topCard}>
           <Text style={[styles.idLabel, { color: colors.mutedForeground }]}>Brand</Text>
           {brands.length > 0 ? (
             <View style={styles.chipWrap}>
@@ -355,7 +361,7 @@ export default function CalculatorScreen() {
           <Text style={[styles.profileHint, { color: colors.mutedForeground }]}>
             Saved settings auto-load next time you enter this brand + flavor.
           </Text>
-        </CardSection>
+        </Card>
 
         {/* Run navigator */}
         <View style={[styles.runNav, { borderColor: colors.border, backgroundColor: colors.card }]}>
@@ -610,8 +616,19 @@ export default function CalculatorScreen() {
         </View>
 
         {/* Run Details (moved from Dough tab) — sub-view aware */}
-        <SectionHeader title="Run Details" />
-        <CardSection>
+        <Card title="Run Details" icon="clipboard" style={styles.sectionCard}>
+          <StatRow
+            label="Cases Left to Run"
+            value={supply.casesLeftToRun.toString()}
+            highlight={supply.casesLeftToRun > 0}
+          />
+          <StatRow
+            label={doughSubTab === "crusts" ? "Cases to Open" : "Approx. Cases on Line"}
+            value={(doughSubTab === "crusts"
+              ? supply.casesLeftToOpen
+              : supply.casesOnLine
+            ).toString()}
+          />
           <View style={styles.runDetailStatusRow}>
             <Text style={[styles.runDetailStatusLabel, { color: colors.mutedForeground }]}>
               {doughSubTab === "crusts" ? "Crust Supply" : "Dough Status"}
@@ -621,56 +638,39 @@ export default function CalculatorScreen() {
               const bufferInt = Math.floor(supply.buffer);
               if (shortInt > 0) {
                 return (
-                  <View style={[styles.runDetailPill, { backgroundColor: colors.destructive }]}>
-                    <Feather name="alert-triangle" size={12} color="#fff" />
-                    <Text style={styles.runDetailPillText}>
-                      Short {shortInt} case{shortInt !== 1 ? "s" : ""}
+                  <View style={styles.runDetailStatus}>
+                    <View style={[styles.statusDot, { backgroundColor: "#f87171" }]} />
+                    <Text style={[styles.runDetailStatusText, { color: "#f87171" }]}>
+                      SHORT {shortInt} case{shortInt !== 1 ? "s" : ""}
                     </Text>
                   </View>
                 );
               }
               if (bufferInt > 0) {
                 return (
-                  <View style={[styles.runDetailPill, { backgroundColor: colors.success }]}>
-                    <Feather name="check" size={12} color="#fff" />
-                    <Text style={styles.runDetailPillText}>
-                      {bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
+                  <View style={styles.runDetailStatus}>
+                    <View style={[styles.statusDot, { backgroundColor: "#4ade80" }]} />
+                    <Text style={[styles.runDetailStatusText, { color: "#4ade80" }]}>
+                      +{bufferInt} case{bufferInt !== 1 ? "s" : ""} ahead
                     </Text>
                   </View>
                 );
               }
               return (
-                <View style={[styles.runDetailPill, { backgroundColor: colors.secondary }]}>
-                  <Text style={[styles.runDetailPillText, { color: colors.foreground }]}>
+                <View style={styles.runDetailStatus}>
+                  <View style={[styles.statusDot, { backgroundColor: colors.mutedForeground }]} />
+                  <Text style={[styles.runDetailStatusText, { color: colors.mutedForeground }]}>
                     Balanced
                   </Text>
                 </View>
               );
             })()}
           </View>
-          <View style={styles.metricsRow}>
-            <MetricCard
-              label="Cases Left to Run"
-              value={supply.casesLeftToRun.toString()}
-              highlight={supply.casesLeftToRun > 0}
-              style={styles.metricHalf}
-            />
-            <MetricCard
-              label={doughSubTab === "crusts" ? "Cases to Open" : "Cases on Line"}
-              value={(doughSubTab === "crusts"
-                ? supply.casesLeftToOpen
-                : supply.casesOnLine
-              ).toString()}
-              style={styles.metricHalf}
-            />
-          </View>
-        </CardSection>
+        </Card>
 
         {/* Run to Time */}
         {calc.pizzasLeft > 0 ? (
-          <>
-            <SectionHeader title="Run to Time" />
-            <CardSection>
+          <Card title="Run to Time" icon="clock" style={styles.sectionCard}>
               <View style={styles.runToTimeRow}>
                 <Text style={[styles.runToTimeLabel, { color: colors.mutedForeground }]}>
                   Run until
@@ -766,15 +766,17 @@ export default function CalculatorScreen() {
                   </View>
                 );
               })()}
-            </CardSection>
-          </>
+          </Card>
         ) : null}
 
         {/* Upcoming runs */}
         {upcomingRuns.length > 0 ? (
-          <>
-            <SectionHeader title="Upcoming Runs" />
-            <CardSection style={{ paddingVertical: 6 }}>
+          <Card
+            title="Upcoming Runs"
+            icon="list"
+            style={styles.sectionCard}
+            contentStyle={{ paddingVertical: 2 }}
+          >
               {upcomingRuns.map(({ r, i }) => (
                 <Pressable
                   key={r.id}
@@ -799,8 +801,7 @@ export default function CalculatorScreen() {
                   <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
                 </Pressable>
               ))}
-            </CardSection>
-          </>
+          </Card>
         ) : null}
 
         {/* Log stoppage button */}
@@ -990,10 +991,13 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
 
-  casesWarn: { fontSize: 12, fontWeight: "600" as const, marginTop: 10 },
+  topCard: { marginTop: 4 },
+  sectionCard: { marginTop: 16 },
+
+  casesWarn: { fontSize: 12, fontFamily: FONTS.semibold, marginTop: 10 },
   idLabel: {
     fontSize: 11,
-    fontWeight: "700" as const,
+    fontFamily: FONTS.bold,
     textTransform: "uppercase" as const,
     letterSpacing: 1,
     marginBottom: 8,
@@ -1005,7 +1009,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  chipText: { fontSize: 13, fontWeight: "500" as const },
+  chipText: { fontSize: 13, fontFamily: FONTS.medium },
   addRow: { flexDirection: "row", gap: 8, marginTop: 10, alignItems: "center" },
   addInput: {
     flex: 1,
@@ -1014,6 +1018,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 14,
+    fontFamily: FONTS.regular,
   },
   addBtn: {
     width: 42,
@@ -1023,39 +1028,44 @@ const styles = StyleSheet.create({
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
-  idEmpty: { fontSize: 13, fontStyle: "italic" as const, paddingVertical: 4 },
+  idEmpty: {
+    fontSize: 13,
+    fontFamily: FONTS.regular,
+    fontStyle: "italic" as const,
+    paddingVertical: 4,
+  },
   profileBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 4,
     paddingVertical: 12,
     marginTop: 14,
   },
-  profileBtnText: { fontSize: 14, fontWeight: "600" as const },
-  profileHint: { fontSize: 12, lineHeight: 16, marginTop: 8 },
+  profileBtnText: { fontSize: 14, fontFamily: FONTS.semibold },
+  profileHint: { fontSize: 12, fontFamily: FONTS.regular, lineHeight: 16, marginTop: 8 },
 
   runNav: {
     flexDirection: "row",
     alignItems: "center",
-    borderRadius: 12,
+    borderRadius: 4,
     borderWidth: 1,
     marginTop: 12,
     overflow: "hidden",
   },
   navBtn: { padding: 12 },
   navCenter: { flex: 1, alignItems: "center", paddingVertical: 10 },
-  navLabel: { fontSize: 15, fontWeight: "600" as const, textAlign: "center" },
+  navLabel: { fontSize: 15, fontFamily: FONTS.semibold, textAlign: "center" },
   navSubRow: { flexDirection: "row", alignItems: "center", marginTop: 1, gap: 5 },
   syncDot: { width: 6, height: 6, borderRadius: 3 },
-  navSub: { fontSize: 11 },
+  navSub: { fontSize: 11, fontFamily: FONTS.regular },
   navAddBtn: {
     margin: 8,
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1068,116 +1078,110 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   headerLeft: { flex: 1, marginRight: 12 },
-  elapsed: { fontSize: 12, marginTop: 2 },
+  elapsed: { fontSize: 12, fontFamily: FONTS.mono, marginTop: 2 },
   batchDueBanner: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
-    borderRadius: 12,
+    borderRadius: 4,
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginTop: 12,
   },
-  batchDueText: { flex: 1, fontWeight: "700" as const, fontSize: 14 },
-  toggleBtn: { borderRadius: 20, paddingVertical: 9, paddingHorizontal: 18 },
-  toggleText: { color: "#fff", fontWeight: "700" as const, fontSize: 13, letterSpacing: 0.3 },
+  batchDueText: { flex: 1, fontFamily: FONTS.bold, fontSize: 14 },
+  toggleBtn: { borderRadius: 4, paddingVertical: 9, paddingHorizontal: 18 },
+  toggleText: { color: "#fff", fontFamily: FONTS.bold, fontSize: 13, letterSpacing: 0.3 },
 
   stoppageBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    borderRadius: 10,
+    borderRadius: 4,
     padding: 12,
     marginTop: 12,
     justifyContent: "center",
   },
-  stoppageBannerText: { color: "#000", fontWeight: "700" as const, fontSize: 13 },
+  stoppageBannerText: { color: "#000", fontFamily: FONTS.bold, fontSize: 13 },
 
   carryCard: {
-    borderRadius: 12,
+    borderRadius: 4,
     borderWidth: 1,
     padding: 14,
     marginTop: 12,
     gap: 10,
   },
   carryHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
-  carryTitle: { fontSize: 14, fontWeight: "700" as const },
-  carryBody: { fontSize: 14, lineHeight: 20 },
-  carryStrong: { fontWeight: "700" as const },
+  carryTitle: { fontSize: 14, fontFamily: FONTS.bold },
+  carryBody: { fontSize: 14, fontFamily: FONTS.regular, lineHeight: 20 },
+  carryStrong: { fontFamily: FONTS.bold },
   carryActions: { flexDirection: "row", gap: 10, marginTop: 2 },
   carryAccept: {
     flex: 1,
-    borderRadius: 10,
+    borderRadius: 4,
     paddingVertical: 11,
     alignItems: "center",
   },
-  carryAcceptText: { color: "#000", fontWeight: "700" as const, fontSize: 14 },
+  carryAcceptText: { color: "#000", fontFamily: FONTS.bold, fontSize: 14 },
   carryDismiss: {
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
     paddingVertical: 11,
     paddingHorizontal: 18,
     alignItems: "center",
   },
-  carryDismissText: { fontWeight: "600" as const, fontSize: 14 },
+  carryDismissText: { fontFamily: FONTS.semibold, fontSize: 14 },
 
   metricsRow: { flexDirection: "row", gap: 10 },
   metricBig: { flex: 1.3 },
   metricCol: { flex: 1, gap: 10 },
-  metricHalf: { flex: 1 },
 
   targetBanner: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 4,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginBottom: 4,
   },
-  targetBannerText: { fontSize: 14, fontWeight: "700" as const, flex: 1 },
+  targetBannerText: { fontSize: 14, fontFamily: FONTS.bold, flex: 1 },
   caseProgressWrap: { marginBottom: 6, gap: 6 },
   caseProgressHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  caseProgressLabel: { fontSize: 12 },
-  caseProgressValue: { fontSize: 12, fontWeight: "600" as const, fontVariant: ["tabular-nums"] },
+  caseProgressLabel: { fontSize: 12, fontFamily: FONTS.regular },
+  caseProgressValue: { fontSize: 12, fontFamily: FONTS.monoBold, fontVariant: ["tabular-nums"] },
   caseProgressTrack: { height: 10, borderRadius: 999, overflow: "hidden" },
   caseProgressFill: { height: "100%", borderRadius: 999 },
   runDetailStatusRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 12,
+    paddingVertical: 9,
   },
-  runDetailStatusLabel: { fontSize: 13, fontWeight: "500" as const },
-  runDetailPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  runDetailPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
+  runDetailStatusLabel: { fontSize: 13, fontFamily: FONTS.regular },
+  runDetailStatus: { flexDirection: "row", alignItems: "center", gap: 6 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  runDetailStatusText: { fontSize: 13, fontFamily: FONTS.semibold },
 
   runToTimeRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  runToTimeLabel: { fontSize: 13 },
+  runToTimeLabel: { fontSize: 13, fontFamily: FONTS.regular },
   runToTimeInput: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 16,
+    fontFamily: FONTS.mono,
     fontVariant: ["tabular-nums"],
     textAlign: "center",
   },
-  runToTimeHint: { fontSize: 12, marginTop: 10 },
+  runToTimeHint: { fontSize: 12, fontFamily: FONTS.regular, marginTop: 10 },
   runToTimeGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1189,8 +1193,8 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: "center",
   },
-  runToTimeValue: { fontSize: 22, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  runToTimeStatLabel: { fontSize: 11, marginTop: 2 },
+  runToTimeValue: { fontSize: 22, fontFamily: FONTS.monoBold, fontVariant: ["tabular-nums"] },
+  runToTimeStatLabel: { fontSize: 11, fontFamily: FONTS.regular, marginTop: 2 },
 
   upcomingRow: {
     flexDirection: "row",
@@ -1199,30 +1203,30 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  upcomingLabel: { fontSize: 15, fontWeight: "600" as const },
-  upcomingSub: { fontSize: 12, marginTop: 2 },
+  upcomingLabel: { fontSize: 15, fontFamily: FONTS.semibold },
+  upcomingSub: { fontSize: 12, fontFamily: FONTS.regular, marginTop: 2 },
 
   stoppageBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    borderRadius: 12,
+    borderRadius: 4,
     borderWidth: 1,
     padding: 14,
     justifyContent: "center",
     marginTop: 16,
   },
-  stoppageBtnText: { fontSize: 15, fontWeight: "600" as const },
+  stoppageBtnText: { fontSize: 15, fontFamily: FONTS.semibold },
 
   notesCard: {
-    borderRadius: 12,
+    borderRadius: 4,
     borderWidth: 1,
     padding: 14,
     marginTop: 16,
     gap: 6,
   },
-  notesLabel: { fontSize: 10, fontWeight: "600" as const, letterSpacing: 0.8 },
-  notesText: { fontSize: 14, lineHeight: 20 },
+  notesLabel: { fontSize: 10, fontFamily: FONTS.semibold, letterSpacing: 0.8 },
+  notesText: { fontSize: 14, fontFamily: FONTS.regular, lineHeight: 20 },
 
   overlay: {
     flex: 1,
@@ -1242,7 +1246,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 20,
   },
-  sheetTitle: { fontSize: 18, fontWeight: "700" as const, marginBottom: 20, textAlign: "center" },
+  sheetTitle: { fontSize: 18, fontFamily: FONTS.bold, marginBottom: 20, textAlign: "center" },
   typeGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -1250,23 +1254,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   typeBtn: {
-    borderRadius: 12,
+    borderRadius: 4,
     paddingVertical: 18,
     paddingHorizontal: 20,
     minWidth: "45%",
     alignItems: "center",
   },
-  typeBtnText: { color: "#fff", fontWeight: "700" as const, fontSize: 16 },
+  typeBtnText: { color: "#fff", fontFamily: FONTS.bold, fontSize: 16 },
 
   pickerRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
   pickerItem: {
     flex: 1,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
     padding: 12,
   },
   pickerItemInner: { flexDirection: "row", alignItems: "center", gap: 10 },
-  pickerLabel: { fontSize: 15, fontWeight: "600" as const },
-  pickerSub: { fontSize: 12, marginTop: 2 },
+  pickerLabel: { fontSize: 15, fontFamily: FONTS.semibold },
+  pickerSub: { fontSize: 12, fontFamily: FONTS.regular, marginTop: 2 },
   pickerDelete: { padding: 12 },
 });

@@ -3,12 +3,12 @@ import React from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
+  Card,
   CardSection,
-  MetricCard,
   ReadOnlyRecipe,
-  SectionHeader,
   Stepper,
 } from "@/components/UI";
+import { FONTS } from "@/constants/fonts";
 import {
   useRun,
   computeDoughSupply,
@@ -18,6 +18,9 @@ import { useColors } from "@/hooks/useColors";
 
 const MAX_TRAYS = 74;
 const MAX_BATCHES = 3;
+
+const SKY_500 = "#0ea5e9";
+const SKY_400 = "#38bdf8";
 
 export default function DoughScreen() {
   const colors = useColors();
@@ -41,7 +44,7 @@ export default function DoughScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: webTop + 8, paddingBottom: 90 + webBottom + insets.bottom },
+          { paddingTop: webTop + 12, paddingBottom: 90 + webBottom + insets.bottom },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -81,9 +84,8 @@ export default function DoughScreen() {
           </View>
         ) : null}
 
-        {/* Staged supply steppers */}
-        <SectionHeader title="Staged Supply" />
-        <CardSection>
+        {/* Staged supply steppers (mirrors web supply progress steppers) */}
+        <CardSection style={styles.stepperCard}>
           <Stepper
             label={isCrust ? "Total Stacks Ready" : "Total Trays on Line"}
             value={run.progress.traysOnLine}
@@ -131,37 +133,35 @@ export default function DoughScreen() {
         </CardSection>
 
         {/* What You Need Now */}
-        <SectionHeader title="What You Need Now" />
-        <CardSection>
-          <View style={styles.metricsRow}>
+        <Card
+          title="What You Need Now"
+          accentColor={isCrust ? SKY_500 : colors.primary}
+          style={styles.section}
+          contentStyle={styles.needContent}
+        >
+          <View style={styles.bigStatRow}>
             {isCrust ? (
               <>
-                <MetricCard
-                  label="Cases to open"
+                <BigStat
                   value={Math.round(supply.casesLeftToOpen).toString()}
-                  highlight={supply.casesLeftToOpen > 0}
-                  style={styles.metric}
+                  label="Cases to open"
+                  color={SKY_400}
                 />
-                <MetricCard
-                  label="Stacks to stage"
+                <BigStat
                   value={Math.round(supply.stacksNeededTotal).toString()}
-                  highlight={supply.stacksNeededTotal > 0}
-                  style={styles.metric}
+                  label="Stacks to stage"
                 />
               </>
             ) : (
               <>
-                <MetricCard
-                  label="Batches to mix"
+                <BigStat
                   value={supply.batchesNeeded.toFixed(2)}
-                  highlight={supply.batchesNeeded > 0}
-                  style={styles.metric}
+                  label="Batches to mix"
+                  color={colors.primary}
                 />
-                <MetricCard
-                  label="Trays needed"
+                <BigStat
                   value={Math.round(supply.traysNeeded).toString()}
-                  highlight={supply.traysNeeded > 0}
-                  style={styles.metric}
+                  label="Trays needed"
                 />
               </>
             )}
@@ -176,23 +176,60 @@ export default function DoughScreen() {
               ? `${supply.casesLeftToOpen} cases to open`
               : `${supply.casesOnLine} cases on line`}
           </Text>
-        </CardSection>
+        </Card>
 
         {/* Dough recipe (dough mode only) */}
         {!isCrust ? (
-          <>
-            <SectionHeader title="Dough Recipe" />
-            {run.settings.doughRecipeName?.trim() ? (
-              <Text style={[styles.recipeName, { color: colors.mutedForeground }]}>
-                {run.settings.doughRecipeName}
+          <Card
+            title="Dough Recipe"
+            icon="layers"
+            accentColor="#f97316"
+            style={styles.section}
+          >
+            <View style={styles.recipeHeadRow}>
+              <Text
+                style={[styles.recipeName, { color: colors.mutedForeground }]}
+                numberOfLines={1}
+              >
+                {run.settings.doughRecipeName?.trim() || "Recipe"}
               </Text>
-            ) : null}
-            <CardSection style={{ paddingVertical: 14 }}>
-              <ReadOnlyRecipe rows={run.settings.doughRecipe ?? []} />
-            </CardSection>
-          </>
+              <Text style={[styles.recipeBatches, { color: colors.mutedForeground }]}>
+                <Text style={[styles.recipeBatchesNum, { color: colors.foreground }]}>
+                  {supply.batchesNeeded > 0 ? supply.batchesNeeded.toFixed(2) : "—"}
+                </Text>{" "}
+                batches needed
+              </Text>
+            </View>
+            <ReadOnlyRecipe rows={run.settings.doughRecipe ?? []} />
+          </Card>
         ) : null}
       </ScrollView>
+    </View>
+  );
+}
+
+function BigStat({
+  value,
+  label,
+  color,
+}: {
+  value: string;
+  label: string;
+  color?: string;
+}) {
+  const colors = useColors();
+  return (
+    <View style={[styles.bigStat, { backgroundColor: colors.muted }]}>
+      <Text
+        style={[styles.bigStatValue, { color: color ?? colors.foreground }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
+        {value}
+      </Text>
+      <Text style={[styles.bigStatLabel, { color: colors.mutedForeground }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -205,12 +242,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 8,
-    marginBottom: 4,
+    marginBottom: 12,
   },
   progressTitle: {
     fontSize: 11,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.semibold,
     letterSpacing: 1,
   },
   supplyToggle: {
@@ -224,15 +260,55 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
   },
-  supplyToggleText: { fontSize: 12, fontWeight: "700" as const },
-  supplyHint: { fontSize: 12, lineHeight: 16, marginTop: 12 },
-  warn: { fontSize: 11, fontWeight: "600", marginTop: 6 },
+  supplyToggleText: { fontSize: 12, fontFamily: FONTS.bold },
 
-  metricsRow: { flexDirection: "row", gap: 10 },
-  metric: { flex: 1 },
+  section: { marginTop: 12 },
+  stepperCard: { paddingTop: 2, paddingBottom: 4 },
+
+  needContent: { paddingTop: 10, paddingBottom: 14 },
+  bigStatRow: { flexDirection: "row", gap: 12 },
+  bigStat: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bigStatValue: {
+    fontSize: 30,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+    textAlign: "center",
+  },
+  bigStatLabel: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    marginTop: 4,
+    textAlign: "center",
+  },
+  supplyHint: { fontSize: 12, lineHeight: 16, marginTop: 12 },
+  warn: { fontSize: 11, fontFamily: FONTS.semibold, marginTop: 6, marginBottom: 4 },
+
+  recipeHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
   recipeName: {
+    flex: 1,
     fontSize: 13,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-    marginBottom: 6,
+    fontFamily: FONTS.mono,
+  },
+  recipeBatches: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+    flexShrink: 0,
+  },
+  recipeBatchesNum: {
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
   },
 });

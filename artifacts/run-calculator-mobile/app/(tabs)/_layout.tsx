@@ -5,6 +5,7 @@ import React, { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { FONTS } from "@/constants/fonts";
 
 const MENU_ITEMS: {
   label: string;
@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     fontSize: 18,
-    fontWeight: "700" as const,
+    fontFamily: FONTS.bold,
     marginBottom: 6,
   },
   menuItem: {
@@ -221,6 +222,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  menuItemLabel: { fontSize: 16, fontWeight: "600" as const },
-  menuItemDesc: { fontSize: 12, marginTop: 2 },
+  menuItemLabel: { fontSize: 16, fontFamily: FONTS.semibold },
+  menuItemDesc: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
 });

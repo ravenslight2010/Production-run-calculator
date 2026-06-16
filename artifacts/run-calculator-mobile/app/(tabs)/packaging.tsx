@@ -3,7 +3,8 @@ import * as Haptics from "expo-haptics";
 import React from "react";
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CardSection, MetricCard, SectionHeader, Stepper } from "@/components/UI";
+import { Stepper } from "@/components/UI";
+import { FONTS } from "@/constants/fonts";
 import { useRun, computeDoughSupply, liveFreezerMin } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -30,6 +31,8 @@ export default function PackagingScreen() {
   const freezerTime = run.settings.freezerTime;
   const freezerMin = liveFreezerMin(run, nowMs);
   const freezerRemaining = Math.max(0, freezerTime - freezerMin);
+  const freezerPct = freezerTime > 0 ? Math.min(freezerMin / freezerTime, 1) : 0;
+  const freezerDone = freezerRemaining <= 0;
   const showFreezer = run.startedAt != null && freezerTime > 0;
   const supply = computeDoughSupply(run, nowMs, run.progress.subTab);
 
@@ -53,155 +56,186 @@ export default function PackagingScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Freezer countdown */}
-        {showFreezer ? (
-          <View style={[styles.freezerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.freezerLeft}>
-              <Feather name="clock" size={16} color={colors.primary} />
-              <View>
-                <Text style={[styles.freezerLabel, { color: colors.mutedForeground }]}>
-                  FREEZER
-                </Text>
-                <Text style={[styles.freezerValue, { color: colors.foreground }]}>
-                  {freezerRemaining > 0
-                    ? `${fmtTime(freezerRemaining)} until full`
-                    : "Fully staged"}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.freezerRight}>
-              <Text style={[styles.freezerCases, { color: colors.primary }]}>
-                {supply.casesOnLine}
-              </Text>
-              <Text style={[styles.freezerCasesLabel, { color: colors.mutedForeground }]}>
-                cases on line
-              </Text>
-            </View>
-          </View>
-        ) : null}
-
-        {/* Output */}
-        <SectionHeader title="Output" />
-        <View style={styles.metricsRow}>
-          <MetricCard
-            label="Cases done"
-            value={casesCompleted.toString()}
-            highlight={casesCompleted > 0}
-            style={styles.metricThird}
-          />
-          <MetricCard
-            label="Cases left"
-            value={calc.casesLeft.toString()}
-            style={styles.metricThird}
-          />
-          <MetricCard
-            label="On line"
-            value={supply.casesOnLine.toString()}
-            style={styles.metricThird}
-          />
-        </View>
-
-        {/* Progress steppers */}
-        <View style={styles.progressHeader}>
-          <Text style={[styles.progressTitle, { color: colors.mutedForeground }]}>
-            PROGRESS
-          </Text>
-          <Pressable
-            onPress={() => {
-              Haptics.selectionAsync();
-              setAutoTrack(!autoTrack);
-            }}
-            style={({ pressed }) => [
-              styles.autoPill,
-              {
-                backgroundColor: autoTrack ? colors.primary : colors.secondary,
-                borderColor: autoTrack ? colors.primary : colors.border,
-                opacity: pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Feather
-              name="zap"
-              size={12}
-              color={autoTrack ? "#000" : colors.mutedForeground}
-            />
-            <Text
-              style={[
-                styles.autoPillText,
-                { color: autoTrack ? "#000" : colors.mutedForeground },
+        {/* ─── Current Progress card ─── */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.cardHeader}>
+            <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>
+              CURRENT PROGRESS
+            </Text>
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync();
+                setAutoTrack(!autoTrack);
+              }}
+              style={({ pressed }) => [
+                styles.autoPill,
+                {
+                  backgroundColor: autoTrack ? colors.primary + "1a" : colors.secondary,
+                  borderColor: autoTrack ? colors.primary + "80" : colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
               ]}
             >
-              Auto {autoTrack ? "On" : "Off"}
-            </Text>
-          </Pressable>
-        </View>
-        {autoTrack ? (
-          <Text style={[styles.autoHint, { color: colors.mutedForeground }]}>
-            Skids &amp; cases update automatically from run time. Tap a stepper to take
-            over for 10 min.
-          </Text>
-        ) : null}
-        <CardSection>
-          <Stepper
-            label="Skids Completed"
-            value={run.progress.skidsCompleted}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ skidsCompleted: Math.max(0, run.progress.skidsCompleted - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ skidsCompleted: run.progress.skidsCompleted + 1 });
-            }}
-          />
-          <Stepper
-            label="Cases on Skid"
-            value={run.progress.casesOnCurrentSkid}
-            onDecrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ casesOnCurrentSkid: Math.max(0, run.progress.casesOnCurrentSkid - 1) });
-            }}
-            onIncrement={() => {
-              Haptics.selectionAsync();
-              suppressAutoTrack();
-              updateProgress({ casesOnCurrentSkid: run.progress.casesOnCurrentSkid + 1 });
-            }}
-          />
-        </CardSection>
+              <Feather
+                name="zap"
+                size={11}
+                color={autoTrack ? colors.primary : colors.mutedForeground}
+              />
+              <Text
+                style={[
+                  styles.autoPillText,
+                  { color: autoTrack ? colors.primary : colors.mutedForeground },
+                ]}
+              >
+                {autoTrack ? "Auto" : "Manual"}
+              </Text>
+            </Pressable>
+          </View>
 
-        {skidNearlyFull ? (
-          <View style={[styles.skidWarn, { backgroundColor: colors.warning + "22", borderColor: colors.warning }]}>
-            <Feather name="alert-triangle" size={14} color={colors.warning} />
-            <Text style={[styles.skidWarnText, { color: colors.warning }]}>
-              Skid nearly full — {casesPerSkid - run.progress.casesOnCurrentSkid} case
-              {casesPerSkid - run.progress.casesOnCurrentSkid !== 1 ? "s" : ""} to go
+          <View style={styles.cardBody}>
+            {autoTrack ? (
+              <Text style={[styles.autoHint, { color: colors.mutedForeground }]}>
+                Skids &amp; cases update automatically from run time. Tap a stepper to take
+                over for 10 min.
+              </Text>
+            ) : null}
+
+            {/* Steppers */}
+            <Stepper
+              label="Total Skids Completed"
+              value={run.progress.skidsCompleted}
+              onDecrement={() => {
+                Haptics.selectionAsync();
+                suppressAutoTrack();
+                updateProgress({ skidsCompleted: Math.max(0, run.progress.skidsCompleted - 1) });
+              }}
+              onIncrement={() => {
+                Haptics.selectionAsync();
+                suppressAutoTrack();
+                updateProgress({ skidsCompleted: run.progress.skidsCompleted + 1 });
+              }}
+            />
+            <Stepper
+              label="Cases on Current Skid"
+              value={run.progress.casesOnCurrentSkid}
+              onDecrement={() => {
+                Haptics.selectionAsync();
+                suppressAutoTrack();
+                updateProgress({ casesOnCurrentSkid: Math.max(0, run.progress.casesOnCurrentSkid - 1) });
+              }}
+              onIncrement={() => {
+                Haptics.selectionAsync();
+                suppressAutoTrack();
+                updateProgress({ casesOnCurrentSkid: run.progress.casesOnCurrentSkid + 1 });
+              }}
+            />
+
+            {/* Skid nearly full nudge */}
+            {skidNearlyFull ? (
+              <View style={[styles.skidWarn, { backgroundColor: colors.warning + "22", borderColor: colors.warning + "4d" }]}>
+                <Feather name="alert-triangle" size={14} color={colors.warning} />
+                <Text style={[styles.skidWarnText, { color: colors.warning }]}>
+                  Skid nearly full — {casesPerSkid - run.progress.casesOnCurrentSkid} case
+                  {casesPerSkid - run.progress.casesOnCurrentSkid !== 1 ? "s" : ""} to go
+                </Text>
+              </View>
+            ) : null}
+
+            {/* Skid Done quick action */}
+            <Pressable
+              onPress={() => {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                suppressAutoTrack();
+                updateProgress({
+                  skidsCompleted: run.progress.skidsCompleted + 1,
+                  casesOnCurrentSkid: 0,
+                });
+              }}
+              style={({ pressed }) => [
+                styles.skidDoneBtn,
+                {
+                  backgroundColor: colors.success + "22",
+                  borderColor: colors.success + "66",
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}
+            >
+              <Feather name="check-circle" size={16} color={colors.success} />
+              <Text style={[styles.skidDoneText, { color: colors.success }]}>
+                Skid Done — log &amp; reset
+              </Text>
+            </Pressable>
+
+            {/* Freezer filling progress */}
+            {showFreezer ? (
+              <>
+                <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                <Text style={[styles.freezerLabel, { color: colors.mutedForeground }]}>
+                  FREEZER FILLING
+                </Text>
+                <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      {
+                        backgroundColor: freezerDone ? colors.success : colors.primary,
+                        width: `${freezerPct * 100}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.freezerStatus,
+                    { color: freezerDone ? colors.success : colors.mutedForeground },
+                  ]}
+                >
+                  {freezerDone ? "✓ Freezer full" : `${fmtTime(freezerRemaining)} until full`}
+                </Text>
+              </>
+            ) : null}
+          </View>
+        </View>
+
+        {/* ─── Output metrics ─── */}
+        <View style={styles.outputRow}>
+          <View style={[styles.outputCell, { backgroundColor: colors.secondary + "66" }]}>
+            <Text
+              style={[styles.outputValue, { color: colors.success }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {casesCompleted}
+            </Text>
+            <Text style={[styles.outputLabel, { color: colors.mutedForeground }]}>
+              Cases done
             </Text>
           </View>
-        ) : null}
-
-        {/* Quick action — log the finished skid and start a fresh one */}
-        <Pressable
-          onPress={() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            suppressAutoTrack();
-            updateProgress({
-              skidsCompleted: run.progress.skidsCompleted + 1,
-              casesOnCurrentSkid: 0,
-            });
-          }}
-          style={({ pressed }) => [
-            styles.skidDoneBtn,
-            { borderColor: colors.success, opacity: pressed ? 0.6 : 1 },
-          ]}
-        >
-          <Feather name="check-circle" size={16} color={colors.success} />
-          <Text style={[styles.skidDoneText, { color: colors.success }]}>
-            Skid Done — log &amp; reset
-          </Text>
-        </Pressable>
+          <View style={[styles.outputCell, { backgroundColor: colors.secondary + "66" }]}>
+            <Text
+              style={[styles.outputValue, { color: colors.foreground }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {calc.casesLeft}
+            </Text>
+            <Text style={[styles.outputLabel, { color: colors.mutedForeground }]}>
+              Cases left
+            </Text>
+          </View>
+          <View style={[styles.outputCell, { backgroundColor: colors.secondary + "66" }]}>
+            <Text
+              style={[styles.outputValue, { color: colors.foreground }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              {supply.casesOnLine}
+            </Text>
+            <Text style={[styles.outputLabel, { color: colors.mutedForeground }]}>
+              On line
+            </Text>
+          </View>
+        </View>
       </ScrollView>
     </View>
   );
@@ -211,37 +245,23 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
 
-  freezerCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: 12,
+  card: {
+    borderRadius: 8,
     borderWidth: 1,
-    padding: 14,
+    overflow: "hidden",
     marginTop: 12,
   },
-  freezerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-  freezerLabel: { fontSize: 11, fontWeight: "600" as const, letterSpacing: 1 },
-  freezerValue: { fontSize: 15, fontWeight: "700" as const, marginTop: 2 },
-  freezerRight: { alignItems: "flex-end" },
-  freezerCases: { fontSize: 22, fontWeight: "700" as const, fontVariant: ["tabular-nums"] },
-  freezerCasesLabel: { fontSize: 11, marginTop: 1 },
-
-  metricsRow: { flexDirection: "row", gap: 10 },
-  metricThird: { flex: 1 },
-
-  progressHeader: {
+  cardHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 22,
-    marginBottom: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
-  progressTitle: {
-    fontSize: 11,
-    fontWeight: "600" as const,
-    letterSpacing: 1,
-  },
+  cardTitle: { fontSize: 12, fontFamily: FONTS.semibold, letterSpacing: 1 },
+  cardBody: { paddingHorizontal: 16, paddingBottom: 14 },
+
   autoPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -251,20 +271,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  autoPillText: { fontSize: 12, fontWeight: "700" as const },
-  autoHint: { fontSize: 12, lineHeight: 16, marginBottom: 10, marginTop: -2 },
+  autoPillText: { fontSize: 11, fontFamily: FONTS.semibold },
+  autoHint: { fontSize: 12, lineHeight: 16, marginTop: 4, marginBottom: 8 },
 
   skidWarn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginTop: 12,
   },
-  skidWarnText: { fontSize: 13, fontWeight: "600" as const, flex: 1 },
+  skidWarnText: { fontSize: 13, fontFamily: FONTS.semibold, flex: 1 },
 
   skidDoneBtn: {
     flexDirection: "row",
@@ -272,9 +292,39 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 8,
+    paddingVertical: 12,
     marginTop: 12,
   },
-  skidDoneText: { fontSize: 15, fontWeight: "700" as const },
+  skidDoneText: { fontSize: 14, fontFamily: FONTS.semibold },
+
+  divider: { height: StyleSheet.hairlineWidth, opacity: 0.5, marginTop: 14, marginBottom: 10 },
+  freezerLabel: { fontSize: 11, fontFamily: FONTS.semibold, letterSpacing: 1, marginBottom: 6 },
+  progressTrack: {
+    height: 6,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  progressFill: { height: "100%", borderRadius: 999 },
+  freezerStatus: {
+    fontSize: 11,
+    fontFamily: FONTS.mono,
+    textAlign: "right",
+    marginTop: 6,
+  },
+
+  outputRow: { flexDirection: "row", gap: 12, marginTop: 16 },
+  outputCell: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: "center",
+  },
+  outputValue: {
+    fontSize: 30,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
+  outputLabel: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
 });

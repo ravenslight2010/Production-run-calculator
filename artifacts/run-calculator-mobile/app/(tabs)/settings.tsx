@@ -5,6 +5,7 @@ import React from "react";
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
+import { FONTS } from "@/constants/fonts";
 import { useRun, runLabel } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -131,8 +132,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 13,
   },
-  rowLabel: { fontSize: 16, fontWeight: "500" as const },
-  rowHint: { fontSize: 12, marginTop: 3, lineHeight: 16 },
+  rowLabel: { fontSize: 16, fontWeight: "500" as const, fontFamily: FONTS.medium },
+  rowHint: { fontSize: 12, marginTop: 3, lineHeight: 16, fontFamily: FONTS.regular },
 
   autoPill: {
     flexDirection: "row",
@@ -143,7 +144,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  autoPillText: { fontSize: 12, fontWeight: "700" as const },
+  autoPillText: { fontSize: 12, fontWeight: "700" as const, fontFamily: FONTS.bold },
 
   linkBtn: {
     flexDirection: "row",
@@ -154,7 +155,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
-  linkText: { flex: 1, fontSize: 15, fontWeight: "600" as const },
+  linkText: { flex: 1, fontSize: 15, fontWeight: "600" as const, fontFamily: FONTS.semibold },
 
   resetBtn: {
     borderRadius: 12,
@@ -163,5 +164,5 @@ const styles = StyleSheet.create({
     marginTop: 24,
     borderWidth: 1,
   },
-  resetBtnText: { fontSize: 16, fontWeight: "600" as const },
+  resetBtnText: { fontSize: 16, fontWeight: "600" as const, fontFamily: FONTS.semibold },
 });

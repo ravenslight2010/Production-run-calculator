@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
 import { useRun, type MasterListKey } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
+import { FONTS } from "@/constants/fonts";
 
 function tap() {
   Haptics.selectionAsync();
@@ -409,7 +410,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  chipText: { fontSize: 13, fontWeight: "500" as const },
+  chipText: { fontSize: 13, fontFamily: FONTS.medium },
   editRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -424,6 +425,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
     fontSize: 13,
+    fontFamily: FONTS.regular,
   },
   editIconBtn: { padding: 6 },
   addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
@@ -434,6 +436,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 14,
+    fontFamily: FONTS.regular,
   },
   addBtn: {
     width: 44,
@@ -449,7 +452,7 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(127,127,127,0.3)",
     gap: 8,
   },
-  brandName: { fontSize: 15, fontWeight: "700" as const },
+  brandName: { fontSize: 15, fontFamily: FONTS.bold },
   pinHint: { fontSize: 12, marginBottom: 10 },
   pinSaveBtn: {
     paddingHorizontal: 18,
@@ -458,7 +461,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  pinSaveText: { fontSize: 14, fontWeight: "600" as const },
+  pinSaveText: { fontSize: 14, fontFamily: FONTS.semibold },
   clearPinBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -469,5 +472,5 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     marginTop: 12,
   },
-  clearPinText: { fontSize: 13, fontWeight: "600" as const },
+  clearPinText: { fontSize: 13, fontFamily: FONTS.semibold },
 });

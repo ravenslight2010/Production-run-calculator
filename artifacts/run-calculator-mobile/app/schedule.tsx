@@ -15,6 +15,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { CardSection, SectionHeader } from "@/components/UI";
 import { todayStr, useRun } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
+import { FONTS } from "@/constants/fonts";
 
 function tap() {
   Haptics.selectionAsync();
@@ -408,11 +409,11 @@ const styles = StyleSheet.create({
   },
   dateWeekday: {
     fontSize: 10,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.semibold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  dateDay: { fontSize: 13, fontWeight: "700" as const, marginTop: 2 },
+  dateDay: { fontSize: 13, fontFamily: FONTS.bold, marginTop: 2 },
   dateBadge: {
     marginTop: 4,
     minWidth: 18,
@@ -422,7 +423,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 4,
   },
-  dateBadgeText: { fontSize: 10, fontWeight: "700" as const },
+  dateBadgeText: { fontSize: 10, fontFamily: FONTS.bold },
 
   empty: { fontSize: 13, fontStyle: "italic" },
   planRow: {
@@ -432,7 +433,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  planTitle: { fontSize: 14, fontWeight: "700" as const },
+  planTitle: { fontSize: 14, fontFamily: FONTS.bold },
   planMeta: { fontSize: 12, marginTop: 2 },
   planNotes: { fontSize: 12, marginTop: 2, fontStyle: "italic" },
   planDelBtn: { padding: 6 },
@@ -447,7 +448,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 12,
   },
-  applyText: { fontSize: 14, fontWeight: "700" as const },
+  applyText: { fontSize: 14, fontFamily: FONTS.bold },
   clearBtn: {
     width: 46,
     borderWidth: 1,
@@ -456,7 +457,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  fieldLabel: { fontSize: 12, fontWeight: "600" as const },
+  fieldLabel: { fontSize: 12, fontFamily: FONTS.semibold },
   optionWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   optionChip: {
     borderWidth: 1,
@@ -464,7 +465,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  optionText: { fontSize: 13, fontWeight: "500" as const },
+  optionText: { fontSize: 13, fontFamily: FONTS.medium },
   inlineRow: { flexDirection: "row", gap: 8, marginTop: 8 },
   input: {
     borderWidth: 1,
@@ -472,6 +473,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 14,
+    fontFamily: FONTS.regular,
   },
   addBtn: {
     flexDirection: "row",
@@ -482,5 +484,5 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginTop: 14,
   },
-  addText: { fontSize: 14, fontWeight: "700" as const },
+  addText: { fontSize: 14, fontFamily: FONTS.bold },
 });

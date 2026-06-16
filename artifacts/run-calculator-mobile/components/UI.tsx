@@ -11,6 +11,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { FONTS } from "@/constants/fonts";
 import type { RecipeRow } from "@/context/RunContext";
 
 export function MetricCard({
@@ -211,10 +212,10 @@ const statRowStyles = StyleSheet.create({
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  label: { fontSize: 13, flexShrink: 1 },
+  label: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular },
   value: {
     fontSize: 14,
-    fontWeight: "600",
+    fontFamily: FONTS.mono,
     fontVariant: ["tabular-nums"],
     textAlign: "right",
   },
@@ -318,6 +319,117 @@ export function CardSection({
     >
       {children}
     </View>
+  );
+}
+
+export function Card({
+  title,
+  icon,
+  accent = false,
+  accentColor,
+  children,
+  style,
+  contentStyle,
+}: {
+  title?: string;
+  icon?: keyof typeof Feather.glyphMap;
+  accent?: boolean;
+  accentColor?: string;
+  children: React.ReactNode;
+  style?: ViewStyle;
+  contentStyle?: ViewStyle;
+}) {
+  const colors = useColors();
+  const showAccent = accent || !!accentColor;
+  return (
+    <View
+      style={[
+        styles.card,
+        { backgroundColor: colors.card, borderColor: colors.border },
+        style,
+      ]}
+    >
+      {showAccent ? (
+        <View
+          style={[
+            styles.cardAccent,
+            { backgroundColor: accentColor ?? colors.primary },
+          ]}
+        />
+      ) : null}
+      {title ? (
+        <View style={styles.cardHeader}>
+          {icon ? (
+            <Feather name={icon} size={15} color={colors.mutedForeground} />
+          ) : null}
+          <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>
+            {title.toUpperCase()}
+          </Text>
+        </View>
+      ) : null}
+      <View style={[styles.cardContent, contentStyle]}>{children}</View>
+    </View>
+  );
+}
+
+export function Button({
+  label,
+  onPress,
+  icon,
+  variant = "primary",
+  disabled = false,
+  size = "md",
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  icon?: keyof typeof Feather.glyphMap;
+  variant?: "primary" | "outline" | "destructive";
+  disabled?: boolean;
+  size?: "sm" | "md";
+  style?: ViewStyle;
+}) {
+  const colors = useColors();
+  const bg =
+    variant === "primary"
+      ? colors.primary
+      : variant === "destructive"
+        ? colors.destructive
+        : "transparent";
+  const fg =
+    variant === "primary"
+      ? colors.primaryForeground
+      : variant === "destructive"
+        ? colors.destructiveForeground
+        : colors.foreground;
+  const borderColor =
+    variant === "outline" ? colors.border : "transparent";
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        styles.button,
+        size === "sm" && styles.buttonSm,
+        {
+          backgroundColor: bg,
+          borderColor,
+          opacity: disabled ? 0.4 : pressed ? 0.7 : 1,
+        },
+        style,
+      ]}
+    >
+      {icon ? <Feather name={icon} size={size === "sm" ? 13 : 15} color={fg} /> : null}
+      <Text
+        style={[
+          styles.buttonText,
+          size === "sm" && styles.buttonTextSm,
+          { color: fg },
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -695,8 +807,8 @@ const roStyles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 2,
   },
-  headIng: { fontSize: 10, fontWeight: "700", letterSpacing: 0.6 },
-  headLbs: { fontSize: 10, fontWeight: "700", letterSpacing: 0.6 },
+  headIng: { fontSize: 10, fontFamily: FONTS.bold, letterSpacing: 0.6 },
+  headLbs: { fontSize: 10, fontFamily: FONTS.bold, letterSpacing: 0.6 },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -705,8 +817,8 @@ const roStyles = StyleSheet.create({
     paddingHorizontal: 2,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  ing: { fontSize: 14, flex: 1, paddingRight: 8 },
-  lbs: { fontSize: 14, fontVariant: ["tabular-nums"] },
+  ing: { fontSize: 14, flex: 1, paddingRight: 8, fontFamily: FONTS.regular },
+  lbs: { fontSize: 14, fontFamily: FONTS.mono, fontVariant: ["tabular-nums"] },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -716,8 +828,8 @@ const roStyles = StyleSheet.create({
     marginTop: 6,
     paddingHorizontal: 2,
   },
-  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: "600" },
-  totalValue: { fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: FONTS.semibold },
+  totalValue: { fontSize: 14, fontFamily: FONTS.monoBold, fontVariant: ["tabular-nums"] },
 });
 
 const recipeStyles = StyleSheet.create({
@@ -726,91 +838,95 @@ const recipeStyles = StyleSheet.create({
   nameInput: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
+    fontFamily: FONTS.regular,
   },
   savePresetBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 4,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
-  savePresetText: { fontSize: 13, fontWeight: "600" },
+  savePresetText: { fontSize: 13, fontFamily: FONTS.semibold },
   presetRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   presetChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 4,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  presetChipText: { fontSize: 12, fontWeight: "500" },
+  presetChipText: { fontSize: 12, fontFamily: FONTS.medium },
   factoryWrap: { gap: 6 },
   factoryLabel: {
     fontSize: 11,
     textTransform: "uppercase",
     letterSpacing: 0.4,
+    fontFamily: FONTS.regular,
   },
   factoryChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 4,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  factoryChipText: { fontSize: 12, fontWeight: "500" },
+  factoryChipText: { fontSize: 12, fontFamily: FONTS.medium },
   row: { flexDirection: "row", alignItems: "center", gap: 8 },
   ingInput: {
     flex: 1,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 4,
     paddingHorizontal: 10,
     paddingVertical: 7,
     fontSize: 14,
+    fontFamily: FONTS.regular,
   },
   lbsInput: {
     width: 64,
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 4,
     paddingHorizontal: 8,
     paddingVertical: 7,
     fontSize: 14,
+    fontFamily: FONTS.mono,
   },
   lbsReadonly: { alignItems: "flex-end", justifyContent: "center" },
-  lbsUnit: { fontSize: 12, width: 22 },
+  lbsUnit: { fontSize: 12, width: 22, fontFamily: FONTS.regular },
   scaleRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
-  scaleLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 },
-  scaleGroup: { flexDirection: "row", borderRadius: 10, padding: 3, gap: 3 },
+  scaleLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, fontFamily: FONTS.regular },
+  scaleGroup: { flexDirection: "row", borderRadius: 4, padding: 3, gap: 3 },
   scaleBtn: {
     minWidth: 36,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 7,
+    borderRadius: 4,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  scaleBtnText: { fontSize: 13, fontWeight: "700" },
-  scaleHint: { fontSize: 11 },
+  scaleBtnText: { fontSize: 13, fontFamily: FONTS.bold },
+  scaleHint: { fontSize: 11, fontFamily: FONTS.regular },
   quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   quickChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 3,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  quickChipText: { fontSize: 11 },
+  quickChipText: { fontSize: 11, fontFamily: FONTS.regular },
   addRowBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -818,10 +934,10 @@ const recipeStyles = StyleSheet.create({
     gap: 6,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderRadius: 8,
+    borderRadius: 4,
     paddingVertical: 9,
   },
-  addRowText: { fontSize: 13, fontWeight: "600" },
+  addRowText: { fontSize: 13, fontFamily: FONTS.semibold },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -829,13 +945,13 @@ const recipeStyles = StyleSheet.create({
     borderTopWidth: 1,
     paddingTop: 10,
   },
-  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5 },
-  totalValue: { fontSize: 16, fontWeight: "700" },
+  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, fontFamily: FONTS.semibold },
+  totalValue: { fontSize: 16, fontFamily: FONTS.monoBold },
 });
 
 const styles = StyleSheet.create({
   metricCard: {
-    borderRadius: 12,
+    borderRadius: 8,
     padding: 14,
     borderWidth: 1,
     flex: 1,
@@ -844,7 +960,7 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     fontSize: 10,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.semibold,
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 4,
@@ -852,17 +968,18 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     fontSize: 32,
-    fontWeight: "700" as const,
+    fontFamily: FONTS.bold,
     textAlign: "center",
   },
   metricSublabel: {
     fontSize: 11,
     marginTop: 3,
     textAlign: "center",
+    fontFamily: FONTS.regular,
   },
 
   batchCard: {
-    borderRadius: 12,
+    borderRadius: 8,
     padding: 14,
     borderWidth: 1,
     flex: 1,
@@ -870,16 +987,16 @@ const styles = StyleSheet.create({
   },
   batchName: {
     fontSize: 10,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.semibold,
     letterSpacing: 0.8,
     marginBottom: 4,
   },
   batchCount: {
     fontSize: 40,
-    fontWeight: "700" as const,
+    fontFamily: FONTS.monoBold,
     lineHeight: 44,
   },
-  batchUnit: { fontSize: 11, marginTop: 2 },
+  batchUnit: { fontSize: 11, marginTop: 2, fontFamily: FONTS.regular },
 
   stepperRow: {
     flexDirection: "row",
@@ -888,31 +1005,31 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  stepperLabel: { fontSize: 16, fontWeight: "500" as const, flex: 1 },
+  stepperLabel: { fontSize: 16, fontFamily: FONTS.medium, flex: 1 },
   stepperControls: { flexDirection: "row", alignItems: "center", gap: 14 },
   stepperBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
   },
   stepperBtnText: {
     fontSize: 22,
-    fontWeight: "300" as const,
+    fontFamily: FONTS.regular,
     lineHeight: 24,
     includeFontPadding: false,
   },
   stepperValue: {
     fontSize: 20,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.monoBold,
     minWidth: 34,
     textAlign: "center",
   },
 
   sectionHeader: {
     fontSize: 11,
-    fontWeight: "600" as const,
+    fontFamily: FONTS.semibold,
     letterSpacing: 1,
     marginTop: 22,
     marginBottom: 10,
@@ -924,26 +1041,57 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  fieldLabel: { fontSize: 16, fontWeight: "500" as const, flex: 1 },
+  fieldLabel: { fontSize: 16, fontFamily: FONTS.medium, flex: 1 },
   fieldRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   fieldInput: {
     fontSize: 16,
     minWidth: 70,
-    fontWeight: "500" as const,
+    fontFamily: FONTS.mono,
     padding: Platform.OS === "web" ? 4 : 0,
   },
   fieldInputText: {
     fontSize: 16,
     minWidth: 130,
-    fontWeight: "500" as const,
+    fontFamily: FONTS.medium,
     textAlign: "right",
     padding: Platform.OS === "web" ? 4 : 0,
   },
-  fieldUnit: { fontSize: 13 },
+  fieldUnit: { fontSize: 13, fontFamily: FONTS.regular },
 
   cardSection: {
-    borderRadius: 12,
+    borderRadius: 8,
     paddingHorizontal: 16,
     borderWidth: 1,
   },
+
+  card: {
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  cardAccent: { height: 3, width: "100%" },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 2,
+  },
+  cardTitle: { fontSize: 12, fontFamily: FONTS.semibold, letterSpacing: 1 },
+  cardContent: { paddingHorizontal: 16, paddingVertical: 12 },
+
+  button: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  buttonSm: { paddingHorizontal: 10, paddingVertical: 6 },
+  buttonText: { fontSize: 14, fontFamily: FONTS.semibold },
+  buttonTextSm: { fontSize: 12 },
 });

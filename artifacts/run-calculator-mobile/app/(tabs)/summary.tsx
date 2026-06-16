@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SectionHeader } from "@/components/UI";
+import { FONTS } from "@/constants/fonts";
 import {
   computeCalc,
   historicalBenchmarkPpm,
@@ -554,8 +555,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 12,
   },
-  shiftTitle: { fontSize: 15, fontWeight: "600" as const },
-  shiftCount: { fontSize: 13 },
+  shiftTitle: { fontSize: 15, fontWeight: "600" as const, fontFamily: FONTS.semibold },
+  shiftCount: { fontSize: 13, fontFamily: FONTS.regular },
   shiftHeaderRight: { flexDirection: "row", alignItems: "center", gap: 10 },
   exportBtn: {
     flexDirection: "row",
@@ -566,7 +567,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  exportBtnText: { fontSize: 12, fontWeight: "600" as const },
+  exportBtnText: { fontSize: 12, fontWeight: "600" as const, fontFamily: FONTS.semibold },
   histExportBtn: {
     borderWidth: 1,
     borderRadius: 10,
@@ -587,8 +588,14 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     letterSpacing: 1,
     marginBottom: 4,
+    fontFamily: FONTS.semibold,
   },
-  statsCellVal: { fontSize: 26, fontWeight: "800" as const },
+  statsCellVal: {
+    fontSize: 26,
+    fontWeight: "800" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
 
   benchCard: {
     flexDirection: "row",
@@ -601,7 +608,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   benchLeft: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
-  benchText: { fontSize: 13, flex: 1 },
+  benchText: { fontSize: 13, flex: 1, fontFamily: FONTS.regular },
   benchPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -610,7 +617,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
   },
-  benchPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const },
+  benchPillText: { color: "#fff", fontSize: 12, fontWeight: "700" as const, fontFamily: FONTS.bold },
 
   runCard: { borderRadius: 16, borderWidth: 1, padding: 14 },
   runHeader: {
@@ -621,8 +628,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   labelRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  runLabel: { fontSize: 15, fontWeight: "700" as const, flexShrink: 1 },
-  runTime: { fontSize: 11, marginTop: 2 },
+  runLabel: { fontSize: 15, fontWeight: "700" as const, flexShrink: 1, fontFamily: FONTS.bold },
+  runTime: { fontSize: 11, marginTop: 2, fontFamily: FONTS.regular },
   dieBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -633,6 +640,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700" as const,
     letterSpacing: 0.3,
+    fontFamily: FONTS.bold,
   },
   statusPill: {
     paddingHorizontal: 9,
@@ -644,6 +652,7 @@ const styles = StyleSheet.create({
     fontWeight: "700" as const,
     textTransform: "uppercase",
     letterSpacing: 0.6,
+    fontFamily: FONTS.bold,
   },
 
   statRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
@@ -659,8 +668,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: 2,
+    fontFamily: FONTS.semibold,
   },
-  statBoxVal: { fontSize: 18, fontWeight: "800" as const },
+  statBoxVal: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
 
   metaRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
   metaField: { flex: 1 },
@@ -670,6 +685,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: 4,
+    fontFamily: FONTS.bold,
   },
   metaInputRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   metaInput: {
@@ -681,21 +697,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600" as const,
     fontVariant: ["tabular-nums"],
+    fontFamily: FONTS.mono,
   },
   metaDelta: {
     fontSize: 12,
     fontWeight: "700" as const,
     fontVariant: ["tabular-nums"],
+    fontFamily: FONTS.monoBold,
   },
   metaSub: {
     fontSize: 10,
     marginTop: 3,
     fontVariant: ["tabular-nums"],
+    fontFamily: FONTS.mono,
   },
 
   progressWrap: { gap: 5 },
   progressLabels: { flexDirection: "row", justifyContent: "space-between" },
-  progressText: { fontSize: 11, fontWeight: "600" as const },
+  progressText: { fontSize: 11, fontWeight: "600" as const, fontFamily: FONTS.semibold },
   progressTrack: { height: 6, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
 
@@ -704,6 +723,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     minHeight: 90,
     padding: Platform.OS === "web" ? 4 : 0,
+    fontFamily: FONTS.regular,
   },
 
   histCard: {
@@ -714,15 +734,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
   },
-  histDate: { fontSize: 15, fontWeight: "700" as const },
-  histMeta: { fontSize: 12, marginTop: 2 },
+  histDate: { fontSize: 15, fontWeight: "700" as const, fontFamily: FONTS.bold },
+  histMeta: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
   histStat: { alignItems: "center", minWidth: 48 },
-  histVal: { fontSize: 18, fontWeight: "800" as const },
+  histVal: {
+    fontSize: 18,
+    fontWeight: "800" as const,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
   histValLabel: {
     fontSize: 9,
     fontWeight: "600" as const,
     letterSpacing: 0.6,
     textTransform: "uppercase",
     marginTop: 1,
+    fontFamily: FONTS.semibold,
   },
 });
