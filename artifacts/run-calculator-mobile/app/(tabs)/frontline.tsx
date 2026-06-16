@@ -1,8 +1,13 @@
 import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BatchCard, CardSection, SectionHeader } from "@/components/UI";
-import { useRun, sauceBarrelBreakdown } from "@/context/RunContext";
+import { CardSection, ReadOnlyRecipe, SectionHeader, StatRow } from "@/components/UI";
+import {
+  useRun,
+  sauceBarrelBreakdown,
+  DEFAULT_PEP_TYPES,
+  type RecipeRow,
+} from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function FrontlineScreen() {
@@ -14,35 +19,55 @@ export default function FrontlineScreen() {
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const s = run.settings;
-  const applicators = [
-    s.app1Type ? { name: s.app1Type, batches: calc.app1Batches, lbs: calc.app1Lbs } : null,
-    s.app2Type ? { name: s.app2Type, batches: calc.app2Batches, lbs: calc.app2Lbs } : null,
-    s.app3Type ? { name: s.app3Type, batches: calc.app3Batches, lbs: calc.app3Lbs } : null,
-    s.app4Type ? { name: s.app4Type, batches: calc.app4Batches, lbs: calc.app4Lbs } : null,
-  ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
-  const pepperoni = [
-    s.pep1Type ? { name: s.pep1Type, batches: calc.pep1Batches, lbs: calc.pep1Lbs } : null,
-    s.pep2Type ? { name: s.pep2Type, batches: calc.pep2Batches, lbs: calc.pep2Lbs } : null,
-  ].filter(Boolean) as { name: string; batches: number; lbs: number }[];
 
-  const hasSauce = s.sauceOzPerPizza > 0 && calc.sauceLbs > 0;
-  const sauceBarrels = sauceBarrelBreakdown(calc.sauceLbs, calc.sauceEffBarrel);
+  const appStat = (n: 1 | 2 | 3 | 4, type: string, lbs: number, batches: number) => {
+    const isMix = (type ?? "").trim().toLowerCase().includes("mix");
+    return {
+      label: type ? `App ${n} — ${type}` : `Applicator ${n}`,
+      value: isMix ? `${lbs.toFixed(1)} lbs` : `${batches.toFixed(2)} batches`,
+      highlight: isMix ? lbs > 0 : batches > 0,
+    };
+  };
+  const pepStat = (n: 1 | 2, type: string, lbs: number, batches: number) => {
+    const isDefault = DEFAULT_PEP_TYPES.includes(type ?? "");
+    return {
+      label: type ? `Pep ${n} — ${type}` : `Pep Applicator ${n}`,
+      value: isDefault ? `${lbs.toFixed(2)} lbs` : `${batches.toFixed(2)} batches`,
+      highlight: isDefault ? lbs > 0 : batches > 0,
+    };
+  };
+  const apps = [
+    appStat(1, s.app1Type, calc.app1Lbs, calc.app1Batches),
+    appStat(2, s.app2Type, calc.app2Lbs, calc.app2Batches),
+    appStat(3, s.app3Type, calc.app3Lbs, calc.app3Batches),
+    appStat(4, s.app4Type, calc.app4Lbs, calc.app4Batches),
+  ];
+  const peps = [
+    pepStat(1, s.pep1Type, calc.pep1Lbs, calc.pep1Batches),
+    pepStat(2, s.pep2Type, calc.pep2Lbs, calc.pep2Batches),
+  ];
+  const sauceBd = sauceBarrelBreakdown(calc.sauceLbs, calc.sauceEffBarrel);
+  const sauceValue = sauceBd
+    ? `${calc.sauceBatches.toFixed(2)} batches · ${sauceBd.batchesPerBarrel}/barrel → ${sauceBd.totalBarrels} barrels`
+    : `${calc.sauceBatches.toFixed(2)} batches`;
 
-  const hasAny = hasSauce || applicators.length > 0 || pepperoni.length > 0;
-
-  const renderGrid = (rows: { name: string; batches: number; lbs: number }[]) => (
-    <View style={styles.batchGrid}>
-      {rows.map((b) => (
-        <BatchCard
-          key={b.name}
-          name={b.name}
-          batches={b.batches}
-          lbs={b.lbs}
-          style={styles.batchItem}
-        />
-      ))}
-    </View>
-  );
+  const appRecipes = [
+    { type: s.app1Type, recipe: s.app1CheeseRecipe, name: s.app1CheeseRecipeName },
+    { type: s.app2Type, recipe: s.app2CheeseRecipe, name: s.app2CheeseRecipeName },
+    { type: s.app3Type, recipe: s.app3CheeseRecipe, name: s.app3CheeseRecipeName },
+    { type: s.app4Type, recipe: s.app4CheeseRecipe, name: s.app4CheeseRecipeName },
+  ]
+    .map((a) => {
+      const t = (a.type ?? "").trim();
+      const lower = t.toLowerCase();
+      if (!t || (lower !== "cheese" && !lower.includes("mix"))) return null;
+      const rows = (a.recipe ?? []).filter(
+        (r) => (r.ingredient ?? "").trim() !== "" || (Number(r.lbs) || 0) > 0,
+      );
+      if (rows.length === 0) return null;
+      return { type: t, name: a.name ?? "", rows: a.recipe ?? [] };
+    })
+    .filter(Boolean) as { type: string; name: string; rows: RecipeRow[] }[];
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -53,50 +78,32 @@ export default function FrontlineScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {hasAny ? (
-          <>
-            <SectionHeader title="Batches Needed" />
-            <Text style={[styles.basis, { color: colors.mutedForeground }]}>
-              Based on {Math.round(calc.casesLeft)} cases × {s.pizzasPerCase} pizzas/case
+        <SectionHeader title="Batches Needed" />
+        <CardSection style={{ paddingVertical: 6 }}>
+          <Text style={[styles.basis, { color: colors.mutedForeground }]}>
+            Based on {Math.round(calc.casesLeft)} cases × {s.pizzasPerCase} pizzas/case
+          </Text>
+          <StatRow label="Sauce" value={sauceValue} highlight={calc.sauceBatches > 0} />
+          {apps.map((a, i) => (
+            <StatRow key={`app${i}`} label={a.label} value={a.value} highlight={a.highlight} />
+          ))}
+          <View style={[styles.divider, { backgroundColor: colors.border }]} />
+          {peps.map((p, i) => (
+            <StatRow key={`pep${i}`} label={p.label} value={p.value} highlight={p.highlight} />
+          ))}
+        </CardSection>
+
+        {appRecipes.map((r, i) => (
+          <View key={i} style={{ marginTop: 14 }}>
+            <Text style={[styles.recipeTitle, { color: colors.foreground }]}>
+              {r.type} Recipe
+              {r.name?.trim() ? ` · ${r.name}` : ""}
             </Text>
-            {hasSauce ? (
-              <>
-                <SectionHeader title="Sauce" />
-                <BatchCard
-                  name="Sauce"
-                  batches={calc.sauceBatches}
-                  lbs={calc.sauceLbs}
-                  sub={
-                    sauceBarrels
-                      ? `${sauceBarrels.totalBarrels} barrel${sauceBarrels.totalBarrels === 1 ? "" : "s"} · ${sauceBarrels.batchesPerBarrel}/barrel`
-                      : undefined
-                  }
-                />
-              </>
-            ) : null}
-            {applicators.length > 0 ? (
-              <>
-                <SectionHeader title="Applicators" />
-                {renderGrid(applicators)}
-              </>
-            ) : null}
-            {pepperoni.length > 0 ? (
-              <>
-                <SectionHeader title="Pepperoni" />
-                {renderGrid(pepperoni)}
-              </>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <SectionHeader title="Frontline Needs" />
-            <CardSection style={{ paddingVertical: 16 }}>
-              <Text style={[styles.empty, { color: colors.mutedForeground }]}>
-                Add applicator or pepperoni types in Setup to see frontline needs.
-              </Text>
+            <CardSection style={{ paddingVertical: 14 }}>
+              <ReadOnlyRecipe rows={r.rows} />
             </CardSection>
-          </>
-        )}
+          </View>
+        ))}
       </ScrollView>
     </View>
   );
@@ -105,8 +112,7 @@ export default function FrontlineScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
-  batchGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  batchItem: { flexBasis: "47%", flexGrow: 1 },
-  basis: { fontSize: 12, marginBottom: 4 },
-  empty: { fontSize: 13, fontStyle: "italic" },
+  basis: { fontSize: 12, marginTop: 6, marginBottom: 4 },
+  divider: { height: StyleSheet.hairlineWidth, opacity: 0.5, marginVertical: 6 },
+  recipeTitle: { fontSize: 14, fontWeight: "600", marginBottom: 6 },
 });

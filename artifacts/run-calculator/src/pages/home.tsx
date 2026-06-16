@@ -1058,6 +1058,62 @@ function FrontlineRecipeCard({
   );
 }
 
+function ReadOnlyRecipeCard({
+  title,
+  subtitle,
+  recipe,
+  accent,
+}: {
+  title: string;
+  subtitle?: string;
+  recipe: RecipeRow[];
+  accent: string;
+}) {
+  const rows = (recipe ?? []).filter(
+    r => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
+  );
+  const total = rows.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-4">
+      <div className={`h-1 ${accent} w-full`} />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center gap-2 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <ClipboardList className="w-4 h-4" /> {title}
+          </CardTitle>
+          {subtitle ? (
+            <span className="text-xs text-muted-foreground font-mono truncate max-w-[55%] text-right">{subtitle}</span>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        {rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No recipe configured. Add ingredients in Setup.</p>
+        ) : (
+          <div className="w-full">
+            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mb-1 px-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+            </div>
+            <div className="space-y-0.5">
+              {rows.map((r, idx) => (
+                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 items-center py-1.5 px-1 rounded odd:bg-muted/20">
+                  <span className="text-sm text-foreground">{r.ingredient || "—"}</span>
+                  <span className="text-sm font-mono text-right text-foreground tabular-nums">{fmtNum(Number(r.lbs ?? 0), 1)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+              <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
+              <span className="text-xs font-mono text-right font-semibold text-foreground tabular-nums">{fmtNum(total, 1)} lbs</span>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3 mt-5 first:mt-0">
@@ -6043,6 +6099,12 @@ export default function Home() {
                     <NeedsList rows={buildNeedRows(v).sauce} />
                   </CardContent>
                 </Card>
+                <ReadOnlyRecipeCard
+                  title="Sauce Recipe"
+                  subtitle={v.frontlineRecipeName?.trim() || undefined}
+                  recipe={v.frontlineRecipe ?? []}
+                  accent="bg-red-500/70"
+                />
               </TabsContent>
 
               {/* ─── FRONTLINE ─── */}
@@ -6116,6 +6178,31 @@ export default function Home() {
                     />
                   </CardContent>
                 </Card>
+                {[
+                  { type: v.app1Type, recipe: v.app1CheeseRecipe, name: v.app1CheeseRecipeName },
+                  { type: v.app2Type, recipe: v.app2CheeseRecipe, name: v.app2CheeseRecipeName },
+                  { type: v.app3Type, recipe: v.app3CheeseRecipe, name: v.app3CheeseRecipeName },
+                  { type: v.app4Type, recipe: v.app4CheeseRecipe, name: v.app4CheeseRecipeName },
+                ].map((app, i) => {
+                  const t = (app.type ?? "").trim();
+                  if (!t) return null;
+                  const lower = t.toLowerCase();
+                  const isMix = lower.includes("mix");
+                  if (lower !== "cheese" && !isMix) return null;
+                  const rows = (app.recipe ?? []).filter(
+                    r => (r.ingredient ?? "").trim() !== "" || Number(r.lbs ?? 0) > 0
+                  );
+                  if (rows.length === 0) return null;
+                  return (
+                    <ReadOnlyRecipeCard
+                      key={i}
+                      title={`${t} Recipe`}
+                      subtitle={app.name?.trim() || undefined}
+                      recipe={app.recipe ?? []}
+                      accent={isMix ? "bg-emerald-500/70" : "bg-amber-500/70"}
+                    />
+                  );
+                })}
               </TabsContent>
 
               {/* ─── WAREHOUSE ─── */}

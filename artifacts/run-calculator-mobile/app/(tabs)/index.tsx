@@ -535,6 +535,52 @@ export default function CalculatorScreen() {
           </View>
         ) : null}
 
+        {/* Case completion progress */}
+        {(() => {
+          const casesNeeded = run.settings.casesNeeded;
+          const casesCompleted =
+            run.progress.skidsCompleted * run.settings.casesPerSkid +
+            run.progress.casesOnCurrentSkid;
+          if (casesNeeded <= 0 || casesCompleted <= 0) return null;
+          if (casesCompleted >= casesNeeded) {
+            return (
+              <View
+                style={[
+                  styles.targetBanner,
+                  { backgroundColor: colors.success + "22", borderColor: colors.success },
+                ]}
+              >
+                <Feather name="check-circle" size={16} color={colors.success} />
+                <Text style={[styles.targetBannerText, { color: colors.success }]}>
+                  Target reached! {casesCompleted} / {casesNeeded} cases
+                </Text>
+              </View>
+            );
+          }
+          const pct = Math.min(100, (casesCompleted / casesNeeded) * 100);
+          return (
+            <View style={styles.caseProgressWrap}>
+              <View style={styles.caseProgressHeader}>
+                <Text style={[styles.caseProgressLabel, { color: colors.mutedForeground }]}>
+                  Cases completed
+                </Text>
+                <Text style={[styles.caseProgressValue, { color: colors.foreground }]}>
+                  {casesCompleted} / {casesNeeded}{" "}
+                  <Text style={{ color: colors.mutedForeground }}>({Math.round(pct)}%)</Text>
+                </Text>
+              </View>
+              <View style={[styles.caseProgressTrack, { backgroundColor: colors.secondary }]}>
+                <View
+                  style={[
+                    styles.caseProgressFill,
+                    { backgroundColor: colors.primary, width: `${pct}%` },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })()}
+
         {/* Live metrics */}
         <SectionHeader title="Live" />
         <View style={styles.metricsRow}>
@@ -1080,6 +1126,28 @@ const styles = StyleSheet.create({
   metricBig: { flex: 1.3 },
   metricCol: { flex: 1, gap: 10 },
   metricHalf: { flex: 1 },
+
+  targetBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 4,
+  },
+  targetBannerText: { fontSize: 14, fontWeight: "700" as const, flex: 1 },
+  caseProgressWrap: { marginBottom: 6, gap: 6 },
+  caseProgressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  caseProgressLabel: { fontSize: 12 },
+  caseProgressValue: { fontSize: 12, fontWeight: "600" as const, fontVariant: ["tabular-nums"] },
+  caseProgressTrack: { height: 10, borderRadius: 999, overflow: "hidden" },
+  caseProgressFill: { height: "100%", borderRadius: 999 },
   runDetailStatusRow: {
     flexDirection: "row",
     alignItems: "center",

@@ -172,6 +172,54 @@ export function SectionHeader({ title }: { title: string }) {
   );
 }
 
+export function StatRow({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  const colors = useColors();
+  return (
+    <View style={[statRowStyles.row, { borderBottomColor: colors.border }]}>
+      <Text
+        style={[statRowStyles.label, { color: colors.mutedForeground }]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[
+          statRowStyles.value,
+          { color: highlight ? colors.primary : colors.foreground },
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+const statRowStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 9,
+    gap: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  label: { fontSize: 13, flexShrink: 1 },
+  value: {
+    fontSize: 14,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
+  },
+});
+
 export function NumericField({
   label,
   value,
@@ -583,6 +631,94 @@ export function RecipeEditor({
     </View>
   );
 }
+
+export function ReadOnlyRecipe({
+  rows,
+  emptyText = "No recipe configured. Add ingredients in Setup.",
+}: {
+  rows: RecipeRow[];
+  emptyText?: string;
+}) {
+  const colors = useColors();
+  const filtered = (rows ?? []).filter(
+    (r) => (r.ingredient ?? "").trim() !== "" || (Number(r.lbs) || 0) > 0,
+  );
+  const total = filtered.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+  if (filtered.length === 0) {
+    return (
+      <Text style={[roStyles.empty, { color: colors.mutedForeground }]}>
+        {emptyText}
+      </Text>
+    );
+  }
+  return (
+    <View style={roStyles.wrap}>
+      <View style={roStyles.headRow}>
+        <Text style={[roStyles.headIng, { color: colors.mutedForeground }]}>
+          INGREDIENT
+        </Text>
+        <Text style={[roStyles.headLbs, { color: colors.mutedForeground }]}>
+          LBS / BATCH
+        </Text>
+      </View>
+      {filtered.map((r, i) => (
+        <View
+          key={i}
+          style={[roStyles.row, { borderBottomColor: colors.border }]}
+        >
+          <Text style={[roStyles.ing, { color: colors.foreground }]}>
+            {r.ingredient || "—"}
+          </Text>
+          <Text style={[roStyles.lbs, { color: colors.foreground }]}>
+            {(Number(r.lbs) || 0).toFixed(1)}
+          </Text>
+        </View>
+      ))}
+      <View style={[roStyles.totalRow, { borderTopColor: colors.border }]}>
+        <Text style={[roStyles.totalLabel, { color: colors.mutedForeground }]}>
+          Total / Batch
+        </Text>
+        <Text style={[roStyles.totalValue, { color: colors.foreground }]}>
+          {total.toFixed(1)} lbs
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const roStyles = StyleSheet.create({
+  wrap: { gap: 0 },
+  empty: { fontSize: 13, fontStyle: "italic" },
+  headRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+    paddingHorizontal: 2,
+  },
+  headIng: { fontSize: 10, fontWeight: "700", letterSpacing: 0.6 },
+  headLbs: { fontSize: 10, fontWeight: "700", letterSpacing: 0.6 },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  ing: { fontSize: 14, flex: 1, paddingRight: 8 },
+  lbs: { fontSize: 14, fontVariant: ["tabular-nums"] },
+  totalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    borderTopWidth: 1,
+    paddingTop: 10,
+    marginTop: 6,
+    paddingHorizontal: 2,
+  },
+  totalLabel: { fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: "600" },
+  totalValue: { fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] },
+});
 
 const recipeStyles = StyleSheet.create({
   wrap: { gap: 10 },

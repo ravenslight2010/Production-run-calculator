@@ -82,15 +82,21 @@ export default function PackagingScreen() {
         <SectionHeader title="Output" />
         <View style={styles.metricsRow}>
           <MetricCard
-            label="Cases Done"
+            label="Cases done"
             value={casesCompleted.toString()}
             highlight={casesCompleted > 0}
-            style={styles.metricBig}
+            style={styles.metricThird}
           />
-          <View style={styles.metricCol}>
-            <MetricCard label="Cases Left" value={calc.casesLeft.toString()} />
-            <MetricCard label="Cases on Line" value={supply.casesOnLine.toString()} />
-          </View>
+          <MetricCard
+            label="Cases left"
+            value={calc.casesLeft.toString()}
+            style={styles.metricThird}
+          />
+          <MetricCard
+            label="On line"
+            value={supply.casesOnLine.toString()}
+            style={styles.metricThird}
+          />
         </View>
 
         {/* Progress steppers */}
@@ -220,8 +226,7 @@ const styles = StyleSheet.create({
   freezerCasesLabel: { fontSize: 11, marginTop: 1 },
 
   metricsRow: { flexDirection: "row", gap: 10 },
-  metricBig: { flex: 1.3 },
-  metricCol: { flex: 1, gap: 10 },
+  metricThird: { flex: 1 },
 
   progressHeader: {
     flexDirection: "row",

@@ -1,7 +1,7 @@
 import React from "react";
 import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BatchCard, CardSection, SectionHeader } from "@/components/UI";
+import { BatchCard, CardSection, ReadOnlyRecipe, SectionHeader } from "@/components/UI";
 import { useRun, sauceBarrelBreakdown } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -44,6 +44,18 @@ export default function SauceScreen() {
             </Text>
           </CardSection>
         )}
+
+        <View style={{ marginTop: 8 }}>
+          <SectionHeader title="Sauce Recipe" />
+          {run.settings.frontlineRecipeName?.trim() ? (
+            <Text style={[styles.recipeName, { color: colors.mutedForeground }]}>
+              {run.settings.frontlineRecipeName}
+            </Text>
+          ) : null}
+          <CardSection style={{ paddingVertical: 14 }}>
+            <ReadOnlyRecipe rows={run.settings.frontlineRecipe ?? []} />
+          </CardSection>
+        </View>
       </ScrollView>
     </View>
   );
@@ -53,4 +65,5 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
   empty: { fontSize: 13, fontStyle: "italic" },
+  recipeName: { fontSize: 13, fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace", marginBottom: 6 },
 });
