@@ -18,6 +18,7 @@ import {
   DEFAULT_DOUGH_INGREDIENTS,
   FRONTLINE_RECIPE_PRESETS_KEY,
   FRONTLINE_RECIPE_NAMES_KEY,
+  DEFAULT_FRONTLINE_RECIPE_NAMES,
   FRONTLINE_INGREDIENTS_KEY,
   DEFAULT_FRONTLINE_INGREDIENTS,
   MIX_INGREDIENTS_KEY,
@@ -50,6 +51,8 @@ import {
   SPEC_PROFILES,
   DOUGH_RECIPES,
   DOUGH_BRAND_SPECS,
+  SAUCE_RECIPES,
+  SAUCE_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
 
@@ -503,5 +506,74 @@ export function applyDoughSpecsSeedIfNeeded(): void {
     }
 
     localStorage.setItem(DOUGH_SPECS_SEED_KEY, "1");
+  } catch {}
+}
+
+const SAUCE_SPECS_SEED_KEY = "run-calc-sauce-specs-v1";
+
+/**
+ * Seed sauce RECIPES + SPECS imported from the sauce procedure sheets. The app
+ * stores sauce recipes under the "frontline" recipe system (the UI labels it
+ * "Sauce Recipe"). Tier 1 adds every sauce recipe to that library (presets,
+ * names, ingredient list). Tier 2 ties an unambiguous brand+flavor to its sauce
+ * recipe on the stored profile — only when the profile has no sauce recipe yet,
+ * so user edits are never clobbered. Oz-per-pizza usage is not in the sheets and
+ * is intentionally not seeded. Runs once, guarded by a version marker.
+ */
+export function applySauceSpecsSeedIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(SAUCE_SPECS_SEED_KEY)) return;
+  try {
+    // ── Tier 1: sauce (frontline) recipe library ──
+    const presets = loadFrontlineRecipePresets();
+    for (const [name, rows] of Object.entries(SAUCE_RECIPES)) {
+      if (!presets[name]) presets[name] = rows.map(r => ({ ...r }));
+    }
+    saveFrontlineRecipePresets(presets);
+
+    saveList(
+      FRONTLINE_RECIPE_NAMES_KEY,
+      mergeListInsensitive(
+        loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES),
+        Object.keys(SAUCE_RECIPES),
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    const allSauceIngredients = [
+      ...new Set(
+        Object.values(SAUCE_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
+      ),
+    ];
+    saveList(
+      FRONTLINE_INGREDIENTS_KEY,
+      mergeListInsensitive(
+        loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+        allSauceIngredients,
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+
+    // ── Tier 2: unambiguous brand → sauce ties on stored profiles ──
+    const bf = loadBrandFlavors();
+    for (const spec of SAUCE_BRAND_SPECS) {
+      const rows = SAUCE_RECIPES[spec.recipe];
+      if (!rows) continue;
+      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
+      for (const flavor of flavors) {
+        const key = PROFILE_KEY(spec.brand, flavor);
+        let prof: Record<string, unknown> = {};
+        try {
+          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+        } catch {
+          prof = {};
+        }
+        const existing = prof.frontlineRecipe as unknown[] | undefined;
+        if (Array.isArray(existing) && existing.length > 0) continue;
+        prof.frontlineRecipeName = spec.recipe;
+        prof.frontlineRecipe = rows.map(r => ({ ...r }));
+        localStorage.setItem(key, JSON.stringify(prof));
+      }
+    }
+
+    localStorage.setItem(SAUCE_SPECS_SEED_KEY, "1");
   } catch {}
 }

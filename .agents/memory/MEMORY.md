@@ -1,6 +1,7 @@
 - [Recipe print/share](recipe-print-share.md) — per-recipe card print/share button requested by user, deferred.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, or a later seed races ahead and the spec seed's skip-if-absent guard drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
+- [Frontline is sauce](frontline-is-sauce.md) — the internal "frontline" recipe system IS the UI's "Sauce Recipe"; seed sauces into frontline plumbing (presets + frontlineRecipeName/frontlineRecipe), no new field.
 - [Cast-to-Screens](cast-screens.md) — web-only station displays via `?screen=` param; parity exception (no mobile equivalent).
 - [Web/mobile parity](web-mobile-parity.md) — run identity on Run screen, line config on Setup; commit-before-saveProfile ordering; single auto-load effect.
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.

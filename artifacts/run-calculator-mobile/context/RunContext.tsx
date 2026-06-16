@@ -8,6 +8,8 @@ import {
   SPEC_PROFILES,
   DOUGH_RECIPES,
   DOUGH_BRAND_SPECS,
+  SAUCE_RECIPES,
+  SAUCE_BRAND_SPECS,
 } from "@/data/specSeed";
 import React, {
   createContext,
@@ -33,6 +35,8 @@ const STORAGE_KEY = "run-calc-mobile-v2";
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 // One-time marker for seeding the imported dough recipes + brand/flavor ties.
 const DOUGH_SEED_KEY = "run-calc-mobile-dough-v1";
+// One-time marker for seeding the imported sauce recipes + brand/flavor ties.
+const SAUCE_SEED_KEY = "run-calc-mobile-sauce-v1";
 
 // Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
 // incoming remote payloads are deferred briefly after a local edit so they don't
@@ -804,6 +808,62 @@ function applyDoughSeed(state: AppState): AppState {
   return { ...state, doughRecipePresets, doughIngredients, brandProfiles };
 }
 
+/**
+ * Additively seed the imported sauce recipes + brand/flavor ties. The app stores
+ * sauce recipes under the "frontline" recipe system (the UI labels it "Sauce
+ * Recipe"). Tier 1 adds every sauce recipe to that library (presets + ingredient
+ * list). Tier 2 ties an unambiguous brand+flavor to its sauce recipe on the
+ * brand profile — only when the profile has no sauce recipe yet, so user edits
+ * are never clobbered. Oz-per-pizza usage is not in the sheets and is not seeded.
+ * Mirrors the web seed.
+ */
+function applySauceSeed(state: AppState): AppState {
+  // ── Tier 1: sauce (frontline) recipe library ──
+  const frontlineRecipePresets: Record<string, RecipeRow[]> = {
+    ...state.frontlineRecipePresets,
+  };
+  for (const [name, rows] of Object.entries(SAUCE_RECIPES)) {
+    if (!frontlineRecipePresets[name]) {
+      frontlineRecipePresets[name] = rows.map((r) => ({ ...r }));
+    }
+  }
+  const allSauceIngredients = [
+    ...new Set(
+      Object.values(SAUCE_RECIPES).flatMap((rows) =>
+        rows.map((r) => r.ingredient),
+      ),
+    ),
+  ];
+  const frontlineIngredients = mergeInsensitive(
+    state.frontlineIngredients,
+    allSauceIngredients,
+  );
+
+  // ── Tier 2: unambiguous brand → sauce ties on brand profiles ──
+  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
+  for (const spec of SAUCE_BRAND_SPECS) {
+    const rows = SAUCE_RECIPES[spec.recipe];
+    if (!rows) continue;
+    const flavors = spec.flavor
+      ? [spec.flavor]
+      : (state.brandFlavors[spec.brand] ?? []);
+    for (const flavor of flavors) {
+      const key = profileKey(spec.brand, flavor);
+      const prof = brandProfiles[key] ?? {};
+      if (Array.isArray(prof.frontlineRecipe) && prof.frontlineRecipe.length > 0) {
+        continue;
+      }
+      brandProfiles[key] = {
+        ...prof,
+        frontlineRecipeName: spec.recipe,
+        frontlineRecipe: rows.map((r) => ({ ...r })),
+      };
+    }
+  }
+
+  return { ...state, frontlineRecipePresets, frontlineIngredients, brandProfiles };
+}
+
 // Fields that belong to one specific run and must NOT travel via a profile.
 const PER_RUN_FIELDS: (keyof RunSettings)[] = [
   "brand",
@@ -1124,20 +1184,23 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     if (!bootDone) return;
     let cancelled = false;
     (async () => {
-      const [specDone, doughDone] = await Promise.all([
+      const [specDone, doughDone, sauceDone] = await Promise.all([
         AsyncStorage.getItem(SPEC_SEED_KEY),
         AsyncStorage.getItem(DOUGH_SEED_KEY),
+        AsyncStorage.getItem(SAUCE_SEED_KEY),
       ]);
-      if (cancelled || (specDone && doughDone)) return;
+      if (cancelled || (specDone && doughDone && sauceDone)) return;
       setAppState((prev) => {
         let next = prev;
         if (!specDone) next = applySpecSeed(next);
         if (!doughDone) next = applyDoughSeed(next);
+        if (!sauceDone) next = applySauceSeed(next);
         persistNow(next);
         return next;
       });
       if (!specDone) AsyncStorage.setItem(SPEC_SEED_KEY, "1");
       if (!doughDone) AsyncStorage.setItem(DOUGH_SEED_KEY, "1");
+      if (!sauceDone) AsyncStorage.setItem(SAUCE_SEED_KEY, "1");
     })();
     return () => {
       cancelled = true;

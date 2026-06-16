@@ -1438,3 +1438,41 @@ import type { FormValues } from "./types";
     { brand: "Brand", flavor: "MR07CH24", recipe: "Brand & Corky's", oz: 6.2 },
     { brand: "Brand", flavor: "MR12CH14", recipe: "Brand & Corky's", oz: 14.2 },
   ];
+
+
+  // ── Sauce recipes imported from attached_assets/*Sauce*.xlsx (the app calls
+  // these "frontline" recipes internally; the UI labels them "Sauce Recipe").
+  // Ingredient lbs are at the documented per-batch scale. Oz-per-pizza usage is
+  // NOT in these sheets, so it is left to the existing profile value.
+  export const SAUCE_RECIPES: Record<string, { ingredient: string; lbs: number }[]> = {
+    "Aldo Pizza Sauce": [{ ingredient: "Tomatek Tomato Puree", lbs: 260 }, { ingredient: "Sunflower Oil", lbs: 4 }, { ingredient: "Olive Oil", lbs: 3 }, { ingredient: "Granulated Garlic", lbs: 2.5 }, { ingredient: "Sugar", lbs: 1 }, { ingredient: "Sea Salt", lbs: 1 }],
+    "Alfredo Pizza Sauce": [{ ingredient: "Water", lbs: 175 }, { ingredient: "UFI Alfredo Sauce Powder", lbs: 50 }, { ingredient: "Soybean Oil", lbs: 38 }],
+    "Asiago Sauce": [{ ingredient: "Water", lbs: 236 }, { ingredient: "Asiago Mix", lbs: 50 }],
+    "Bobo's Buffalo Pizza Sauce": [{ ingredient: "Legacy Buffalo Ranch Sauce", lbs: 400 }, { ingredient: "Frank's Red Hot Sauce", lbs: 16 }],
+    "Bobo's Pizza Sauce": [{ ingredient: "Water", lbs: 250 }, { ingredient: "Tomatek Crushed & Concentrate Tomatoes", lbs: 165 }, { ingredient: "Soybean Oil", lbs: 18 }, { ingredient: "Sugar", lbs: 9 }, { ingredient: "Salt", lbs: 5 }, { ingredient: "Ground Basil", lbs: 5 }, { ingredient: "Olive Oil", lbs: 4 }, { ingredient: "Ground Oregano", lbs: 2 }, { ingredient: "Granulated Garlic", lbs: 2 }],
+    "Brand Marriott Pizza Sauce": [{ ingredient: "Tomatek Tomato Puree", lbs: 425 }, { ingredient: "Olive Oil", lbs: 16 }, { ingredient: "Granulated Garlic", lbs: 5.6 }, { ingredient: "Salt", lbs: 2 }, { ingredient: "Ground Oregano", lbs: 0.5 }],
+    "Four Hands Red Hot Pizza Sauce": [{ ingredient: "Red Hot Sauce (Old Vienna)", lbs: 48 }, { ingredient: "Franks Hot Sauce", lbs: 145 }, { ingredient: "Garlic Sauce", lbs: 200 }, { ingredient: "Riplets Seasoning", lbs: 2.7 }, { ingredient: "Sugar", lbs: 30 }],
+    "Garlic Alfredo Pizza Sauce": [{ ingredient: "Water", lbs: 175 }, { ingredient: "UFI Alfredo Sauce Powder", lbs: 50 }, { ingredient: "Soybean Oil", lbs: 38 }, { ingredient: "Garlic Powder", lbs: 2.5 }],
+    "Gravy Sauce": [{ ingredient: "Water", lbs: 235 }, { ingredient: "Gravy Mix", lbs: 40 }],
+    "Lucia Pizza Sauce": [{ ingredient: "Water", lbs: 250 }, { ingredient: "Tomatek Crushed & Concentrate Tomatoes", lbs: 165 }, { ingredient: "Soybean Oil", lbs: 18 }, { ingredient: "Olive Oil", lbs: 4 }, { ingredient: "Sugar", lbs: 4 }, { ingredient: "Salt", lbs: 4 }, { ingredient: "Ground Oregano", lbs: 2 }, { ingredient: "Ground Basil", lbs: 2 }, { ingredient: "Granulated Garlic", lbs: 2 }],
+    "Medulla's TOI Pizza Sauce": [{ ingredient: "Water", lbs: 223 }, { ingredient: "Tomatek Crushed & Concentrate Tomatoes", lbs: 112 }, { ingredient: "Olive Oil", lbs: 42 }, { ingredient: "Light Brown Sugar", lbs: 6.2 }, { ingredient: "Sugar", lbs: 3.2 }, { ingredient: "Granulated Garlic", lbs: 3.2 }, { ingredient: "Salt", lbs: 2 }, { ingredient: "Onion Powder", lbs: 2 }, { ingredient: "Ground Oregano", lbs: 2 }, { ingredient: "Ground Basil", lbs: 2 }, { ingredient: "Black Pepper", lbs: 2 }, { ingredient: "Fennel", lbs: 0.4 }],
+    "Member's Selection Artisan Pizza Sauce": [{ ingredient: "Tomatek Tomato Puree", lbs: 260 }, { ingredient: "Water", lbs: 72.8 }, { ingredient: "Sugar", lbs: 6.5 }, { ingredient: "Onion Powder", lbs: 2.6 }, { ingredient: "Salt", lbs: 2.6 }, { ingredient: "Garlic Powder", lbs: 2.6 }],
+    "Mystic Pizza Sauce": [{ ingredient: "Water", lbs: 270 }, { ingredient: "Tomatek Crushed & Concentrate Tomatoes", lbs: 160 }, { ingredient: "Sugar", lbs: 5.4 }, { ingredient: "Salt", lbs: 5.4 }, { ingredient: "Granulated Garlic", lbs: 4.5 }, { ingredient: "Romano Sheep Cheese", lbs: 2.52 }, { ingredient: "Basil Flakes", lbs: 2.15 }, { ingredient: "Onion Powder", lbs: 0.68 }, { ingredient: "Oregano Flake", lbs: 0.09 }, { ingredient: "Black Pepper", lbs: 0.09 }, { ingredient: "Ground Basil", lbs: 0.04 }],
+    "Sweet and Sour Sauce": [{ ingredient: "Legacy Sweet and Sour", lbs: 320 }, { ingredient: "Pineapple Juice", lbs: 40 }],
+    "Sweet Chili Sauce": [{ ingredient: "UFI Sweet Chili Powder", lbs: 50 }, { ingredient: "Water", lbs: 43.5 }, { ingredient: "White Vinegar", lbs: 0.48 }, { ingredient: "Ultrasperse", lbs: 1.65 }],
+    "Tikka Masala Sauce": [{ ingredient: "Water", lbs: 106.578 }, { ingredient: "Oil", lbs: 10 }, { ingredient: "Ginger", lbs: 3.65 }, { ingredient: "Garlic Puree", lbs: 3.65 }, { ingredient: "Cinnamon Sticks", lbs: 0.1 }, { ingredient: "Anise", lbs: 0.15 }, { ingredient: "Cumin, Whole", lbs: 0.38 }, { ingredient: "Bay Leaves", lbs: 0.002 }, { ingredient: "Fenu Greek Leaves", lbs: 0.39 }, { ingredient: "Tomato Paste", lbs: 83.2 }, { ingredient: "Sugar", lbs: 7 }, { ingredient: "Salt", lbs: 2.5 }, { ingredient: "Cumin, Ground", lbs: 0.67 }, { ingredient: "Coriander Powder", lbs: 0.67 }, { ingredient: "Chili Powder", lbs: 1 }, { ingredient: "Green Cardamon Powder", lbs: 0.07 }, { ingredient: "Garam Masala Powder", lbs: 0.67 }, { ingredient: "Paprika", lbs: 1 }, { ingredient: "Cloves, Whole", lbs: 0.08 }, { ingredient: "Heavy Cream", lbs: 48 }, { ingredient: "Black Pepper Powder", lbs: 0.24 }],
+  };
+
+  // Unambiguous brand→sauce ties. Picking the brand+flavor auto-fills the sauce
+  // (frontline) recipe. Omit `flavor` to apply to all flavors of the brand.
+  // Flavor-specific ties are listed FIRST so they win over a brand-wide tie.
+  // Ambiguous / flavor-only sauces are left in the library for manual selection.
+  export const SAUCE_BRAND_SPECS: { brand: string; flavor?: string; recipe: string }[] = [
+    { brand: "Bobo's", flavor: "12\" BUFFALO", recipe: "Bobo's Buffalo Pizza Sauce" },
+    { brand: "Four Hands", flavor: "OLD VIENNA RED HOT CHICKEN", recipe: "Four Hands Red Hot Pizza Sauce" },
+    { brand: "Hannaford", flavor: "CHICKEN TIKKA MASALA", recipe: "Tikka Masala Sauce" },
+    { brand: "Aldo's", recipe: "Aldo Pizza Sauce" },
+    { brand: "Brand", recipe: "Brand Marriott Pizza Sauce" },
+    { brand: "Lucia's", recipe: "Lucia Pizza Sauce" },
+    { brand: "Bobo's", recipe: "Bobo's Pizza Sauce" },
+  ];
