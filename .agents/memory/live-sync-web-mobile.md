@@ -52,8 +52,13 @@ contract is owned by web + db and is untyped on the server. Mobile mirrors it in
   only in `normalizeState`/on-load migration is NOT enough: a legacy peer re-adds
   the old value through `applyPayloadToState` (mobile `unionList`) or the web sync
   `mergeList`/setters. Apply the same rename+drop-retired cleanup to incoming
-  payload lists AND to incoming run/settings pep refs (mobile `formValuesToSettings`,
-  web `cleanedRemotePep`), or the value resurrects and propagates back out.
+  payload lists AND to incoming run/settings refs (mobile `formValuesToSettings`,
+  web `cleanedRemotePep`), or the value resurrects and propagates back out. This
+  covers BOTH pep-type renames AND ingredient/app-type renames (cheeseIngredients +
+  ingredientTypes lists, app*Type fields, recipe-row ingredients): mobile routes
+  ingredient ingress through `renameIngredientSettings`/`renameIngredientList`, web
+  through `INGREDIENT_RENAMES` on the cheese/ingredient list merges. Web run-value
+  ingredient names self-heal via read-path `normalizePepFields`→`normalizeIngredientFields`.
 - **Web sync setState must be change-guarded.** The outgoing payload echoes
   loadHistory()/master lists every SSE cycle (~10s); calling setState/`setHistory`/
   `setDayState`/`setBrands`/etc. unconditionally on each inbound echo causes a

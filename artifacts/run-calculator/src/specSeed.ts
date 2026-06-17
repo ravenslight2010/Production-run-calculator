@@ -28,7 +28,7 @@ import type { FormValues } from "./types";
   };
 
   export const SPEC_APP_TYPES: string[] = [
-    "4Hands Club Mix",
+  "4Hands Club Mix",
   "4Hands Meat Cheese Mix",
   "4hands Red Hot Chicken Mix",
   "4Hands Red Hot Mix",
@@ -43,7 +43,6 @@ import type { FormValues } from "./types";
   "Bratwurst Mix",
   "Carribean Mix",
   "Celery",
-  "Cheese Burger Cheese Mix",
   "Cheeseburger Cheese Mix",
   "Chicken Bacon Club Cheese Mix",
   "Chorizo",
@@ -103,7 +102,6 @@ import type { FormValues } from "./types";
   "Lucia's Standard Cheese Mix",
   "Masala Chicken Mix",
   "Monterey Jack",
-  "Monterey Jack Cheese",
   "Mozzarella Part Skim",
   "Natural Bacon",
   "Natural Hamburger",
@@ -118,7 +116,6 @@ import type { FormValues } from "./types";
   "Red Hot Cheese Mix Monterey Jack 5.0, Riplet Seasoning 0.01",
   "Red Hot Chicken Mix",
   "Red Onion Diced",
-  "Red Onion, Diced",
   "Sausage",
   "Scrambled Egg",
   "Show Me Dough Supreme Mix",
@@ -131,15 +128,13 @@ import type { FormValues } from "./types";
   "Tomatoes",
   "Vita Lucia's Italiano Cheese Mix",
   "White Fajita Mix",
-  "Whole Milk Mozzarella",
-  "Whole Milk Mozzarella Cheese",
   "Whole Mozzarella",
   ];
 
   export const SPEC_PEP_TYPES: string[] = ["Bratwurst Sticks","Chorizo Stick","Mozzarella Stick"];
 
   export const SPEC_CHEESE_INGREDIENTS: string[] = [
-    "Bacon",
+  "Bacon",
   "Black Olives",
   "Blanched Green Pepper Strips",
   "Blanched Red Pepper Strips",
@@ -147,10 +142,7 @@ import type { FormValues } from "./types";
   "Blanched Yellow Pepper Strips",
   "Cheese Spice Blend",
   "Chicken",
-  "Chicken w",
-  "Cilanto",
   "Cilantro",
-  "COW Romano Cheese",
   "Cow's Romano",
   "Diced Chicken",
   "Diced Ham",
@@ -169,12 +161,9 @@ import type { FormValues } from "./types";
   "Fresh Spinach",
   "Frozen Basil Flakes",
   "Garlic Powder",
-  "Goat",
   "Goat Cheese",
   "Grated Parmesan",
   "Green Onion",
-  "Green Pepper Strips",
-  "Green Pepper Strips Blanched",
   "Gyro Meat",
   "Gyro Spice Blend",
   "IQF Basil",
@@ -190,40 +179,25 @@ import type { FormValues } from "./types";
   "Nutmeg",
   "Old Vienna Red Hot Riplet Seasoning",
   "Oregano Flake",
-  "P/S Mozz",
   "Parmesan",
   "Part Skim Mozzarella",
-  "Part-Skim Mozz",
   "Pizella",
   "Provolone",
   "Red Onion Strips",
-  "Red Onions",
-  "Red Pepper Strips",
-  "Red Pepper Strips Blanched",
   "Sauerkraut",
   "Sausage",
   "SHEEP Romano",
   "Shredded Parmesan",
-  "Skim Mozz",
   "Skim Mozzarella",
   "Spinach",
   "Three Cheese Blend",
-  "Three Cheese Blend &",
   "Tomatoes",
   "Vienna Red Hot Sauce",
   "White Cheddar",
-  "White Fajita Blend",
   "White Fajita Mix",
-  "White Onion Strips",
-  "White Onion Strips Blanched",
-  "Whole Milk Mozzarella",
-  "Whole Mozz",
   "Whole Mozzarella",
   "Whole Mozzarella-Extra Large Cut",
   "Yellow Cheddar",
-  "Yellow Cheddar Cheese",
-  "Yellow Pepper Strips",
-  "Yellow Pepper Strips Blanched",
   ];
 
   export const SPEC_PROFILES: SpecProfile[] = [
@@ -303,11 +277,11 @@ import type { FormValues } from "./types";
     sauceOzPerPizza: 4,
     app1Type: "Basha's Original Cheese Mix",
     app1OzPerPizza: 3,
-    app1CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":2},{"ingredient":"Provolone","lbs":1}],
+    app1CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2},{"ingredient":"Provolone","lbs":1}],
     app1CheeseRecipeName: "Basha's Original Cheese Mix",
     app2Type: "Basha's Original Cheese Mix",
     app2OzPerPizza: 3,
-    app2CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":2},{"ingredient":"Provolone","lbs":1}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2},{"ingredient":"Provolone","lbs":1}],
     app2CheeseRecipeName: "Basha's Original Cheese Mix"
   } },
   { brand: "Basha", flavor: "PEPPERONI", values: {
@@ -315,9 +289,9 @@ import type { FormValues } from "./types";
     pep1Sticks: 19,
     pep1OzPerPizza: 1.5,
     pep1Type: "Pepperoni Stick",
-    app1Type: "Whole Milk Mozzarella",
+    app1Type: "Whole Mozzarella",
     app1OzPerPizza: 2.5,
-    app2Type: "Whole Milk Mozzarella",
+    app2Type: "Whole Mozzarella",
     app2OzPerPizza: 3
   } },
   { brand: "Basha", flavor: "SSG & PEPP", values: {
@@ -327,9 +301,9 @@ import type { FormValues } from "./types";
     pep1Type: "Pepperoni Stick",
     app1Type: "Sausage",
     app1OzPerPizza: 2.5,
-    app2Type: "Whole Milk Mozzarella",
+    app2Type: "Whole Mozzarella",
     app2OzPerPizza: 3,
-    app3Type: "Whole Milk Mozzarella",
+    app3Type: "Whole Mozzarella",
     app3OzPerPizza: 2
   } },
   { brand: "Basha", flavor: "SUPREME", values: {
@@ -339,13 +313,13 @@ import type { FormValues } from "./types";
     pep1Type: "Pepperoni Stick",
     app1Type: "Sausage",
     app1OzPerPizza: 1.7,
-    app2Type: "Whole Milk Mozzarella",
+    app2Type: "Whole Mozzarella",
     app2OzPerPizza: 2.5,
     app3Type: "Red Fajita Mix",
     app3OzPerPizza: 3,
-    app3CheeseRecipe: [{"ingredient":"Red Onions","lbs":0.75},{"ingredient":"Green Pepper Strips","lbs":0.75},{"ingredient":"Red Pepper Strips","lbs":0.75},{"ingredient":"Yellow Pepper Strips","lbs":0.75}],
+    app3CheeseRecipe: [{"ingredient":"Red Onion Strips","lbs":0.75},{"ingredient":"Blanched Green Pepper Strips","lbs":0.75},{"ingredient":"Blanched Red Pepper Strips","lbs":0.75},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.75}],
     app3CheeseRecipeName: "Red Fajita Mix",
-    app4Type: "Whole Milk Mozzarella",
+    app4Type: "Whole Mozzarella",
     app4OzPerPizza: 2
   } },
   { brand: "Bobo's", flavor: "9\" CHEESE", values: {
@@ -641,20 +615,20 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2,
     app2Type: "4Hands Meat Cheese Mix",
     app2OzPerPizza: 2.5,
-    app2CheeseRecipe: [{"ingredient":"Part-Skim Mozz","lbs":2.09},{"ingredient":"White Cheddar","lbs":0.22},{"ingredient":"Provolone","lbs":0.19}],
+    app2CheeseRecipe: [{"ingredient":"Part Skim Mozzarella","lbs":2.09},{"ingredient":"White Cheddar","lbs":0.22},{"ingredient":"Provolone","lbs":0.19}],
     app2CheeseRecipeName: "4Hands Meat Cheese Mix",
     app3Type: "Bacon",
     app3OzPerPizza: 0.5,
     app4Type: "4Hands Meat Cheese Mix",
     app4OzPerPizza: 1.5,
-    app4CheeseRecipe: [{"ingredient":"Part-Skim Mozz","lbs":1.26},{"ingredient":"White Cheddar","lbs":0.13},{"ingredient":"Provolone","lbs":0.11}],
+    app4CheeseRecipe: [{"ingredient":"Part Skim Mozzarella","lbs":1.26},{"ingredient":"White Cheddar","lbs":0.13},{"ingredient":"Provolone","lbs":0.11}],
     app4CheeseRecipeName: "4Hands Meat Cheese Mix"
   } },
   { brand: "Four Hands", flavor: "OLD VIENNA RED HOT CHICKEN", values: {
     sauceOzPerPizza: 3,
     app1Type: "Red Hot Chicken Mix",
     app1OzPerPizza: 2.5,
-    app1CheeseRecipe: [{"ingredient":"Chicken w","lbs":2.41},{"ingredient":"Vienna Red Hot Sauce","lbs":0.09}],
+    app1CheeseRecipe: [{"ingredient":"Chicken","lbs":2.41},{"ingredient":"Vienna Red Hot Sauce","lbs":0.09}],
     app1CheeseRecipeName: "Red Hot Chicken Mix",
     app2Type: "Four Hands Red Hot Bacon Jalapeno Mix",
     app2OzPerPizza: 0.75,
@@ -675,7 +649,7 @@ import type { FormValues } from "./types";
     app2CheeseRecipeName: "Club Mix",
     app3Type: "Chicken Bacon Club Cheese Mix",
     app3OzPerPizza: 4,
-    app3CheeseRecipe: [{"ingredient":"Skim Mozz","lbs":3},{"ingredient":"Yellow Cheddar","lbs":1}],
+    app3CheeseRecipe: [{"ingredient":"Skim Mozzarella","lbs":3},{"ingredient":"Yellow Cheddar","lbs":1}],
     app3CheeseRecipeName: "Chicken Bacon Club Cheese Mix"
   } },
   { brand: "Four Hands", flavor: "SUGARFIRE BBQ CHICKEN", values: {
@@ -684,11 +658,11 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2.52,
     app1CheeseRecipe: [{"ingredient":"Chicken","lbs":2.43},{"ingredient":"Liquid Smoke","lbs":0.09}],
     app1CheeseRecipeName: "Four Hands Surgarfire Chicken Mix",
-    app2Type: "Red Onion, Diced",
+    app2Type: "Red Onion Diced",
     app2OzPerPizza: 0.73,
     app3Type: "Four Hands BBQ Chicken Cheese Mix",
     app3OzPerPizza: 4.05,
-    app3CheeseRecipe: [{"ingredient":"Monterey Jack","lbs":3},{"ingredient":"Yellow Cheddar Cheese","lbs":1},{"ingredient":"Cilantro","lbs":0.05}],
+    app3CheeseRecipe: [{"ingredient":"Monterey Jack","lbs":3},{"ingredient":"Yellow Cheddar","lbs":1},{"ingredient":"Cilantro","lbs":0.05}],
     app3CheeseRecipeName: "Four Hands BBQ Chicken Cheese Mix"
   } },
   { brand: "Four Hands", flavor: "SEVEN CHEESE", values: {
@@ -728,7 +702,7 @@ import type { FormValues } from "./types";
     app2CheeseRecipeName: "Gyro Veg Mix",
     app3Type: "Gyro Cheese Blend",
     app3OzPerPizza: 3.25,
-    app3CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":3},{"ingredient":"Feta","lbs":0.25}],
+    app3CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":3},{"ingredient":"Feta","lbs":0.25}],
     app3CheeseRecipeName: "Gyro Cheese Blend"
   } },
   { brand: "Four Hands", flavor: "BACON CHEESEBURGER", values: {
@@ -737,7 +711,7 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 3,
     app2Type: "Cheeseburger Cheese Mix",
     app2OzPerPizza: 3,
-    app2CheeseRecipe: [{"ingredient":"Whole Mozz","lbs":1.5},{"ingredient":"Yellow Cheddar","lbs":1.5}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1.5},{"ingredient":"Yellow Cheddar","lbs":1.5}],
     app2CheeseRecipeName: "Cheeseburger Cheese Mix",
     app3Type: "Bacon Cheeseburger Mix",
     app3OzPerPizza: 1.5,
@@ -745,7 +719,7 @@ import type { FormValues } from "./types";
     app3CheeseRecipeName: "Bacon Cheeseburger Mix",
     app4Type: "Cheeseburger Cheese Mix",
     app4OzPerPizza: 2,
-    app4CheeseRecipe: [{"ingredient":"Whole Mozz","lbs":1},{"ingredient":"Yellow Cheddar","lbs":1}],
+    app4CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1},{"ingredient":"Yellow Cheddar","lbs":1}],
     app4CheeseRecipeName: "Cheeseburger Cheese Mix"
   } },
   { brand: "Four Hands", flavor: "CHICKEN TIKKA MASALA", values: {
@@ -758,18 +732,18 @@ import type { FormValues } from "./types";
     app2OzPerPizza: 3.5,
     app2CheeseRecipe: [{"ingredient":"Blanched Red Pepper Strips","lbs":0.875},{"ingredient":"Blanched Green Pepper Strips","lbs":0.875},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.875},{"ingredient":"Blanched White Onion Strips","lbs":0.875}],
     app2CheeseRecipeName: "White Fajita Mix",
-    app3Type: "Whole Milk Mozzarella Cheese",
+    app3Type: "Whole Mozzarella",
     app3OzPerPizza: 4
   } },
   { brand: "Hannaford", flavor: "FIVE CHEESE", values: {
     sauceOzPerPizza: 3.5,
     app1Type: "Lowe's/Hannaford 5Cheese Mix",
     app1OzPerPizza: 2.5,
-    app1CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":1.965},{"ingredient":"White Cheddar","lbs":0.49},{"ingredient":"Cheese Spice Blend","lbs":5}],
+    app1CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1.965},{"ingredient":"White Cheddar","lbs":0.49},{"ingredient":"Cheese Spice Blend","lbs":5}],
     app1CheeseRecipeName: "Lowe's/Hannaford 5Cheese Mix",
     app2Type: "Lowe's/Hannaford 5Cheese Mix",
     app2OzPerPizza: 2.5,
-    app2CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":1.965},{"ingredient":"White Cheddar","lbs":0.49},{"ingredient":"Cheese Spice Blend","lbs":5}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1.965},{"ingredient":"White Cheddar","lbs":0.49},{"ingredient":"Cheese Spice Blend","lbs":5}],
     app2CheeseRecipeName: "Lowe's/Hannaford 5Cheese Mix"
   } },
   { brand: "Hannaford", flavor: "BBQ CHICKEN", values: {
@@ -803,11 +777,11 @@ import type { FormValues } from "./types";
     sauceOzPerPizza: 4,
     app1Type: "Hannaford's Spicy 4Cheese Mix",
     app1OzPerPizza: 2.5,
-    app1CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":3},{"ingredient":"White Cheddar","lbs":1},{"ingredient":"Provolone","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.25}],
+    app1CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":3},{"ingredient":"White Cheddar","lbs":1},{"ingredient":"Provolone","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.25}],
     app1CheeseRecipeName: "Hannaford's Spicy 4Cheese Mix",
     app2Type: "Hannaford's Spicy 4Cheese Mix",
     app2OzPerPizza: 2.75,
-    app2CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":3},{"ingredient":"White Cheddar","lbs":1},{"ingredient":"Provolone","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.25}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":3},{"ingredient":"White Cheddar","lbs":1},{"ingredient":"Provolone","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.25}],
     app2CheeseRecipeName: "Hannaford's Spicy 4Cheese Mix"
   } },
   { brand: "Hannaford", flavor: "SPINACH GOAT CHEESE", values: {
@@ -816,7 +790,7 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 1,
     app2Type: "Hannaford Spinach Goat Cheese Mix",
     app2OzPerPizza: 4.1,
-    app2CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":2.4},{"ingredient":"Spinach","lbs":0.6},{"ingredient":"Goat","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.1}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2.4},{"ingredient":"Spinach","lbs":0.6},{"ingredient":"Goat Cheese","lbs":1},{"ingredient":"Grated Parmesan","lbs":0.1}],
     app2CheeseRecipeName: "Hannaford Spinach Goat Cheese Mix"
   } },
   { brand: "Hannaford", flavor: "CHICKEN BACON CLUB", values: {
@@ -829,7 +803,7 @@ import type { FormValues } from "./types";
     app2CheeseRecipeName: "Hannaford Club Mix",
     app3Type: "Hannaford Club Cheese Mix",
     app3OzPerPizza: 4,
-    app3CheeseRecipe: [{"ingredient":"Yellow Cheddar","lbs":2},{"ingredient":"Skim Mozz","lbs":2}],
+    app3CheeseRecipe: [{"ingredient":"Yellow Cheddar","lbs":2},{"ingredient":"Skim Mozzarella","lbs":2}],
     app3CheeseRecipeName: "Hannaford Club Cheese Mix"
   } },
   { brand: "Hannaford", flavor: "CHICKEN TIKKA MASALA", values: {
@@ -840,16 +814,16 @@ import type { FormValues } from "./types";
     app1CheeseRecipeName: "Masala Chicken Mix",
     app2Type: "White Fajita Mix",
     app2OzPerPizza: 1.5,
-    app2CheeseRecipe: [{"ingredient":"Red Pepper Strips Blanched","lbs":0.375},{"ingredient":"Green Pepper Strips Blanched","lbs":0.375},{"ingredient":"Yellow Pepper Strips Blanched","lbs":0.375},{"ingredient":"White Onion Strips Blanched","lbs":0.375}],
+    app2CheeseRecipe: [{"ingredient":"Blanched Red Pepper Strips","lbs":0.375},{"ingredient":"Blanched Green Pepper Strips","lbs":0.375},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.375},{"ingredient":"Blanched White Onion Strips","lbs":0.375}],
     app2CheeseRecipeName: "White Fajita Mix",
-    app3Type: "Whole Milk Mozzarella",
+    app3Type: "Whole Mozzarella",
     app3OzPerPizza: 4
   } },
   { brand: "Lowe's", flavor: "FIVE CHEESE", values: {
     sauceOzPerPizza: 1.3,
     app1Type: "Lowe's/Hannaford 5Cheese Mix",
     app1OzPerPizza: 2,
-    app1CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":1.57},{"ingredient":"White Cheddar","lbs":0.4},{"ingredient":"Three Cheese Blend &","lbs":0.03},{"ingredient":"Cheese Spice Blend","lbs":0.004}],
+    app1CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1.57},{"ingredient":"White Cheddar","lbs":0.4},{"ingredient":"Three Cheese Blend","lbs":0.03},{"ingredient":"Cheese Spice Blend","lbs":0.004}],
     app1CheeseRecipeName: "Lowe's/Hannaford 5Cheese Mix"
   } },
   { brand: "Lowe's", flavor: "MEAT LOVERS", values: {
@@ -873,11 +847,11 @@ import type { FormValues } from "./types";
     pep1Type: "Pepperoni Stick - NATURAL",
     app1Type: "Lowe's Pepperoni Cheese Mix",
     app1OzPerPizza: 0.7,
-    app1CheeseRecipe: [{"ingredient":"P/S Mozz","lbs":0.44},{"ingredient":"Provolone","lbs":0.26}],
+    app1CheeseRecipe: [{"ingredient":"Part Skim Mozzarella","lbs":0.44},{"ingredient":"Provolone","lbs":0.26}],
     app1CheeseRecipeName: "Lowe's Pepperoni Cheese Mix",
     app2Type: "Lowe's Pepperoni/Romano Cheese Mix",
     app2OzPerPizza: 0.8,
-    app2CheeseRecipe: [{"ingredient":"P/S Mozz","lbs":0.44},{"ingredient":"Provolone","lbs":0.26},{"ingredient":"SHEEP Romano","lbs":0.1}],
+    app2CheeseRecipe: [{"ingredient":"Part Skim Mozzarella","lbs":0.44},{"ingredient":"Provolone","lbs":0.26},{"ingredient":"SHEEP Romano","lbs":0.1}],
     app2CheeseRecipeName: "Lowe's Pepperoni/Romano Cheese Mix"
   } },
   { brand: "Lowe's", flavor: "SUPREME", values: {
@@ -1078,7 +1052,7 @@ import type { FormValues } from "./types";
     pep1Type: "Bratwurst Sticks",
     app1Type: "Lucia's Craft Cheese Mix",
     app1OzPerPizza: 3,
-    app1CheeseRecipe: [{"ingredient":"Whole Mozz","lbs":1.5},{"ingredient":"Provolone","lbs":1.5}],
+    app1CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":1.5},{"ingredient":"Provolone","lbs":1.5}],
     app1CheeseRecipeName: "Lucia's Craft Cheese Mix",
     app2Type: "Bratwurst Mix",
     app2OzPerPizza: 2.05,
@@ -1095,9 +1069,9 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2,
     app2Type: "Hannaford South of Border Mix",
     app2OzPerPizza: 3.36,
-    app2CheeseRecipe: [{"ingredient":"IQF Black Beans","lbs":0.74},{"ingredient":"Diced Tomatoes","lbs":0.71},{"ingredient":"FR Red Onion Strips","lbs":0.71},{"ingredient":"FR Corn","lbs":0.63},{"ingredient":"Yellow Pepper Strips","lbs":0.46},{"ingredient":"Cilantro","lbs":0.11}],
+    app2CheeseRecipe: [{"ingredient":"IQF Black Beans","lbs":0.74},{"ingredient":"Diced Tomatoes","lbs":0.71},{"ingredient":"FR Red Onion Strips","lbs":0.71},{"ingredient":"FR Corn","lbs":0.63},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.46},{"ingredient":"Cilantro","lbs":0.11}],
     app2CheeseRecipeName: "Hannaford South of Border Mix",
-    app3Type: "Monterey Jack Cheese",
+    app3Type: "Monterey Jack",
     app3OzPerPizza: 4
   } },
   { brand: "Craft", flavor: "CHICKEN TIKKA MASALA", values: {
@@ -1108,9 +1082,9 @@ import type { FormValues } from "./types";
     app1CheeseRecipeName: "Masala Chicken Mix",
     app2Type: "White Fajita Mix",
     app2OzPerPizza: 1.5,
-    app2CheeseRecipe: [{"ingredient":"Red Pepper Strips","lbs":0.37},{"ingredient":"Green Pepper Strips","lbs":0.37},{"ingredient":"Yellow Pepper Strips","lbs":0.37},{"ingredient":"White Onion Strips","lbs":0.37}],
+    app2CheeseRecipe: [{"ingredient":"Blanched Red Pepper Strips","lbs":0.37},{"ingredient":"Blanched Green Pepper Strips","lbs":0.37},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.37},{"ingredient":"Blanched White Onion Strips","lbs":0.37}],
     app2CheeseRecipeName: "White Fajita Mix",
-    app3Type: "Whole Milk Mozzarella",
+    app3Type: "Whole Mozzarella",
     app3OzPerPizza: 5
   } },
   { brand: "Lucia's", flavor: "6CHEESE", values: {
@@ -1187,10 +1161,10 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2.5,
     app2Type: "Onion FR Diced White/Yellow",
     app2OzPerPizza: 0.6,
-    app3Type: "Cheese Burger Cheese Mix",
+    app3Type: "Cheeseburger Cheese Mix",
     app3OzPerPizza: 5,
     app3CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2.5},{"ingredient":"Yellow Cheddar","lbs":2.5}],
-    app3CheeseRecipeName: "Cheese Burger Cheese Mix"
+    app3CheeseRecipeName: "Cheeseburger Cheese Mix"
   } },
   { brand: "Lucia's", flavor: "SUPREME", values: {
     sauceOzPerPizza: 4,
@@ -1205,7 +1179,7 @@ import type { FormValues } from "./types";
     app2CheeseRecipeName: "Lucia's Standard Cheese Mix",
     app3Type: "Lucia's Red Fajita Mix",
     app3OzPerPizza: 3,
-    app3CheeseRecipe: [{"ingredient":"Red Onion Strips","lbs":0.75},{"ingredient":"Green Pepper Strips","lbs":0.75},{"ingredient":"Red Pepper Strips","lbs":0.75},{"ingredient":"Yellow Pepper Strips","lbs":0.75}],
+    app3CheeseRecipe: [{"ingredient":"Red Onion Strips","lbs":0.75},{"ingredient":"Blanched Green Pepper Strips","lbs":0.75},{"ingredient":"Blanched Red Pepper Strips","lbs":0.75},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.75}],
     app3CheeseRecipeName: "Lucia's Red Fajita Mix",
     app4Type: "Lucia's Standard Cheese Mix",
     app4OzPerPizza: 2,
@@ -1218,7 +1192,7 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2.5,
     app2Type: "Celery",
     app2OzPerPizza: 0.85,
-    app3Type: "Monterey Jack Cheese",
+    app3Type: "Monterey Jack",
     app3OzPerPizza: 5
   } },
   { brand: "Nob Hill", flavor: "SOUTH OF THE BORDER", values: {
@@ -1227,9 +1201,9 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2,
     app2Type: "Hannaford South of Border Mix",
     app2OzPerPizza: 3.36,
-    app2CheeseRecipe: [{"ingredient":"IQF Black Beans","lbs":0.74},{"ingredient":"Diced Tomatoes","lbs":0.71},{"ingredient":"FR Red Onion Strips","lbs":0.71},{"ingredient":"FR Corn","lbs":0.63},{"ingredient":"Yellow Pepper Strips","lbs":0.46},{"ingredient":"Cilantro","lbs":0.11}],
+    app2CheeseRecipe: [{"ingredient":"IQF Black Beans","lbs":0.74},{"ingredient":"Diced Tomatoes","lbs":0.71},{"ingredient":"FR Red Onion Strips","lbs":0.71},{"ingredient":"FR Corn","lbs":0.63},{"ingredient":"Blanched Yellow Pepper Strips","lbs":0.46},{"ingredient":"Cilantro","lbs":0.11}],
     app2CheeseRecipeName: "Hannaford South of Border Mix",
-    app3Type: "Monterey Jack Cheese",
+    app3Type: "Monterey Jack",
     app3OzPerPizza: 4
   } },
   { brand: "Nob Hill", flavor: "BACON CHEESEBURGER", values: {
@@ -1283,7 +1257,7 @@ import type { FormValues } from "./types";
     app3CheeseRecipeName: "Carribean Mix",
     app4Type: "Lucia's Craft Caribbean Cheese Mix",
     app4OzPerPizza: 4.65,
-    app4CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2.25},{"ingredient":"Provolone","lbs":2.25},{"ingredient":"Cilanto","lbs":0.15}],
+    app4CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":2.25},{"ingredient":"Provolone","lbs":2.25},{"ingredient":"Cilantro","lbs":0.15}],
     app4CheeseRecipeName: "Lucia's Craft Caribbean Cheese Mix"
   } },
   { brand: "Price Chopper", flavor: "BBQ CHICKEN", values: {
@@ -1303,7 +1277,7 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 2,
     app2Type: "Diced Celery",
     app2OzPerPizza: 0.7,
-    app3Type: "Monterey Jack Cheese",
+    app3Type: "Monterey Jack",
     app3OzPerPizza: 4
   } },
   { brand: "Price Chopper", flavor: "Chicken Bacon Club", values: {
@@ -1316,7 +1290,7 @@ import type { FormValues } from "./types";
     app2CheeseRecipeName: "Hannaford Club Mix",
     app3Type: "Hannaford Club Cheese Mix",
     app3OzPerPizza: 4,
-    app3CheeseRecipe: [{"ingredient":"Yellow Cheddar","lbs":2},{"ingredient":"Skim Mozz","lbs":2}],
+    app3CheeseRecipe: [{"ingredient":"Yellow Cheddar","lbs":2},{"ingredient":"Skim Mozzarella","lbs":2}],
     app3CheeseRecipeName: "Hannaford Club Cheese Mix"
   } },
   { brand: "Price Chopper", flavor: "MEAT LOVERS", values: {
@@ -1355,7 +1329,7 @@ import type { FormValues } from "./types";
     app1CheeseRecipeName: "SMD Pep Cheese Mix",
     app2Type: "SMD Pep Cheese Mix",
     app2OzPerPizza: 3.25,
-    app2CheeseRecipe: [{"ingredient":"Skim Mozzarella","lbs":1.5},{"ingredient":"Provolone","lbs":0.9},{"ingredient":"Diced Pepperoni","lbs":0.6},{"ingredient":"COW Romano Cheese","lbs":0.25}],
+    app2CheeseRecipe: [{"ingredient":"Skim Mozzarella","lbs":1.5},{"ingredient":"Provolone","lbs":0.9},{"ingredient":"Diced Pepperoni","lbs":0.6},{"ingredient":"Cow's Romano","lbs":0.25}],
     app2CheeseRecipeName: "SMD Pep Cheese Mix"
   } },
   { brand: "SMD", flavor: "MEAT LOVERS", values: {
@@ -1365,11 +1339,11 @@ import type { FormValues } from "./types";
     pep1Type: "Pepperoni Stick",
     app1Type: "Italian Sausage",
     app1OzPerPizza: 1.5,
-    app2Type: "Whole Milk Mozzarella",
+    app2Type: "Whole Mozzarella",
     app2OzPerPizza: 2.5,
     app3Type: "Bacon",
     app3OzPerPizza: 1,
-    app4Type: "Whole Milk Mozzarella",
+    app4Type: "Whole Mozzarella",
     app4OzPerPizza: 1.5
   } },
   { brand: "SMD", flavor: "SUPREME", values: {
@@ -1381,15 +1355,15 @@ import type { FormValues } from "./types";
     app1OzPerPizza: 1.75,
     app2Type: "HT Standard Cheese Mix",
     app2OzPerPizza: 2,
-    app2CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":0.67},{"ingredient":"Fontina","lbs":0.67},{"ingredient":"Provolone","lbs":0.67}],
+    app2CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":0.67},{"ingredient":"Fontina","lbs":0.67},{"ingredient":"Provolone","lbs":0.67}],
     app2CheeseRecipeName: "HT Standard Cheese Mix",
     app3Type: "Show Me Dough Supreme Mix",
     app3OzPerPizza: 1.9,
-    app3CheeseRecipe: [{"ingredient":"White Fajita Blend","lbs":1.4},{"ingredient":"Black Olives","lbs":0.5}],
+    app3CheeseRecipe: [{"ingredient":"White Fajita Mix","lbs":1.4},{"ingredient":"Black Olives","lbs":0.5}],
     app3CheeseRecipeName: "Show Me Dough Supreme Mix",
     app4Type: "HT Standard Cheese Mix",
     app4OzPerPizza: 1.5,
-    app4CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":0.5},{"ingredient":"Fontina","lbs":0.5},{"ingredient":"Provolone","lbs":0.5}],
+    app4CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":0.5},{"ingredient":"Fontina","lbs":0.5},{"ingredient":"Provolone","lbs":0.5}],
     app4CheeseRecipeName: "HT Standard Cheese Mix"
   } },
   { brand: "SMD", flavor: "BBQ CHICKEN", values: {
@@ -1400,7 +1374,7 @@ import type { FormValues } from "./types";
     app2OzPerPizza: 0.5,
     app3Type: "SMD BBQ Chicken Cheese Mix",
     app3OzPerPizza: 4,
-    app3CheeseRecipe: [{"ingredient":"Whole Milk Mozzarella","lbs":3.5},{"ingredient":"Yellow Cheddar","lbs":0.5}],
+    app3CheeseRecipe: [{"ingredient":"Whole Mozzarella","lbs":3.5},{"ingredient":"Yellow Cheddar","lbs":0.5}],
     app3CheeseRecipeName: "SMD BBQ Chicken Cheese Mix"
   } },
   ];
@@ -1479,23 +1453,23 @@ import type { FormValues } from "./types";
   ];
 
   export const CHEESE_RECIPES: Record<string, { ingredient: string; lbs: number }[]> = {
-    "4 Cheese with Sweet & Spicy Chili Sauce": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 7 }, { ingredient: "Provolone", lbs: 6.6 }, { ingredient: "Grated Parmesan", lbs: 1.7 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "4 Cheese with Sweet & Spicy Chili Sauce": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 7 }, { ingredient: "Provolone", lbs: 6.6 }, { ingredient: "Grated Parmesan", lbs: 1.7 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "4Hands Chicken Bacon Club Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 24 }, { ingredient: "Yellow Cheddar", lbs: 8 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "4Hands Meat Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 44 }, { ingredient: "White Cheddar", lbs: 4.5 }, { ingredient: "Provolone", lbs: 4 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "4Hands Pizella Cheese": [{ ingredient: "Pizella Cheese", lbs: 48 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "4Hands Seven Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 36 }, { ingredient: "White Cheddar", lbs: 9.5 }, { ingredient: "Provolone", lbs: 5 }, { ingredient: "Fontina", lbs: 5 }, { ingredient: "3Cheese (Asiago, Parm, Romano)", lbs: 3 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "4Hands Seven Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 36 }, { ingredient: "White Cheddar", lbs: 9.5 }, { ingredient: "Provolone", lbs: 5 }, { ingredient: "Fontina", lbs: 5 }, { ingredient: "3Cheese (Asiago, Parm, Romano)", lbs: 3 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "4Hands Sugarfire Chicken Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 45 }, { ingredient: "Yellow Cheddar", lbs: 15 }, { ingredient: "IQF Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Aldo's Parmesan / Oregano Mix": [{ ingredient: "Grated Parmesan", lbs: 10 }, { ingredient: "Oregano Flake", lbs: 5 }],
     "Aldo's Standard Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Pizella (Pizza Cheese)", lbs: 35 }, { ingredient: "Parm / Oregano Mix", lbs: 0.3 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Basha's Original Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Basha's Ultra Thin 5 Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "White Cheddar", lbs: 10 }, { ingredient: "3Cheese (Asiago, Parm, Romano)", lbs: 0.8 }, { ingredient: "Five Cheese Spice Blend", lbs: 0.1 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Basha's Original Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Basha's Ultra Thin 5 Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "White Cheddar", lbs: 10 }, { ingredient: "3Cheese (Asiago, Parm, Romano)", lbs: 0.8 }, { ingredient: "Five Cheese Spice Blend", lbs: 0.1 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Basha's Ultra Thin BBQ Chicken Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 43 }, { ingredient: "IQF Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Basha's Ultra Thin Pepperoni Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "Diced Pepperoni", lbs: 10 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Basha's Ultra Thin Pepperoni/Romano Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "SHEEP Romano", lbs: 3 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Bobo's Breakfast Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Bobo's Chx Alfredo Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 40 }, { ingredient: "Yellow Cheddar", lbs: 26 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Bobo's STL Style Cheese": [{ ingredient: "STL Style Cheese", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Brand Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 24 }, { ingredient: "Whole Milk Mozzarella", lbs: 24 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Brand Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 24 }, { ingredient: "Whole Mozzarella", lbs: 24 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Cheeseburger Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Corner BBQ Chicken Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 44 }, { ingredient: "IQF Cilantro", lbs: 0.6 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Corner Booth Five Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 5 }, { ingredient: "Provolone", lbs: 5 }, { ingredient: "Fontina", lbs: 2.5 }, { ingredient: "Grated Parmesan", lbs: 2.5 }, { ingredient: "Cellulose", lbs: 0.3 }],
@@ -1510,7 +1484,7 @@ import type { FormValues } from "./types";
     "Four Hands Whole Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Gyro Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Feta Cheese", lbs: 2.5 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Hannaford BBQ Chicken Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 45 }, { ingredient: "IQF Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Hannaford Margherita Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "IQF Basil", lbs: 0.8 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Hannaford Margherita Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "IQF Basil", lbs: 0.8 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Hannaford's Chicken Bacon Club Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 16 }, { ingredient: "Yellow Cheddar", lbs: 16 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's 7 5 Cheese": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 5 }, { ingredient: "3 Cheese Blend", lbs: 0.375 }, { ingredient: "5 Cheese Spice Blend", lbs: 0.05 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's 7 BBQ Chicken": [{ ingredient: "Monterey Jack", lbs: 43 }, { ingredient: "Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
@@ -1519,16 +1493,16 @@ import type { FormValues } from "./types";
     "Lowe's 7 Supreme": [{ ingredient: "Skim Mozzarella", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's 7 White Spinach": [{ ingredient: "Skim Mozzarella", lbs: 20 }, { ingredient: "Spinach", lbs: 13 }, { ingredient: "Nutmeg", lbs: 0.63 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's BBQ Chicken Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 45 }, { ingredient: "IQF Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Lowe's California Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 10 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "Fontina", lbs: 10 }, { ingredient: "Goat Cheese", lbs: 7.5 }, { ingredient: "Basil, Frozen", lbs: 0.75 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Lowe's California Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 10 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "Fontina", lbs: 10 }, { ingredient: "Goat Cheese", lbs: 7.5 }, { ingredient: "Basil, Frozen", lbs: 0.75 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's Club Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Lowe's Grilled Vegetable Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "Fontina", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Lowe's Margehrita Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "IQF Basil", lbs: 0.8 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Lowe's Grilled Vegetable Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "Fontina", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Lowe's Margehrita Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "IQF Basil", lbs: 0.8 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's Pepperoni Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 40 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's Pepperoni/Romano Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 10 }, { ingredient: "SHEEP Romano", lbs: 4.3 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's Red Pepper Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Feta Cheese", lbs: 2 }, { ingredient: "3Cheese Blend (Asiago, Parm, Romano)", lbs: 1 }, { ingredient: "Spinach, Fresh Chopped", lbs: 4.6 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's Spinach Mushroom Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 20 }, { ingredient: "Frozen Mushrooms", lbs: 8 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lowe's White Spinach Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 10 }, { ingredient: "Fresh Spinach", lbs: 20 }, { ingredient: "Nutmeg", lbs: 0.05 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Lowes/Hannaford Five Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "White Cheddar", lbs: 10 }, { ingredient: "3Cheese Blend (Asiago, Parm, Romano)", lbs: 0.86 }, { ingredient: "Five Cheese Spice Blend", lbs: 0.066 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Lowes/Hannaford Five Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "White Cheddar", lbs: 10 }, { ingredient: "3Cheese Blend (Asiago, Parm, Romano)", lbs: 0.86 }, { ingredient: "Five Cheese Spice Blend", lbs: 0.066 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lucia Craft Whole Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lucia's 6 Cheese Mix": [{ ingredient: "Pizella (Pizza Cheese)", lbs: 17.5 }, { ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Fontina", lbs: 3.5 }, { ingredient: "Parmesan, Shredded", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lucia's Americano Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
@@ -1548,11 +1522,11 @@ import type { FormValues } from "./types";
     "Lucia's Pinsa Spinach Mushroom Pesto Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Fresh Spinach", lbs: 20 }, { ingredient: "Grated Parmesan", lbs: 5 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lucia's Spinach Cheese Mix": [{ ingredient: "Whole Mozzarella Cheese", lbs: 20 }, { ingredient: "Fresh Spinach", lbs: 5 }, { ingredient: "Grated Parmesan", lbs: 0.6 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Lucia's Standard Cheese Mix": [{ ingredient: "Pizella (Pizza Cheese)", lbs: 35 }, { ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Medulla 12x16 Mozzarella Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Skim Milk Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 2 }],
-    "Member's Selection (PriceSmart) Color Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 14 }],
+    "Medulla 12x16 Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Skim Milk Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 2 }],
+    "Member's Selection (PriceSmart) Color Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 14 }],
     "Monterey Jack Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 44 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Mozzarella Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Mystic 50/50 Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Mystic 50/50 Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "White Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Nob Hill Craft Bacon Club Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 30 }, { ingredient: "Yellow Cheddar", lbs: 15 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Nob Hill Craft Caribbean Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "IQF Cilantro", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Nob Hill Craft Cheeseburger Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
@@ -1562,17 +1536,17 @@ import type { FormValues } from "./types";
     "Price Chopper Hannaford's Chicken Bacon Club Cheese Mix": [{ ingredient: "Skim Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Red Hot Cheese Mix": [{ ingredient: "Monterey Jack", lbs: 45 }, { ingredient: "Red Hot Riplet Seasoning", lbs: 0.2 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Skim Mozzarella Cheese Mix": [{ ingredient: "Skim Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "SMD BBQ Chicken Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "Yellow Cheddar", lbs: 6 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "SMD Four Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "Provolone", lbs: 12 }, { ingredient: "Yellow Cheddar", lbs: 1.5 }, { ingredient: "Romano Cheese - COW", lbs: 0.2 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "SMD BBQ Chicken Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Yellow Cheddar", lbs: 6 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "SMD Four Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Provolone", lbs: 12 }, { ingredient: "Yellow Cheddar", lbs: 1.5 }, { ingredient: "Romano Cheese - COW", lbs: 0.2 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "SMD Pepperoni Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 8 }, { ingredient: "Diced Pepperoni (Hormel #18969)", lbs: 8 }, { ingredient: "Cow's Romano", lbs: 2.5 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "Fontina", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Spinach Goat Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 20 }, { ingredient: "Goat Cheese", lbs: 7.5 }, { ingredient: "Spinach, Fresh Chopped", lbs: 6 }, { ingredient: "Grated Parmesan", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Vita Mozzarella Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }],
+    "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie Cheese Mix)": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Provolone", lbs: 20 }, { ingredient: "Fontina", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Spinach Goat Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Goat Cheese", lbs: 7.5 }, { ingredient: "Spinach, Fresh Chopped", lbs: 6 }, { ingredient: "Grated Parmesan", lbs: 1 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Vita Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }],
     "Vita Red Pepper Cheese Mix": [{ ingredient: "Part Skim Mozzarella", lbs: 20 }, { ingredient: "Feta Cheese", lbs: 2 }, { ingredient: "3Cheese Blend (Asiago, Parm, Romano)", lbs: 1 }, { ingredient: "Fresh Spinach", lbs: 4.6 }],
     "Vocelli's BBQ Chicken Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Yellow Cheddar", lbs: 20 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Vocelli's Garlic Spinaci Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 20 }, { ingredient: "Fresh Spinach", lbs: 22.7 }, { ingredient: "Feta", lbs: 16.7 }, { ingredient: "Cow's Romano", lbs: 1.3 }, { ingredient: "Cellulose", lbs: 0.3 }],
     "Vocelli's Whole Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
-    "Whole Mozzarella Cheese Mix": [{ ingredient: "Whole Milk Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
+    "Whole Mozzarella Cheese Mix": [{ ingredient: "Whole Mozzarella", lbs: 40 }, { ingredient: "Cellulose", lbs: 0.3 }],
   };
 
   export const CHEESE_BRAND_SPECS: { brand: string; flavor?: string; app: number; recipe: string }[] = [

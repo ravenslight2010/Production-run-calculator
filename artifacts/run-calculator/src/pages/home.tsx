@@ -20,6 +20,7 @@ import {
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
+  INGREDIENT_RENAMES,
   DEFAULT_DIE_TYPES,
   DEFAULT_INGREDIENT_TYPES,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -83,6 +84,7 @@ import {
   applyMixSeedV14IfNeeded,
   applyMixSeedV15IfNeeded,
   applyPepTaxonomyMigrationIfNeeded,
+  applyIngredientDedupeMigrationIfNeeded,
   applySpecProfilesSeedIfNeeded,
   applyDieTypesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
@@ -178,6 +180,7 @@ applyMixSeedV14IfNeeded();
 applyMixSeedV15IfNeeded();
 applySpecProfilesSeedIfNeeded();
 applyPepTaxonomyMigrationIfNeeded();
+applyIngredientDedupeMigrationIfNeeded();
 applyDieTypesSeedIfNeeded();
 applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
@@ -2024,9 +2027,12 @@ export default function Home() {
       }
 
       // ── Ingredient types ──
+      // Rename legacy/near-duplicate names from incoming sync so an un-migrated
+      // peer can't re-add old spellings to the list.
       if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
         const local = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
-        const merged = [...new Set([...local, ...payload.ingredientTypes])].sort((a, b) => a.localeCompare(b));
+        const cleanedRemote = payload.ingredientTypes.map(t => INGREDIENT_RENAMES[t] ?? t);
+        const merged = [...new Set([...local, ...cleanedRemote])].sort((a, b) => a.localeCompare(b));
         if (!arraysEqual(merged, local)) {
           saveList(INGREDIENT_TYPES_KEY, merged);
           setIngredientTypes(merged);
@@ -2063,7 +2069,8 @@ export default function Home() {
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes);
       mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes);
-      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, payload.cheeseIngredients, setCheeseIngredients);
+      const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
+      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients);
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients);
       // Strip topping items from incoming frontline payload — old server payloads may still carry them
       const toppingSet = new Set(MIX_SEED.frontlineIngredients);

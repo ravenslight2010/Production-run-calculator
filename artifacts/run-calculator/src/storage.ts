@@ -31,6 +31,7 @@ import {
   PEP_TYPES_KEY,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
+  INGREDIENT_RENAMES,
   RETIRED_PEP_TYPES,
   CHEESE_INGREDIENTS_KEY,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -108,7 +109,41 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
       (o as Record<string, unknown>)[k] = PEP_TYPE_RENAMES[val];
     }
   }
+  normalizeIngredientFields(o);
   return o;
+}
+
+const RECIPE_FIELDS = [
+  "doughRecipe",
+  "app1CheeseRecipe",
+  "app2CheeseRecipe",
+  "app3CheeseRecipe",
+  "app4CheeseRecipe",
+  "frontlineRecipe",
+] as const;
+
+// Rename near-duplicate applicator (app*Type) and recipe-ingredient names to
+// their canonical spelling on read, so saved profiles/runs/templates/history
+// stay consistent with the deduped option lists. Idempotent and self-healing.
+function normalizeIngredientFields(o: Record<string, unknown>): void {
+  for (const k of ["app1Type", "app2Type", "app3Type", "app4Type"] as const) {
+    const val = o[k];
+    if (typeof val === "string" && INGREDIENT_RENAMES[val]) {
+      o[k] = INGREDIENT_RENAMES[val];
+    }
+  }
+  for (const k of RECIPE_FIELDS) {
+    const arr = o[k];
+    if (!Array.isArray(arr)) continue;
+    for (const row of arr) {
+      if (row && typeof row === "object") {
+        const r = row as Record<string, unknown>;
+        if (typeof r.ingredient === "string" && INGREDIENT_RENAMES[r.ingredient]) {
+          r.ingredient = INGREDIENT_RENAMES[r.ingredient];
+        }
+      }
+    }
+  }
 }
 
 export function loadProfile(brand: string, flavor: string): FormValues | null {
@@ -358,6 +393,35 @@ export function applyPepTaxonomyMigrationIfNeeded(): void {
     saveList(INGREDIENT_TYPES_KEY, [...new Set(savedApp)].sort((a, b) => a.localeCompare(b)));
 
     localStorage.setItem(PEP_TAXONOMY_MIGRATION_KEY, "1");
+  } catch {}
+}
+
+const INGREDIENT_DEDUPE_MIGRATION_KEY = "run-calc-ingredient-dedupe-v1";
+
+// One-time near-duplicate cleanup: rename app-type and cheese-ingredient names to
+// their canonical spelling and drop the resulting duplicates (case-insensitive).
+// Names inside saved profiles/runs/templates/history are renamed on read (see
+// normalizeIngredientFields), so this only repairs the manageable option lists.
+export function applyIngredientDedupeMigrationIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(INGREDIENT_DEDUPE_MIGRATION_KEY)) return;
+  try {
+    for (const key of [INGREDIENT_TYPES_KEY, CHEESE_INGREDIENTS_KEY]) {
+      if (localStorage.getItem(key) === null) continue;
+      const saved = loadList(key, []);
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const t of saved) {
+        const renamed = INGREDIENT_RENAMES[t] ?? t;
+        const lk = renamed.toLowerCase();
+        if (!seen.has(lk)) {
+          seen.add(lk);
+          out.push(renamed);
+        }
+      }
+      saveList(key, out.sort((a, b) => a.localeCompare(b)));
+    }
+    localStorage.setItem(INGREDIENT_DEDUPE_MIGRATION_KEY, "1");
   } catch {}
 }
 

@@ -236,6 +236,45 @@ export const PEP_TYPE_RENAMES: Record<string, string> = {
   "Pep - Cured": "Pepperoni Stick",
   "Pep - Natural": "Pepperoni Stick - NATURAL",
 };
+// Near-duplicate applicator/cheese-ingredient names (typos, spacing, redundant
+// suffixes, abbreviations, and word-order/blanched variants) collapsed onto a
+// single canonical spelling. Genuinely different products are intentionally NOT
+// mapped: all "FR" (fire roasted) variants, the three Parmesan forms (Grated /
+// Shredded / plain), mozzarella fat levels (Part Skim / Skim / Whole) and the
+// Extra Large Cut. Applied to saved lists (one-time) and to app-type / recipe
+// ingredient names on read (idempotent, self-healing across sync).
+export const INGREDIENT_RENAMES: Record<string, string> = {
+  // App-type / mix names
+  "Cheese Burger Cheese Mix": "Cheeseburger Cheese Mix",
+  "Red Onion, Diced": "Red Onion Diced",
+  "Monterey Jack Cheese": "Monterey Jack",
+  "Yellow Cheddar Cheese": "Yellow Cheddar",
+  // Cheese ingredients
+  Cilanto: "Cilantro",
+  "COW Romano Cheese": "Cow's Romano",
+  Goat: "Goat Cheese",
+  "Three Cheese Blend &": "Three Cheese Blend",
+  "Chicken w": "Chicken",
+  "White Fajita Blend": "White Fajita Mix",
+  "Part-Skim Mozz": "Part Skim Mozzarella",
+  "P/S Mozz": "Part Skim Mozzarella",
+  "Skim Mozz": "Skim Mozzarella",
+  // Whole mozzarella consolidation (whole milk == whole); keep Extra Large Cut separate
+  "Whole Milk Mozzarella Cheese": "Whole Mozzarella",
+  "Whole Milk Mozzarella": "Whole Mozzarella",
+  "Whole Mozz": "Whole Mozzarella",
+  // Pepper/onion strips: collapse plain + both word-order blanched -> "Blanched X Strips"
+  "Green Pepper Strips Blanched": "Blanched Green Pepper Strips",
+  "Green Pepper Strips": "Blanched Green Pepper Strips",
+  "Red Pepper Strips Blanched": "Blanched Red Pepper Strips",
+  "Red Pepper Strips": "Blanched Red Pepper Strips",
+  "White Onion Strips Blanched": "Blanched White Onion Strips",
+  "White Onion Strips": "Blanched White Onion Strips",
+  "Yellow Pepper Strips Blanched": "Blanched Yellow Pepper Strips",
+  "Yellow Pepper Strips": "Blanched Yellow Pepper Strips",
+  // Red onion
+  "Red Onions": "Red Onion Strips",
+};
 // Pep-type names that were recategorized as applicator types and must be dropped
 // from the pep-type list (still usable as an applicator type / cheese ingredient).
 export const RETIRED_PEP_TYPES = ["Diced Pepperoni"];

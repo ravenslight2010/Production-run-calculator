@@ -18,6 +18,8 @@
 import {
   DEFAULT_PROGRESS,
   DEFAULT_SETTINGS,
+  renameIngredientList,
+  renameIngredientSettings,
   renamePepList,
   renamePepSettings,
   todayStr,
@@ -195,7 +197,7 @@ function formValuesToSettings(
 ): RunSettings {
   const base = prev ?? DEFAULT_SETTINGS;
   const v = (fv ?? {}) as Partial<WebFormValues>;
-  return renamePepSettings({
+  return renameIngredientSettings(renamePepSettings({
     ...base,
     brand: str(meta.brand, base.brand),
     flavor: str(meta.flavor, base.flavor),
@@ -250,7 +252,7 @@ function formValuesToSettings(
     app4CheeseRecipe: v.app4CheeseRecipe !== undefined ? rows(v.app4CheeseRecipe) : base.app4CheeseRecipe,
     frontlineRecipeName: str(v.frontlineRecipeName, base.frontlineRecipeName),
     frontlineRecipe: v.frontlineRecipe !== undefined ? rows(v.frontlineRecipe) : base.frontlineRecipe,
-  });
+  }));
 }
 
 function formValuesToProgress(
@@ -361,7 +363,7 @@ export function applyPayloadToState(
   // reintroduce "Pep - Cured"/"Pep - Natural"/"Diced Pepperoni" via sync.
   if (payload.pepTypes) patch.pepTypes = renamePepList(unionList(prev.pepTypes, payload.pepTypes));
   if (payload.dieTypes) patch.dieTypes = unionList(prev.dieTypes, payload.dieTypes);
-  if (payload.cheeseIngredients) patch.cheeseIngredients = unionList(prev.cheeseIngredients, payload.cheeseIngredients);
+  if (payload.cheeseIngredients) patch.cheeseIngredients = renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients));
   if (payload.doughIngredients) patch.doughIngredients = unionList(prev.doughIngredients, payload.doughIngredients);
   if (payload.frontlineIngredients) patch.frontlineIngredients = unionList(prev.frontlineIngredients, payload.frontlineIngredients);
 

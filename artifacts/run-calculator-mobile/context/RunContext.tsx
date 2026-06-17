@@ -268,6 +268,44 @@ export const PEP_TYPE_RENAMES: Record<string, string> = {
   "Pep - Cured": "Pepperoni Stick",
   "Pep - Natural": "Pepperoni Stick - NATURAL",
 };
+// Near-duplicate applicator/cheese-ingredient names collapsed onto a single
+// canonical spelling. Genuinely different products are intentionally NOT mapped:
+// all "FR" (fire roasted) variants, the three Parmesan forms (Grated / Shredded /
+// plain), mozzarella fat levels (Part Skim / Skim / Whole) and the Extra Large
+// Cut. Mirrors the web map. Applied to the cheese-ingredient list and to app-type
+// / recipe ingredient names on every load (idempotent, self-healing across sync).
+export const INGREDIENT_RENAMES: Record<string, string> = {
+  // App-type / mix names
+  "Cheese Burger Cheese Mix": "Cheeseburger Cheese Mix",
+  "Red Onion, Diced": "Red Onion Diced",
+  "Monterey Jack Cheese": "Monterey Jack",
+  "Yellow Cheddar Cheese": "Yellow Cheddar",
+  // Cheese ingredients
+  Cilanto: "Cilantro",
+  "COW Romano Cheese": "Cow's Romano",
+  Goat: "Goat Cheese",
+  "Three Cheese Blend &": "Three Cheese Blend",
+  "Chicken w": "Chicken",
+  "White Fajita Blend": "White Fajita Mix",
+  "Part-Skim Mozz": "Part Skim Mozzarella",
+  "P/S Mozz": "Part Skim Mozzarella",
+  "Skim Mozz": "Skim Mozzarella",
+  // Whole mozzarella consolidation (whole milk == whole); keep Extra Large Cut separate
+  "Whole Milk Mozzarella Cheese": "Whole Mozzarella",
+  "Whole Milk Mozzarella": "Whole Mozzarella",
+  "Whole Mozz": "Whole Mozzarella",
+  // Pepper/onion strips: collapse plain + both word-order blanched -> "Blanched X Strips"
+  "Green Pepper Strips Blanched": "Blanched Green Pepper Strips",
+  "Green Pepper Strips": "Blanched Green Pepper Strips",
+  "Red Pepper Strips Blanched": "Blanched Red Pepper Strips",
+  "Red Pepper Strips": "Blanched Red Pepper Strips",
+  "White Onion Strips Blanched": "Blanched White Onion Strips",
+  "White Onion Strips": "Blanched White Onion Strips",
+  "Yellow Pepper Strips Blanched": "Blanched Yellow Pepper Strips",
+  "Yellow Pepper Strips": "Blanched Yellow Pepper Strips",
+  // Red onion
+  "Red Onions": "Red Onion Strips",
+};
 // Pep-type names recategorized as applicators — dropped from the pep-type list
 // (still usable as an applicator via the cheese-ingredient list).
 const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
@@ -1176,17 +1214,65 @@ export function renamePepList(list: string[] | undefined): string[] {
   return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
 }
 
+const RECIPE_FIELDS = [
+  "doughRecipe",
+  "app1CheeseRecipe",
+  "app2CheeseRecipe",
+  "app3CheeseRecipe",
+  "app4CheeseRecipe",
+  "frontlineRecipe",
+] as const;
+
+// Rename near-duplicate applicator (app*Type) and recipe-ingredient names to
+// their canonical spelling on a settings object. Idempotent and self-healing.
+export function renameIngredientSettings<T extends Partial<RunSettings>>(s: T): T {
+  const out = { ...s } as Record<string, unknown>;
+  for (const k of ["app1Type", "app2Type", "app3Type", "app4Type"] as const) {
+    const val = out[k];
+    if (typeof val === "string" && INGREDIENT_RENAMES[val]) out[k] = INGREDIENT_RENAMES[val];
+  }
+  for (const k of RECIPE_FIELDS) {
+    const arr = out[k];
+    if (!Array.isArray(arr)) continue;
+    out[k] = arr.map((row) =>
+      row && typeof row === "object" && typeof (row as RecipeRow).ingredient === "string"
+        ? { ...row, ingredient: INGREDIENT_RENAMES[(row as RecipeRow).ingredient] ?? (row as RecipeRow).ingredient }
+        : row,
+    );
+  }
+  return out as T;
+}
+
+// Rename near-duplicate cheese-ingredient names and drop the resulting
+// duplicates (case-insensitive), preserving order.
+export function renameIngredientList(list: string[] | undefined): string[] {
+  const base = list ?? [...DEFAULT_CHEESE_INGREDIENTS];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of base) {
+    const renamed = INGREDIENT_RENAMES[t] ?? t;
+    const key = renamed.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(renamed);
+    }
+  }
+  return out;
+}
+
 function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
-  return renamePepSettings({
-    ...DEFAULT_SETTINGS,
-    ...(s ?? {}),
-    doughRecipe: s?.doughRecipe ?? [],
-    app1CheeseRecipe: s?.app1CheeseRecipe ?? [],
-    app2CheeseRecipe: s?.app2CheeseRecipe ?? [],
-    app3CheeseRecipe: s?.app3CheeseRecipe ?? [],
-    app4CheeseRecipe: s?.app4CheeseRecipe ?? [],
-    frontlineRecipe: s?.frontlineRecipe ?? [],
-  });
+  return renameIngredientSettings(
+    renamePepSettings({
+      ...DEFAULT_SETTINGS,
+      ...(s ?? {}),
+      doughRecipe: s?.doughRecipe ?? [],
+      app1CheeseRecipe: s?.app1CheeseRecipe ?? [],
+      app2CheeseRecipe: s?.app2CheeseRecipe ?? [],
+      app3CheeseRecipe: s?.app3CheeseRecipe ?? [],
+      app4CheeseRecipe: s?.app4CheeseRecipe ?? [],
+      frontlineRecipe: s?.frontlineRecipe ?? [],
+    }),
+  );
 }
 
 function normalizeRun(r: RunState): RunState {
@@ -1204,7 +1290,9 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     runToTime: parsed.runToTime ?? "",
     date: parsed.date ?? todayStr(),
     templates: (parsed.templates ?? []).map((t) =>
-      t.settings ? { ...t, settings: renamePepSettings(t.settings) } : t
+      t.settings
+        ? { ...t, settings: renameIngredientSettings(renamePepSettings(t.settings)) }
+        : t
     ),
     autoTrack: parsed.autoTrack ?? true,
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
@@ -1212,7 +1300,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     brandFlavors: parsed.brandFlavors ?? { ...MIX_SEED.brandFlavors },
     dieTypes: parsed.dieTypes ?? [...DEFAULT_DIE_TYPES],
     pepTypes: renamePepList(parsed.pepTypes),
-    cheeseIngredients: parsed.cheeseIngredients ?? [...DEFAULT_CHEESE_INGREDIENTS],
+    cheeseIngredients: renameIngredientList(parsed.cheeseIngredients),
     doughIngredients: parsed.doughIngredients ?? [...DEFAULT_DOUGH_INGREDIENTS],
     frontlineIngredients:
       parsed.frontlineIngredients ?? [
@@ -1223,7 +1311,10 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
       ],
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
     brandProfiles: Object.fromEntries(
-      Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [k, renamePepSettings(v)])
+      Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [
+        k,
+        renameIngredientSettings(renamePepSettings(v)),
+      ])
     ),
     doughRecipePresets: parsed.doughRecipePresets ?? {},
     cheeseRecipePresets: parsed.cheeseRecipePresets ?? {},
