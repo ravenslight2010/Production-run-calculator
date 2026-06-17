@@ -1,0 +1,297 @@
+import * as XLSX from "xlsx";
+import type { FormValues, RunMeta } from "../types";
+import { fmtClock, fmtTime } from "../utils";
+
+/**
+ * Shared Excel (.xlsx) + QuickBooks CSV row model for production runs.
+ *
+ * This module is intentionally mirrored verbatim in the mobile app
+ * (artifacts/run-calculator-mobile/utils/runExcel.ts) per the web/mobile parity
+ * rule in replit.md. Columns, validation, fuzzy matching and the QuickBooks
+ * layout MUST stay identical across both apps. Adapt only platform IO at the UI
+ * layer, never the row model below.
+ */
+
+export const RUN_EXPORT_COLUMNS = [
+  "Date",
+  "Run",
+  "Brand",
+  "Flavor",
+  "Status",
+  "Cases Planned",
+  "Cases Made",
+  "Pizzas",
+  "PPM",
+  "Started",
+  "Ended",
+  "Net Duration",
+  "Downtime",
+  "Stoppages",
+  "Dough Batches",
+  "Sauce Batches",
+  "Notes",
+] as const;
+
+export type RunExportRow = Record<(typeof RUN_EXPORT_COLUMNS)[number], string | number>;
+
+function statusOf(run: RunMeta): string {
+  return run.endedAt ? "Finished" : run.startedAt ? "Running" : "Upcoming";
+}
+
+/**
+ * Normalized planning inputs for the export's batch math. Each platform maps its
+ * own field names onto this shape (e.g. web `targetDoughballWeight` ↔ mobile
+ * `doughballWeightOz`) so the formula below produces IDENTICAL numbers on both.
+ * This is the single source of truth for exported Dough/Sauce batch totals — do
+ * not compute them from a platform-specific calc engine.
+ */
+export type ExportBatchInput = {
+  casesNeeded: number;
+  pizzasPerCase: number;
+  casesPerLayer: number;
+  doughballOz: number;
+  doughBatchYield: number;
+  doughRecipeLbs: number;
+  sauceOzPerPizza: number;
+  sauceBarrelLbs: number;
+  frontlineRecipeLbs: number;
+};
+
+/** Planned-total dough & sauce batches. Identical math web + mobile. */
+export function computeExportBatches(i: ExportBatchInput): { doughBatches: number; sauceBatches: number } {
+  const totalPizzas = i.casesNeeded * i.pizzasPerCase;
+  const totalPizzasForSauce = totalPizzas + i.casesPerLayer * i.pizzasPerCase;
+  const sauceEffBarrel = i.frontlineRecipeLbs > 0 ? i.frontlineRecipeLbs : i.sauceBarrelLbs;
+  const sauceLbs = (totalPizzasForSauce * i.sauceOzPerPizza) / 16 + 30;
+  const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
+  const effYield =
+    i.doughRecipeLbs > 0 && i.doughballOz > 0
+      ? (i.doughRecipeLbs * 16) / i.doughballOz
+      : i.doughBatchYield;
+  const doughBatches = effYield > 0 ? totalPizzas / effYield : 0;
+  return { doughBatches, sauceBatches };
+}
+
+/** Build one export row object for a single run (identical fields web + mobile). */
+export function buildRunExportRow(date: string, label: string, run: RunMeta, vals: FormValues): RunExportRow {
+  const totalPizzas = vals.casesNeeded * vals.pizzasPerCase;
+  const grossDurSec = run.startedAt && run.endedAt ? (run.endedAt - run.startedAt) / 1000 : 0;
+  const downtimeSec = (run.stoppages ?? [])
+    .filter((s) => s.endedAt && s.type !== "pause")
+    .reduce((acc, s) => acc + (s.endedAt! - s.startedAt) / 1000, 0);
+  const netDurSec = Math.max(0, grossDurSec - downtimeSec);
+  const casesMade = run.actualCases ?? vals.casesNeeded;
+  const netPpm =
+    netDurSec > 0 && casesMade > 0 && vals.pizzasPerCase > 0
+      ? Math.round((casesMade * vals.pizzasPerCase) / (netDurSec / 60))
+      : 0;
+  const stopReasons = (run.stoppages ?? [])
+    .map((s) => `${s.reason}(${s.endedAt ? fmtTime((s.endedAt - s.startedAt) / 1000) : "open"})`)
+    .join("; ");
+  const { doughBatches, sauceBatches } = computeExportBatches({
+    casesNeeded: vals.casesNeeded,
+    pizzasPerCase: vals.pizzasPerCase,
+    casesPerLayer: vals.casesPerLayer,
+    doughballOz: vals.targetDoughballWeight,
+    doughBatchYield: vals.doughBatchYield,
+    doughRecipeLbs: (vals.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0),
+    sauceOzPerPizza: vals.sauceOzPerPizza,
+    sauceBarrelLbs: vals.sauceBarrelLbs,
+    frontlineRecipeLbs: (vals.frontlineRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0),
+  });
+  return {
+    Date: date,
+    Run: label,
+    Brand: run.brand,
+    Flavor: run.flavor,
+    Status: statusOf(run),
+    "Cases Planned": vals.casesNeeded,
+    "Cases Made": run.actualCases ?? "",
+    Pizzas: totalPizzas,
+    PPM: netPpm > 0 ? netPpm : "",
+    Started: run.startedAt ? fmtClock(run.startedAt) : "",
+    Ended: run.endedAt ? fmtClock(run.endedAt) : "",
+    "Net Duration": netDurSec > 0 ? fmtTime(netDurSec) : "",
+    Downtime: downtimeSec > 0 ? fmtTime(downtimeSec) : "0",
+    Stoppages: stopReasons,
+    "Dough Batches": Math.round(doughBatches * 100) / 100,
+    "Sauce Batches": Math.round(sauceBatches * 100) / 100,
+    Notes: run.notes ?? "",
+  };
+}
+
+/** Build an xlsx workbook (as ArrayBuffer-ready) from export rows. */
+export function buildRunWorkbook(rows: RunExportRow[]): XLSX.WorkBook {
+  const ws = XLSX.utils.json_to_sheet(rows, { header: [...RUN_EXPORT_COLUMNS] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Production Runs");
+  return wb;
+}
+
+// ---------------------------------------------------------------------------
+// Import
+// ---------------------------------------------------------------------------
+
+export type ImportRow = {
+  rowNumber: number; // 1-based spreadsheet row (excluding header)
+  brand: string;
+  flavor: string;
+  casesPlanned: number;
+  notes: string;
+};
+
+export type ImportParseResult = {
+  rows: ImportRow[];
+  errors: { rowNumber: number; message: string }[];
+};
+
+function pick(obj: Record<string, unknown>, keys: string[]): string {
+  for (const k of Object.keys(obj)) {
+    const norm = k.trim().toLowerCase();
+    if (keys.some((want) => norm === want)) {
+      const v = obj[k];
+      return v == null ? "" : String(v).trim();
+    }
+  }
+  return "";
+}
+
+/** Parse an xlsx ArrayBuffer/Uint8Array into validated import rows + per-row errors. */
+export function parseRunWorkbook(data: ArrayBuffer | Uint8Array): ImportParseResult {
+  const wb = XLSX.read(data, { type: "array" });
+  return parseWorkbookObject(wb);
+}
+
+/** Parse an already-read workbook (used by base64 path on mobile). */
+export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
+  const sheetName = wb.SheetNames[0];
+  const rows: ImportRow[] = [];
+  const errors: { rowNumber: number; message: string }[] = [];
+  if (!sheetName) {
+    return { rows, errors: [{ rowNumber: 0, message: "No sheets found in file." }] };
+  }
+  const ws = wb.Sheets[sheetName];
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "" });
+  raw.forEach((obj, i) => {
+    const rowNumber = i + 2; // +1 for header row, +1 for 1-based spreadsheet rows
+    const brand = pick(obj, ["brand"]);
+    const flavor = pick(obj, ["flavor"]);
+    const casesStr = pick(obj, ["cases planned", "cases", "casesplanned", "casesneeded", "cases needed"]);
+    const notes = pick(obj, ["notes"]);
+    if (!brand && !flavor && !casesStr) return; // skip blank rows silently
+    if (!brand) {
+      errors.push({ rowNumber, message: "Missing Brand" });
+      return;
+    }
+    const casesPlanned = casesStr === "" ? 0 : Number(casesStr);
+    if (casesStr !== "" && (!isFinite(casesPlanned) || casesPlanned < 0)) {
+      errors.push({ rowNumber, message: `Invalid Cases Planned "${casesStr}"` });
+      return;
+    }
+    rows.push({ rowNumber, brand, flavor, casesPlanned: Math.round(casesPlanned), notes });
+  });
+  return { rows, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Fuzzy matching (Levenshtein) for brand/flavor mapping
+// ---------------------------------------------------------------------------
+
+function levenshtein(a: string, b: string): number {
+  const al = a.length;
+  const bl = b.length;
+  if (al === 0) return bl;
+  if (bl === 0) return al;
+  const prev = new Array<number>(bl + 1);
+  const cur = new Array<number>(bl + 1);
+  for (let j = 0; j <= bl; j++) prev[j] = j;
+  for (let i = 1; i <= al; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= bl; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= bl; j++) prev[j] = cur[j];
+  }
+  return prev[bl];
+}
+
+export type FuzzyMatch = { value: string; score: number; exact: boolean };
+
+/**
+ * Match a candidate name against a list of known options.
+ * Returns case-insensitive exact match first, otherwise fuzzy suggestions
+ * sorted best-first (closest edit distance), filtered to reasonable similarity.
+ */
+export function fuzzyMatch(candidate: string, options: string[]): FuzzyMatch[] {
+  const c = candidate.trim().toLowerCase();
+  if (!c) return [];
+  const exact = options.find((o) => o.trim().toLowerCase() === c);
+  if (exact) return [{ value: exact, score: 0, exact: true }];
+  const scored = options
+    .map((o) => {
+      const dist = levenshtein(c, o.trim().toLowerCase());
+      const maxLen = Math.max(c.length, o.length, 1);
+      return { value: o, score: dist, ratio: dist / maxLen, exact: false };
+    })
+    .filter((m) => m.ratio <= 0.5)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 3)
+    .map(({ value, score, exact }) => ({ value, score, exact }));
+  return scored;
+}
+
+/** Case-insensitive exact lookup; returns the canonical option or null. */
+export function exactMatch(candidate: string, options: string[]): string | null {
+  const c = candidate.trim().toLowerCase();
+  if (!c) return null;
+  return options.find((o) => o.trim().toLowerCase() === c) ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// QuickBooks CSV
+// ---------------------------------------------------------------------------
+
+export const QUICKBOOKS_COLUMNS = [
+  "*InvoiceNo",
+  "*Customer",
+  "*InvoiceDate",
+  "*DueDate",
+  "Item(Product/Service)",
+  "ItemDescription",
+  "ItemQuantity",
+  "ItemRate",
+  "*ItemAmount",
+] as const;
+
+function csvEscape(v: string | number): string {
+  const s = String(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Build a QuickBooks-importable CSV of run totals as zero-amount reference
+ * records (no live Intuit sync). One line per run; quantity = pizzas produced,
+ * rate and amount are 0 so these never affect books.
+ */
+export function buildQuickBooksCsv(date: string, runs: { label: string; brand: string; flavor: string; vals: FormValues; actualCases?: number }[]): string {
+  const lines: string[] = [QUICKBOOKS_COLUMNS.map(csvEscape).join(",")];
+  runs.forEach((r, i) => {
+    const cases = r.actualCases ?? r.vals.casesNeeded;
+    const pizzas = cases * r.vals.pizzasPerCase;
+    const item = [r.brand, r.flavor].filter(Boolean).join(" ") || r.label;
+    const row: (string | number)[] = [
+      `RUN-${date}-${i + 1}`,
+      "Production",
+      date,
+      date,
+      item,
+      `Production run: ${r.label} (${cases} cases / ${pizzas} pizzas)`,
+      pizzas,
+      0,
+      0,
+    ];
+    lines.push(row.map(csvEscape).join(","));
+  });
+  return lines.join("\n");
+}

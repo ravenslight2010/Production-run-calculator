@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import React from "react";
 import {
@@ -11,11 +13,14 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as XLSX from "xlsx";
+import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import { SectionHeader } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
 import {
   computeCalc,
   historicalBenchmarkPpm,
+  profileKey,
   runLabel,
   todayStr,
   useRun,
@@ -23,7 +28,22 @@ import {
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { exportRunsCsv } from "@/utils/exportCsv";
+import { exportRunsExcel, exportRunsQuickBooks } from "@/utils/exportExcel";
+import {
+  parseRunWorkbookBase64,
+  parseWorkbookObject,
+  type ImportParseResult,
+} from "@/utils/runExcel";
 import { shareShiftReport } from "@/utils/shiftReport";
+
+function tomorrowStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const y = d.getFullYear();
+  const m = (d.getMonth() + 1).toString().padStart(2, "0");
+  const day = d.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 type RunStatus = "finished" | "current" | "upcoming";
 
@@ -300,7 +320,69 @@ function RunCard({ run, index }: { run: RunState; index: number }) {
 export default function SummaryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, tick, shiftNotes, setShiftNotes, history } = useRun();
+  const {
+    allRuns,
+    tick,
+    shiftNotes,
+    setShiftNotes,
+    history,
+    brands,
+    brandFlavors,
+    brandProfiles,
+    addScheduledRun,
+    addFlavor,
+    addListItem,
+    supervisorPin,
+  } = useRun();
+
+  const [importResult, setImportResult] = React.useState<ImportParseResult | null>(null);
+  const [importOpen, setImportOpen] = React.useState(false);
+
+  async function handleImportPick() {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      let result: ImportParseResult;
+      if (Platform.OS === "web") {
+        const resp = await fetch(asset.uri);
+        const ab = await resp.arrayBuffer();
+        result = parseWorkbookObject(XLSX.read(ab, { type: "array" }));
+      } else {
+        const b64 = await Promise.resolve(new File(asset.uri).base64());
+        result = parseRunWorkbookBase64(b64);
+      }
+      setImportResult(result);
+      setImportOpen(true);
+    } catch {
+      // ignore — user can retry
+    }
+  }
+
+  function commitImport(payload: ImportCommit) {
+    payload.createBrands.forEach((b) => addListItem("brands", b));
+    payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
+    payload.runs.forEach((r) => {
+      const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
+      addScheduledRun(payload.date, {
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesPlanned,
+        dieType,
+        notes: r.notes,
+      });
+    });
+    setImportOpen(false);
+    setImportResult(null);
+  }
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -383,8 +465,53 @@ export default function SummaryScreen() {
                   Export CSV
                 </Text>
               </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  exportRunsExcel(todayStr(), allRuns);
+                }}
+                style={({ pressed }) => [
+                  styles.exportBtn,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="grid" size={13} color={colors.primary} />
+                <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+                  Export Excel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  exportRunsQuickBooks(todayStr(), allRuns);
+                }}
+                style={({ pressed }) => [
+                  styles.exportBtn,
+                  { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                ]}
+              >
+                <Feather name="dollar-sign" size={13} color={colors.primary} />
+                <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+                  QuickBooks
+                </Text>
+              </Pressable>
             </>
           ) : null}
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              handleImportPick();
+            }}
+            style={({ pressed }) => [
+              styles.exportBtn,
+              { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+            ]}
+          >
+            <Feather name="upload" size={13} color={colors.primary} />
+            <Text style={[styles.exportBtnText, { color: colors.primary }]}>
+              Import Excel
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -544,6 +671,20 @@ export default function SummaryScreen() {
           </View>
         </>
       ) : null}
+
+      <ExcelImportModal
+        visible={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          setImportResult(null);
+        }}
+        result={importResult}
+        brands={brands}
+        brandFlavors={brandFlavors}
+        supervisorPin={supervisorPin}
+        defaultDate={tomorrowStr()}
+        onConfirm={commitImport}
+      />
     </ScrollView>
   );
 }

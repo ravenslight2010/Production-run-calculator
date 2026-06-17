@@ -126,6 +126,8 @@ import {
   ShieldCheck,
   Settings,
   Download,
+  Upload,
+  FileSpreadsheet,
   Printer,
   History,
   FileText,
@@ -157,6 +159,15 @@ import {
   Boxes,
   Menu,
 } from "lucide-react";
+import * as XLSX from "xlsx";
+import {
+  buildRunExportRow,
+  buildRunWorkbook,
+  buildQuickBooksCsv,
+  parseRunWorkbook,
+  type ImportParseResult,
+} from "@/utils/runExcel";
+import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 
 import {
   Form,
@@ -1868,6 +1879,9 @@ export default function Home() {
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
@@ -3023,6 +3037,89 @@ export default function Home() {
     const a = document.createElement("a");
     a.href = url; a.download = `production-run-${day.date}.csv`; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportExcel() {
+    const rows = dayState.runs.map((run) => {
+      const vals = run.id === currentRunId ? v : loadRunValues(run.id);
+      return buildRunExportRow(todayStr(), runLabel(run), run, vals);
+    });
+    const wb = buildRunWorkbook(rows);
+    XLSX.writeFile(wb, `production-run-${todayStr()}.xlsx`);
+  }
+
+  function exportQuickBooks() {
+    const runs = dayState.runs.map((run) => {
+      const vals = run.id === currentRunId ? v : loadRunValues(run.id);
+      return { label: runLabel(run), brand: run.brand, flavor: run.flavor, vals, actualCases: run.actualCases };
+    });
+    const csv = buildQuickBooksCsv(todayStr(), runs);
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `quickbooks-runs-${todayStr()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const result = parseRunWorkbook(buf);
+      setImportResult(result);
+      setShowImportDialog(true);
+    } catch {
+      // ignore malformed file — user can retry
+    }
+  }
+
+  async function commitExcelImport(payload: ImportCommit) {
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    const date = payload.date;
+    // Fetch the existing day payload so we can append additively WITHOUT
+    // dropping any existing run metadata (started/ended times, stoppages,
+    // actuals) or other day-level fields (shiftNotes, recipe presets, etc.).
+    let existing: SyncPayload | null = null;
+    try {
+      const res = await fetch(`/api/sync/${date}`);
+      if (res.ok) existing = (await res.json()) as SyncPayload | null;
+    } catch {}
+    const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
+    const existingRuns: RunMeta[] = existingDayState.runs ?? [];
+    const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
+    const newRuns: RunMeta[] = [];
+    const newRunValues: Record<string, FormValues> = {};
+    for (const r of payload.runs) {
+      const id = genId();
+      const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+      const base: FormValues = profile ?? DEFAULT_VALUES;
+      newRunValues[id] = { ...base, casesNeeded: r.casesPlanned };
+      newRuns.push({ id, brand: r.brand, flavor: r.flavor, notes: r.notes || undefined });
+    }
+    const runs = [...existingRuns, ...newRuns];
+    const runValues = { ...existingRunValues, ...newRunValues };
+    const outPayload: SyncPayload = {
+      ...(existing ?? {}),
+      dayState: { ...existingDayState, runs, date, resetAt: existingDayState.resetAt ?? Date.now() },
+      runValues,
+      brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
+      brandFlavors: loadBrandFlavors(),
+    };
+    try {
+      const res = await fetch(`/api/sync/${date}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: outPayload }),
+      });
+      if (res.ok) {
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+      }
+    } catch {}
+    setShowImportDialog(false);
+    setImportResult(null);
   }
 
   function printSummary() {
@@ -7904,6 +8001,34 @@ export default function Home() {
                         >
                           <Download className="w-3.5 h-3.5" /> Export CSV
                         </button>
+                        <button
+                          type="button"
+                          onClick={exportExcel}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <FileSpreadsheet className="w-3.5 h-3.5" /> Export Excel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={exportQuickBooks}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" /> QuickBooks
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => importInputRef.current?.click()}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Upload className="w-3.5 h-3.5" /> Import Excel
+                        </button>
+                        <input
+                          ref={importInputRef}
+                          type="file"
+                          accept=".xlsx,.xls"
+                          className="hidden"
+                          onChange={handleImportFile}
+                        />
                       </div>
 
                       {/* Day Totals banner */}
@@ -8446,6 +8571,18 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* ── Excel Import Dialog ──────────────────────────────────────────── */}
+        <ExcelImportDialog
+          open={showImportDialog}
+          onClose={() => { setShowImportDialog(false); setImportResult(null); }}
+          result={importResult}
+          brands={brands}
+          brandFlavors={brandFlavors}
+          canCreate={isSupervisor}
+          defaultDate={tomorrowStr()}
+          onConfirm={commitExcelImport}
+        />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (

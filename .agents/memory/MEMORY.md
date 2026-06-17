@@ -20,3 +20,4 @@
 - [RN custom font weights](rn-custom-font-weights.md) — RN ignores fontWeight for custom fonts; set fontFamily to the loaded weighted variant (FONTS map), numerics use mono.
 - [Frontline formula parity](frontline-formula-parity.md) — mobile computeCalc frontline = web (fractional batches, casesLeftToRun basis w/ double layer buffer); dough/timing intentionally use casesLeft.
 - [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave before profile loads; saveProfile guard + seed self-heal; no numeric-scan for real-data.
+- [Excel import/export + QuickBooks CSV](excel-import-export.md) — export totals must use one shared formula (not platform calc engines); import must merge full day payload (no clobber).
