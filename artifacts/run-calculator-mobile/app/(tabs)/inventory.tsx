@@ -26,12 +26,15 @@ import {
   deleteInventoryItem,
   restockInventory,
   adjustInventory,
+  fetchInventorySettings,
+  updateInventorySettings,
   deriveCandidateItems,
   isLowStock,
   lotExpiryStatus,
   daysUntil,
   todayStr,
   openInventoryStream,
+  EXPIRY_SOON_DAYS,
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
 
@@ -53,12 +56,19 @@ export default function InventoryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
+  const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
   const refetchRef = useRef<() => void>(() => {});
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchInventory();
+      const [data, settings] = await Promise.all([
+        fetchInventory(),
+        fetchInventorySettings(),
+      ]);
       setItems(data);
+      setExpirySoonDays(settings.expirySoonDays);
+      setExpiryInput(String(settings.expirySoonDays));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load inventory");
@@ -67,6 +77,22 @@ export default function InventoryScreen() {
     }
   }, []);
   refetchRef.current = load;
+
+  const saveExpiryLeadTime = useCallback(async () => {
+    const n = Math.max(0, Math.round(Number(expiryInput)));
+    if (!Number.isFinite(n) || n === expirySoonDays) {
+      setExpiryInput(String(expirySoonDays));
+      return;
+    }
+    try {
+      const saved = await updateInventorySettings({ expirySoonDays: n });
+      setExpirySoonDays(saved.expirySoonDays);
+      setExpiryInput(String(saved.expirySoonDays));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save settings");
+      setExpiryInput(String(expirySoonDays));
+    }
+  }, [expiryInput, expirySoonDays]);
 
   useEffect(() => {
     let stream: { close: () => void } | null = null;
@@ -98,13 +124,13 @@ export default function InventoryScreen() {
       if (isLowStock(it)) low.push(it);
       for (const lot of it.lots) {
         if (lot.qtyRemaining <= 0) continue;
-        const st = lotExpiryStatus(lot);
+        const st = lotExpiryStatus(lot, expirySoonDays);
         if (st === "expired") expired.push({ item: it, lot });
         else if (st === "soon") expiring.push({ item: it, lot });
       }
     }
     return { low, expiring, expired };
-  }, [items]);
+  }, [items, expirySoonDays]);
 
   const grouped = useMemo(() => {
     const packaging = items.filter((i) => i.category === "packaging");
@@ -208,6 +234,7 @@ export default function InventoryScreen() {
             expandedId={expandedId}
             setExpandedId={setExpandedId}
             onChanged={load}
+            expirySoonDays={expirySoonDays}
           />
         )}
         {grouped.ingredient.length > 0 && (
@@ -218,8 +245,33 @@ export default function InventoryScreen() {
             expandedId={expandedId}
             setExpandedId={setExpandedId}
             onChanged={load}
+            expirySoonDays={expirySoonDays}
           />
         )}
+
+        {/* Settings: configurable expiry lead time */}
+        <Card title="Settings" icon="settings" style={{ marginBottom: 16 }}>
+          <View style={styles.settingsRow}>
+            <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
+              Expiring-soon lead time (days)
+            </Text>
+            <TextInput
+              style={[
+                styles.settingsInput,
+                { borderColor: colors.border, color: colors.foreground },
+              ]}
+              keyboardType="number-pad"
+              value={expiryInput}
+              onChangeText={setExpiryInput}
+              onBlur={saveExpiryLeadTime}
+              returnKeyType="done"
+              onSubmitEditing={saveExpiryLeadTime}
+            />
+          </View>
+          <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>
+            Lots within this many days of expiring are flagged as expiring soon.
+          </Text>
+        </Card>
       </ScrollView>
     </View>
   );
@@ -232,6 +284,7 @@ function CategorySection({
   expandedId,
   setExpandedId,
   onChanged,
+  expirySoonDays,
 }: {
   title: string;
   icon: keyof typeof Feather.glyphMap;
@@ -239,6 +292,7 @@ function CategorySection({
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
   onChanged: () => void;
+  expirySoonDays: number;
 }) {
   return (
     <Card title={title} icon={icon} style={{ marginBottom: 16 }} contentStyle={{ gap: 6 }}>
@@ -249,6 +303,7 @@ function CategorySection({
           expanded={expandedId === item.id}
           onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
           onChanged={onChanged}
+          expirySoonDays={expirySoonDays}
         />
       ))}
     </Card>
@@ -260,11 +315,13 @@ function ItemRow({
   expanded,
   onToggle,
   onChanged,
+  expirySoonDays,
 }: {
   item: InventoryItem;
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => void;
+  expirySoonDays: number;
 }) {
   const colors = useColors();
   const low = isLowStock(item);
@@ -297,12 +354,12 @@ function ItemRow({
           <Text style={[styles.itemUnit, { color: colors.mutedForeground }]}>{item.unit}</Text>
         </Text>
       </Pressable>
-      {expanded && <ItemDetail item={item} onChanged={onChanged} />}
+      {expanded && <ItemDetail item={item} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
     </View>
   );
 }
 
-function ItemDetail({ item, onChanged }: { item: InventoryItem; onChanged: () => void }) {
+function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
   const colors = useColors();
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
@@ -357,7 +414,7 @@ function ItemDetail({ item, onChanged }: { item: InventoryItem; onChanged: () =>
         ) : (
           <View style={{ gap: 4 }}>
             {lots.map((lot) => {
-              const st = lotExpiryStatus(lot);
+              const st = lotExpiryStatus(lot, expirySoonDays);
               return (
                 <View key={lot.id} style={styles.lotRow}>
                   <Text style={[styles.lotText, { color: colors.mutedForeground }]} numberOfLines={1}>
@@ -799,6 +856,25 @@ const styles = StyleSheet.create({
   },
   alertText: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular },
   alertValue: { fontSize: 13, fontFamily: FONTS.medium, flexShrink: 0 },
+
+  settingsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  settingsLabel: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular },
+  settingsInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minWidth: 64,
+    textAlign: "right",
+    fontSize: 14,
+    fontFamily: FONTS.medium,
+  },
+  settingsHint: { fontSize: 11, marginTop: 6, fontFamily: FONTS.regular },
 
   toggleBtn: {
     flexDirection: "row",

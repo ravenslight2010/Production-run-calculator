@@ -141,6 +141,8 @@ export function deriveCandidateItems(valsList: FormValues[]): CandidateItem[] {
 }
 
 // ── Expiration helpers ───────────────────────────────────────────────────────
+// Default expiry lead time; overridden by the user-configured value loaded from
+// the inventory settings endpoint.
 export const EXPIRY_SOON_DAYS = 7;
 
 export function daysUntil(dateStr: string | null): number | null {
@@ -154,11 +156,14 @@ export function daysUntil(dateStr: string | null): number | null {
 
 export type ExpiryStatus = "expired" | "soon" | "ok" | "none";
 
-export function lotExpiryStatus(lot: InventoryLot): ExpiryStatus {
+export function lotExpiryStatus(
+  lot: InventoryLot,
+  soonDays: number = EXPIRY_SOON_DAYS,
+): ExpiryStatus {
   const d = daysUntil(lot.expirationDate);
   if (d == null) return "none";
   if (d < 0) return "expired";
-  if (d <= EXPIRY_SOON_DAYS) return "soon";
+  if (d <= soonDays) return "soon";
   return "ok";
 }
 
@@ -205,8 +210,16 @@ export type RestockBody = {
   expirationDate?: string;
 };
 export type AdjustBody = { itemId: number; qtyDelta: number; note?: string };
+export type InventorySettings = { expirySoonDays: number };
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
+export const fetchInventorySettings = () =>
+  api<InventorySettings>("/inventory/settings");
+export const updateInventorySettings = (body: InventorySettings) =>
+  api<InventorySettings>("/inventory/settings", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 export const fetchLedger = (itemId?: number) =>
   api<LedgerEntry[]>(`/inventory/ledger${itemId != null ? `?itemId=${itemId}` : ""}`);
 export const createInventoryItem = (body: CreateItemBody) =>

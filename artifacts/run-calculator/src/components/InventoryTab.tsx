@@ -27,10 +27,13 @@ import {
   deleteInventoryItem,
   restockInventory,
   adjustInventory,
+  fetchInventorySettings,
+  updateInventorySettings,
   inventoryClientId,
   isLowStock,
   lotExpiryStatus,
   daysUntil,
+  EXPIRY_SOON_DAYS,
 } from "../inventoryShared";
 
 function fmtQty(n: number): string {
@@ -55,12 +58,19 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
+  const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
     try {
-      const data = await fetchInventory();
+      const [data, settings] = await Promise.all([
+        fetchInventory(),
+        fetchInventorySettings(),
+      ]);
       setItems(data);
+      setExpirySoonDays(settings.expirySoonDays);
+      setExpiryInput(String(settings.expirySoonDays));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load inventory");
@@ -69,6 +79,22 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
     }
   }
   refetchRef.current = load;
+
+  async function saveExpiryLeadTime() {
+    const n = Math.max(0, Math.round(Number(expiryInput)));
+    if (!Number.isFinite(n) || n === expirySoonDays) {
+      setExpiryInput(String(expirySoonDays));
+      return;
+    }
+    try {
+      const saved = await updateInventorySettings({ expirySoonDays: n });
+      setExpirySoonDays(saved.expirySoonDays);
+      setExpiryInput(String(saved.expirySoonDays));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save settings");
+      setExpiryInput(String(expirySoonDays));
+    }
+  }
 
   useEffect(() => {
     load();
@@ -92,13 +118,13 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
       if (isLowStock(it)) low.push(it);
       for (const lot of it.lots) {
         if (lot.qtyRemaining <= 0) continue;
-        const st = lotExpiryStatus(lot);
+        const st = lotExpiryStatus(lot, expirySoonDays);
         if (st === "expired") expired.push({ item: it, lot });
         else if (st === "soon") expiring.push({ item: it, lot });
       }
     }
     return { low, expiring, expired };
-  }, [items]);
+  }, [items, expirySoonDays]);
 
   const grouped = useMemo(() => {
     const packaging = items.filter((i) => i.category === "packaging");
@@ -191,6 +217,7 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
           expandedId={expandedId}
           setExpandedId={setExpandedId}
           onChanged={load}
+          expirySoonDays={expirySoonDays}
         />
       )}
       {grouped.ingredient.length > 0 && (
@@ -201,8 +228,41 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
           expandedId={expandedId}
           setExpandedId={setExpandedId}
           onChanged={load}
+          expirySoonDays={expirySoonDays}
         />
       )}
+
+      {/* Settings: configurable expiry lead time */}
+      <Card className="bg-card/50 border-border/50 shadow-md">
+        <CardHeader className="pb-2 pt-4 px-5">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Settings
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-4">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="expiry-lead" className="text-sm text-muted-foreground">
+              Expiring-soon lead time (days)
+            </label>
+            <Input
+              id="expiry-lead"
+              type="number"
+              min={0}
+              inputMode="numeric"
+              className="w-20 text-right"
+              value={expiryInput}
+              onChange={(e) => setExpiryInput(e.target.value)}
+              onBlur={saveExpiryLeadTime}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Lots within this many days of expiring are flagged as expiring soon.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -214,6 +274,7 @@ function CategorySection({
   expandedId,
   setExpandedId,
   onChanged,
+  expirySoonDays,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -221,6 +282,7 @@ function CategorySection({
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
   onChanged: () => void;
+  expirySoonDays: number;
 }) {
   return (
     <Card className="bg-card/50 border-border/50 shadow-md">
@@ -237,6 +299,7 @@ function CategorySection({
             expanded={expandedId === item.id}
             onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
             onChanged={onChanged}
+            expirySoonDays={expirySoonDays}
           />
         ))}
       </CardContent>
@@ -249,11 +312,13 @@ function ItemRow({
   expanded,
   onToggle,
   onChanged,
+  expirySoonDays,
 }: {
   item: InventoryItem;
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => void;
+  expirySoonDays: number;
 }) {
   const low = isLowStock(item);
   return (
@@ -272,12 +337,12 @@ function ItemRow({
           {fmtQty(item.onHand)} <span className="font-normal text-muted-foreground">{item.unit}</span>
         </span>
       </button>
-      {expanded && <ItemDetail item={item} onChanged={onChanged} />}
+      {expanded && <ItemDetail item={item} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
     </div>
   );
 }
 
-function ItemDetail({ item, onChanged }: { item: InventoryItem; onChanged: () => void }) {
+function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -320,7 +385,7 @@ function ItemDetail({ item, onChanged }: { item: InventoryItem; onChanged: () =>
         ) : (
           <div className="space-y-1">
             {lots.map((lot) => {
-              const st = lotExpiryStatus(lot);
+              const st = lotExpiryStatus(lot, expirySoonDays);
               return (
                 <div key={lot.id} className="flex items-center justify-between gap-2 text-xs">
                   <span className="truncate text-muted-foreground">

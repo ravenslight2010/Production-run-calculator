@@ -27,11 +27,13 @@ import type {
   HealthStatus,
   InventoryItem,
   InventoryLedgerEntry,
+  InventorySettings,
   ListInventoryLedgerParams,
   ProductionRun,
   ProductionRunInput,
   RestockInput,
-  UpdateInventoryItemInput
+  UpdateInventoryItemInput,
+  UpdateInventorySettingsInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -928,4 +930,152 @@ export function useListInventoryLedger<TData = Awaited<ReturnType<typeof listInv
 
 
 
+
+export const getGetInventorySettingsUrl = () => {
+
+
+
+
+  return `/api/inventory/settings`
+}
+
+/**
+ * @summary Get global inventory settings (expiry lead time)
+ */
+export const getInventorySettings = async ( options?: RequestInit): Promise<InventorySettings> => {
+
+  return customFetch<InventorySettings>(getGetInventorySettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetInventorySettingsQueryKey = () => {
+    return [
+    `/api/inventory/settings`
+    ] as const;
+    }
+
+
+export const getGetInventorySettingsQueryOptions = <TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetInventorySettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getInventorySettings>>> = ({ signal }) => getInventorySettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetInventorySettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getInventorySettings>>>
+export type GetInventorySettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get global inventory settings (expiry lead time)
+ */
+
+export function useGetInventorySettings<TData = Awaited<ReturnType<typeof getInventorySettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getInventorySettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetInventorySettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateInventorySettingsUrl = () => {
+
+
+
+
+  return `/api/inventory/settings`
+}
+
+/**
+ * @summary Update global inventory settings
+ */
+export const updateInventorySettings = async (updateInventorySettingsInput: UpdateInventorySettingsInput, options?: RequestInit): Promise<InventorySettings> => {
+
+  return customFetch<InventorySettings>(getUpdateInventorySettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateInventorySettingsInput,)
+  }
+);}
+
+
+
+
+export const getUpdateInventorySettingsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInventorySettings>>, TError,{data: BodyType<UpdateInventorySettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateInventorySettings>>, TError,{data: BodyType<UpdateInventorySettingsInput>}, TContext> => {
+
+const mutationKey = ['updateInventorySettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateInventorySettings>>, {data: BodyType<UpdateInventorySettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateInventorySettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateInventorySettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateInventorySettings>>>
+    export type UpdateInventorySettingsMutationBody = BodyType<UpdateInventorySettingsInput>
+    export type UpdateInventorySettingsMutationError = ErrorType<void>
+
+    /**
+ * @summary Update global inventory settings
+ */
+export const useUpdateInventorySettings = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateInventorySettings>>, TError,{data: BodyType<UpdateInventorySettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateInventorySettings>>,
+        TError,
+        {data: BodyType<UpdateInventorySettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateInventorySettingsMutationOptions(options));
+    }
 

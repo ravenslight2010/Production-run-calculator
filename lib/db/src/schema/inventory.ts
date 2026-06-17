@@ -69,7 +69,16 @@ export const inventoryConsumedRunsTable = pgTable("inventory_consumed_runs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Global inventory settings (single row, id=1). expirySoonDays is the
+// user-configurable lead time for the "expiring soon" alert.
+export const inventorySettingsTable = pgTable("inventory_settings", {
+  id: integer("id").primaryKey().default(1),
+  expirySoonDays: integer("expiry_soon_days").notNull().default(7),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type InventoryItem = typeof inventoryItemsTable.$inferSelect;
 export type InventoryLot = typeof inventoryLotsTable.$inferSelect;
 export type InventoryLedgerEntry = typeof inventoryLedgerTable.$inferSelect;
 export type InventoryConsumedRun = typeof inventoryConsumedRunsTable.$inferSelect;
+export type InventorySettings = typeof inventorySettingsTable.$inferSelect;

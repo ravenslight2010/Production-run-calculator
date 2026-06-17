@@ -248,3 +248,23 @@ export const ListInventoryLedgerResponseItem = zod.object({
 export const ListInventoryLedgerResponse = zod.array(ListInventoryLedgerResponseItem)
 
 
+/**
+ * @summary Get global inventory settings (expiry lead time)
+ */
+export const GetInventorySettingsResponse = zod.object({
+  "expirySoonDays": zod.number()
+})
+
+
+/**
+ * @summary Update global inventory settings
+ */
+export const UpdateInventorySettingsBody = zod.object({
+  "expirySoonDays": zod.number()
+})
+
+export const UpdateInventorySettingsResponse = zod.object({
+  "expirySoonDays": zod.number()
+})
+
+

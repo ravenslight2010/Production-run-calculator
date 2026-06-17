@@ -244,6 +244,38 @@ paths:
                 items:
                   $ref: "#/components/schemas/InventoryLedgerEntry"
 
+  /inventory/settings:
+    get:
+      operationId: getInventorySettings
+      tags: [inventory]
+      summary: Get global inventory settings (expiry lead time)
+      responses:
+        "200":
+          description: Inventory settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventorySettings"
+    put:
+      operationId: updateInventorySettings
+      tags: [inventory]
+      summary: Update global inventory settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInventorySettingsInput"
+      responses:
+        "200":
+          description: Updated inventory settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventorySettings"
+        "400":
+          description: Invalid input
+
 components:
   schemas:
     HealthStatus:
@@ -518,3 +550,19 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    InventorySettings:
+      type: object
+      required:
+        - expirySoonDays
+      properties:
+        expirySoonDays:
+          type: integer
+
+    UpdateInventorySettingsInput:
+      type: object
+      required:
+        - expirySoonDays
+      properties:
+        expirySoonDays:
+          type: integer

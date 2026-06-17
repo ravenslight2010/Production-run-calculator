@@ -6,6 +6,7 @@ import {
   inventoryLotsTable,
   inventoryLedgerTable,
   inventoryConsumedRunsTable,
+  inventorySettingsTable,
   type InventoryLot,
 } from "@workspace/db";
 import {
@@ -14,6 +15,7 @@ import {
   RestockInventoryBody,
   AdjustInventoryBody,
   ConsumeInventoryBody,
+  UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -76,12 +78,16 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // returns how much was actually consumed (may be less than requested).
 async function drawDown(exec: Executor, itemId: number, qty: number): Promise<number> {
   if (qty <= 0) return 0;
+  // Lock the item's lot rows FOR UPDATE so concurrent consume/adjust transactions
+  // for the same item serialize here instead of reading the same stale quantities
+  // and writing conflicting qtyRemaining values (lost updates / on-hand drift).
   const lots = await exec
     .select()
     .from(inventoryLotsTable)
     .where(
       and(eq(inventoryLotsTable.itemId, itemId), gt(inventoryLotsTable.qtyRemaining, 0)),
-    );
+    )
+    .for("update");
   const ordered = sortLotsForConsumption(lots);
   let remaining = qty;
   for (const lot of ordered) {
@@ -363,6 +369,51 @@ router.get("/inventory/ledger", async (req, res): Promise<void> => {
         .orderBy(desc(inventoryLedgerTable.createdAt))
         .limit(500);
   res.json(rows);
+});
+
+// Global inventory settings live in a single row (id=1). Reads create the
+// default row on demand so a fresh install returns a safe default (7-day lead).
+async function loadSettings() {
+  const [row] = await db
+    .select()
+    .from(inventorySettingsTable)
+    .where(eq(inventorySettingsTable.id, 1));
+  if (row) return row;
+  const [created] = await db
+    .insert(inventorySettingsTable)
+    .values({ id: 1 })
+    .onConflictDoNothing({ target: inventorySettingsTable.id })
+    .returning();
+  if (created) return created;
+  const [existing] = await db
+    .select()
+    .from(inventorySettingsTable)
+    .where(eq(inventorySettingsTable.id, 1));
+  return existing;
+}
+
+router.get("/inventory/settings", async (_req, res): Promise<void> => {
+  const row = await loadSettings();
+  res.json({ expirySoonDays: row.expirySoonDays });
+});
+
+router.put("/inventory/settings", async (req, res): Promise<void> => {
+  const parsed = UpdateInventorySettingsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const expirySoonDays = Math.max(0, Math.round(parsed.data.expirySoonDays));
+  const [row] = await db
+    .insert(inventorySettingsTable)
+    .values({ id: 1, expirySoonDays, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: inventorySettingsTable.id,
+      set: { expirySoonDays, updatedAt: new Date() },
+    })
+    .returning();
+  broadcast(headerSenderId(req));
+  res.json({ expirySoonDays: row.expirySoonDays });
 });
 
 router.get("/inventory/events", async (req: Request, res: Response): Promise<void> => {

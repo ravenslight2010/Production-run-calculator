@@ -125,6 +125,14 @@ export interface InventoryLedgerEntry {
   createdAt: string;
 }
 
+export interface InventorySettings {
+  expirySoonDays: number;
+}
+
+export interface UpdateInventorySettingsInput {
+  expirySoonDays: number;
+}
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };
