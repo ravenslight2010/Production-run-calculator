@@ -16,24 +16,17 @@ import {
   AdjustInventoryBody,
   ConsumeInventoryBody,
   UpdateInventorySettingsBody,
-  IdentifyInventoryPhotoBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
-import * as z from "zod";
+import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 
 const router: IRouter = Router();
 
 // Cost/abuse guards for the paid AI vision endpoint. The API is unauthenticated,
-// so cap both how often it can be called and how large each request can be before
-// it reaches the model.
+// so cap how often it can be called. Size/shape guards live in photoIdentify.ts.
 const PHOTO_RATE_WINDOW_MS = 60_000;
 const PHOTO_RATE_MAX = 10; // requests per IP per minute
-// Base64 inflates by ~33%, so ~8M chars ≈ a ~6 MB source image — far above any
-// normal phone photo, while staying under the 10mb express.json body limit so we
-// return a clean 413 here instead of a parser error.
-const MAX_IMAGE_BASE64_CHARS = 8_000_000;
-const MAX_CANDIDATES = 1000;
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string };
@@ -259,82 +252,22 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 // Read-only: identifies incoming stock from a photo and returns suggested restock
 // entries. It never writes — the client must confirm each entry, which then goes
 // through the existing POST /inventory/restock path. Low/zero confidence is left
-// to the client to surface as a manual-entry fallback.
-type PhotoGuessOut = {
-  name: string;
-  qty: number;
-  unit: string;
-  category: "ingredient" | "packaging";
-  matchedKey: string | null;
-  confidence: number;
-};
-
-// The vision model is unreliable, so validate its structured output with a
-// lenient Zod schema (coerces numeric strings, tolerates missing optional
-// fields) rather than trusting the raw JSON. Anything that fails per-item
-// validation is dropped; the whole response collapses to [] if the top-level
-// shape is wrong. Post-parse we still clamp confidence and scrub matchedKey
-// against the candidates the client actually sent.
-const VisionGuessSchema = z.object({
-  name: z.coerce.string(),
-  qty: z.coerce.number().optional(),
-  unit: z.coerce.string().optional(),
-  category: z.coerce.string().optional(),
-  matchedKey: z.string().nullish(),
-  confidence: z.coerce.number().optional(),
-});
-const VisionResponseSchema = z.object({
-  items: z.array(z.unknown()).optional(),
-});
-
-function sanitizeGuesses(raw: unknown, candidateKeys: Set<string>): PhotoGuessOut[] {
-  const top = VisionResponseSchema.safeParse(raw);
-  if (!top.success) return [];
-  const out: PhotoGuessOut[] = [];
-  for (const item of top.data.items ?? []) {
-    const parsed = VisionGuessSchema.safeParse(item);
-    if (!parsed.success) continue;
-    const g = parsed.data;
-    const name = g.name.trim();
-    if (!name) continue;
-    const qty = g.qty != null && Number.isFinite(g.qty) && g.qty > 0 ? g.qty : 0;
-    const unit = (g.unit ?? "").trim() || "units";
-    const category =
-      (g.category ?? "").trim().toLowerCase() === "packaging" ? "packaging" : "ingredient";
-    let matchedKey = g.matchedKey ?? null;
-    if (matchedKey != null && !candidateKeys.has(matchedKey)) matchedKey = null;
-    let confidence = g.confidence ?? 0;
-    if (!Number.isFinite(confidence)) confidence = 0;
-    confidence = Math.max(0, Math.min(1, confidence));
-    out.push({ name, qty, unit, category, matchedKey, confidence });
-  }
-  return out;
-}
+// to the client to surface as a manual-entry fallback. Request validation and
+// model-output sanitizing live in ./photoIdentify so they can be unit-tested
+// without a DB or the vision provider.
 
 router.post(
   "/inventory/identify-photo",
   rateLimit({ windowMs: PHOTO_RATE_WINDOW_MS, max: PHOTO_RATE_MAX }),
   async (req, res): Promise<void> => {
-  const parsed = IdentifyInventoryPhotoBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const validation = validateIdentifyPhotoBody(req.body);
+  if (!validation.ok) {
+    res.status(validation.status).json({ error: validation.error });
     return;
   }
-  const { imageBase64, mimeType, candidates } = parsed.data;
-  if (!imageBase64 || imageBase64.length < 16) {
-    res.status(400).json({ error: "imageBase64 required" });
-    return;
-  }
-  if (imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
-    res.status(413).json({ error: "Image too large" });
-    return;
-  }
-  if (candidates && candidates.length > MAX_CANDIDATES) {
-    res.status(400).json({ error: `Too many candidates (max ${MAX_CANDIDATES})` });
-    return;
-  }
+  const { imageBase64, mimeType, candidates } = validation.data;
+  const candidateKeys = validation.candidateKeys;
   const cands = candidates ?? [];
-  const candidateKeys = new Set(cands.map((c) => c.key));
   const candidateLines = cands
     .map((c) => `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`)
     .join("\n");
