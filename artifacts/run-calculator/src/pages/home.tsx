@@ -5532,6 +5532,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("summary")}>
                   <BarChart2 className="w-4 h-4 mr-2" /> Summary
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
+                  <ClipboardList className="w-4 h-4 mr-2" /> Stock
+                </DropdownMenuItem>
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -6502,7 +6505,7 @@ export default function Home() {
                 })()}
               </TabsContent>
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-7 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -6526,10 +6529,6 @@ export default function Home() {
                 <TabsTrigger value="warehouse" data-testid="tab-warehouse" className="flex flex-col items-center gap-0.5 px-1">
                   <Warehouse className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Whse</span>
-                </TabsTrigger>
-                <TabsTrigger value="inventory" data-testid="tab-inventory" className="flex flex-col items-center gap-0.5 px-1">
-                  <ClipboardList className="w-4 h-4 shrink-0" />
-                  <span className="text-[10px] truncate">Stock</span>
                 </TabsTrigger>
               </TabsList>
 

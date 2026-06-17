@@ -9,7 +9,9 @@ Both `run-calculator` (web) and `run-calculator-mobile` use the SAME navigation:
 
 **Bottom tabs:** Run (current + upcoming runs), Dough/Crusts (supply steppers + dough/crust output), Sauce (sauce needs), Frontline (applicator + pepperoni needs), Packaging (packaging steppers + freezer + output), Warehouse (aggregated needs across all not-ended runs + production schedule).
 
-**Header menu (dropdown/sheet, not a tab):** Stoppages, Summary, Setup (per-run config + recipe editors + templates), Settings (app-level: supervisor PIN, master data, reset).
+**Header menu (dropdown/sheet, not a tab):** Stoppages, Summary, Stock (inventory), Schedule (supervisor-only on web), Setup (per-run config + recipe editors + templates), Settings (app-level: supervisor PIN, master data, reset).
+
+**Rule:** the bottom bar stays at exactly 6 tabs. New top-level destinations (e.g. Inventory/Stock) go in the header menu, NOT a 7th tab — adding a 7th tab is a spec violation. On web that's a `setActiveTab(...)` DropdownMenuItem with a `TabsContent` panel but no `TabsTrigger`; on mobile it's a `(tabs)/` screen with `options={{ href: null }}` plus a `MENU_ITEMS` entry that `router.push`es to it.
 
 **Why:** User explicitly wanted both apps identical in layout. Calculations/formulas, RunContext sync, and stored state shape must stay unchanged — this is purely a UI reorg.
 

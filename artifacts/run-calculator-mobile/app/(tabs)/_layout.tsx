@@ -15,6 +15,7 @@ const MENU_ITEMS: {
 }[] = [
   { label: "Stoppages", icon: "clock", route: "/stoppages", desc: "Log and review downtime" },
   { label: "Summary", icon: "list", route: "/summary", desc: "Shift totals and export" },
+  { label: "Stock", icon: "clipboard", route: "/inventory", desc: "On-hand stock, lots, and restocks" },
   { label: "Schedule", icon: "calendar", route: "/schedule", desc: "Plan future production days" },
   { label: "Setup", icon: "sliders", route: "/configure", desc: "Run config and recipes" },
   { label: "Settings", icon: "settings", route: "/settings", desc: "App options and master data" },
@@ -118,16 +119,8 @@ export default function TabLayout() {
             tabBarIcon: ({ color }) => <Feather name="archive" size={22} color={color} />,
           }}
         />
-        <Tabs.Screen
-          name="inventory"
-          options={{
-            title: "Inventory",
-            tabBarLabel: "Stock",
-            tabBarIcon: ({ color }) => <Feather name="clipboard" size={22} color={color} />,
-          }}
-        />
-
         {/* Menu-reachable screens (hidden from the bottom tab bar) */}
+        <Tabs.Screen name="inventory" options={{ href: null, title: "Inventory" }} />
         <Tabs.Screen name="stoppages" options={{ href: null, title: "Stoppages" }} />
         <Tabs.Screen name="summary" options={{ href: null, title: "Summary" }} />
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />
