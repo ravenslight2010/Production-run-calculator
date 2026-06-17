@@ -12,6 +12,8 @@ tags:
     description: Health operations
   - name: runs
     description: Production run history
+  - name: inventory
+    description: Stock / inventory control
 paths:
   /healthz:
     get:
@@ -77,6 +79,170 @@ paths:
           description: Deleted
         "404":
           description: Not found
+
+  /inventory:
+    get:
+      operationId: listInventory
+      tags: [inventory]
+      summary: List inventory items with lots and on-hand
+      responses:
+        "200":
+          description: Inventory items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryItem"
+
+  /inventory/items:
+    post:
+      operationId: createInventoryItem
+      tags: [inventory]
+      summary: Create an inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInventoryItemInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "400":
+          description: Invalid input
+
+  /inventory/items/{id}:
+    patch:
+      operationId: updateInventoryItem
+      tags: [inventory]
+      summary: Update an inventory item (name, reorder threshold)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInventoryItemInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteInventoryItem
+      tags: [inventory]
+      summary: Delete an inventory item
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+
+  /inventory/restock:
+    post:
+      operationId: restockInventory
+      tags: [inventory]
+      summary: Add a received lot (creates the item if missing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestockInput"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "400":
+          description: Invalid input
+
+  /inventory/adjust:
+    post:
+      operationId: adjustInventory
+      tags: [inventory]
+      summary: Manually adjust on-hand quantity (delta-based)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdjustInput"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "400":
+          description: Invalid input
+        "404":
+          description: Not found
+
+  /inventory/consume:
+    post:
+      operationId: consumeInventory
+      tags: [inventory]
+      summary: Deduct stock for a completed run (idempotent by runId)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsumeInput"
+      responses:
+        "200":
+          description: Consumption result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsumeResult"
+        "400":
+          description: Invalid input
+
+  /inventory/ledger:
+    get:
+      operationId: listInventoryLedger
+      tags: [inventory]
+      summary: List movement history (optionally filtered by item)
+      parameters:
+        - name: itemId
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Ledger entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryLedgerEntry"
 
 components:
   schemas:
@@ -157,3 +323,198 @@ components:
           additionalProperties: true
         notes:
           type: string
+
+    InventoryLot:
+      type: object
+      required:
+        - id
+        - itemId
+        - lotNumber
+        - qtyReceived
+        - qtyRemaining
+        - createdAt
+      properties:
+        id:
+          type: integer
+        itemId:
+          type: integer
+        lotNumber:
+          type: string
+        qtyReceived:
+          type: number
+        qtyRemaining:
+          type: number
+        receivedDate:
+          type: [string, "null"]
+        expirationDate:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    InventoryItem:
+      type: object
+      required:
+        - id
+        - key
+        - category
+        - name
+        - unit
+        - reorderThreshold
+        - onHand
+        - lots
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: integer
+        key:
+          type: string
+        category:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        reorderThreshold:
+          type: number
+        onHand:
+          type: number
+        lots:
+          type: array
+          items:
+            $ref: "#/components/schemas/InventoryLot"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateInventoryItemInput:
+      type: object
+      required:
+        - key
+        - category
+        - name
+        - unit
+      properties:
+        key:
+          type: string
+        category:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        reorderThreshold:
+          type: number
+
+    UpdateInventoryItemInput:
+      type: object
+      properties:
+        name:
+          type: string
+        reorderThreshold:
+          type: number
+
+    RestockInput:
+      type: object
+      required:
+        - itemKey
+        - category
+        - name
+        - unit
+        - qty
+      properties:
+        itemKey:
+          type: string
+        category:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        qty:
+          type: number
+        lotNumber:
+          type: string
+        receivedDate:
+          type: [string, "null"]
+        expirationDate:
+          type: [string, "null"]
+
+    AdjustInput:
+      type: object
+      required:
+        - itemId
+        - qtyDelta
+      properties:
+        itemId:
+          type: integer
+        qtyDelta:
+          type: number
+        note:
+          type: string
+
+    ConsumeLine:
+      type: object
+      required:
+        - itemKey
+        - qty
+      properties:
+        itemKey:
+          type: string
+        qty:
+          type: number
+
+    ConsumeInput:
+      type: object
+      required:
+        - runId
+        - lines
+      properties:
+        runId:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsumeLine"
+
+    ConsumeResult:
+      type: object
+      required:
+        - applied
+      properties:
+        applied:
+          type: boolean
+        consumed:
+          type: integer
+
+    InventoryLedgerEntry:
+      type: object
+      required:
+        - id
+        - itemId
+        - type
+        - qtyDelta
+        - note
+        - createdAt
+      properties:
+        id:
+          type: integer
+        itemId:
+          type: integer
+        lotId:
+          type: [integer, "null"]
+        type:
+          type: string
+        qtyDelta:
+          type: number
+        runId:
+          type: [string, "null"]
+        note:
+          type: string
+        createdAt:
+          type: string
+          format: date-time

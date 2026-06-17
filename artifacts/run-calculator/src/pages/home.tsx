@@ -96,6 +96,8 @@ import {
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
+import InventoryTab from "../components/InventoryTab";
+import { computeRunConsumptionLines, deriveCandidateItems, consumeRun } from "../inventoryShared";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1454,6 +1456,10 @@ export default function Home() {
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
+  // Latest current-run id, readable from the [] rollover effects without going
+  // stale when the user switches runs after the effect first ran.
+  const currentRunIdRef = useRef(currentRunId);
+  currentRunIdRef.current = currentRunId;
   const currentMixPresets = useMemo<MixPreset[]>(
     () => findMixPresets(currentRun?.brand ?? "", currentRun?.flavor ?? ""),
     [currentRun?.brand, currentRun?.flavor]
@@ -2267,6 +2273,15 @@ export default function Home() {
         // Auto-end any active run before archiving yesterday
         const prevDs = (() => { try { return JSON.parse(localStorage.getItem(DAY_KEY) ?? "null") as DayState | null; } catch { return null; } })();
         if (prevDs && stored.date) {
+          // Auto-deduct inventory for every run being closed by the rollover, the
+          // same as an explicit endRun. consume is idempotent per runId, so runs
+          // already deducted via endRun won't double-count.
+          for (const r of prevDs.runs) {
+            if (r.startedAt && !r.endedAt) {
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
+            }
+          }
           const finalDs: DayState = {
             ...prevDs,
             runs: prevDs.runs.map(r =>
@@ -2777,6 +2792,9 @@ export default function Home() {
     const cur = form.getValues();
     saveRunValues(currentRunId, cur);
     if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    // Auto-deduct this run's materials from inventory (idempotent by runId;
+    // no-op for any material that has no inventory item).
+    void consumeRun(currentRunId, computeRunConsumptionLines(cur)).catch(() => {});
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex ? { ...r, pausedAt: undefined, endedAt: Date.now() } : r
     );
@@ -3066,6 +3084,14 @@ export default function Home() {
           catch { return null; }
         })();
         if (storedDs?.date && storedDs.date !== todayStr()) {
+          // Auto-deduct inventory for every run closed by the midnight rollover,
+          // matching endRun. consume is idempotent per runId — no double-count.
+          for (const r of storedDs.runs) {
+            if (r.startedAt && !r.endedAt) {
+              const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
+            }
+          }
           // Auto-end any run that was still active when midnight hit
           const finalDs: DayState = {
             ...storedDs,
@@ -6469,7 +6495,14 @@ export default function Home() {
                 </Card>
               </TabsContent>
 
-              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
+              <TabsContent value="inventory">
+                {(() => {
+                  const valsList = dayState.runs.map(r => r.id === currentRunId ? form.getValues() : loadRunValues(r.id));
+                  return <InventoryTab candidates={deriveCandidateItems(valsList)} />;
+                })()}
+              </TabsContent>
+
+              <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-7 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Run</span>
@@ -6493,6 +6526,10 @@ export default function Home() {
                 <TabsTrigger value="warehouse" data-testid="tab-warehouse" className="flex flex-col items-center gap-0.5 px-1">
                   <Warehouse className="w-4 h-4 shrink-0" />
                   <span className="text-[10px] truncate">Whse</span>
+                </TabsTrigger>
+                <TabsTrigger value="inventory" data-testid="tab-inventory" className="flex flex-col items-center gap-0.5 px-1">
+                  <ClipboardList className="w-4 h-4 shrink-0" />
+                  <span className="text-[10px] truncate">Stock</span>
                 </TabsTrigger>
               </TabsList>
 

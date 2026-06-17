@@ -1,0 +1,918 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Card, Button } from "@/components/UI";
+import { useRun } from "@/context/RunContext";
+import { useColors } from "@/hooks/useColors";
+import { FONTS } from "@/constants/fonts";
+import {
+  type CandidateItem,
+  type InventoryItem,
+  type InventoryLot,
+  type LedgerEntry,
+  fetchInventory,
+  fetchLedger,
+  createInventoryItem,
+  updateInventoryItem,
+  deleteInventoryItem,
+  restockInventory,
+  adjustInventory,
+  deriveCandidateItems,
+  isLowStock,
+  lotExpiryStatus,
+  daysUntil,
+  todayStr,
+  openInventoryStream,
+} from "@/context/inventoryShared";
+import { getOrCreateClientId } from "@/context/sync/client";
+
+function fmtQty(n: number): string {
+  const r = Math.round(n * 100) / 100;
+  return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0$/, "");
+}
+
+export default function InventoryScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { allRuns } = useRun();
+
+  const webTop = Platform.OS === "web" ? 67 : 0;
+  const webBottom = Platform.OS === "web" ? 34 : 0;
+
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const refetchRef = useRef<() => void>(() => {});
+
+  const load = useCallback(async () => {
+    try {
+      const data = await fetchInventory();
+      setItems(data);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load inventory");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  refetchRef.current = load;
+
+  useEffect(() => {
+    let stream: { close: () => void } | null = null;
+    let cancelled = false;
+    load();
+    (async () => {
+      const clientId = await getOrCreateClientId();
+      if (cancelled) return;
+      stream = openInventoryStream(clientId, (senderId) => {
+        if (senderId !== clientId) refetchRef.current();
+      });
+    })();
+    return () => {
+      cancelled = true;
+      stream?.close();
+    };
+  }, [load]);
+
+  const candidates = useMemo(
+    () => deriveCandidateItems(allRuns.map((r) => r.settings)),
+    [allRuns],
+  );
+
+  const alerts = useMemo(() => {
+    const low: InventoryItem[] = [];
+    const expiring: { item: InventoryItem; lot: InventoryLot }[] = [];
+    const expired: { item: InventoryItem; lot: InventoryLot }[] = [];
+    for (const it of items) {
+      if (isLowStock(it)) low.push(it);
+      for (const lot of it.lots) {
+        if (lot.qtyRemaining <= 0) continue;
+        const st = lotExpiryStatus(lot);
+        if (st === "expired") expired.push({ item: it, lot });
+        else if (st === "soon") expiring.push({ item: it, lot });
+      }
+    }
+    return { low, expiring, expired };
+  }, [items]);
+
+  const grouped = useMemo(() => {
+    const packaging = items.filter((i) => i.category === "packaging");
+    const ingredient = items.filter((i) => i.category !== "packaging");
+    return { packaging, ingredient };
+  }, [items]);
+
+  const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
+  const hasAlerts =
+    alerts.expired.length > 0 || alerts.expiring.length > 0 || alerts.low.length > 0;
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: webTop + 8, paddingBottom: 90 + webBottom + insets.bottom },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Alerts */}
+        {hasAlerts && (
+          <Card title="Inventory Alerts" icon="alert-triangle" accentColor={colors.warning} style={{ marginBottom: 16 }}>
+            <View style={{ gap: 6 }}>
+              {alerts.expired.map(({ item, lot }) => (
+                <View key={`exp-${lot.id}`} style={styles.alertRow}>
+                  <Text style={[styles.alertText, { color: colors.destructive }]} numberOfLines={1}>
+                    {item.name}{lot.lotNumber ? ` · lot ${lot.lotNumber}` : ""}
+                  </Text>
+                  <Text style={[styles.alertValue, { color: colors.destructive }]} numberOfLines={1}>
+                    Expired {lot.expirationDate}
+                  </Text>
+                </View>
+              ))}
+              {alerts.expiring.map(({ item, lot }) => (
+                <View key={`soon-${lot.id}`} style={styles.alertRow}>
+                  <Text style={[styles.alertText, { color: colors.warning }]} numberOfLines={1}>
+                    {item.name}{lot.lotNumber ? ` · lot ${lot.lotNumber}` : ""}
+                  </Text>
+                  <Text style={[styles.alertValue, { color: colors.warning }]} numberOfLines={1}>
+                    Expires in {daysUntil(lot.expirationDate)}d
+                  </Text>
+                </View>
+              ))}
+              {alerts.low.map((item) => (
+                <View key={`low-${item.id}`} style={styles.alertRow}>
+                  <Text style={[styles.alertText, { color: colors.warning }]} numberOfLines={1}>
+                    {item.name} — low stock
+                  </Text>
+                  <Text style={[styles.alertValue, { color: colors.warning }]} numberOfLines={1}>
+                    {fmtQty(item.onHand)} / {fmtQty(item.reorderThreshold)} {item.unit}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        )}
+
+        {/* Add item */}
+        <Card title="Add Item" icon="plus-square" style={{ marginBottom: 16 }}>
+          <Pressable
+            onPress={() => setShowAdd((v) => !v)}
+            style={({ pressed }) => [
+              styles.toggleBtn,
+              { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Feather name={showAdd ? "chevron-down" : "plus"} size={14} color={colors.mutedForeground} />
+            <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+              {showAdd ? "Close" : "New"}
+            </Text>
+          </Pressable>
+          {showAdd && (
+            <View style={{ marginTop: 12 }}>
+              <AddItemForm
+                candidates={candidates.filter((c) => !existingKeys.has(c.key))}
+                onAdded={() => {
+                  setShowAdd(false);
+                  load();
+                }}
+              />
+            </View>
+          )}
+        </Card>
+
+        {loading && (
+          <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading inventory…</Text>
+        )}
+        {error && <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>}
+        {!loading && items.length === 0 && (
+          <Text style={[styles.emptyCenter, { color: colors.mutedForeground }]}>
+            No inventory yet. Use Add Item to start tracking stock.
+          </Text>
+        )}
+
+        {grouped.packaging.length > 0 && (
+          <CategorySection
+            title="Packaging"
+            icon="package"
+            items={grouped.packaging}
+            expandedId={expandedId}
+            setExpandedId={setExpandedId}
+            onChanged={load}
+          />
+        )}
+        {grouped.ingredient.length > 0 && (
+          <CategorySection
+            title="Ingredients"
+            icon="box"
+            items={grouped.ingredient}
+            expandedId={expandedId}
+            setExpandedId={setExpandedId}
+            onChanged={load}
+          />
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+function CategorySection({
+  title,
+  icon,
+  items,
+  expandedId,
+  setExpandedId,
+  onChanged,
+}: {
+  title: string;
+  icon: keyof typeof Feather.glyphMap;
+  items: InventoryItem[];
+  expandedId: number | null;
+  setExpandedId: (id: number | null) => void;
+  onChanged: () => void;
+}) {
+  return (
+    <Card title={title} icon={icon} style={{ marginBottom: 16 }} contentStyle={{ gap: 6 }}>
+      {items.map((item) => (
+        <ItemRow
+          key={item.id}
+          item={item}
+          expanded={expandedId === item.id}
+          onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
+          onChanged={onChanged}
+        />
+      ))}
+    </Card>
+  );
+}
+
+function ItemRow({
+  item,
+  expanded,
+  onToggle,
+  onChanged,
+}: {
+  item: InventoryItem;
+  expanded: boolean;
+  onToggle: () => void;
+  onChanged: () => void;
+}) {
+  const colors = useColors();
+  const low = isLowStock(item);
+  return (
+    <View style={[styles.itemRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+      <Pressable onPress={onToggle} style={styles.itemHeader}>
+        <View style={styles.itemHeaderLeft}>
+          <Feather
+            name={expanded ? "chevron-down" : "chevron-right"}
+            size={16}
+            color={colors.mutedForeground}
+          />
+          <Text style={[styles.itemName, { color: colors.foreground }]} numberOfLines={1}>
+            {item.name}
+          </Text>
+          {low && (
+            <View style={[styles.lowBadge, { borderColor: colors.warning }]}>
+              <Text style={[styles.lowBadgeText, { color: colors.warning }]}>LOW</Text>
+            </View>
+          )}
+        </View>
+        <Text
+          style={[
+            styles.itemQty,
+            { color: low ? colors.warning : colors.foreground },
+          ]}
+          numberOfLines={1}
+        >
+          {fmtQty(item.onHand)}{" "}
+          <Text style={[styles.itemUnit, { color: colors.mutedForeground }]}>{item.unit}</Text>
+        </Text>
+      </Pressable>
+      {expanded && <ItemDetail item={item} onChanged={onChanged} />}
+    </View>
+  );
+}
+
+function ItemDetail({ item, onChanged }: { item: InventoryItem; onChanged: () => void }) {
+  const colors = useColors();
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState<LedgerEntry[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [editThreshold, setEditThreshold] = useState(false);
+  const [thresholdVal, setThresholdVal] = useState(String(item.reorderThreshold));
+
+  const run = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      setBusy(true);
+      try {
+        await fn();
+        onChanged();
+      } catch {
+        /* surfaced by parent reload */
+      } finally {
+        setBusy(false);
+      }
+    },
+    [onChanged],
+  );
+
+  async function loadHistory() {
+    if (!showHistory && history == null) {
+      try {
+        setHistory(await fetchLedger(item.id));
+      } catch {
+        setHistory([]);
+      }
+    }
+    setShowHistory((v) => !v);
+  }
+
+  const lots = item.lots.filter((l) => l.qtyRemaining > 0);
+  const emptyLots = item.lots.filter((l) => l.qtyRemaining <= 0);
+
+  function expiryColor(st: ReturnType<typeof lotExpiryStatus>): string {
+    if (st === "expired") return colors.destructive;
+    if (st === "soon") return colors.warning;
+    return colors.mutedForeground;
+  }
+
+  return (
+    <View style={[styles.detail, { borderTopColor: colors.border }]}>
+      {/* Lots */}
+      <View>
+        <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>
+          LOTS (FIFO/FEFO ORDER)
+        </Text>
+        {lots.length === 0 ? (
+          <Text style={[styles.muted, { color: colors.mutedForeground }]}>No stock on hand.</Text>
+        ) : (
+          <View style={{ gap: 4 }}>
+            {lots.map((lot) => {
+              const st = lotExpiryStatus(lot);
+              return (
+                <View key={lot.id} style={styles.lotRow}>
+                  <Text style={[styles.lotText, { color: colors.mutedForeground }]} numberOfLines={1}>
+                    {lot.lotNumber ? `Lot ${lot.lotNumber}` : "Unlotted"}
+                    {lot.expirationDate ? (
+                      <Text style={{ color: expiryColor(st) }}> · exp {lot.expirationDate}</Text>
+                    ) : null}
+                  </Text>
+                  <Text style={[styles.lotQty, { color: colors.foreground }]} numberOfLines={1}>
+                    {fmtQty(lot.qtyRemaining)} / {fmtQty(lot.qtyReceived)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+        {emptyLots.length > 0 && (
+          <Text style={[styles.tinyMuted, { color: colors.mutedForeground }]}>
+            {emptyLots.length} depleted lot{emptyLots.length !== 1 ? "s" : ""}
+          </Text>
+        )}
+      </View>
+
+      {/* Reorder threshold */}
+      <View style={styles.thresholdRow}>
+        <Text style={[styles.detailInline, { color: colors.mutedForeground }]}>Reorder at</Text>
+        {editThreshold ? (
+          <View style={styles.thresholdEdit}>
+            <TextInput
+              value={thresholdVal}
+              onChangeText={setThresholdVal}
+              keyboardType="numeric"
+              style={[styles.inputSm, { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background }]}
+            />
+            <Button
+              label="Save"
+              size="sm"
+              disabled={busy}
+              onPress={() =>
+                run(async () => {
+                  await updateInventoryItem(item.id, { reorderThreshold: Number(thresholdVal) || 0 });
+                  setEditThreshold(false);
+                })
+              }
+            />
+          </View>
+        ) : (
+          <Pressable onPress={() => setEditThreshold(true)} style={styles.thresholdView}>
+            <Text style={[styles.thresholdValText, { color: colors.foreground }]}>
+              {fmtQty(item.reorderThreshold)} {item.unit}
+            </Text>
+            <Feather name="edit-2" size={12} color={colors.mutedForeground} />
+          </Pressable>
+        )}
+      </View>
+
+      <View style={[styles.sep, { backgroundColor: colors.border }]} />
+
+      <RestockForm item={item} busy={busy} run={run} />
+      <AdjustForm item={item} busy={busy} run={run} />
+
+      <View style={[styles.sep, { backgroundColor: colors.border }]} />
+
+      {/* History */}
+      <Pressable onPress={loadHistory} style={styles.historyToggle}>
+        <Feather name="clock" size={14} color={colors.mutedForeground} />
+        <Text style={[styles.historyToggleText, { color: colors.mutedForeground }]}>
+          {showHistory ? "Hide" : "Show"} history
+        </Text>
+      </Pressable>
+      {showHistory && (
+        <View style={{ gap: 4 }}>
+          {history == null ? (
+            <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading…</Text>
+          ) : history.length === 0 ? (
+            <Text style={[styles.muted, { color: colors.mutedForeground }]}>No history.</Text>
+          ) : (
+            history.map((h) => (
+              <View key={h.id} style={styles.lotRow}>
+                <Text style={[styles.lotText, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  <Text style={{ fontFamily: FONTS.medium }}>{h.type.toUpperCase()}</Text>
+                  {h.note ? ` · ${h.note}` : ""}
+                </Text>
+                <Text
+                  style={[
+                    styles.lotQty,
+                    { color: h.qtyDelta < 0 ? colors.destructive : colors.success ?? colors.primary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {h.qtyDelta > 0 ? "+" : ""}
+                  {fmtQty(h.qtyDelta)}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
+      <View style={[styles.sep, { backgroundColor: colors.border }]} />
+      <Button
+        label="Delete item"
+        icon="trash-2"
+        variant="destructive"
+        size="sm"
+        disabled={busy}
+        onPress={() => run(() => deleteInventoryItem(item.id))}
+      />
+    </View>
+  );
+}
+
+function RestockForm({
+  item,
+  busy,
+  run,
+}: {
+  item: InventoryItem;
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const colors = useColors();
+  const [qty, setQty] = useState("");
+  const [lotNumber, setLotNumber] = useState("");
+  const [expiration, setExpiration] = useState("");
+  const n = Number(qty);
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>RESTOCK</Text>
+      <View style={styles.formRow}>
+        <TextInput
+          placeholder="Qty"
+          placeholderTextColor={colors.mutedForeground}
+          value={qty}
+          onChangeText={setQty}
+          keyboardType="numeric"
+          style={[inputStyle, { flex: 1 }]}
+        />
+        <TextInput
+          placeholder="Lot #"
+          placeholderTextColor={colors.mutedForeground}
+          value={lotNumber}
+          onChangeText={setLotNumber}
+          style={[inputStyle, { flex: 1 }]}
+        />
+        <TextInput
+          placeholder="Exp YYYY-MM-DD"
+          placeholderTextColor={colors.mutedForeground}
+          value={expiration}
+          onChangeText={setExpiration}
+          autoCapitalize="none"
+          style={[inputStyle, { flex: 1.4 }]}
+        />
+      </View>
+      <Button
+        label="Add stock"
+        icon="plus"
+        size="sm"
+        disabled={busy || !(n > 0)}
+        onPress={() =>
+          run(async () => {
+            await restockInventory({
+              itemKey: item.key,
+              category: item.category,
+              name: item.name,
+              unit: item.unit,
+              qty: n,
+              lotNumber: lotNumber.trim() || undefined,
+              receivedDate: todayStr(),
+              expirationDate: expiration.trim() || undefined,
+            });
+            setQty("");
+            setLotNumber("");
+            setExpiration("");
+          })
+        }
+      />
+    </View>
+  );
+}
+
+function AdjustForm({
+  item,
+  busy,
+  run,
+}: {
+  item: InventoryItem;
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const colors = useColors();
+  const [delta, setDelta] = useState("");
+  const [note, setNote] = useState("");
+  const n = Number(delta);
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+  return (
+    <View style={{ gap: 6, marginTop: 10 }}>
+      <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>MANUAL ADJUSTMENT</Text>
+      <View style={styles.formRow}>
+        <TextInput
+          placeholder="± Qty"
+          placeholderTextColor={colors.mutedForeground}
+          value={delta}
+          onChangeText={setDelta}
+          keyboardType="numbers-and-punctuation"
+          style={[inputStyle, { flex: 1 }]}
+        />
+        <TextInput
+          placeholder="Reason"
+          placeholderTextColor={colors.mutedForeground}
+          value={note}
+          onChangeText={setNote}
+          style={[inputStyle, { flex: 1.6 }]}
+        />
+      </View>
+      <Button
+        label="Apply adjustment"
+        variant="outline"
+        size="sm"
+        disabled={busy || !(n !== 0) || Number.isNaN(n)}
+        onPress={() =>
+          run(async () => {
+            await adjustInventory({ itemId: item.id, qtyDelta: n, note: note.trim() || undefined });
+            setDelta("");
+            setNote("");
+          })
+        }
+      />
+    </View>
+  );
+}
+
+function AddItemForm({
+  candidates,
+  onAdded,
+}: {
+  candidates: CandidateItem[];
+  onAdded: () => void;
+}) {
+  const colors = useColors();
+  const [mode, setMode] = useState<"candidate" | "custom">(
+    candidates.length > 0 ? "candidate" : "custom",
+  );
+  const [selectedKey, setSelectedKey] = useState(candidates[0]?.key ?? "");
+  const [name, setName] = useState("");
+  const [unit, setUnit] = useState("");
+  const [category, setCategory] = useState<"ingredient" | "packaging">("ingredient");
+  const [threshold, setThreshold] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  async function submit() {
+    setBusy(true);
+    try {
+      if (mode === "candidate") {
+        const c = candidates.find((x) => x.key === selectedKey);
+        if (!c) return;
+        await createInventoryItem({
+          key: c.key,
+          category: c.category,
+          name: c.name,
+          unit: c.unit,
+          reorderThreshold: Number(threshold) || 0,
+        });
+      } else {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const u = unit.trim() || "units";
+        await createInventoryItem({
+          key: `${category}:${trimmed}:${u}`,
+          category,
+          name: trimmed,
+          unit: u,
+          reorderThreshold: Number(threshold) || 0,
+        });
+      }
+      onAdded();
+    } catch {
+      /* parent reloads */
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={styles.modeRow}>
+        <Pressable
+          onPress={() => candidates.length > 0 && setMode("candidate")}
+          disabled={candidates.length === 0}
+          style={[
+            styles.modeBtn,
+            {
+              borderColor: mode === "candidate" ? colors.primary : colors.border,
+              backgroundColor: mode === "candidate" ? colors.primary + "1A" : "transparent",
+              opacity: candidates.length === 0 ? 0.4 : 1,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.modeBtnText,
+              { color: mode === "candidate" ? colors.primary : colors.mutedForeground },
+            ]}
+          >
+            From production
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setMode("custom")}
+          style={[
+            styles.modeBtn,
+            {
+              borderColor: mode === "custom" ? colors.primary : colors.border,
+              backgroundColor: mode === "custom" ? colors.primary + "1A" : "transparent",
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.modeBtnText,
+              { color: mode === "custom" ? colors.primary : colors.mutedForeground },
+            ]}
+          >
+            Custom
+          </Text>
+        </Pressable>
+      </View>
+
+      {mode === "candidate" ? (
+        candidates.length === 0 ? (
+          <Text style={[styles.muted, { color: colors.mutedForeground }]}>
+            All production items already tracked. Use Custom to add others.
+          </Text>
+        ) : (
+          <View style={{ gap: 6 }}>
+            {candidates.map((c) => (
+              <Pressable
+                key={c.key}
+                onPress={() => setSelectedKey(c.key)}
+                style={[
+                  styles.candidateRow,
+                  {
+                    borderColor: selectedKey === c.key ? colors.primary : colors.border,
+                    backgroundColor: selectedKey === c.key ? colors.primary + "1A" : "transparent",
+                  },
+                ]}
+              >
+                <Feather
+                  name={selectedKey === c.key ? "check-circle" : "circle"}
+                  size={16}
+                  color={selectedKey === c.key ? colors.primary : colors.mutedForeground}
+                />
+                <Text style={[styles.candidateText, { color: colors.foreground }]} numberOfLines={1}>
+                  {c.name} ({c.unit})
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )
+      ) : (
+        <View style={{ gap: 6 }}>
+          <TextInput
+            placeholder="Item name"
+            placeholderTextColor={colors.mutedForeground}
+            value={name}
+            onChangeText={setName}
+            style={inputStyle}
+          />
+          <View style={styles.formRow}>
+            <TextInput
+              placeholder="Unit (e.g. lbs)"
+              placeholderTextColor={colors.mutedForeground}
+              value={unit}
+              onChangeText={setUnit}
+              style={[inputStyle, { flex: 1 }]}
+            />
+            <Pressable
+              onPress={() =>
+                setCategory((c) => (c === "ingredient" ? "packaging" : "ingredient"))
+              }
+              style={[
+                styles.input,
+                styles.categoryToggle,
+                { borderColor: colors.border, backgroundColor: colors.background, flex: 1 },
+              ]}
+            >
+              <Text style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 13 }}>
+                {category === "ingredient" ? "Ingredient" : "Packaging"}
+              </Text>
+              <Feather name="repeat" size={13} color={colors.mutedForeground} />
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      <TextInput
+        placeholder="Reorder threshold (optional)"
+        placeholderTextColor={colors.mutedForeground}
+        value={threshold}
+        onChangeText={setThreshold}
+        keyboardType="numeric"
+        style={inputStyle}
+      />
+      <Button label="Add to inventory" icon="plus" size="sm" disabled={busy} onPress={submit} />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  content: { paddingHorizontal: 16 },
+
+  muted: { fontSize: 13, fontStyle: "italic", fontFamily: FONTS.regular },
+  tinyMuted: { fontSize: 11, marginTop: 4, fontFamily: FONTS.regular },
+  emptyCenter: {
+    fontSize: 14,
+    textAlign: "center",
+    paddingVertical: 24,
+    fontFamily: FONTS.regular,
+  },
+
+  alertRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  alertText: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular },
+  alertValue: { fontSize: 13, fontFamily: FONTS.medium, flexShrink: 0 },
+
+  toggleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  toggleBtnText: { fontSize: 12, fontFamily: FONTS.medium },
+
+  itemRow: { borderRadius: 8, borderWidth: 1 },
+  itemHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  itemHeaderLeft: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1, minWidth: 0 },
+  itemName: { fontSize: 14, fontFamily: FONTS.medium, flexShrink: 1 },
+  lowBadge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+  lowBadgeText: { fontSize: 9, fontFamily: FONTS.bold },
+  itemQty: {
+    fontSize: 14,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+    flexShrink: 0,
+  },
+  itemUnit: { fontFamily: FONTS.regular },
+
+  detail: { paddingHorizontal: 12, paddingBottom: 12, paddingTop: 12, borderTopWidth: 1, gap: 12 },
+  detailLabel: { fontSize: 11, fontFamily: FONTS.medium, marginBottom: 4, letterSpacing: 0.5 },
+  detailInline: { fontSize: 13, fontFamily: FONTS.regular },
+
+  lotRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  lotText: { fontSize: 12, flexShrink: 1, fontFamily: FONTS.regular },
+  lotQty: {
+    fontSize: 12,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+    flexShrink: 0,
+  },
+
+  thresholdRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  thresholdEdit: { flexDirection: "row", alignItems: "center", gap: 6 },
+  thresholdView: { flexDirection: "row", alignItems: "center", gap: 4 },
+  thresholdValText: {
+    fontSize: 13,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+  },
+
+  sep: { height: 1 },
+
+  input: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    fontFamily: FONTS.regular,
+  },
+  inputSm: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+    width: 80,
+    fontFamily: FONTS.regular,
+  },
+  formRow: { flexDirection: "row", gap: 6 },
+  categoryToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  historyToggle: { flexDirection: "row", alignItems: "center", gap: 6 },
+  historyToggleText: { fontSize: 12, fontFamily: FONTS.medium },
+
+  modeRow: { flexDirection: "row", gap: 6 },
+  modeBtn: {
+    flex: 1,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modeBtnText: { fontSize: 12, fontFamily: FONTS.medium },
+
+  candidateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  candidateText: { fontSize: 13, fontFamily: FONTS.regular, flexShrink: 1 },
+});

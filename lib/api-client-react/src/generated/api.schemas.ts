@@ -39,3 +39,93 @@ export interface ProductionRunInput {
   notes?: string;
 }
 
+export interface InventoryLot {
+  id: number;
+  itemId: number;
+  lotNumber: string;
+  qtyReceived: number;
+  qtyRemaining: number;
+  /** @nullable */
+  receivedDate?: string | null;
+  /** @nullable */
+  expirationDate?: string | null;
+  createdAt: string;
+}
+
+export interface InventoryItem {
+  id: number;
+  key: string;
+  category: string;
+  name: string;
+  unit: string;
+  reorderThreshold: number;
+  onHand: number;
+  lots: InventoryLot[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateInventoryItemInput {
+  key: string;
+  category: string;
+  name: string;
+  unit: string;
+  reorderThreshold?: number;
+}
+
+export interface UpdateInventoryItemInput {
+  name?: string;
+  reorderThreshold?: number;
+}
+
+export interface RestockInput {
+  itemKey: string;
+  category: string;
+  name: string;
+  unit: string;
+  qty: number;
+  lotNumber?: string;
+  /** @nullable */
+  receivedDate?: string | null;
+  /** @nullable */
+  expirationDate?: string | null;
+}
+
+export interface AdjustInput {
+  itemId: number;
+  qtyDelta: number;
+  note?: string;
+}
+
+export interface ConsumeLine {
+  itemKey: string;
+  qty: number;
+}
+
+export interface ConsumeInput {
+  runId: string;
+  lines: ConsumeLine[];
+}
+
+export interface ConsumeResult {
+  applied: boolean;
+  consumed?: number;
+}
+
+export interface InventoryLedgerEntry {
+  id: number;
+  itemId: number;
+  /** @nullable */
+  lotId?: number | null;
+  type: string;
+  qtyDelta: number;
+  /** @nullable */
+  runId?: string | null;
+  note: string;
+  createdAt: string;
+}
+
+export type ListInventoryLedgerParams = {
+itemId?: number;
+};
+

@@ -60,3 +60,191 @@ export const DeleteRunParams = zod.object({
 })
 
 
+/**
+ * @summary List inventory items with lots and on-hand
+ */
+export const ListInventoryResponseItem = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListInventoryResponse = zod.array(ListInventoryResponseItem)
+
+
+/**
+ * @summary Create an inventory item
+ */
+export const CreateInventoryItemBody = zod.object({
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number().optional()
+})
+
+
+/**
+ * @summary Update an inventory item (name, reorder threshold)
+ */
+export const UpdateInventoryItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateInventoryItemBody = zod.object({
+  "name": zod.string().optional(),
+  "reorderThreshold": zod.number().optional()
+})
+
+export const UpdateInventoryItemResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete an inventory item
+ */
+export const DeleteInventoryItemParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Add a received lot (creates the item if missing)
+ */
+export const RestockInventoryBody = zod.object({
+  "itemKey": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "qty": zod.number(),
+  "lotNumber": zod.string().optional(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish()
+})
+
+export const RestockInventoryResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Manually adjust on-hand quantity (delta-based)
+ */
+export const AdjustInventoryBody = zod.object({
+  "itemId": zod.number(),
+  "qtyDelta": zod.number(),
+  "note": zod.string().optional()
+})
+
+export const AdjustInventoryResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Deduct stock for a completed run (idempotent by runId)
+ */
+export const ConsumeInventoryBody = zod.object({
+  "runId": zod.string(),
+  "lines": zod.array(zod.object({
+  "itemKey": zod.string(),
+  "qty": zod.number()
+}))
+})
+
+export const ConsumeInventoryResponse = zod.object({
+  "applied": zod.boolean(),
+  "consumed": zod.number().optional()
+})
+
+
+/**
+ * @summary List movement history (optionally filtered by item)
+ */
+export const ListInventoryLedgerQueryParams = zod.object({
+  "itemId": zod.coerce.number().optional()
+})
+
+export const ListInventoryLedgerResponseItem = zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "lotId": zod.number().nullish(),
+  "type": zod.string(),
+  "qtyDelta": zod.number(),
+  "runId": zod.string().nullish(),
+  "note": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const ListInventoryLedgerResponse = zod.array(ListInventoryLedgerResponseItem)
+
+

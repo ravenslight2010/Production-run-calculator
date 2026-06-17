@@ -32,6 +32,10 @@ import {
   type SyncStream,
 } from "./sync/client";
 import type { SyncPayload } from "./sync/payloadTypes";
+import {
+  computeRunConsumptionLines,
+  consumeRunInventory,
+} from "./inventoryShared";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
@@ -1399,6 +1403,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             if (parsed.date && parsed.date !== today) {
               // Calendar day rolled over: archive the prior day's runs,
               // frozen at the prior day's end so history is immutable.
+              // Auto-deduct inventory for every run being closed by the rollover,
+              // matching endRun. consume is idempotent per runId, so runs already
+              // deducted via endRun won't double-count.
+              for (const r of parsed.runs) {
+                if (r.startedAt != null && r.endedAt == null) {
+                  void consumeRunInventory(
+                    r.id,
+                    computeRunConsumptionLines(r.settings),
+                  ).catch(() => {});
+                }
+              }
               const boundaryMs = new Date(`${today}T00:00:00`).getTime();
               const archived: HistoryDay = {
                 date: parsed.date,
@@ -1666,7 +1681,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const endRun = useCallback(
-    () => updateCurrentRun((r) => ({ ...r, isRunning: false, endedAt: Date.now() })),
+    () =>
+      updateCurrentRun((r) => {
+        // Auto-deduct this run's planned usage from inventory (idempotent by
+        // run id; no-op for unknown item keys / when sync is disabled).
+        void consumeRunInventory(r.id, computeRunConsumptionLines(r.settings)).catch(
+          () => {},
+        );
+        return { ...r, isRunning: false, endedAt: Date.now() };
+      }),
     [updateCurrentRun],
   );
 

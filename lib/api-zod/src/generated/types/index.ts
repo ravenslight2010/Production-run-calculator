@@ -6,8 +6,19 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './adjustInput';
+export * from './consumeInput';
+export * from './consumeLine';
+export * from './consumeResult';
+export * from './createInventoryItemInput';
 export * from './healthStatus';
+export * from './inventoryItem';
+export * from './inventoryLedgerEntry';
+export * from './inventoryLot';
+export * from './listInventoryLedgerParams';
 export * from './productionRun';
 export * from './productionRunInput';
 export * from './productionRunInputInputs';
 export * from './productionRunInputs';
+export * from './restockInput';
+export * from './updateInventoryItemInput';

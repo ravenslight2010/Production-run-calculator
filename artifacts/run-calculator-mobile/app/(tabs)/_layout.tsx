@@ -118,6 +118,14 @@ export default function TabLayout() {
             tabBarIcon: ({ color }) => <Feather name="archive" size={22} color={color} />,
           }}
         />
+        <Tabs.Screen
+          name="inventory"
+          options={{
+            title: "Inventory",
+            tabBarLabel: "Stock",
+            tabBarIcon: ({ color }) => <Feather name="clipboard" size={22} color={color} />,
+          }}
+        />
 
         {/* Menu-reachable screens (hidden from the bottom tab bar) */}
         <Tabs.Screen name="stoppages" options={{ href: null, title: "Stoppages" }} />

@@ -19,3 +19,4 @@
 
 export * from "./runs";
 export * from "./sync";
+export * from "./inventory";
