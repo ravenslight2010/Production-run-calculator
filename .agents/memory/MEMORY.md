@@ -12,7 +12,7 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
-- [Packaging settings](packaging-settings.md) — 6 single-select run fields; `cartoned` yes/no gates warehouse roll-up (circles/pizza, shippers/case) & shows Cartoned/Labeled badge; defaults contribute 0.
+- [Packaging settings](packaging-settings.md) — 6 single-select + numeric `cartonsPerCase`; `cartoned` (default yes) gates warehouse roll-up (circles/pizza, shippers/case, cartons=pizzas÷cartonsPerCase ceil) & Cartoned/Labeled badge.
 - [Sync body-parser limit](sync-body-limit.md) — API json limit raised to 10mb; day-state payload embeds full per-run recipes, outgrew default 100kb → 413 broke all sync + scheduled saves.
 - [RN custom font weights](rn-custom-font-weights.md) — RN ignores fontWeight for custom fonts; set fontFamily to the loaded weighted variant (FONTS map), numerics use mono.
 - [Frontline formula parity](frontline-formula-parity.md) — mobile computeCalc frontline = web (fractional batches, casesLeftToRun basis w/ double layer buffer); dough/timing intentionally use casesLeft.

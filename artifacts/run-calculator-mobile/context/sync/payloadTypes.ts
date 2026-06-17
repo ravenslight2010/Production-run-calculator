@@ -98,6 +98,7 @@ export interface WebFormValues {
   frontlineRecipeName: string;
   frontlineRecipe: WebRecipeRow[];
   cartoned: string;
+  cartonsPerCase: number;
   circles: string;
   shipper: string;
   skidStacking: string;

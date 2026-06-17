@@ -67,7 +67,8 @@ export const formSchema = z.object({
   frontlineRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
-  cartoned: z.string().default("no"),
+  cartoned: z.string().default("yes"),
+  cartonsPerCase: z.coerce.number().min(0).default(0),
   circles: z.string().default("none"),
   shipper: z.string().default(""),
   skidStacking: z.string().default(""),
@@ -135,7 +136,8 @@ export const DEFAULT_VALUES: FormValues = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
-  cartoned: "no",
+  cartoned: "yes",
+  cartonsPerCase: 0,
   circles: "none",
   shipper: "",
   skidStacking: "",

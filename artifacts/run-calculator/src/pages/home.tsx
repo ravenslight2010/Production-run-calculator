@@ -317,11 +317,15 @@ function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
 function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   const circleMap = new Map<string, number>();
   const shipperMap = new Map<string, number>();
+  let cartonCases = 0;
   for (const vals of valsList) {
     // Only cartoned runs contribute to packaging needs; "labeled" (cartoned !==
     // "yes") runs are excluded entirely.
     if ((vals.cartoned ?? "").trim().toLowerCase() !== "yes") continue;
     const s = computeSummaryStats(vals);
+    // Cartons are bought by the case: cases = total pizzas / cartons per case.
+    const perCase = Number(vals.cartonsPerCase) || 0;
+    if (perCase > 0 && s.totalPizzas > 0) cartonCases += s.totalPizzas / perCase;
     const circle = (vals.circles ?? "").trim();
     if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
       circleMap.set(circle, (circleMap.get(circle) ?? 0) + s.totalPizzas);
@@ -334,6 +338,7 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   const rows: NeedRow[] = [];
   for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
   for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
+  if (cartonCases > 0) rows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
   return rows;
 }
 
@@ -6049,6 +6054,12 @@ export default function Home() {
                         </div>
                       );
                     })}
+                    <NumField
+                      control={form.control}
+                      name="cartonsPerCase"
+                      label="Cartons Per Case"
+                      step="1"
+                    />
                   </div>
                 </details>
               </TabsContent>
@@ -6077,6 +6088,14 @@ export default function Home() {
                       );
                     })()}
                     <div className="space-y-1.5">
+                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "yes" && (
+                        <div className="flex items-baseline justify-between gap-2 text-sm">
+                          <span className="text-muted-foreground">Cartons / Case</span>
+                          <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
+                            {Number(v.cartonsPerCase) > 0 ? fmtNum(Number(v.cartonsPerCase), 0) : "—"}
+                          </span>
+                        </div>
+                      )}
                       {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
                         const val = ((v[f.name] as string) ?? "").trim();
                         return (

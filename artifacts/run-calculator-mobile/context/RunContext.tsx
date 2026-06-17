@@ -142,6 +142,7 @@ export interface RunSettings {
   frontlineRecipe: RecipeRow[];
   // Packaging (single-select config — see PACKAGING_FIELDS)
   cartoned: string;
+  cartonsPerCase: number;
   circles: string;
   shipper: string;
   skidStacking: string;
@@ -264,7 +265,8 @@ export const DEFAULT_SETTINGS: RunSettings = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
-  cartoned: "no",
+  cartoned: "yes",
+  cartonsPerCase: 0,
   circles: "none",
   shipper: "",
   skidStacking: "",

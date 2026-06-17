@@ -229,6 +229,21 @@ export default function PackagingScreen() {
                 </View>
               );
             })()}
+            {((run.settings.cartoned as string) ?? "").trim().toLowerCase() === "yes" && (
+              <View style={styles.pkgRow}>
+                <Text style={[styles.pkgLabel, { color: colors.mutedForeground }]}>
+                  Cartons / Case
+                </Text>
+                <Text
+                  style={[styles.pkgValue, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {Number(run.settings.cartonsPerCase) > 0
+                    ? Number(run.settings.cartonsPerCase).toLocaleString()
+                    : "—"}
+                </Text>
+              </View>
+            )}
             {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
               const val = ((run.settings[f.name] as string) ?? "").trim();
               return (

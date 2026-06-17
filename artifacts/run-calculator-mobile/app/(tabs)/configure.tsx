@@ -78,6 +78,8 @@ interface FormState {
   doughBatchYield: string;
   // Freezer
   freezerTime: string;
+  // Packaging
+  cartonsPerCase: string;
 }
 
 function n2s(n: number): string {
@@ -127,6 +129,7 @@ function settingsToForm(s: RunSettings): FormState {
     crustsPerCase: n2s(s.crustsPerCase),
     doughBatchYield: n2s(s.doughBatchYield),
     freezerTime: n2s(s.freezerTime),
+    cartonsPerCase: n2s(s.cartonsPerCase),
   };
 }
 
@@ -218,6 +221,7 @@ export default function ConfigureScreen() {
       crustsPerCase: toNum(form.crustsPerCase),
       doughBatchYield: toNum(form.doughBatchYield),
       freezerTime: toNum(form.freezerTime),
+      cartonsPerCase: toNum(form.cartonsPerCase),
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
@@ -510,6 +514,15 @@ export default function ConfigureScreen() {
             </View>
           );
         })}
+        <CardSection>
+          <NumericField
+            label="Cartons per Case"
+            value={form.cartonsPerCase}
+            onChangeText={set("cartonsPerCase")}
+            onBlur={save}
+            placeholder="0"
+          />
+        </CardSection>
 
         {/* Die Type */}
         <SectionHeader title="Die Type" />

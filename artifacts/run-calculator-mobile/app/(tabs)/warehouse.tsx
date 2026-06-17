@@ -93,6 +93,7 @@ export default function WarehouseScreen() {
   // Mirrors web aggregatePackagingNeeds.
   const circleMap = new Map<string, number>();
   const shipperMap = new Map<string, number>();
+  let cartonCases = 0;
   for (const r of allRuns) {
     if (r.endedAt != null) continue;
     const s = r.settings;
@@ -100,6 +101,9 @@ export default function WarehouseScreen() {
     if ((s.cartoned ?? "").trim().toLowerCase() !== "yes") continue;
     const cases = s.casesNeeded;
     const pizzas = s.casesNeeded * s.pizzasPerCase;
+    // Cartons are bought by the case: cases = total pizzas / cartons per case.
+    const perCase = Number(s.cartonsPerCase) || 0;
+    if (perCase > 0 && pizzas > 0) cartonCases += pizzas / perCase;
     const circle = (s.circles ?? "").trim();
     if (circle && circle.toLowerCase() !== "none" && pizzas > 0) {
       circleMap.set(circle, (circleMap.get(circle) ?? 0) + pizzas);
@@ -114,6 +118,8 @@ export default function WarehouseScreen() {
     packagingRows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
   for (const [type, n] of shipperMap)
     packagingRows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
+  if (cartonCases > 0)
+    packagingRows.push({ label: "Cartons", value: fmtNum(Math.ceil(cartonCases), 0), sub: "cases" });
 
   const today = todayStr();
   const scheduledDays = Object.keys(scheduled)
