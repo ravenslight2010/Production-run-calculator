@@ -396,7 +396,7 @@ export function applyPepTaxonomyMigrationIfNeeded(): void {
   } catch {}
 }
 
-const INGREDIENT_DEDUPE_MIGRATION_KEY = "run-calc-ingredient-dedupe-v1";
+const INGREDIENT_DEDUPE_MIGRATION_KEY = "run-calc-ingredient-dedupe-v2";
 
 // One-time near-duplicate cleanup: rename app-type and cheese-ingredient names to
 // their canonical spelling and drop the resulting duplicates (case-insensitive).

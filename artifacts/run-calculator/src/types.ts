@@ -249,6 +249,10 @@ export const INGREDIENT_RENAMES: Record<string, string> = {
   "Red Onion, Diced": "Red Onion Diced",
   "Monterey Jack Cheese": "Monterey Jack",
   "Yellow Cheddar Cheese": "Yellow Cheddar",
+  // Word-order / redundant-suffix / plural variants of the same product
+  "Mozzarella Part Skim": "Part Skim Mozzarella",
+  "Pizella Cheese": "Pizella",
+  Jalapeno: "Jalapenos",
   // Cheese ingredients
   Cilanto: "Cilantro",
   "COW Romano Cheese": "Cow's Romano",
