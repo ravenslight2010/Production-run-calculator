@@ -18,6 +18,8 @@ import {
   DEFAULT_STOP_REASONS,
   DEFAULT_SUPERVISOR_PIN,
   DEFAULT_PEP_TYPES,
+  PEP_TYPE_RENAMES,
+  RETIRED_PEP_TYPES,
   DEFAULT_DIE_TYPES,
   DEFAULT_INGREDIENT_TYPES,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -80,6 +82,7 @@ import {
   applyMixSeedIfNeeded,
   applyMixSeedV14IfNeeded,
   applyMixSeedV15IfNeeded,
+  applyPepTaxonomyMigrationIfNeeded,
   applySpecProfilesSeedIfNeeded,
   applyDieTypesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
@@ -174,6 +177,7 @@ applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
 applyMixSeedV15IfNeeded();
 applySpecProfilesSeedIfNeeded();
+applyPepTaxonomyMigrationIfNeeded();
 applyDieTypesSeedIfNeeded();
 applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
@@ -1487,7 +1491,10 @@ export default function Home() {
   const [pepTypes, setPepTypes] = useState<string[]>(() => {
     const LEGACY_PEP_TYPES = ["Natural", "Cured"];
     const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
-    const merged = [...new Set([...DEFAULT_PEP_TYPES, ...saved.filter(t => !LEGACY_PEP_TYPES.includes(t))])].sort((a, b) => a.localeCompare(b));
+    const cleaned = saved
+      .map(t => PEP_TYPE_RENAMES[t] ?? t)
+      .filter(t => !LEGACY_PEP_TYPES.includes(t) && !RETIRED_PEP_TYPES.includes(t));
+    const merged = [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
     return merged;
   });
 
@@ -1937,6 +1944,8 @@ export default function Home() {
   useEffect(() => {
     applySyncCallbackRef.current = (payload: SyncPayload) => {
       isSyncApplyingRef.current = true;
+      const arraysEqual = (a: string[], b: string[]) =>
+        a.length === b.length && a.every((x, i) => x === b[i]);
 
       // ── Reset guard: only apply day state + run values if remote reset is at least as recent
       //    AND the remote date matches today (prevents yesterday's stale device from overwriting a fresh day) ──
@@ -1966,6 +1975,9 @@ export default function Home() {
             runToTime: payload.dayState.runToTime ?? prev.runToTime,
             resetAt: remoteResetAt > 0 ? remoteResetAt : prev.resetAt,
           };
+          // Skip the re-render when nothing actually changed (sync echoes its own
+          // pushes ~every 10s); a fresh object every time reset open-menu scroll.
+          if (JSON.stringify(newDs) === JSON.stringify(prev)) return prev;
           saveDayState(newDs);
           return newDs;
         });
@@ -1990,7 +2002,7 @@ export default function Home() {
         const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
         const merged = [...new Set([...local, ...remoteSanitized])].sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
-        setBrands(merged);
+        setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
       }
 
       // ── Brand flavors ──
@@ -2006,15 +2018,19 @@ export default function Home() {
           merged[brand] = [...new Set([...(merged[brand] ?? []), ...flavors])].sort((a, b) => a.localeCompare(b));
         }
         saveBrandFlavors(merged);
-        setBrandFlavors(merged);
+        setBrandFlavors(prev =>
+          JSON.stringify(prev) === JSON.stringify(merged) ? prev : merged
+        );
       }
 
       // ── Ingredient types ──
       if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
         const local = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
         const merged = [...new Set([...local, ...payload.ingredientTypes])].sort((a, b) => a.localeCompare(b));
-        saveList(INGREDIENT_TYPES_KEY, merged);
-        setIngredientTypes(merged);
+        if (!arraysEqual(merged, local)) {
+          saveList(INGREDIENT_TYPES_KEY, merged);
+          setIngredientTypes(merged);
+        }
       }
 
       // ── Templates (remote wins for same id, local-only entries kept) ──
@@ -2022,19 +2038,30 @@ export default function Home() {
         const local = loadTemplates();
         const remoteIds = new Set(payload.templates.map(t => t.id));
         const merged = [...payload.templates, ...local.filter(t => !remoteIds.has(t.id))];
-        saveTemplates(merged);
-        setTemplates(merged);
+        if (JSON.stringify(merged) !== JSON.stringify(local)) {
+          saveTemplates(merged);
+          setTemplates(merged);
+        }
       }
 
       // ── Simple list merges (union, no deletions) ──
+      // Skip the setState (and the re-render it triggers) when the merged result is
+      // identical to what's already stored. Sync runs on every SSE message (~10s),
+      // so unconditional setState caused a re-render storm that reset menu scroll.
       function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void) {
         if (!remote || remote.length === 0) return;
         const local = loadList(key, defaults);
         const merged = [...new Set([...local, ...remote])].sort((a, b) => a.localeCompare(b));
+        if (arraysEqual(merged, local)) return;
         saveList(key, merged);
         setter(merged);
       }
-      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, payload.pepTypes, setPepTypes);
+      // Drop retired pep names + rename legacy ones from incoming sync so a peer that
+      // hasn't migrated yet can't re-add "Diced Pepperoni"/"Pep - Cured" to the list.
+      const cleanedRemotePep = (payload.pepTypes ?? [])
+        .map(t => PEP_TYPE_RENAMES[t] ?? t)
+        .filter(t => !RETIRED_PEP_TYPES.includes(t));
+      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes);
       mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes);
       mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, payload.cheeseIngredients, setCheeseIngredients);
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients);
@@ -2112,8 +2139,12 @@ export default function Home() {
           }
         }
         const merged = [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, MAX_HISTORY_DAYS);
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
-        setHistory(merged);
+        // Skip the save + re-render when history is unchanged; the outgoing payload
+        // always echoes loadHistory(), so each SSE cycle would otherwise re-render.
+        if (JSON.stringify(merged) !== JSON.stringify(local)) {
+          try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch {}
+          setHistory(merged);
+        }
       }
 
       requestAnimationFrame(() => { isSyncApplyingRef.current = false; });

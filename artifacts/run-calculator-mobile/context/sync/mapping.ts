@@ -18,6 +18,8 @@
 import {
   DEFAULT_PROGRESS,
   DEFAULT_SETTINGS,
+  renamePepList,
+  renamePepSettings,
   todayStr,
   type RecipeRow,
   type RunProgress,
@@ -193,7 +195,7 @@ function formValuesToSettings(
 ): RunSettings {
   const base = prev ?? DEFAULT_SETTINGS;
   const v = (fv ?? {}) as Partial<WebFormValues>;
-  return {
+  return renamePepSettings({
     ...base,
     brand: str(meta.brand, base.brand),
     flavor: str(meta.flavor, base.flavor),
@@ -248,7 +250,7 @@ function formValuesToSettings(
     app4CheeseRecipe: v.app4CheeseRecipe !== undefined ? rows(v.app4CheeseRecipe) : base.app4CheeseRecipe,
     frontlineRecipeName: str(v.frontlineRecipeName, base.frontlineRecipeName),
     frontlineRecipe: v.frontlineRecipe !== undefined ? rows(v.frontlineRecipe) : base.frontlineRecipe,
-  };
+  });
 }
 
 function formValuesToProgress(
@@ -355,7 +357,9 @@ export function applyPayloadToState(
   // Master-data (union, always)
   if (payload.brands) patch.brands = unionList(prev.brands, payload.brands);
   if (payload.brandFlavors) patch.brandFlavors = unionBrandFlavors(prev.brandFlavors, payload.brandFlavors);
-  if (payload.pepTypes) patch.pepTypes = unionList(prev.pepTypes, payload.pepTypes);
+  // Clean incoming pep types (rename legacy + drop retired) so a legacy peer can't
+  // reintroduce "Pep - Cured"/"Pep - Natural"/"Diced Pepperoni" via sync.
+  if (payload.pepTypes) patch.pepTypes = renamePepList(unionList(prev.pepTypes, payload.pepTypes));
   if (payload.dieTypes) patch.dieTypes = unionList(prev.dieTypes, payload.dieTypes);
   if (payload.cheeseIngredients) patch.cheeseIngredients = unionList(prev.cheeseIngredients, payload.cheeseIngredients);
   if (payload.doughIngredients) patch.doughIngredients = unionList(prev.doughIngredients, payload.doughIngredients);

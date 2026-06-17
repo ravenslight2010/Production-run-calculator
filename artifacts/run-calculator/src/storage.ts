@@ -30,6 +30,8 @@ import {
   DEFAULT_INGREDIENT_TYPES,
   PEP_TYPES_KEY,
   DEFAULT_PEP_TYPES,
+  PEP_TYPE_RENAMES,
+  RETIRED_PEP_TYPES,
   CHEESE_INGREDIENTS_KEY,
   DEFAULT_CHEESE_INGREDIENTS,
   DIE_TYPES_KEY,
@@ -96,6 +98,19 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
 // Fields that are run-specific and must never carry over via a brand/flavor profile
 const PER_RUN_FIELDS: (keyof FormValues)[] = ["casesNeeded", "carryOverDone"];
 
+// Rename legacy pep-type names ("Pep - Cured"/"Pep - Natural") to the detailed
+// standard names on read, so saved profiles/runs keep their pre-made calc behavior
+// and never show a stale name. Idempotent and self-healing across sync.
+function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
+  for (const k of ["pep1Type", "pep2Type"] as const) {
+    const val = o[k];
+    if (typeof val === "string" && PEP_TYPE_RENAMES[val]) {
+      (o as Record<string, unknown>)[k] = PEP_TYPE_RENAMES[val];
+    }
+  }
+  return o;
+}
+
 export function loadProfile(brand: string, flavor: string): FormValues | null {
   try {
     const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
@@ -109,7 +124,7 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
     const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
     // Strip per-run fields even if they were saved in an old profile
     PER_RUN_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
-    return result;
+    return normalizePepFields(result as unknown as Record<string, unknown>) as unknown as FormValues;
   } catch {}
   return null;
 }
@@ -194,7 +209,15 @@ export function saveDayState(ds: DayState): void {
 export function loadHistory(): HistoryDay[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    if (raw) return JSON.parse(raw) as HistoryDay[];
+    if (raw) {
+      const history = JSON.parse(raw) as HistoryDay[];
+      for (const day of history) {
+        for (const vals of Object.values(day.runValues ?? {})) {
+          normalizePepFields(vals as unknown as Record<string, unknown>);
+        }
+      }
+      return history;
+    }
   } catch {}
   return [];
 }
@@ -216,7 +239,7 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
 export function loadRunValues(id: string): FormValues {
   try {
     const raw = localStorage.getItem(RUN_KEY(id));
-    if (raw) return { ...DEFAULT_VALUES, ...JSON.parse(raw) };
+    if (raw) return normalizePepFields({ ...DEFAULT_VALUES, ...JSON.parse(raw) } as unknown as Record<string, unknown>) as unknown as FormValues;
   } catch {}
   return DEFAULT_VALUES;
 }
@@ -228,7 +251,13 @@ export function saveRunValues(id: string, values: FormValues): void {
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);
-    if (raw) return JSON.parse(raw) as RunTemplate[];
+    if (raw) {
+      const templates = JSON.parse(raw) as RunTemplate[];
+      for (const t of templates) {
+        if (t.values) normalizePepFields(t.values as unknown as Record<string, unknown>);
+      }
+      return templates;
+    }
   } catch {}
   return [];
 }
@@ -302,6 +331,35 @@ const STALE_INGREDIENTS = [
   "Diced Chicken / (C&F 0001mpdc40 or House of Raeford 28501)",
   "Diced Chicken / c&f 001mpdc40 or / House of Raeford 28501",
 ];
+
+const PEP_TAXONOMY_MIGRATION_KEY = "run-calc-pep-taxonomy-v1";
+
+// One-time taxonomy fix:
+//  • Pep types list: rename legacy names → detailed standard names, drop retired
+//    names ("Diced Pepperoni" — now an applicator type), ensure defaults present.
+//  • Applicator (ingredient) types list: add "Diced Pepperoni".
+// Pep references inside saved profiles/runs/templates/history are normalized on
+// read (see normalizePepFields), so this only repairs the manageable lists.
+export function applyPepTaxonomyMigrationIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(PEP_TAXONOMY_MIGRATION_KEY)) return;
+  try {
+    const savedPep = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
+    const cleanedPep = savedPep
+      .map(t => PEP_TYPE_RENAMES[t] ?? t)
+      .filter(t => !RETIRED_PEP_TYPES.includes(t));
+    const mergedPep = [...new Set([...DEFAULT_PEP_TYPES, ...cleanedPep])].sort((a, b) => a.localeCompare(b));
+    saveList(PEP_TYPES_KEY, mergedPep);
+
+    const savedApp = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+    for (const name of RETIRED_PEP_TYPES) {
+      if (!savedApp.some(t => t.toLowerCase() === name.toLowerCase())) savedApp.push(name);
+    }
+    saveList(INGREDIENT_TYPES_KEY, [...new Set(savedApp)].sort((a, b) => a.localeCompare(b)));
+
+    localStorage.setItem(PEP_TAXONOMY_MIGRATION_KEY, "1");
+  } catch {}
+}
 
 export function applyMixSeedIfNeeded(): void {
   if (typeof localStorage === "undefined") return;

@@ -59,6 +59,7 @@ import type { FormValues } from "./types";
   "Diced Celery",
   "Diced Chicken",
   "Diced Ham",
+  "Diced Pepperoni",
   "Diced Red Fajita Mix",
   "Four Hands 7Cheese Mix",
   "Four Hands BBQ Chicken Cheese Mix",
@@ -135,7 +136,7 @@ import type { FormValues } from "./types";
   "Whole Mozzarella",
   ];
 
-  export const SPEC_PEP_TYPES: string[] = ["Bratwurst Sticks","Chorizo Stick","Diced Pepperoni","Mozzarella Stick","Pepperoni Stick","Pepperoni Stick - NATURAL"];
+  export const SPEC_PEP_TYPES: string[] = ["Bratwurst Sticks","Chorizo Stick","Mozzarella Stick"];
 
   export const SPEC_CHEESE_INGREDIENTS: string[] = [
     "Bacon",

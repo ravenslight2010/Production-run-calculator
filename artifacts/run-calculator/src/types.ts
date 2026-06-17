@@ -228,7 +228,17 @@ export const DEFAULT_INGREDIENT_TYPES = [
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
 ];
 export const PEP_TYPES_KEY = "run-calc-pep-types";
-export const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
+export const DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];
+// Legacy pep-type names that were renamed to the detailed standard names above.
+// Applied on read + via one-time migration so saved selections keep their pre-made
+// (no-batch) calc behavior and the deduped list shows only the detailed names.
+export const PEP_TYPE_RENAMES: Record<string, string> = {
+  "Pep - Cured": "Pepperoni Stick",
+  "Pep - Natural": "Pepperoni Stick - NATURAL",
+};
+// Pep-type names that were recategorized as applicator types and must be dropped
+// from the pep-type list (still usable as an applicator type / cheese ingredient).
+export const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
 export const DIE_TYPES_KEY = "run-calc-die-types";
 export const DEFAULT_DIE_TYPES = ["7in", "9in", "11in", "12in", "Argus", "Mystic"];
 export const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";

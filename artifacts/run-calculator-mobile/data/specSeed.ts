@@ -24,7 +24,7 @@ import type { RunProfile } from "@/context/RunContext";
   "SMD": ["FOUR CHEESE","PEPPERONI","MEAT LOVERS","SUPREME","BBQ CHICKEN"],
   };
 
-  export const SPEC_PEP_TYPES: string[] = ["Bratwurst Sticks","Chorizo Stick","Diced Pepperoni","Mozzarella Stick","Pepperoni Stick","Pepperoni Stick - NATURAL"];
+  export const SPEC_PEP_TYPES: string[] = ["Bratwurst Sticks","Chorizo Stick","Mozzarella Stick"];
 
   export const SPEC_CHEESE_INGREDIENTS: string[] = [
     "Bacon",

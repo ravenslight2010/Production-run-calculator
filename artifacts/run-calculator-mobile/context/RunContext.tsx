@@ -261,7 +261,16 @@ export const DEFAULT_SETTINGS: RunSettings = {
 };
 
 // ── Master data defaults (manageable lists shared across runs) ──────────────
-export const DEFAULT_PEP_TYPES = ["Pep - Cured", "Pep - Natural"];
+export const DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];
+// Legacy pep-type names renamed to the detailed standard names above; applied on
+// every load so saved selections keep their pre-made (no-batch) calc behavior.
+export const PEP_TYPE_RENAMES: Record<string, string> = {
+  "Pep - Cured": "Pepperoni Stick",
+  "Pep - Natural": "Pepperoni Stick - NATURAL",
+};
+// Pep-type names recategorized as applicators — dropped from the pep-type list
+// (still usable as an applicator via the cheese-ingredient list).
+const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
 export const DEFAULT_CHEESE_INGREDIENTS = [
   "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
 ];
@@ -1147,8 +1156,28 @@ const INITIAL_STATE: AppState = {
 // Fill any missing fields (from older persisted blobs) with defaults so the
 // rest of the app can assume a complete shape. Additive migration — keeps the
 // `run-calc-mobile-v2` key and never drops user data.
+// Rename legacy pep-type names → detailed standard names on a settings object.
+// Idempotent and self-healing across loads + sync.
+export function renamePepSettings<T extends Partial<RunSettings>>(s: T): T {
+  const out = { ...s } as Record<string, unknown>;
+  for (const k of ["pep1Type", "pep2Type"] as const) {
+    const val = out[k];
+    if (typeof val === "string" && PEP_TYPE_RENAMES[val]) out[k] = PEP_TYPE_RENAMES[val];
+  }
+  return out as T;
+}
+
+// Rename + drop retired names from a pep-type list and ensure defaults are present.
+export function renamePepList(list: string[] | undefined): string[] {
+  const base = list ?? [...DEFAULT_PEP_TYPES];
+  const cleaned = base
+    .map((t) => PEP_TYPE_RENAMES[t] ?? t)
+    .filter((t) => !RETIRED_PEP_TYPES.includes(t));
+  return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
+}
+
 function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
-  return {
+  return renamePepSettings({
     ...DEFAULT_SETTINGS,
     ...(s ?? {}),
     doughRecipe: s?.doughRecipe ?? [],
@@ -1157,7 +1186,7 @@ function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
     app3CheeseRecipe: s?.app3CheeseRecipe ?? [],
     app4CheeseRecipe: s?.app4CheeseRecipe ?? [],
     frontlineRecipe: s?.frontlineRecipe ?? [],
-  };
+  });
 }
 
 function normalizeRun(r: RunState): RunState {
@@ -1174,13 +1203,15 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     shiftNotes: parsed.shiftNotes ?? "",
     runToTime: parsed.runToTime ?? "",
     date: parsed.date ?? todayStr(),
-    templates: parsed.templates ?? [],
+    templates: (parsed.templates ?? []).map((t) =>
+      t.settings ? { ...t, settings: renamePepSettings(t.settings) } : t
+    ),
     autoTrack: parsed.autoTrack ?? true,
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
     brands: parsed.brands ?? [...MIX_SEED.brands],
     brandFlavors: parsed.brandFlavors ?? { ...MIX_SEED.brandFlavors },
     dieTypes: parsed.dieTypes ?? [...DEFAULT_DIE_TYPES],
-    pepTypes: parsed.pepTypes ?? [...DEFAULT_PEP_TYPES],
+    pepTypes: renamePepList(parsed.pepTypes),
     cheeseIngredients: parsed.cheeseIngredients ?? [...DEFAULT_CHEESE_INGREDIENTS],
     doughIngredients: parsed.doughIngredients ?? [...DEFAULT_DOUGH_INGREDIENTS],
     frontlineIngredients:
@@ -1191,7 +1222,9 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         ]),
       ],
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
-    brandProfiles: parsed.brandProfiles ?? {},
+    brandProfiles: Object.fromEntries(
+      Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [k, renamePepSettings(v)])
+    ),
     doughRecipePresets: parsed.doughRecipePresets ?? {},
     cheeseRecipePresets: parsed.cheeseRecipePresets ?? {},
     frontlineRecipePresets: parsed.frontlineRecipePresets ?? {},

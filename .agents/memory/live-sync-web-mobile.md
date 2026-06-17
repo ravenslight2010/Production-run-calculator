@@ -47,6 +47,18 @@ contract is owned by web + db and is untyped on the server. Mobile mirrors it in
   unconditionally.
 
 ## Gotchas
+- **Taxonomy migrations must be enforced on the inbound sync path, not just on-load.**
+  Renaming/retiring master-data values (e.g. pep-type renames, dropping a value)
+  only in `normalizeState`/on-load migration is NOT enough: a legacy peer re-adds
+  the old value through `applyPayloadToState` (mobile `unionList`) or the web sync
+  `mergeList`/setters. Apply the same rename+drop-retired cleanup to incoming
+  payload lists AND to incoming run/settings pep refs (mobile `formValuesToSettings`,
+  web `cleanedRemotePep`), or the value resurrects and propagates back out.
+- **Web sync setState must be change-guarded.** The outgoing payload echoes
+  loadHistory()/master lists every SSE cycle (~10s); calling setState/`setHistory`/
+  `setDayState`/`setBrands`/etc. unconditionally on each inbound echo causes a
+  re-render storm that resets open-menu scroll position. Guard every sync setter
+  with an equality check (arraysEqual / JSON.stringify) and return prev when equal.
 - `getApiBaseUrl()` builds from `process.env.EXPO_PUBLIC_DOMAIN` → `https://<domain>`.
 - SSE transport branches on `Platform.OS`: web uses global `EventSource`, native
   uses `react-native-sse`.
