@@ -253,6 +253,9 @@ export const INGREDIENT_RENAMES: Record<string, string> = {
   "Mozzarella Part Skim": "Part Skim Mozzarella",
   "Pizella Cheese": "Pizella",
   Jalapeno: "Jalapenos",
+  // Cut/prep variants collapsed onto the base ingredient (FR variants kept separate)
+  "Diced Chicken": "Chicken",
+  "Diced Tomatoes": "Tomatoes",
   // Cheese ingredients
   Cilanto: "Cilantro",
   "COW Romano Cheese": "Cow's Romano",

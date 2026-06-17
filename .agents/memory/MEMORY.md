@@ -2,6 +2,7 @@
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
 - [Spec-import seed pattern](spec-import-seed-pattern.md) — two-tier additive marker-guarded recipe imports (dough/sauce/cheese), kept at web+mobile parity.
+- [Ingredient near-dup merges](ingredient-dedupe.md) — INGREDIENT_RENAMES mirrored web+mobile; FR/Parmesan/mozz-fat carve-outs kept, "Diced" merges by default; bump dedupe marker when adding entries.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
 - [Frontline is sauce](frontline-is-sauce.md) — internal "frontline" recipe system IS the UI's "Sauce Recipe"; seed sauces into frontline plumbing, no new field.
