@@ -19,9 +19,21 @@ import {
   IdentifyInventoryPhotoBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import { rateLimit } from "../middlewares/rateLimit";
 import * as z from "zod";
 
 const router: IRouter = Router();
+
+// Cost/abuse guards for the paid AI vision endpoint. The API is unauthenticated,
+// so cap both how often it can be called and how large each request can be before
+// it reaches the model.
+const PHOTO_RATE_WINDOW_MS = 60_000;
+const PHOTO_RATE_MAX = 10; // requests per IP per minute
+// Base64 inflates by ~33%, so ~8M chars ≈ a ~6 MB source image — far above any
+// normal phone photo, while staying under the 10mb express.json body limit so we
+// return a clean 413 here instead of a parser error.
+const MAX_IMAGE_BASE64_CHARS = 8_000_000;
+const MAX_CANDIDATES = 1000;
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string };
@@ -299,7 +311,10 @@ function sanitizeGuesses(raw: unknown, candidateKeys: Set<string>): PhotoGuessOu
   return out;
 }
 
-router.post("/inventory/identify-photo", async (req, res): Promise<void> => {
+router.post(
+  "/inventory/identify-photo",
+  rateLimit({ windowMs: PHOTO_RATE_WINDOW_MS, max: PHOTO_RATE_MAX }),
+  async (req, res): Promise<void> => {
   const parsed = IdentifyInventoryPhotoBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -308,6 +323,14 @@ router.post("/inventory/identify-photo", async (req, res): Promise<void> => {
   const { imageBase64, mimeType, candidates } = parsed.data;
   if (!imageBase64 || imageBase64.length < 16) {
     res.status(400).json({ error: "imageBase64 required" });
+    return;
+  }
+  if (imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
+    res.status(413).json({ error: "Image too large" });
+    return;
+  }
+  if (candidates && candidates.length > MAX_CANDIDATES) {
+    res.status(400).json({ error: `Too many candidates (max ${MAX_CANDIDATES})` });
     return;
   }
   const cands = candidates ?? [];
