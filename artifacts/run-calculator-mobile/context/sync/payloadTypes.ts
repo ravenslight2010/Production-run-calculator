@@ -97,6 +97,7 @@ export interface WebFormValues {
   app4CheeseRecipe: WebRecipeRow[];
   frontlineRecipeName: string;
   frontlineRecipe: WebRecipeRow[];
+  cartoned: string;
   circles: string;
   shipper: string;
   skidStacking: string;

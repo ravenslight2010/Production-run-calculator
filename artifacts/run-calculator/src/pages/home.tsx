@@ -318,6 +318,9 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   const circleMap = new Map<string, number>();
   const shipperMap = new Map<string, number>();
   for (const vals of valsList) {
+    // Only cartoned runs contribute to packaging needs; "labeled" (cartoned !==
+    // "yes") runs are excluded entirely.
+    if ((vals.cartoned ?? "").trim().toLowerCase() !== "yes") continue;
     const s = computeSummaryStats(vals);
     const circle = (vals.circles ?? "").trim();
     if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
@@ -6059,8 +6062,22 @@ export default function Home() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
+                    {(() => {
+                      const isCartoned = ((v.cartoned as string) ?? "").trim().toLowerCase() === "yes";
+                      return (
+                        <span
+                          className={`inline-block mb-3 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider border ${
+                            isCartoned
+                              ? "bg-primary/15 text-primary border-primary/40"
+                              : "bg-muted/40 text-muted-foreground border-border/60"
+                          }`}
+                        >
+                          {isCartoned ? "Cartoned" : "Labeled"}
+                        </span>
+                      );
+                    })()}
                     <div className="space-y-1.5">
-                      {PACKAGING_FIELDS.map((f) => {
+                      {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
                         const val = ((v[f.name] as string) ?? "").trim();
                         return (
                           <div key={f.name} className="flex items-baseline justify-between gap-2 text-sm">

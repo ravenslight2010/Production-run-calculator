@@ -67,6 +67,7 @@ export const formSchema = z.object({
   frontlineRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  cartoned: z.string().default("no"),
   circles: z.string().default("none"),
   shipper: z.string().default(""),
   skidStacking: z.string().default(""),
@@ -134,6 +135,7 @@ export const DEFAULT_VALUES: FormValues = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
+  cartoned: "no",
   circles: "none",
   shipper: "",
   skidStacking: "",
@@ -145,6 +147,7 @@ export const DEFAULT_VALUES: FormValues = {
 // Settings and surfaced in the Packaging tab. circles are counted per pizza and
 // shippers per case in the warehouse needs roll-up (grouped by selected value).
 export const PACKAGING_FIELDS = [
+  { name: "cartoned", label: "Cartoned", options: ["yes", "no"] },
   { name: "circles", label: "Circles", options: ["none", "microwave", "7in", "11in", "12in"] },
   { name: "shipper", label: "Shipper", options: ["costco", "12in", "11in", "7in", "edwardos"] },
   { name: "skidStacking", label: "Skid Stacking Style", options: ["lucia", "hannaford", "column"] },

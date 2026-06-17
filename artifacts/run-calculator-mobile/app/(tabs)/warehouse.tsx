@@ -96,6 +96,8 @@ export default function WarehouseScreen() {
   for (const r of allRuns) {
     if (r.endedAt != null) continue;
     const s = r.settings;
+    // Only cartoned runs contribute to packaging needs; "labeled" runs excluded.
+    if ((s.cartoned ?? "").trim().toLowerCase() !== "yes") continue;
     const cases = s.casesNeeded;
     const pizzas = s.casesNeeded * s.pizzasPerCase;
     const circle = (s.circles ?? "").trim();

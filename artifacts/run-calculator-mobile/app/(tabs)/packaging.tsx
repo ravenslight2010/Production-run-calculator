@@ -205,7 +205,31 @@ export default function PackagingScreen() {
             </Text>
           </View>
           <View style={styles.cardBody}>
-            {PACKAGING_FIELDS.map((f) => {
+            {(() => {
+              const isCartoned =
+                ((run.settings.cartoned as string) ?? "").trim().toLowerCase() === "yes";
+              return (
+                <View
+                  style={[
+                    styles.pkgBadge,
+                    {
+                      backgroundColor: isCartoned ? colors.primary + "26" : colors.secondary,
+                      borderColor: isCartoned ? colors.primary + "66" : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.pkgBadgeText,
+                      { color: isCartoned ? colors.primary : colors.mutedForeground },
+                    ]}
+                  >
+                    {isCartoned ? "Cartoned" : "Labeled"}
+                  </Text>
+                </View>
+              );
+            })()}
+            {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
               const val = ((run.settings[f.name] as string) ?? "").trim();
               return (
                 <View key={f.name} style={styles.pkgRow}>
@@ -340,6 +364,20 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
+  pkgBadge: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 10,
+  },
+  pkgBadgeText: {
+    fontSize: 12,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
   pkgRow: {
     flexDirection: "row",
     alignItems: "baseline",
