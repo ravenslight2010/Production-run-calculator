@@ -46,6 +46,17 @@ function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function expiryClass(status: ReturnType<typeof lotExpiryStatus>): string {
   if (status === "expired") return "text-red-500";
   if (status === "soon") return "text-amber-500";
@@ -457,6 +468,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
               <div key={h.id} className="flex items-center justify-between gap-2 text-xs">
                 <span className="truncate text-muted-foreground">
                   <span className="uppercase font-semibold">{h.type}</span>
+                  <span className="ml-1.5 text-muted-foreground/70">{fmtDateTime(h.createdAt)}</span>
                   {h.note ? ` · ${h.note}` : ""}
                 </span>
                 <span className={`font-mono tabular-nums whitespace-nowrap ${h.qtyDelta < 0 ? "text-red-500" : "text-emerald-500"}`}>

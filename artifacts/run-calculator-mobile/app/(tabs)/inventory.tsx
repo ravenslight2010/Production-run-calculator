@@ -43,6 +43,17 @@ function fmtQty(n: number): string {
   return Number.isInteger(r) ? String(r) : r.toFixed(2).replace(/0$/, "");
 }
 
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -496,6 +507,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
               <View key={h.id} style={styles.lotRow}>
                 <Text style={[styles.lotText, { color: colors.mutedForeground }]} numberOfLines={1}>
                   <Text style={{ fontFamily: FONTS.medium }}>{h.type.toUpperCase()}</Text>
+                  {` · ${fmtDateTime(h.createdAt)}`}
                   {h.note ? ` · ${h.note}` : ""}
                 </Text>
                 <Text
