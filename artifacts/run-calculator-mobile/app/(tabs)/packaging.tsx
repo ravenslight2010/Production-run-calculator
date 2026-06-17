@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stepper } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
-import { useRun, computeDoughSupply, liveFreezerMin } from "@/context/RunContext";
+import { useRun, computeDoughSupply, liveFreezerMin, PACKAGING_FIELDS } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 function fmtTime(min: number): string {
@@ -197,6 +197,33 @@ export default function PackagingScreen() {
           </View>
         </View>
 
+        {/* ─── Packaging settings ─── */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.cardHeader}>
+            <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>
+              PACKAGING
+            </Text>
+          </View>
+          <View style={styles.cardBody}>
+            {PACKAGING_FIELDS.map((f) => {
+              const val = ((run.settings[f.name] as string) ?? "").trim();
+              return (
+                <View key={f.name} style={styles.pkgRow}>
+                  <Text style={[styles.pkgLabel, { color: colors.mutedForeground }]}>
+                    {f.label}
+                  </Text>
+                  <Text
+                    style={[styles.pkgValue, { color: colors.foreground }]}
+                    numberOfLines={1}
+                  >
+                    {val || "—"}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
         {/* ─── Output metrics ─── */}
         <View style={styles.outputRow}>
           <View style={[styles.outputCell, { backgroundColor: colors.secondary + "66" }]}>
@@ -311,6 +338,23 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     textAlign: "right",
     marginTop: 6,
+  },
+
+  pkgRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingVertical: 5,
+  },
+  pkgLabel: { fontSize: 13, fontFamily: FONTS.regular },
+  pkgValue: {
+    fontSize: 14,
+    fontFamily: FONTS.semibold,
+    fontVariant: ["tabular-nums"],
+    textTransform: "capitalize",
+    flexShrink: 1,
+    textAlign: "right",
   },
 
   outputRow: { flexDirection: "row", gap: 12, marginTop: 16 },

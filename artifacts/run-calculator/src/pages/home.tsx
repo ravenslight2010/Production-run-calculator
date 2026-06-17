@@ -12,6 +12,7 @@ import {
   type HistoryDay,
   type RunTemplate,
   DEFAULT_VALUES,
+  PACKAGING_FIELDS,
   DAY_KEY,
   STOP_REASONS_KEY,
   SUPERVISOR_PIN_KEY,
@@ -308,6 +309,29 @@ function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
       value: fmtNum(val.num, val.unit === "batches" ? 2 : 1),
       sub: val.unit,
     }));
+}
+
+// Roll up packaging consumables across the given runs: circles are 1 per pizza
+// and shippers are 1 per case, each grouped by the run's selected type. "none"
+// / unset selections contribute nothing.
+function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
+  const circleMap = new Map<string, number>();
+  const shipperMap = new Map<string, number>();
+  for (const vals of valsList) {
+    const s = computeSummaryStats(vals);
+    const circle = (vals.circles ?? "").trim();
+    if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
+      circleMap.set(circle, (circleMap.get(circle) ?? 0) + s.totalPizzas);
+    }
+    const shipper = (vals.shipper ?? "").trim();
+    if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
+      shipperMap.set(shipper, (shipperMap.get(shipper) ?? 0) + s.totalCases);
+    }
+  }
+  const rows: NeedRow[] = [];
+  for (const [type, n] of circleMap) rows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
+  for (const [type, n] of shipperMap) rows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
+  return rows;
 }
 
 function StatRow({
@@ -5814,7 +5838,6 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <TabsContent value="setup">
-                {isSupervisor && (
                 <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -5981,11 +6004,76 @@ export default function Home() {
                     </fieldset>
                     </div>
                 </details>
-                )}
+
+                {/* Packaging Settings */}
+                <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
+                  <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
+                    <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <Package className="w-3.5 h-3.5" />
+                      Packaging Settings
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                  </summary>
+                  <div className="border-t border-border/40 px-5 pb-5 pt-4 space-y-4">
+                    {PACKAGING_FIELDS.map((f) => {
+                      const cur = (v[f.name] as string) ?? "";
+                      return (
+                        <div key={f.name}>
+                          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                            {f.label}
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {f.options.map((opt) => {
+                              const active = cur === opt;
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() =>
+                                    form.setValue(f.name, active ? "" : opt, { shouldDirty: true })
+                                  }
+                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border capitalize transition-colors ${
+                                    active
+                                      ? "bg-primary text-primary-foreground border-primary"
+                                      : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
               </TabsContent>
 
               {/* ─── PACKAGING ─── */}
               <TabsContent value="packaging">
+                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                  <CardHeader className="pb-1 pt-3 px-4">
+                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <Package className="w-3.5 h-3.5" /> Packaging
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <div className="space-y-1.5">
+                      {PACKAGING_FIELDS.map((f) => {
+                        const val = ((v[f.name] as string) ?? "").trim();
+                        return (
+                          <div key={f.name} className="flex items-baseline justify-between gap-2 text-sm">
+                            <span className="text-muted-foreground">{f.label}</span>
+                            <span className="font-bold tabular-nums text-foreground capitalize whitespace-nowrap">
+                              {val || "—"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-1 pt-3 px-4">
                       <div className="flex items-center justify-between">
@@ -6281,17 +6369,32 @@ export default function Home() {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   const valsList = activeRuns.map(r => loadRunValues(r.id));
                   const agg = aggregateNeedRows(valsList);
+                  const pkg = aggregatePackagingNeeds(valsList);
                   return (
-                    <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                      <CardHeader className="pb-2 pt-4 px-5">
-                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4">
-                        <NeedsList rows={agg} />
-                      </CardContent>
-                    </Card>
+                    <>
+                      <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                        <CardHeader className="pb-2 pt-4 px-5">
+                          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                            <Warehouse className="w-4 h-4" /> Total Ingredient Needs — All Runs
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="px-4 pb-4">
+                          <NeedsList rows={agg} />
+                        </CardContent>
+                      </Card>
+                      {pkg.length > 0 && (
+                        <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                          <CardHeader className="pb-2 pt-4 px-5">
+                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                              <Package className="w-4 h-4" /> Packaging Needs — All Runs
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="px-4 pb-4">
+                            <NeedsList rows={pkg} />
+                          </CardContent>
+                        </Card>
+                      )}
+                    </>
                   );
                 })()}
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">

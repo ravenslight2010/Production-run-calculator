@@ -87,6 +87,32 @@ export default function WarehouseScreen() {
       sub: val.unit,
     }));
 
+  // Packaging consumables across active runs: circles are 1 per pizza
+  // (casesNeeded × pizzasPerCase) and shippers are 1 per case (casesNeeded),
+  // each grouped by the run's selected type. "none"/unset contribute nothing.
+  // Mirrors web aggregatePackagingNeeds.
+  const circleMap = new Map<string, number>();
+  const shipperMap = new Map<string, number>();
+  for (const r of allRuns) {
+    if (r.endedAt != null) continue;
+    const s = r.settings;
+    const cases = s.casesNeeded;
+    const pizzas = s.casesNeeded * s.pizzasPerCase;
+    const circle = (s.circles ?? "").trim();
+    if (circle && circle.toLowerCase() !== "none" && pizzas > 0) {
+      circleMap.set(circle, (circleMap.get(circle) ?? 0) + pizzas);
+    }
+    const shipper = (s.shipper ?? "").trim();
+    if (shipper && shipper.toLowerCase() !== "none" && cases > 0) {
+      shipperMap.set(shipper, (shipperMap.get(shipper) ?? 0) + cases);
+    }
+  }
+  const packagingRows: NeedRow[] = [];
+  for (const [type, n] of circleMap)
+    packagingRows.push({ label: `Circles — ${type}`, value: fmtNum(n, 0), sub: "circles" });
+  for (const [type, n] of shipperMap)
+    packagingRows.push({ label: `Shippers — ${type}`, value: fmtNum(n, 0), sub: "shippers" });
+
   const today = todayStr();
   const scheduledDays = Object.keys(scheduled)
     .filter((d) => (scheduled[d]?.length ?? 0) > 0 && d >= today)
@@ -130,6 +156,32 @@ export default function WarehouseScreen() {
             </View>
           )}
         </Card>
+
+        {/* Packaging consumables across all active runs */}
+        {packagingRows.length > 0 && (
+          <Card title="Packaging Needs — All Runs" icon="package" style={{ marginTop: 16 }}>
+            <View style={styles.needList}>
+              {packagingRows.map((row, i) => (
+                <View key={i} style={styles.needRow}>
+                  <Text
+                    style={[styles.needLabel, { color: colors.mutedForeground }]}
+                    numberOfLines={1}
+                  >
+                    {row.label}
+                  </Text>
+                  <Text style={styles.needValueWrap} numberOfLines={1}>
+                    <Text style={[styles.needValue, { color: colors.foreground }]}>
+                      {row.value}{" "}
+                    </Text>
+                    <Text style={[styles.needSub, { color: colors.mutedForeground }]}>
+                      {row.sub}
+                    </Text>
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        )}
 
         {/* Upcoming production schedule */}
         <Card title="Production Schedule" icon="calendar" style={{ marginTop: 16 }}>

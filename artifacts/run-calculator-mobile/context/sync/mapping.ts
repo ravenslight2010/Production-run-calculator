@@ -168,6 +168,11 @@ export function runToFormValues(run: RunState): WebFormValues {
     app4CheeseRecipe: cloneRows(s.app4CheeseRecipe),
     frontlineRecipeName: s.frontlineRecipeName,
     frontlineRecipe: cloneRows(s.frontlineRecipe),
+    circles: s.circles,
+    shipper: s.shipper,
+    skidStacking: s.skidStacking,
+    gripSheets: s.gripSheets,
+    slipSheets: s.slipSheets,
   };
 }
 
@@ -252,6 +257,11 @@ function formValuesToSettings(
     app4CheeseRecipe: v.app4CheeseRecipe !== undefined ? rows(v.app4CheeseRecipe) : base.app4CheeseRecipe,
     frontlineRecipeName: str(v.frontlineRecipeName, base.frontlineRecipeName),
     frontlineRecipe: v.frontlineRecipe !== undefined ? rows(v.frontlineRecipe) : base.frontlineRecipe,
+    circles: str(v.circles, base.circles),
+    shipper: str(v.shipper, base.shipper),
+    skidStacking: str(v.skidStacking, base.skidStacking),
+    gripSheets: str(v.gripSheets, base.gripSheets),
+    slipSheets: str(v.slipSheets, base.slipSheets),
   }));
 }
 

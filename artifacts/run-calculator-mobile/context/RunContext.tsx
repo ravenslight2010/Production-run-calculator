@@ -140,6 +140,12 @@ export interface RunSettings {
   app4CheeseRecipe: RecipeRow[];
   frontlineRecipeName: string;
   frontlineRecipe: RecipeRow[];
+  // Packaging (single-select config — see PACKAGING_FIELDS)
+  circles: string;
+  shipper: string;
+  skidStacking: string;
+  gripSheets: string;
+  slipSheets: string;
   // Notes
   notes: string;
 }
@@ -257,8 +263,25 @@ export const DEFAULT_SETTINGS: RunSettings = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
+  circles: "none",
+  shipper: "",
+  skidStacking: "",
+  gripSheets: "none",
+  slipSheets: "no",
   notes: "",
 };
+
+// Single-select packaging configuration fields, mirrored from the web app
+// (artifacts/run-calculator/src/types.ts PACKAGING_FIELDS). circles are counted
+// per pizza and shippers per case in the warehouse roll-up (grouped by value).
+export const PACKAGING_FIELDS = [
+  { name: "circles", label: "Circles", options: ["none", "microwave", "7in", "11in", "12in"] },
+  { name: "shipper", label: "Shipper", options: ["costco", "12in", "11in", "7in", "edwardos"] },
+  { name: "skidStacking", label: "Skid Stacking Style", options: ["lucia", "hannaford", "column"] },
+  { name: "gripSheets", label: "Grip Sheets", options: ["none", "every other layer", "3rd and 5th"] },
+  { name: "slipSheets", label: "Slip Sheets", options: ["yes", "no"] },
+] as const;
+export type PackagingFieldName = (typeof PACKAGING_FIELDS)[number]["name"];
 
 // ── Master data defaults (manageable lists shared across runs) ──────────────
 export const DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];

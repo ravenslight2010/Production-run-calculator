@@ -14,6 +14,7 @@ import {
 import {
   useRun,
   runLabel,
+  PACKAGING_FIELDS,
   type RecipeRow,
   type RunSettings,
 } from "@/context/RunContext";
@@ -456,6 +457,59 @@ export default function ConfigureScreen() {
             unit="(buffer)"
           />
         </CardSection>
+
+        {/* Packaging Settings */}
+        <SectionHeader title="Packaging Settings" />
+        {PACKAGING_FIELDS.map((f) => {
+          const cur = (run.settings[f.name] as string) ?? "";
+          return (
+            <View key={f.name} style={{ marginBottom: 14 }}>
+              <Text
+                style={{
+                  fontFamily: FONTS.semibold,
+                  fontSize: 12,
+                  letterSpacing: 0.5,
+                  textTransform: "uppercase",
+                  color: colors.mutedForeground,
+                  marginBottom: 8,
+                  marginLeft: 4,
+                }}
+              >
+                {f.label}
+              </Text>
+              <View style={styles.chipRow}>
+                {f.options.map((opt) => {
+                  const active = cur === opt;
+                  return (
+                    <Pressable
+                      key={opt}
+                      onPress={() => {
+                        updateSettings({ [f.name]: active ? "" : opt } as Partial<RunSettings>);
+                        Haptics.selectionAsync();
+                      }}
+                      style={[
+                        styles.chip,
+                        {
+                          borderColor: active ? colors.primary : colors.border,
+                          backgroundColor: active ? colors.primary + "22" : "transparent",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          { color: active ? colors.primary : colors.foreground },
+                        ]}
+                      >
+                        {opt}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          );
+        })}
 
         {/* Die Type */}
         <SectionHeader title="Die Type" />

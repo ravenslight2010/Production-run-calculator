@@ -67,6 +67,11 @@ export const formSchema = z.object({
   frontlineRecipe: z.array(
     z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
   ).default([]),
+  circles: z.string().default("none"),
+  shipper: z.string().default(""),
+  skidStacking: z.string().default(""),
+  gripSheets: z.string().default("none"),
+  slipSheets: z.string().default("no"),
 });
 
 export type FormValues = z.infer<typeof formSchema>;
@@ -129,7 +134,24 @@ export const DEFAULT_VALUES: FormValues = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
+  circles: "none",
+  shipper: "",
+  skidStacking: "",
+  gripSheets: "none",
+  slipSheets: "no",
 };
+
+// Single-select packaging configuration fields, shown in Setup → Packaging
+// Settings and surfaced in the Packaging tab. circles are counted per pizza and
+// shippers per case in the warehouse needs roll-up (grouped by selected value).
+export const PACKAGING_FIELDS = [
+  { name: "circles", label: "Circles", options: ["none", "microwave", "7in", "11in", "12in"] },
+  { name: "shipper", label: "Shipper", options: ["costco", "12in", "11in", "7in", "edwardos"] },
+  { name: "skidStacking", label: "Skid Stacking Style", options: ["lucia", "hannaford", "column"] },
+  { name: "gripSheets", label: "Grip Sheets", options: ["none", "every other layer", "3rd and 5th"] },
+  { name: "slipSheets", label: "Slip Sheets", options: ["yes", "no"] },
+] as const;
+export type PackagingFieldName = (typeof PACKAGING_FIELDS)[number]["name"];
 
 export const CRUST_FIELDS = [
   "crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray",
