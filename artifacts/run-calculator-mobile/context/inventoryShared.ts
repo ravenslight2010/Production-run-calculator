@@ -297,6 +297,30 @@ export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
     body: JSON.stringify(body),
   });
 
+// Score how closely a free-text guess name matches a known candidate name.
+// Higher is closer. Used to surface the closest inventory items when the AI
+// match is uncertain so the user can pick the right one.
+export function scoreNameMatch(query: string, name: string): number {
+  const q = query.toLowerCase().trim();
+  const n = name.toLowerCase().trim();
+  if (!q || !n) return 0;
+  if (q === n) return 1000;
+  if (n.includes(q) || q.includes(n)) return 500 + Math.min(q.length, n.length);
+  const qt = new Set(q.split(/\s+/).filter(Boolean));
+  let overlap = 0;
+  for (const t of n.split(/\s+/).filter(Boolean)) if (qt.has(t)) overlap += 1;
+  return overlap * 10;
+}
+
+// Rank candidates by closeness to a guessed name (closest first). Stable for
+// equal scores (preserves input order).
+export function rankCandidatesByName(name: string, candidates: CandidateItem[]): CandidateItem[] {
+  return candidates
+    .map((c, i) => ({ c, i, s: scoreNameMatch(name, c.name) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i)
+    .map((x) => x.c);
+}
+
 // ── SSE stream (ping → refetch), cross-platform like openSyncStream ──────────
 export interface InventoryStream {
   close: () => void;

@@ -19,6 +19,7 @@ import {
   IdentifyInventoryPhotoBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import * as z from "zod";
 
 const router: IRouter = Router();
 
@@ -256,27 +257,41 @@ type PhotoGuessOut = {
   confidence: number;
 };
 
+// The vision model is unreliable, so validate its structured output with a
+// lenient Zod schema (coerces numeric strings, tolerates missing optional
+// fields) rather than trusting the raw JSON. Anything that fails per-item
+// validation is dropped; the whole response collapses to [] if the top-level
+// shape is wrong. Post-parse we still clamp confidence and scrub matchedKey
+// against the candidates the client actually sent.
+const VisionGuessSchema = z.object({
+  name: z.coerce.string(),
+  qty: z.coerce.number().optional(),
+  unit: z.coerce.string().optional(),
+  category: z.coerce.string().optional(),
+  matchedKey: z.string().nullish(),
+  confidence: z.coerce.number().optional(),
+});
+const VisionResponseSchema = z.object({
+  items: z.array(z.unknown()).optional(),
+});
+
 function sanitizeGuesses(raw: unknown, candidateKeys: Set<string>): PhotoGuessOut[] {
-  const items =
-    raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items)
-      ? ((raw as { items: unknown[] }).items)
-      : [];
+  const top = VisionResponseSchema.safeParse(raw);
+  if (!top.success) return [];
   const out: PhotoGuessOut[] = [];
-  for (const g of items) {
-    if (!g || typeof g !== "object") continue;
-    const o = g as Record<string, unknown>;
-    const name = String(o.name ?? "").trim();
+  for (const item of top.data.items ?? []) {
+    const parsed = VisionGuessSchema.safeParse(item);
+    if (!parsed.success) continue;
+    const g = parsed.data;
+    const name = g.name.trim();
     if (!name) continue;
-    const qtyNum = Number(o.qty);
-    const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
-    const unit = String(o.unit ?? "").trim() || "units";
+    const qty = g.qty != null && Number.isFinite(g.qty) && g.qty > 0 ? g.qty : 0;
+    const unit = (g.unit ?? "").trim() || "units";
     const category =
-      String(o.category ?? "").trim().toLowerCase() === "packaging"
-        ? "packaging"
-        : "ingredient";
-    let matchedKey = typeof o.matchedKey === "string" ? o.matchedKey : null;
+      (g.category ?? "").trim().toLowerCase() === "packaging" ? "packaging" : "ingredient";
+    let matchedKey = g.matchedKey ?? null;
     if (matchedKey != null && !candidateKeys.has(matchedKey)) matchedKey = null;
-    let confidence = Number(o.confidence);
+    let confidence = g.confidence ?? 0;
     if (!Number.isFinite(confidence)) confidence = 0;
     confidence = Math.max(0, Math.min(1, confidence));
     out.push({ name, qty, unit, category, matchedKey, confidence });

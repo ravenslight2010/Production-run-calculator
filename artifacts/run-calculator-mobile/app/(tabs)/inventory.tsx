@@ -31,6 +31,7 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  rankCandidatesByName,
   deriveCandidateItems,
   isLowStock,
   lotExpiryStatus,
@@ -875,6 +876,7 @@ function AddItemForm({
 // ── Photo stock intake ───────────────────────────────────────────────────────
 interface ReviewRow {
   id: string;
+  guessName: string;
   name: string;
   qty: string;
   unit: string;
@@ -884,6 +886,8 @@ interface ReviewRow {
   lotNumber: string;
   expiration: string;
 }
+
+const NEW_ITEM = "__new__";
 
 function PhotoIntakeCard({
   candidates,
@@ -916,6 +920,7 @@ function PhotoIntakeCard({
       const matched = g.matchedKey ? candByKey.get(g.matchedKey) : undefined;
       return {
         id: `${Date.now()}-${i}`,
+        guessName: g.name,
         name: matched?.name ?? g.name,
         qty: g.qty > 0 ? fmtQty(g.qty) : "",
         unit: matched?.unit ?? g.unit,
@@ -979,21 +984,36 @@ function PhotoIntakeCard({
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
   }
 
+  // Re-map a review row to an existing inventory item, or back to a new item.
+  // When matched, the row's name/unit/category lock to the chosen item so what
+  // the user sees is exactly what gets committed.
+  function setMatch(id: string, key: string) {
+    if (key === NEW_ITEM) {
+      setRows((rs) =>
+        rs.map((r) => (r.id === id ? { ...r, matchedKey: null, name: r.guessName } : r)),
+      );
+      return;
+    }
+    const c = candByKey.get(key);
+    if (!c) return;
+    patch(id, { matchedKey: c.key, name: c.name, unit: c.unit, category: c.category });
+  }
+
   async function confirmRow(row: ReviewRow) {
     const n = Number(row.qty);
     if (!(n > 0)) return;
     const name = row.name.trim();
     if (!name) return;
     const unit = row.unit.trim() || "units";
-    const matched = row.matchedKey ? candByKey.get(row.matchedKey) : undefined;
-    const itemKey = matched?.key ?? `${row.category}:${name}:${unit}`;
+    // matched rows commit the matched item's stable key; new items derive one.
+    const itemKey = row.matchedKey ?? `${row.category}:${name}:${unit}`;
     setCommittingId(row.id);
     try {
       await restockInventory({
         itemKey,
-        category: matched?.category ?? row.category,
-        name: matched?.name ?? name,
-        unit: matched?.unit ?? unit,
+        category: row.category,
+        name,
+        unit,
         qty: n,
         lotNumber: row.lotNumber.trim() || undefined,
         receivedDate: todayStr(),
@@ -1060,6 +1080,8 @@ function PhotoIntakeCard({
               </Text>
               {rows.map((row) => {
                 const lowConf = row.confidence < 0.5;
+                const ranked = rankCandidatesByName(row.guessName, candidates);
+                const matchedLocked = !!row.matchedKey;
                 return (
                   <View
                     key={row.id}
@@ -1092,12 +1114,60 @@ function PhotoIntakeCard({
                         <Feather name="x" size={16} color={colors.mutedForeground} />
                       </Pressable>
                     </View>
+                    {candidates.length > 0 && (
+                      <View style={{ gap: 4 }}>
+                        <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>MATCH TO</Text>
+                        <View style={styles.matchChips}>
+                          <Pressable
+                            onPress={() => setMatch(row.id, NEW_ITEM)}
+                            style={[
+                              styles.matchChip,
+                              { borderColor: row.matchedKey ? colors.border : colors.primary,
+                                backgroundColor: row.matchedKey ? colors.background : colors.primary },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.matchChipText,
+                                { color: row.matchedKey ? colors.foreground : colors.primaryForeground },
+                              ]}
+                            >
+                              + New
+                            </Text>
+                          </Pressable>
+                          {ranked.map((c) => {
+                            const active = row.matchedKey === c.key;
+                            return (
+                              <Pressable
+                                key={c.key}
+                                onPress={() => setMatch(row.id, c.key)}
+                                style={[
+                                  styles.matchChip,
+                                  { borderColor: active ? colors.primary : colors.border,
+                                    backgroundColor: active ? colors.primary : colors.background },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.matchChipText,
+                                    { color: active ? colors.primaryForeground : colors.foreground },
+                                  ]}
+                                >
+                                  {c.name}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    )}
                     <TextInput
                       placeholder="Item name"
                       placeholderTextColor={colors.mutedForeground}
                       value={row.name}
+                      editable={!matchedLocked}
                       onChangeText={(t) => patch(row.id, { name: t })}
-                      style={inputStyle}
+                      style={[inputStyle, matchedLocked && { opacity: 0.5 }]}
                     />
                     <View style={styles.formRow}>
                       <TextInput
@@ -1339,4 +1409,7 @@ const styles = StyleSheet.create({
   reviewBadges: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
   badge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
   badgeText: { fontSize: 9, fontFamily: FONTS.bold },
+  matchChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  matchChip: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
+  matchChipText: { fontSize: 11, fontFamily: FONTS.medium },
 });

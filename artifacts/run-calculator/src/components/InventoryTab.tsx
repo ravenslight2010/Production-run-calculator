@@ -34,6 +34,7 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  rankCandidatesByName,
   inventoryClientId,
   isLowStock,
   lotExpiryStatus,
@@ -754,6 +755,7 @@ async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
 
 type ReviewRow = {
   id: string;
+  guessName: string;
   name: string;
   qty: string;
   unit: string;
@@ -763,6 +765,8 @@ type ReviewRow = {
   lotNumber: string;
   expiration: string;
 };
+
+const NEW_ITEM = "__new__";
 
 function PhotoIntakeCard({
   candidates,
@@ -790,6 +794,7 @@ function PhotoIntakeCard({
       const matched = g.matchedKey ? candByKey.get(g.matchedKey) : undefined;
       return {
         id: `${Date.now()}-${i}`,
+        guessName: g.name,
         name: matched?.name ?? g.name,
         qty: g.qty > 0 ? fmtQty(g.qty) : "",
         unit: matched?.unit ?? g.unit,
@@ -830,21 +835,36 @@ function PhotoIntakeCard({
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
   }
 
+  // Re-map a review row to an existing inventory item, or back to a new item.
+  // When matched, the row's name/unit/category lock to the chosen item so what
+  // the user sees is exactly what gets committed.
+  function setMatch(id: string, key: string) {
+    if (key === NEW_ITEM) {
+      setRows((rs) =>
+        rs.map((r) => (r.id === id ? { ...r, matchedKey: null, name: r.guessName } : r)),
+      );
+      return;
+    }
+    const c = candByKey.get(key);
+    if (!c) return;
+    patch(id, { matchedKey: c.key, name: c.name, unit: c.unit, category: c.category });
+  }
+
   async function confirmRow(row: ReviewRow) {
     const n = Number(row.qty);
     if (!(n > 0)) return;
     const name = row.name.trim();
     if (!name) return;
     const unit = row.unit.trim() || "units";
-    const matched = row.matchedKey ? candByKey.get(row.matchedKey) : undefined;
-    const itemKey = matched?.key ?? `${row.category}:${name}:${unit}`;
+    // matched rows commit the matched item's stable key; new items derive one.
+    const itemKey = row.matchedKey ?? `${row.category}:${name}:${unit}`;
     setCommittingId(row.id);
     try {
       await restockInventory({
         itemKey,
-        category: matched?.category ?? row.category,
-        name: matched?.name ?? name,
-        unit: matched?.unit ?? unit,
+        category: row.category,
+        name,
+        unit,
         qty: n,
         lotNumber: row.lotNumber.trim() || undefined,
         receivedDate: todayStr(),
@@ -920,6 +940,8 @@ function PhotoIntakeCard({
               </p>
               {rows.map((row) => {
                 const lowConf = row.confidence < 0.5;
+                const ranked = rankCandidatesByName(row.guessName, candidates);
+                const matchedLocked = !!row.matchedKey;
                 return (
                   <div key={row.id} className="rounded-md border border-border/40 bg-muted/10 p-2.5 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
@@ -942,11 +964,29 @@ function PhotoIntakeCard({
                         <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
+                    {candidates.length > 0 && (
+                      <label className="block">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Match to</span>
+                        <select
+                          value={row.matchedKey ?? NEW_ITEM}
+                          onChange={(e) => setMatch(row.id, e.target.value)}
+                          className="mt-0.5 w-full h-8 rounded-md border border-border/60 bg-background px-1.5 text-xs"
+                        >
+                          <option value={NEW_ITEM}>+ New item "{row.guessName}"</option>
+                          {ranked.map((c) => (
+                            <option key={c.key} value={c.key}>
+                              {c.name} ({c.unit})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     <Input
                       placeholder="Item name"
                       value={row.name}
+                      disabled={matchedLocked}
                       onChange={(e) => patch(row.id, { name: e.target.value })}
-                      className="h-8 text-xs"
+                      className="h-8 text-xs disabled:opacity-60"
                     />
                     <div className="grid grid-cols-3 gap-1.5">
                       <Input
@@ -959,13 +999,13 @@ function PhotoIntakeCard({
                       <Input
                         placeholder="Unit"
                         value={row.unit}
-                        disabled={!!row.matchedKey}
+                        disabled={matchedLocked}
                         onChange={(e) => patch(row.id, { unit: e.target.value })}
-                        className="h-8 text-xs"
+                        className="h-8 text-xs disabled:opacity-60"
                       />
                       <select
                         value={row.category}
-                        disabled={!!row.matchedKey}
+                        disabled={matchedLocked}
                         onChange={(e) => patch(row.id, { category: e.target.value as InventoryCategory })}
                         className="h-8 rounded-md border border-border/60 bg-background px-1 text-xs disabled:opacity-50"
                       >
