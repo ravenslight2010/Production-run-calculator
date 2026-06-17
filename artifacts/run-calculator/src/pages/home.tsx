@@ -1938,6 +1938,11 @@ export default function Home() {
   const applySyncCallbackRef = useRef<(p: SyncPayload) => void>(() => {});
   const initialFinishTimestampRef = useRef<number>(0);
   const pushAcknowledgedRef = useRef(true);
+  // Signature of the last payload we successfully pushed. Idle clients must not
+  // re-broadcast an unchanged state (periodic 30s push / reconnect re-push),
+  // otherwise a second open tab keeps overwriting another tab's live edits.
+  // Mirrors the mobile app's lastSyncSigRef gate (web/mobile parity).
+  const lastSyncSigRef = useRef<string>("");
   const [syncConnected, setSyncConnected] = useState(false);
 
   // Keep dayStateRef current
@@ -2278,16 +2283,19 @@ export default function Home() {
     };
   }, []);
 
-  function doFetch(payload: SyncPayload, retriesLeft: number) {
+  function doFetch(payload: SyncPayload, retriesLeft: number, sig?: string) {
     fetch("/api/sync/today", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ senderId: clientId.current, payload }),
     }).then(() => {
       pushAcknowledgedRef.current = true;
+      // Record the synced signature ONLY after a successful PUT, so a failed
+      // push is never treated as synced (which would block its retry).
+      if (sig !== undefined) lastSyncSigRef.current = sig;
     }).catch(() => {
       if (retriesLeft > 0) {
-        setTimeout(() => doFetch(payload, retriesLeft - 1), 5_000);
+        setTimeout(() => doFetch(payload, retriesLeft - 1, sig), 5_000);
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
         pushAcknowledgedRef.current = true;
@@ -2341,7 +2349,12 @@ export default function Home() {
         brandProfiles,
         crustProfiles,
       };
-      doFetch(payload, 3);
+      // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
+      // Without this, a second open tab keeps broadcasting its stale copy and
+      // clobbers the other tab's edits ("keeps resetting / loses changes").
+      const sig = JSON.stringify(payload);
+      if (sig === lastSyncSigRef.current) { pushAcknowledgedRef.current = true; return; }
+      doFetch(payload, 3, sig);
     }, delay);
   }
   function resetFieldArrays(vals: FormValues) {

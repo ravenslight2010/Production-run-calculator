@@ -34,6 +34,19 @@ contract is owned by web + db and is untyped on the server. Mobile mirrors it in
 - **Echo guard:** ignore SSE messages whose `senderId === our clientId`; also a
   `lastSyncSigRef` deterministic-JSON signature compare skips no-op re-pushes and
   echoes of just-applied remote state.
+- **Outgoing pushes MUST be signature-gated on BOTH platforms.** Each client
+  re-pushes its full state on a 30s timer + on every SSE reconnect. If those
+  pushes are unconditional, a second idle tab/device keeps broadcasting its
+  STALE copy and clobbers the other tab's live edits after the edit-quiet
+  window → user sees "app keeps resetting / loses changes". Gate every push:
+  skip when the payload signature equals the last *successfully pushed* one.
+  Set the synced signature only in the PUT success path (never before/on
+  failure, or a failed push is marked synced and never retries = silent lost
+  update). Web previously lacked this gate while mobile had it — a parity trap.
+- **Residual lost-update:** signature gating stops the repeating clobber but a
+  ≤30s one-shot echo race can still drop a concurrent edit. Fully closing it
+  needs a monotonic `updatedAt`/rev on the payload (reject older remote
+  runValues) — not yet implemented; would need web+mobile parity.
 - **Push reliability:** `putToday` throws on non-OK; `doPush` records the synced
   signature ONLY after a successful PUT, else marks offline + retries
   (`PUSH_RETRY_MS`). **Why:** recording the signature before/ignoring failures
