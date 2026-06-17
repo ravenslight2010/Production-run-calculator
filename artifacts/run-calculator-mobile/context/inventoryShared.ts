@@ -251,6 +251,21 @@ export interface InventorySettings {
   expirySoonDays: number;
 }
 
+// ── Photo stock intake (AI vision) ───────────────────────────────────────────
+export interface PhotoGuess {
+  name: string;
+  qty: number;
+  unit: string;
+  category: InventoryCategory;
+  matchedKey: string | null;
+  confidence: number;
+}
+export interface IdentifyPhotoBody {
+  imageBase64: string;
+  mimeType?: string;
+  candidates?: CandidateItem[];
+}
+
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");
@@ -275,6 +290,11 @@ export const consumeRunInventory = (runId: string, lines: ConsumeLine[]) =>
   api<{ applied: boolean; consumed: number }>("/inventory/consume", {
     method: "POST",
     body: JSON.stringify({ runId, lines }),
+  });
+export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
+  api<{ items: PhotoGuess[] }>("/inventory/identify-photo", {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 
 // ── SSE stream (ping → refetch), cross-platform like openSyncStream ──────────

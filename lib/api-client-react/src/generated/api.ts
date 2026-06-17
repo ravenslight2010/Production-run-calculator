@@ -25,6 +25,8 @@ import type {
   ConsumeResult,
   CreateInventoryItemInput,
   HealthStatus,
+  IdentifyPhotoInput,
+  IdentifyPhotoResult,
   InventoryItem,
   InventoryLedgerEntry,
   InventorySettings,
@@ -1077,5 +1079,76 @@ export const useUpdateInventorySettings = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getUpdateInventorySettingsMutationOptions(options));
+    }
+
+export const getIdentifyInventoryPhotoUrl = () => {
+
+
+
+
+  return `/api/inventory/identify-photo`
+}
+
+/**
+ * @summary Identify incoming stock items from a photo (AI vision); read-only
+ */
+export const identifyInventoryPhoto = async (identifyPhotoInput: IdentifyPhotoInput, options?: RequestInit): Promise<IdentifyPhotoResult> => {
+
+  return customFetch<IdentifyPhotoResult>(getIdentifyInventoryPhotoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      identifyPhotoInput,)
+  }
+);}
+
+
+
+
+export const getIdentifyInventoryPhotoMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof identifyInventoryPhoto>>, TError,{data: BodyType<IdentifyPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof identifyInventoryPhoto>>, TError,{data: BodyType<IdentifyPhotoInput>}, TContext> => {
+
+const mutationKey = ['identifyInventoryPhoto'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof identifyInventoryPhoto>>, {data: BodyType<IdentifyPhotoInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  identifyInventoryPhoto(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IdentifyInventoryPhotoMutationResult = NonNullable<Awaited<ReturnType<typeof identifyInventoryPhoto>>>
+    export type IdentifyInventoryPhotoMutationBody = BodyType<IdentifyPhotoInput>
+    export type IdentifyInventoryPhotoMutationError = ErrorType<void>
+
+    /**
+ * @summary Identify incoming stock items from a photo (AI vision); read-only
+ */
+export const useIdentifyInventoryPhoto = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof identifyInventoryPhoto>>, TError,{data: BodyType<IdentifyPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof identifyInventoryPhoto>>,
+        TError,
+        {data: BodyType<IdentifyPhotoInput>},
+        TContext
+      > => {
+      return useMutation(getIdentifyInventoryPhotoMutationOptions(options));
     }
 

@@ -212,6 +212,26 @@ export type RestockBody = {
 export type AdjustBody = { itemId: number; qtyDelta: number; note?: string };
 export type InventorySettings = { expirySoonDays: number };
 
+// ── Photo stock intake (AI vision) ───────────────────────────────────────────
+export type PhotoGuess = {
+  name: string;
+  qty: number;
+  unit: string;
+  category: InventoryCategory;
+  matchedKey: string | null;
+  confidence: number;
+};
+export type IdentifyPhotoBody = {
+  imageBase64: string;
+  mimeType?: string;
+  candidates?: CandidateItem[];
+};
+export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
+  api<{ items: PhotoGuess[] }>("/inventory/identify-photo", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");

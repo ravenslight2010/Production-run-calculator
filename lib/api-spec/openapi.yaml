@@ -276,6 +276,29 @@ paths:
         "400":
           description: Invalid input
 
+  /inventory/identify-photo:
+    post:
+      operationId: identifyInventoryPhoto
+      tags: [inventory]
+      summary: Identify incoming stock items from a photo (AI vision); read-only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IdentifyPhotoInput"
+      responses:
+        "200":
+          description: Identified stock items (each requires user confirmation)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentifyPhotoResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: Vision provider error
+
 components:
   schemas:
     HealthStatus:
@@ -566,3 +589,73 @@ components:
       properties:
         expirySoonDays:
           type: integer
+
+    PhotoCandidate:
+      type: object
+      required:
+        - key
+        - category
+        - name
+        - unit
+      properties:
+        key:
+          type: string
+        category:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+
+    IdentifyPhotoInput:
+      type: object
+      required:
+        - imageBase64
+      properties:
+        imageBase64:
+          type: string
+          description: Base64-encoded image data (no data URI prefix)
+        mimeType:
+          type: string
+          description: Image MIME type, e.g. image/jpeg
+        candidates:
+          type: array
+          description: Known inventory + production items to match against
+          items:
+            $ref: "#/components/schemas/PhotoCandidate"
+
+    PhotoGuess:
+      type: object
+      required:
+        - name
+        - qty
+        - unit
+        - category
+        - matchedKey
+        - confidence
+      properties:
+        name:
+          type: string
+        qty:
+          type: number
+        unit:
+          type: string
+        category:
+          type: string
+          enum: [ingredient, packaging]
+        matchedKey:
+          type: [string, "null"]
+          description: Stable key of a matched known item, or null for a new item
+        confidence:
+          type: number
+          description: 0..1 model confidence in this identification
+
+    IdentifyPhotoResult:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhotoGuess"

@@ -16,7 +16,9 @@ import {
   AdjustInventoryBody,
   ConsumeInventoryBody,
   UpdateInventorySettingsBody,
+  IdentifyInventoryPhotoBody,
 } from "@workspace/api-zod";
+import { openai } from "@workspace/integrations-openai-ai-server";
 
 const router: IRouter = Router();
 
@@ -238,6 +240,120 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
   });
   broadcast(headerSenderId(req));
   res.json(await loadItemResponse(item.id));
+});
+
+// ── Photo stock intake (AI vision) ───────────────────────────────────────────
+// Read-only: identifies incoming stock from a photo and returns suggested restock
+// entries. It never writes — the client must confirm each entry, which then goes
+// through the existing POST /inventory/restock path. Low/zero confidence is left
+// to the client to surface as a manual-entry fallback.
+type PhotoGuessOut = {
+  name: string;
+  qty: number;
+  unit: string;
+  category: "ingredient" | "packaging";
+  matchedKey: string | null;
+  confidence: number;
+};
+
+function sanitizeGuesses(raw: unknown, candidateKeys: Set<string>): PhotoGuessOut[] {
+  const items =
+    raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items)
+      ? ((raw as { items: unknown[] }).items)
+      : [];
+  const out: PhotoGuessOut[] = [];
+  for (const g of items) {
+    if (!g || typeof g !== "object") continue;
+    const o = g as Record<string, unknown>;
+    const name = String(o.name ?? "").trim();
+    if (!name) continue;
+    const qtyNum = Number(o.qty);
+    const qty = Number.isFinite(qtyNum) && qtyNum > 0 ? qtyNum : 0;
+    const unit = String(o.unit ?? "").trim() || "units";
+    const category =
+      String(o.category ?? "").trim().toLowerCase() === "packaging"
+        ? "packaging"
+        : "ingredient";
+    let matchedKey = typeof o.matchedKey === "string" ? o.matchedKey : null;
+    if (matchedKey != null && !candidateKeys.has(matchedKey)) matchedKey = null;
+    let confidence = Number(o.confidence);
+    if (!Number.isFinite(confidence)) confidence = 0;
+    confidence = Math.max(0, Math.min(1, confidence));
+    out.push({ name, qty, unit, category, matchedKey, confidence });
+  }
+  return out;
+}
+
+router.post("/inventory/identify-photo", async (req, res): Promise<void> => {
+  const parsed = IdentifyInventoryPhotoBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { imageBase64, mimeType, candidates } = parsed.data;
+  if (!imageBase64 || imageBase64.length < 16) {
+    res.status(400).json({ error: "imageBase64 required" });
+    return;
+  }
+  const cands = candidates ?? [];
+  const candidateKeys = new Set(cands.map((c) => c.key));
+  const candidateLines = cands
+    .map((c) => `- key="${c.key}" name="${c.name}" unit="${c.unit}" category="${c.category}"`)
+    .join("\n");
+  const dataUri = `data:${mimeType || "image/jpeg"};base64,${imageBase64}`;
+
+  const systemPrompt =
+    "You are a stock-intake assistant for a frozen-pizza production facility. " +
+    "You look at a photo of incoming/received goods (ingredients or packaging) and " +
+    "identify the distinct physical items and how many units are visible. Be conservative: " +
+    "only report items you can actually see, and use a low confidence when unsure.";
+  const userText =
+    "Identify the distinct stock items in this photo. For each item, estimate the visible " +
+    "quantity as a number of discrete units (e.g. cases, boxes, bags, barrels), choose a short " +
+    "unit label, and classify it as either \"ingredient\" or \"packaging\".\n\n" +
+    "Match each item to one of the KNOWN ITEMS below by returning its exact key in matchedKey " +
+    "when you are confident it is the same product; otherwise set matchedKey to null (a new item).\n\n" +
+    (candidateLines
+      ? `KNOWN ITEMS:\n${candidateLines}\n\n`
+      : "KNOWN ITEMS: (none provided)\n\n") +
+    "Respond ONLY with JSON of the exact shape: " +
+    '{"items":[{"name":string,"qty":number,"unit":string,"category":"ingredient"|"packaging",' +
+    '"matchedKey":string|null,"confidence":number}]}. ' +
+    "confidence is 0..1. If you cannot identify anything, return {\"items\":[]}.";
+
+  let content = "";
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.4",
+      max_completion_tokens: 8192,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userText },
+            { type: "image_url", image_url: { url: dataUri } },
+          ],
+        },
+      ],
+    });
+    content = response.choices[0]?.message?.content ?? "";
+  } catch (err) {
+    req.log.error({ err }, "identify-photo vision call failed");
+    res.status(502).json({ error: "Vision provider error" });
+    return;
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(content);
+  } catch {
+    req.log.warn({ content: content.slice(0, 200) }, "identify-photo non-JSON response");
+    res.json({ items: [] });
+    return;
+  }
+  res.json({ items: sanitizeGuesses(raw, candidateKeys) });
 });
 
 router.post("/inventory/adjust", async (req, res): Promise<void> => {

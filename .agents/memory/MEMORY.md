@@ -12,6 +12,7 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
+- [Photo stock intake](photo-stock-intake.md) — AI photo→identify (read-only /inventory/identify-photo) then user-confirmed commit through EXISTING restock path; web+mobile parity.
 - [Inventory settings & concurrency](inventory-settings-concurrency.md) — expiry lead time is a global server-persisted setting (not a constant); drawDown needs FOR UPDATE row locks; clients use raw fetch by design.
 - [Inventory consume idempotency](inventory-consume-idempotency.md) — auto-deduct correctness: marker table written even at 0-consume, transactional claim+drawdown, every run-finalization path (endRun + web/mobile rollovers) must consume; keys identical web+mobile.
 - [Packaging settings](packaging-settings.md) — 6 single-select + numeric `cartonsPerCase`; `cartoned` (default yes) gates warehouse roll-up (circles/pizza, shippers/case, cartons=pizzas÷cartonsPerCase ceil) & Cartoned/Labeled badge.

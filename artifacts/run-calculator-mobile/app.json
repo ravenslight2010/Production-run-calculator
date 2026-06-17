@@ -28,7 +28,14 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to identify incoming stock.",
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use the camera to photograph incoming stock."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -268,3 +268,29 @@ export const UpdateInventorySettingsResponse = zod.object({
 })
 
 
+/**
+ * @summary Identify incoming stock items from a photo (AI vision); read-only
+ */
+export const IdentifyInventoryPhotoBody = zod.object({
+  "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
+  "candidates": zod.array(zod.object({
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string()
+})).optional().describe('Known inventory + production items to match against')
+})
+
+export const IdentifyInventoryPhotoResponse = zod.object({
+  "items": zod.array(zod.object({
+  "name": zod.string(),
+  "qty": zod.number(),
+  "unit": zod.string(),
+  "category": zod.enum(['ingredient', 'packaging']),
+  "matchedKey": zod.string().nullable().describe('Stable key of a matched known item, or null for a new item'),
+  "confidence": zod.number().describe('0..1 model confidence in this identification')
+}))
+})
+
+

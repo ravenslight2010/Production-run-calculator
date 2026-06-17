@@ -10,6 +10,10 @@ import {
   PackagePlus,
   Pencil,
   History as HistoryIcon,
+  Camera,
+  Sparkles,
+  Loader2,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -29,11 +33,14 @@ import {
   adjustInventory,
   fetchInventorySettings,
   updateInventorySettings,
+  identifyInventoryPhoto,
   inventoryClientId,
   isLowStock,
   lotExpiryStatus,
   daysUntil,
   EXPIRY_SOON_DAYS,
+  type PhotoGuess,
+  type InventoryCategory,
 } from "../inventoryShared";
 
 function fmtQty(n: number): string {
@@ -145,6 +152,22 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
 
   const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
 
+  // Merged candidate set for photo matching: existing tracked items + items the
+  // current production plan would consume. Deduped by stable key.
+  const matchCandidates = useMemo<CandidateItem[]>(() => {
+    const map = new Map<string, CandidateItem>();
+    for (const it of items) {
+      map.set(it.key, {
+        key: it.key,
+        category: (it.category === "packaging" ? "packaging" : "ingredient") as InventoryCategory,
+        name: it.name,
+        unit: it.unit,
+      });
+    }
+    for (const c of candidates) if (!map.has(c.key)) map.set(c.key, c);
+    return [...map.values()];
+  }, [items, candidates]);
+
   return (
     <div className="space-y-4 pb-4">
       {/* Alerts */}
@@ -211,6 +234,9 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
           </CardContent>
         )}
       </Card>
+
+      {/* Photo stock intake */}
+      <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -696,5 +722,294 @@ function AddItemForm({
         <Plus className="w-3.5 h-3.5" /> Add to inventory
       </Button>
     </div>
+  );
+}
+
+// ── Photo stock intake ───────────────────────────────────────────────────────
+// Downscale a chosen image to a JPEG data URL, then return its base64 payload.
+async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = () => reject(new Error("Failed to read file"));
+    fr.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("Failed to load image"));
+    i.src = dataUrl;
+  });
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return dataUrl.split(",")[1] ?? "";
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", 0.6).split(",")[1] ?? "";
+}
+
+type ReviewRow = {
+  id: string;
+  name: string;
+  qty: string;
+  unit: string;
+  category: InventoryCategory;
+  matchedKey: string | null;
+  confidence: number;
+  lotNumber: string;
+  expiration: string;
+};
+
+function PhotoIntakeCard({
+  candidates,
+  onCommitted,
+}: {
+  candidates: CandidateItem[];
+  onCommitted: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<ReviewRow[]>([]);
+  const [noResults, setNoResults] = useState(false);
+  const [committingId, setCommittingId] = useState<string | null>(null);
+
+  const candByKey = useMemo(() => {
+    const m = new Map<string, CandidateItem>();
+    for (const c of candidates) m.set(c.key, c);
+    return m;
+  }, [candidates]);
+
+  function toRows(guesses: PhotoGuess[]): ReviewRow[] {
+    return guesses.map((g, i) => {
+      const matched = g.matchedKey ? candByKey.get(g.matchedKey) : undefined;
+      return {
+        id: `${Date.now()}-${i}`,
+        name: matched?.name ?? g.name,
+        qty: g.qty > 0 ? fmtQty(g.qty) : "",
+        unit: matched?.unit ?? g.unit,
+        category: matched?.category ?? g.category,
+        matchedKey: matched?.key ?? null,
+        confidence: g.confidence,
+        lotNumber: "",
+        expiration: "",
+      };
+    });
+  }
+
+  async function onPick(file: File | null) {
+    if (!file) return;
+    setError(null);
+    setNoResults(false);
+    setRows([]);
+    setAnalyzing(true);
+    try {
+      const imageBase64 = await fileToBase64Jpeg(file);
+      const { items } = await identifyInventoryPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        candidates,
+      });
+      const next = toRows(items);
+      setRows(next);
+      setNoResults(next.length === 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to analyze photo");
+    } finally {
+      setAnalyzing(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  function patch(id: string, p: Partial<ReviewRow>) {
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  }
+
+  async function confirmRow(row: ReviewRow) {
+    const n = Number(row.qty);
+    if (!(n > 0)) return;
+    const name = row.name.trim();
+    if (!name) return;
+    const unit = row.unit.trim() || "units";
+    const matched = row.matchedKey ? candByKey.get(row.matchedKey) : undefined;
+    const itemKey = matched?.key ?? `${row.category}:${name}:${unit}`;
+    setCommittingId(row.id);
+    try {
+      await restockInventory({
+        itemKey,
+        category: matched?.category ?? row.category,
+        name: matched?.name ?? name,
+        unit: matched?.unit ?? unit,
+        qty: n,
+        lotNumber: row.lotNumber.trim() || undefined,
+        receivedDate: todayStr(),
+        expirationDate: row.expiration || undefined,
+      });
+      setRows((rs) => rs.filter((r) => r.id !== row.id));
+      onCommitted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add stock");
+    } finally {
+      setCommittingId(null);
+    }
+  }
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4" /> Photo Intake
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />} {open ? "Close" : "Scan"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Take or upload a photo of incoming stock. We'll identify the items and pre-fill
+            restock entries for you to confirm.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            size="sm"
+            className="h-9 w-full text-sm"
+            disabled={analyzing}
+            onClick={() => fileRef.current?.click()}
+          >
+            {analyzing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…
+              </>
+            ) : (
+              <>
+                <Camera className="w-3.5 h-3.5" /> Choose photo
+              </>
+            )}
+          </Button>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          {noResults && (
+            <p className="text-xs text-muted-foreground">
+              Couldn't identify any items. Try a clearer photo, or add stock manually above.
+            </p>
+          )}
+
+          {rows.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Review &amp; confirm ({rows.length})
+              </p>
+              {rows.map((row) => {
+                const lowConf = row.confidence < 0.5;
+                return (
+                  <div key={row.id} className="rounded-md border border-border/40 bg-muted/10 p-2.5 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        {row.matchedKey ? (
+                          <span className="text-[10px] font-bold uppercase text-emerald-500 border border-emerald-500/50 rounded px-1 shrink-0">Match</span>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase text-sky-500 border border-sky-500/50 rounded px-1 shrink-0">New</span>
+                        )}
+                        {lowConf && (
+                          <span className="text-[10px] font-bold uppercase text-amber-500 border border-amber-500/50 rounded px-1 shrink-0">Low conf</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setRows((rs) => rs.filter((r) => r.id !== row.id))}
+                        className="text-muted-foreground hover:text-red-500 shrink-0"
+                        aria-label="Discard"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <Input
+                      placeholder="Item name"
+                      value={row.name}
+                      onChange={(e) => patch(row.id, { name: e.target.value })}
+                      className="h-8 text-xs"
+                    />
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <Input
+                        type="number"
+                        placeholder="Qty"
+                        value={row.qty}
+                        onChange={(e) => patch(row.id, { qty: e.target.value })}
+                        className="h-8 text-xs"
+                      />
+                      <Input
+                        placeholder="Unit"
+                        value={row.unit}
+                        disabled={!!row.matchedKey}
+                        onChange={(e) => patch(row.id, { unit: e.target.value })}
+                        className="h-8 text-xs"
+                      />
+                      <select
+                        value={row.category}
+                        disabled={!!row.matchedKey}
+                        onChange={(e) => patch(row.id, { category: e.target.value as InventoryCategory })}
+                        className="h-8 rounded-md border border-border/60 bg-background px-1 text-xs disabled:opacity-50"
+                      >
+                        <option value="ingredient">Ingredient</option>
+                        <option value="packaging">Packaging</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Input
+                        placeholder="Lot #"
+                        value={row.lotNumber}
+                        onChange={(e) => patch(row.id, { lotNumber: e.target.value })}
+                        className="h-8 text-xs"
+                      />
+                      <Input
+                        type="date"
+                        value={row.expiration}
+                        onChange={(e) => patch(row.id, { expiration: e.target.value })}
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-8 w-full text-xs"
+                      disabled={committingId === row.id || !(Number(row.qty) > 0) || !row.name.trim()}
+                      onClick={() => confirmRow(row)}
+                    >
+                      {committingId === row.id ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" /> Adding…
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3 h-3" /> Confirm &amp; add stock
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
   );
 }

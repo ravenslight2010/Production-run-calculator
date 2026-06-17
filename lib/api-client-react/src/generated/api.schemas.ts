@@ -133,6 +133,48 @@ export interface UpdateInventorySettingsInput {
   expirySoonDays: number;
 }
 
+export interface PhotoCandidate {
+  key: string;
+  category: string;
+  name: string;
+  unit: string;
+}
+
+export interface IdentifyPhotoInput {
+  /** Base64-encoded image data (no data URI prefix) */
+  imageBase64: string;
+  /** Image MIME type, e.g. image/jpeg */
+  mimeType?: string;
+  /** Known inventory + production items to match against */
+  candidates?: PhotoCandidate[];
+}
+
+export type PhotoGuessCategory = typeof PhotoGuessCategory[keyof typeof PhotoGuessCategory];
+
+
+export const PhotoGuessCategory = {
+  ingredient: 'ingredient',
+  packaging: 'packaging',
+} as const;
+
+export interface PhotoGuess {
+  name: string;
+  qty: number;
+  unit: string;
+  category: PhotoGuessCategory;
+  /**
+     * Stable key of a matched known item, or null for a new item
+     * @nullable
+     */
+  matchedKey: string | null;
+  /** 0..1 model confidence in this identification */
+  confidence: number;
+}
+
+export interface IdentifyPhotoResult {
+  items: PhotoGuess[];
+}
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };

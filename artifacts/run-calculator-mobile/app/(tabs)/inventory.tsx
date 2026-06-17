@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   ScrollView,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, Button } from "@/components/UI";
@@ -28,6 +30,7 @@ import {
   adjustInventory,
   fetchInventorySettings,
   updateInventorySettings,
+  identifyInventoryPhoto,
   deriveCandidateItems,
   isLowStock,
   lotExpiryStatus,
@@ -35,6 +38,8 @@ import {
   todayStr,
   openInventoryStream,
   EXPIRY_SOON_DAYS,
+  type InventoryCategory,
+  type PhotoGuess,
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
 
@@ -150,6 +155,23 @@ export default function InventoryScreen() {
   }, [items]);
 
   const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
+
+  // Merged candidate set for photo matching: existing tracked items + items the
+  // current production plan would consume. Deduped by stable key.
+  const matchCandidates = useMemo<CandidateItem[]>(() => {
+    const map = new Map<string, CandidateItem>();
+    for (const it of items) {
+      map.set(it.key, {
+        key: it.key,
+        category: (it.category === "packaging" ? "packaging" : "ingredient") as InventoryCategory,
+        name: it.name,
+        unit: it.unit,
+      });
+    }
+    for (const c of candidates) if (!map.has(c.key)) map.set(c.key, c);
+    return [...map.values()];
+  }, [items, candidates]);
+
   const hasAlerts =
     alerts.expired.length > 0 || alerts.expiring.length > 0 || alerts.low.length > 0;
 
@@ -226,6 +248,9 @@ export default function InventoryScreen() {
             </View>
           )}
         </Card>
+
+        {/* Photo stock intake */}
+        <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />
 
         {loading && (
           <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading inventory…</Text>
@@ -847,6 +872,305 @@ function AddItemForm({
   );
 }
 
+// ── Photo stock intake ───────────────────────────────────────────────────────
+interface ReviewRow {
+  id: string;
+  name: string;
+  qty: string;
+  unit: string;
+  category: InventoryCategory;
+  matchedKey: string | null;
+  confidence: number;
+  lotNumber: string;
+  expiration: string;
+}
+
+function PhotoIntakeCard({
+  candidates,
+  onCommitted,
+}: {
+  candidates: CandidateItem[];
+  onCommitted: () => void;
+}) {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<ReviewRow[]>([]);
+  const [noResults, setNoResults] = useState(false);
+  const [committingId, setCommittingId] = useState<string | null>(null);
+
+  const candByKey = useMemo(() => {
+    const m = new Map<string, CandidateItem>();
+    for (const c of candidates) m.set(c.key, c);
+    return m;
+  }, [candidates]);
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  function toRows(guesses: PhotoGuess[]): ReviewRow[] {
+    return guesses.map((g, i) => {
+      const matched = g.matchedKey ? candByKey.get(g.matchedKey) : undefined;
+      return {
+        id: `${Date.now()}-${i}`,
+        name: matched?.name ?? g.name,
+        qty: g.qty > 0 ? fmtQty(g.qty) : "",
+        unit: matched?.unit ?? g.unit,
+        category: matched?.category ?? g.category,
+        matchedKey: matched?.key ?? null,
+        confidence: g.confidence,
+        lotNumber: "",
+        expiration: "",
+      };
+    });
+  }
+
+  async function analyze(base64: string | null | undefined) {
+    if (!base64) return;
+    setError(null);
+    setNoResults(false);
+    setRows([]);
+    setAnalyzing(true);
+    try {
+      const { items } = await identifyInventoryPhoto({
+        imageBase64: base64,
+        mimeType: "image/jpeg",
+        candidates,
+      });
+      const next = toRows(items);
+      setRows(next);
+      setNoResults(next.length === 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to analyze photo");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function takePhoto() {
+    setError(null);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setError("Camera permission is required to take a photo.");
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({
+      base64: true,
+      quality: 0.5,
+      mediaTypes: ["images"],
+    });
+    if (!res.canceled) await analyze(res.assets[0]?.base64);
+  }
+
+  async function pickPhoto() {
+    setError(null);
+    const res = await ImagePicker.launchImageLibraryAsync({
+      base64: true,
+      quality: 0.5,
+      mediaTypes: ["images"],
+    });
+    if (!res.canceled) await analyze(res.assets[0]?.base64);
+  }
+
+  function patch(id: string, p: Partial<ReviewRow>) {
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  }
+
+  async function confirmRow(row: ReviewRow) {
+    const n = Number(row.qty);
+    if (!(n > 0)) return;
+    const name = row.name.trim();
+    if (!name) return;
+    const unit = row.unit.trim() || "units";
+    const matched = row.matchedKey ? candByKey.get(row.matchedKey) : undefined;
+    const itemKey = matched?.key ?? `${row.category}:${name}:${unit}`;
+    setCommittingId(row.id);
+    try {
+      await restockInventory({
+        itemKey,
+        category: matched?.category ?? row.category,
+        name: matched?.name ?? name,
+        unit: matched?.unit ?? unit,
+        qty: n,
+        lotNumber: row.lotNumber.trim() || undefined,
+        receivedDate: todayStr(),
+        expirationDate: row.expiration.trim() || undefined,
+      });
+      setRows((rs) => rs.filter((r) => r.id !== row.id));
+      onCommitted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add stock");
+    } finally {
+      setCommittingId(null);
+    }
+  }
+
+  return (
+    <Card title="Photo Intake" icon="camera" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "camera"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Scan"}
+        </Text>
+      </Pressable>
+
+      {open && (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            Take or upload a photo of incoming stock. We'll identify the items and pre-fill
+            restock entries for you to confirm.
+          </Text>
+          <View style={styles.formRow}>
+            <View style={{ flex: 1 }}>
+              <Button label="Take photo" icon="camera" size="sm" disabled={analyzing} onPress={takePhoto} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={analyzing} onPress={pickPhoto} />
+            </View>
+          </View>
+
+          {analyzing && (
+            <View style={styles.analyzingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                Analyzing photo…
+              </Text>
+            </View>
+          )}
+          {error && <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>}
+          {noResults && (
+            <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+              Couldn't identify any items. Try a clearer photo, or add stock manually above.
+            </Text>
+          )}
+
+          {rows.length > 0 && (
+            <View style={{ gap: 8 }}>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>
+                REVIEW &amp; CONFIRM ({rows.length})
+              </Text>
+              {rows.map((row) => {
+                const lowConf = row.confidence < 0.5;
+                return (
+                  <View
+                    key={row.id}
+                    style={[styles.reviewRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+                  >
+                    <View style={styles.reviewHeader}>
+                      <View style={styles.reviewBadges}>
+                        <View
+                          style={[
+                            styles.badge,
+                            { borderColor: row.matchedKey ? (colors.success ?? colors.primary) : colors.primary },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.badgeText,
+                              { color: row.matchedKey ? (colors.success ?? colors.primary) : colors.primary },
+                            ]}
+                          >
+                            {row.matchedKey ? "MATCH" : "NEW"}
+                          </Text>
+                        </View>
+                        {lowConf && (
+                          <View style={[styles.badge, { borderColor: colors.warning }]}>
+                            <Text style={[styles.badgeText, { color: colors.warning }]}>LOW CONF</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Pressable onPress={() => setRows((rs) => rs.filter((r) => r.id !== row.id))} hitSlop={8}>
+                        <Feather name="x" size={16} color={colors.mutedForeground} />
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      placeholder="Item name"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={row.name}
+                      onChangeText={(t) => patch(row.id, { name: t })}
+                      style={inputStyle}
+                    />
+                    <View style={styles.formRow}>
+                      <TextInput
+                        placeholder="Qty"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={row.qty}
+                        onChangeText={(t) => patch(row.id, { qty: t })}
+                        keyboardType="numeric"
+                        style={[inputStyle, { flex: 1 }]}
+                      />
+                      <TextInput
+                        placeholder="Unit"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={row.unit}
+                        editable={!row.matchedKey}
+                        onChangeText={(t) => patch(row.id, { unit: t })}
+                        style={[inputStyle, { flex: 1 }, !!row.matchedKey && { opacity: 0.5 }]}
+                      />
+                      <Pressable
+                        disabled={!!row.matchedKey}
+                        onPress={() =>
+                          patch(row.id, {
+                            category: row.category === "ingredient" ? "packaging" : "ingredient",
+                          })
+                        }
+                        style={[
+                          styles.input,
+                          styles.categoryToggle,
+                          { borderColor: colors.border, backgroundColor: colors.background, flex: 1.2 },
+                          !!row.matchedKey && { opacity: 0.5 },
+                        ]}
+                      >
+                        <Text style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 12 }}>
+                          {row.category === "ingredient" ? "Ingr." : "Pkg."}
+                        </Text>
+                        <Feather name="repeat" size={12} color={colors.mutedForeground} />
+                      </Pressable>
+                    </View>
+                    <View style={styles.formRow}>
+                      <TextInput
+                        placeholder="Lot #"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={row.lotNumber}
+                        onChangeText={(t) => patch(row.id, { lotNumber: t })}
+                        style={[inputStyle, { flex: 1 }]}
+                      />
+                      <TextInput
+                        placeholder="Exp YYYY-MM-DD"
+                        placeholderTextColor={colors.mutedForeground}
+                        value={row.expiration}
+                        onChangeText={(t) => patch(row.id, { expiration: t })}
+                        autoCapitalize="none"
+                        style={[inputStyle, { flex: 1.4 }]}
+                      />
+                    </View>
+                    <Button
+                      label={committingId === row.id ? "Adding…" : "Confirm & add stock"}
+                      icon="plus"
+                      size="sm"
+                      disabled={committingId === row.id || !(Number(row.qty) > 0) || !row.name.trim()}
+                      onPress={() => confirmRow(row)}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
@@ -1003,4 +1327,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   candidateText: { fontSize: 13, fontFamily: FONTS.regular, flexShrink: 1 },
+
+  analyzingRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  reviewRow: { borderRadius: 8, borderWidth: 1, padding: 10, gap: 6 },
+  reviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  reviewBadges: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 },
+  badge: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
+  badgeText: { fontSize: 9, fontFamily: FONTS.bold },
 });
