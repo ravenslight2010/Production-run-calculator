@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
 import { getSessionBoundaryMs } from "../lib/sessionBoundary";
+import { userExists } from "../lib/userValidity";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -45,6 +46,13 @@ export async function requireAuth(
   // is a single cached read, never a per-request DB query.
   const boundaryMs = await getSessionBoundaryMs();
   if (boundaryMs > 0 && verified.iat * 1000 < boundaryMs) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  // Removed-staff fence: tokens are stateless, so a deleted user's still-valid
+  // token would otherwise keep working until it expires. Reject the request the
+  // moment the account no longer exists (cached read; evicted on deletion).
+  if (!(await userExists(verified.sub))) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

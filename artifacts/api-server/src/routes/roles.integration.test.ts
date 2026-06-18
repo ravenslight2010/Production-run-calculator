@@ -53,6 +53,8 @@ let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
 
+let clearUserValidityCache: () => void;
+
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
@@ -93,6 +95,8 @@ beforeAll(async () => {
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  const userValidityMod = await import("../lib/userValidity");
+  clearUserValidityCache = userValidityMod.clearUserValidityCache;
   db = dbMod.db;
   pool = dbMod.pool;
   inventoryItemsTable = dbMod.inventoryItemsTable;
@@ -135,6 +139,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // The user-existence cache is module-level and outlives a single test; fixed
+  // ids reused across tests would otherwise inherit a prior test's revocation.
+  clearUserValidityCache();
   await db.execute(
     sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
   );
@@ -399,5 +406,43 @@ describe("staff account administration", () => {
       newPassword: "brand-new-secret",
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("removed staff lose access immediately", () => {
+  // A removed user's stateless session token would otherwise keep working until
+  // its natural expiry (up to 30 days). After deletion the very next request
+  // must be rejected. We use a dedicated throwaway account (not the shared
+  // MANAGER/OPERATOR fixtures) so caching its now-revoked state can't leak into
+  // other tests. The same code path serves web (httpOnly cookie) and mobile
+  // (bearer) sessions because requireAuth normalises both to one verified token.
+  it("revokes an active session on the next request after deletion (→ 401)", async () => {
+    const VICTIM = "victim-1";
+    await db.insert(usersTable).values({ id: VICTIM, username: "victim", passwordHash: "x" });
+    await db.insert(userRolesTable).values({ userId: VICTIM, role: "operator" });
+
+    // The session works while the account exists (also warms the existence cache
+    // to `true`, so the revocation below must actively evict it).
+    const before = await req(VICTIM, "GET", "/api/me");
+    expect(before.status).toBe(200);
+
+    const removed = await req(MANAGER, "DELETE", `/api/users/${VICTIM}`);
+    expect(removed.status).toBe(204);
+
+    // Same still-valid token, but the account is gone → rejected immediately.
+    const after = await req(VICTIM, "GET", "/api/me");
+    expect(after.status).toBe(401);
+  });
+
+  it("does not affect other active users (→ 200)", async () => {
+    const VICTIM = "victim-2";
+    await db.insert(usersTable).values({ id: VICTIM, username: "victim2", passwordHash: "x" });
+    await db.insert(userRolesTable).values({ userId: VICTIM, role: "operator" });
+
+    await req(MANAGER, "DELETE", `/api/users/${VICTIM}`);
+
+    // The surviving operator's session is untouched.
+    const res = await req(OPERATOR, "GET", "/api/me");
+    expect(res.status).toBe(200);
   });
 });

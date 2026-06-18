@@ -1,6 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
+import { revokeUser } from "./userValidity";
 
 export type Role = "manager" | "operator";
 
@@ -184,5 +185,9 @@ export async function deleteUser(
   }
 
   await db.delete(usersTable).where(eq(usersTable.id, targetUserId));
+  // Revoke any still-valid stateless session token for this user immediately, so
+  // their browser/app is cut off on its very next request rather than lingering
+  // until the token's natural expiry.
+  revokeUser(targetUserId);
   return { ok: true };
 }
