@@ -32,6 +32,7 @@ import {
   updateInventorySettings,
   identifyInventoryPhoto,
   photoErrorMessage,
+  InventoryApiError,
   rankCandidatesByName,
   deriveCandidateItems,
   isLowStock,
@@ -898,12 +899,23 @@ function PhotoIntakeCard({
   onCommitted: () => void;
 }) {
   const colors = useColors();
+  const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
+
+  // Count down the rate-limit (429) cooldown so the retry button re-enables
+  // exactly when the server will accept another request.
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
 
   const candByKey = useMemo(() => {
     const m = new Map<string, CandidateItem>();
@@ -936,9 +948,11 @@ function PhotoIntakeCard({
 
   async function analyze(base64: string | null | undefined) {
     if (!base64) return;
+    lastImageRef.current = base64;
     setError(null);
     setNoResults(false);
     setRows([]);
+    setRetryIn(0);
     setAnalyzing(true);
     try {
       const { items } = await identifyInventoryPhoto({
@@ -951,9 +965,17 @@ function PhotoIntakeCard({
       setNoResults(next.length === 0);
     } catch (e) {
       setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
     } finally {
       setAnalyzing(false);
     }
+  }
+
+  // Re-run analysis on the last captured image without re-opening the camera.
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
   }
 
   async function takePhoto() {
@@ -1067,7 +1089,21 @@ function PhotoIntakeCard({
               </Text>
             </View>
           )}
-          {error && <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>}
+          {error && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>
+              {lastImageRef.current && (
+                <Button
+                  label={retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                  icon="refresh-cw"
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing || retryIn > 0}
+                  onPress={retry}
+                />
+              )}
+            </View>
+          )}
           {noResults && (
             <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
               Couldn't identify any items. Try a clearer photo, or add stock manually above.

@@ -35,6 +35,7 @@ import {
   updateInventorySettings,
   identifyInventoryPhoto,
   photoErrorMessage,
+  InventoryApiError,
   rankCandidatesByName,
   inventoryClientId,
   isLowStock,
@@ -777,12 +778,23 @@ function PhotoIntakeCard({
   onCommitted: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
+
+  // Count down the rate-limit (429) cooldown so the retry button re-enables
+  // exactly when the server will accept another request.
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
 
   const candByKey = useMemo(() => {
     const m = new Map<string, CandidateItem>();
@@ -808,14 +820,14 @@ function PhotoIntakeCard({
     });
   }
 
-  async function onPick(file: File | null) {
-    if (!file) return;
+  async function analyze(imageBase64: string) {
+    lastImageRef.current = imageBase64;
     setError(null);
     setNoResults(false);
     setRows([]);
+    setRetryIn(0);
     setAnalyzing(true);
     try {
-      const imageBase64 = await fileToBase64Jpeg(file);
       const { items } = await identifyInventoryPhoto({
         imageBase64,
         mimeType: "image/jpeg",
@@ -826,10 +838,31 @@ function PhotoIntakeCard({
       setNoResults(next.length === 0);
     } catch (e) {
       setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
     } finally {
       setAnalyzing(false);
+    }
+  }
+
+  async function onPick(file: File | null) {
+    if (!file) return;
+    let imageBase64: string;
+    try {
+      imageBase64 = await fileToBase64Jpeg(file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read photo");
+      return;
+    } finally {
       if (fileRef.current) fileRef.current.value = "";
     }
+    await analyze(imageBase64);
+  }
+
+  // Re-run analysis on the last picked image without re-opening the picker.
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
   }
 
   function patch(id: string, p: Partial<ReviewRow>) {
@@ -927,7 +960,23 @@ function PhotoIntakeCard({
             )}
           </Button>
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
+          {error && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-red-500">{error}</p>
+              {lastImageRef.current && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 w-full text-xs"
+                  disabled={analyzing || retryIn > 0}
+                  onClick={retry}
+                >
+                  <Loader2 className={`w-3.5 h-3.5 ${analyzing ? "animate-spin" : "hidden"}`} />
+                  {retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                </Button>
+              )}
+            </div>
+          )}
           {noResults && (
             <p className="text-xs text-muted-foreground">
               Couldn't identify any items. Try a clearer photo, or add stock manually above.
