@@ -23,7 +23,12 @@ import { rateLimit } from "../middlewares/rateLimit";
 import { requireRole } from "../middlewares/requireRole";
 import { getOrCreateUserRole } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
-import { applyRunConsumption, planDrawDown, sortLotsForConsumption } from "./inventoryLogic";
+import {
+  applyRunConsumption,
+  planDrawDown,
+  sortLotsForConsumption,
+  type ConsumeLine,
+} from "./inventoryLogic";
 
 const router: IRouter = Router();
 
@@ -74,7 +79,7 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // returns how much was actually consumed (may be less than requested). The
 // ordering and never-negative math live in planDrawDown (pure, unit-tested);
 // this wrapper only adds the locking read and persists the planned updates.
-async function drawDown(exec: Executor, itemId: number, qty: number): Promise<number> {
+export async function drawDown(exec: Executor, itemId: number, qty: number): Promise<number> {
   if (qty <= 0) return 0;
   // Lock the item's lot rows FOR UPDATE so concurrent consume/adjust transactions
   // for the same item serialize here instead of reading the same stale quantities
@@ -401,25 +406,20 @@ router.post("/inventory/adjust", async (req, res): Promise<void> => {
   res.json(await loadItemResponse(itemId));
 });
 
-router.post("/inventory/consume", async (req, res): Promise<void> => {
-  const parsed = ConsumeInventoryBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const { runId, lines } = parsed.data;
-  if (!runId) {
-    res.status(400).json({ error: "runId required" });
-    return;
-  }
-  // Claim + drawdown + ledger all run in one transaction. The unique runId
-  // marker is written even for zero-consume runs, so a later restock + re-consume
-  // of the same run can't double-deduct, and onConflictDoNothing makes the claim
-  // race-safe. Because the claim is part of the transaction, any failure mid-loop
-  // rolls the claim back too, so the run can be retried and applied exactly once.
-  // The run-once control flow lives in applyRunConsumption (pure, unit-tested);
-  // here we just bind it to transaction-scoped DB operations.
-  const result = await db.transaction((tx) =>
+// Claim + drawdown + ledger all run in one transaction. The unique runId
+// marker is written even for zero-consume runs, so a later restock + re-consume
+// of the same run can't double-deduct, and onConflictDoNothing makes the claim
+// race-safe. Because the claim is part of the transaction, any failure mid-loop
+// rolls the claim back too, so the run can be retried and applied exactly once.
+// The run-once control flow lives in applyRunConsumption (pure, unit-tested);
+// here we just bind it to transaction-scoped DB operations. Exported so the DB
+// wiring (FOR UPDATE drawdown, race-safe claim, transaction boundaries) can be
+// integration-tested against a real Postgres.
+export async function consumeRun(
+  runId: string,
+  lines: ConsumeLine[],
+): Promise<{ applied: boolean; consumed: number }> {
+  return db.transaction((tx) =>
     applyRunConsumption(
       {
         claimRun: async (rid) => {
@@ -453,6 +453,20 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
       lines,
     ),
   );
+}
+
+router.post("/inventory/consume", async (req, res): Promise<void> => {
+  const parsed = ConsumeInventoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { runId, lines } = parsed.data;
+  if (!runId) {
+    res.status(400).json({ error: "runId required" });
+    return;
+  }
+  const result = await consumeRun(runId, lines);
   if (!result.applied) {
     res.json({ applied: false, consumed: 0 });
     return;
