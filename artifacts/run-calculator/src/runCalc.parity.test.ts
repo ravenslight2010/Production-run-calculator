@@ -24,6 +24,13 @@
 //  4. The intentional dough/timing divergence (frontline uses casesLeftToRun with
 //     a doubled layer buffer; dough/timing use the casesLeft basis) is encoded so
 //     it reads as a deliberate expectation, not a surprise.
+//  5. The dough/crust SUPPLY math (trays/batches needed, cases left to open,
+//     staged dough-on-hand, buffer, depletion) — duplicated as mobile
+//     `computeDoughSupply` and an inline `useMemo` in the web pages/home.tsx — is
+//     locked: concrete unit expectations for both modes (incl. ceil rounding) plus
+//     a parity guard against a faithful transcription of the web inline formula
+//     (`webDoughSupply`), with the two crust-mode divergences (perBatch source and
+//     the casesOnLine ppm source) encoded as deliberate expectations.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
@@ -409,5 +416,602 @@ describe("intentional divergence: frontline basis vs dough/timing basis", () => 
     // Dough lbs uses pizzasLeft (1200), NOT the frontline basis (744).
     expect(calc.doughLbs).toBeCloseTo((1200 * 8) / 16, 9);
     expect(frontlinePizzas).not.toBe(calc.pizzasLeft);
+  });
+});
+
+// ── 5. Dough / crust supply math (computeDoughSupply) ─────────────────────────
+//
+// The web supply math lives inline in a `useMemo` in pages/home.tsx and is NOT
+// importable (unlike the frontline math, which is shared via @workspace/
+// inventory-math). `webDoughSupply` below is a faithful, line-for-line
+// transcription of that inline block (home.tsx, the `calc` useMemo: ppm /
+// perTray / effectiveDoughBatchYield / perBatch / casesOnLine / casesLeftToRun /
+// totalPizzasLeft / doughOnHand / doughDeficit / batchesNeeded / traysNeeded /
+// pizzasNetOfStaged / casesLeftToOpen / stacksNeededTotal / buffer /
+// doughShortCases). If the web inline formula changes, update this transcription
+// in lockstep — the parity guard exists to make a silent divergence loud.
+//
+// Web/mobile field-name differences encoded here:
+//   - web `targetDoughballWeight`  ↔ mobile `doughballWeightOz`
+//   - web `approxLineSpeed`        ↔ mobile `lineSpeedPPM`
+//   - web reads skidsCompleted / casesOnCurrentSkid / traysOnLine / batchesReady
+//     from settings; mobile reads them from `progress`.
+// Two intentional crust-mode divergences are asserted, not smoothed over:
+//   - perBatch: web uses crustsPerCase, mobile uses effectiveDoughBatchYield.
+//   - casesOnLine ppm: web uses approxLineSpeed, mobile reuses the dough ppm
+//     (crustsPerCycle*cycleSpeed*speedAdjustment, else lineSpeedPPM). This only
+//     bites once a run has started (freezerTime > 0); unstarted runs coincide.
+
+interface DoughSupplyVals {
+  approxLineSpeed: number;
+  crustsPerCycle: number;
+  cycleSpeed: number;
+  speedAdjustment: number;
+  crustsPerStack: number;
+  doughballsPerTray: number;
+  doughRecipe?: { lbs?: number }[];
+  targetDoughballWeight: number;
+  doughBatchYield: number;
+  crustsPerCase: number;
+  casesNeeded: number;
+  skidsCompleted: number;
+  casesPerSkid: number;
+  casesOnCurrentSkid: number;
+  casesPerLayer: number;
+  pizzasPerCase: number;
+  traysOnLine: number;
+  batchesReady: number;
+}
+
+// Faithful transcription of the web pages/home.tsx inline supply useMemo.
+function webDoughSupply(
+  v: DoughSupplyVals,
+  liveFreezerMin: number,
+  doughSubTab: "dough" | "crusts",
+) {
+  const ppm =
+    doughSubTab === "crusts"
+      ? v.approxLineSpeed
+      : v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
+  const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
+  const doughRecipeLbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const effectiveDoughBatchYield =
+    doughRecipeLbs > 0 && v.targetDoughballWeight > 0
+      ? (doughRecipeLbs * 16) / v.targetDoughballWeight
+      : v.doughBatchYield;
+  const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : effectiveDoughBatchYield;
+  const freezerTime = liveFreezerMin;
+  const casesOnLine =
+    ppm > 0 ? Math.floor((ppm * freezerTime) / v.pizzasPerCase) : 0;
+  const casesLeftToRun =
+    v.casesNeeded -
+    v.skidsCompleted * v.casesPerSkid -
+    v.casesOnCurrentSkid -
+    casesOnLine +
+    v.casesPerLayer;
+  const totalPizzasLeft = casesLeftToRun * v.pizzasPerCase;
+  const doughOnHand =
+    v.traysOnLine * perTray + v.batchesReady * effectiveDoughBatchYield;
+  const doughDeficit = Math.max(0, totalPizzasLeft - doughOnHand);
+  const batchesNeeded = doughDeficit / effectiveDoughBatchYield;
+  const traysNeeded = doughDeficit / perTray;
+  const pizzasNetOfStaged = Math.max(0, totalPizzasLeft - v.traysOnLine * perTray);
+  const casesLeftToOpen =
+    v.crustsPerCase > 0 ? Math.ceil(pizzasNetOfStaged / v.crustsPerCase) : 0;
+  const stacksNeededTotal =
+    perTray > 0 ? Math.ceil(pizzasNetOfStaged / perTray) : 0;
+  const buffer = Math.max(0, doughOnHand - totalPizzasLeft) / v.pizzasPerCase;
+  const doughShortCases = doughDeficit / v.pizzasPerCase;
+  return {
+    perTray,
+    perBatch,
+    casesOnLine,
+    casesLeftToRun,
+    totalPizzasLeft,
+    doughOnHand,
+    doughDeficit,
+    batchesNeeded,
+    traysNeeded,
+    casesLeftToOpen,
+    stacksNeededTotal,
+    buffer,
+    doughShortCases,
+  };
+}
+
+// Build a mobile RunState whose progress fields drive computeDoughSupply, and
+// whose started/ended flags produce a known liveFreezerMin (0 unstarted; the
+// settings.freezerTime when ended).
+function supplyState(
+  settings: Record<string, any>,
+  progress: Record<string, any> = {},
+  started = false,
+) {
+  const runOverrides: Record<string, any> = {
+    progress: { ...mobile.DEFAULT_PROGRESS, ...progress },
+  };
+  if (started) {
+    runOverrides.startedAt = NOW - 60 * 60 * 1000;
+    runOverrides.endedAt = NOW; // ended -> liveFreezerMin === settings.freezerTime
+  }
+  return mobileState(settings, runOverrides);
+}
+
+describe("computeDoughSupply (mobile) — dough mode unit coverage", () => {
+  it("computes trays/batches/cases needed for an unstarted run with no staged dough", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({
+        casesNeeded: 100,
+        pizzasPerCase: 12,
+        casesPerSkid: 48,
+        casesPerLayer: 6,
+        crustsPerCycle: 4,
+        cycleSpeed: 10,
+        speedAdjustment: 1,
+        doughballsPerTray: 60,
+        doughBatchYield: 300,
+        doughballWeightOz: 8,
+        crustsPerCase: 12,
+      }),
+      NOW,
+      "dough",
+    );
+    expect(d.perTray).toBe(60);
+    expect(d.perBatch).toBe(300); // dough mode -> effectiveDoughBatchYield
+    expect(d.casesOnLine).toBe(0); // unstarted -> liveFreezerMin 0
+    expect(d.casesLeftToRun).toBe(106); // 100 - 0 - 0 - 0 + 6
+    expect(d.totalPizzasLeft).toBe(1272); // 106 * 12
+    expect(d.doughOnHand).toBe(0);
+    expect(d.doughDeficit).toBe(1272);
+    expect(d.batchesNeeded).toBeCloseTo(4.24, 10); // 1272 / 300
+    expect(d.traysNeeded).toBeCloseTo(21.2, 10); // 1272 / 60
+    expect(d.casesLeftToOpen).toBe(106); // ceil(1272 / 12)
+    expect(d.stacksNeededTotal).toBe(22); // ceil(1272 / 60) = ceil(21.2)
+    expect(d.buffer).toBe(0);
+    expect(d.doughShortCases).toBeCloseTo(106, 10); // 1272 / 12
+  });
+
+  it("nets out cases-on-line and staged dough for a started run", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState(
+        {
+          casesNeeded: 100,
+          pizzasPerCase: 12,
+          casesPerSkid: 48,
+          casesPerLayer: 6,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
+          speedAdjustment: 1,
+          freezerTime: 15,
+          doughballsPerTray: 60,
+          doughBatchYield: 300,
+          doughballWeightOz: 8,
+          crustsPerCase: 12,
+        },
+        { traysOnLine: 2, batchesReady: 1 },
+        true, // ended -> liveFreezerMin = 15
+      ),
+      NOW,
+      "dough",
+    );
+    expect(d.casesOnLine).toBe(50); // floor(40 * 15 / 12)
+    expect(d.casesLeftToRun).toBe(56); // 100 - 0 - 0 - 50 + 6
+    expect(d.totalPizzasLeft).toBe(672); // 56 * 12
+    expect(d.doughOnHand).toBe(420); // 2*60 + 1*300
+    expect(d.doughDeficit).toBe(252); // 672 - 420
+    expect(d.batchesNeeded).toBeCloseTo(0.84, 10); // 252 / 300
+    expect(d.traysNeeded).toBeCloseTo(4.2, 10); // 252 / 60
+    expect(d.casesLeftToOpen).toBe(46); // ceil((672 - 120) / 12) = ceil(46)
+    expect(d.stacksNeededTotal).toBe(10); // ceil(552 / 60) = ceil(9.2)
+    expect(d.buffer).toBe(0);
+    expect(d.doughShortCases).toBeCloseTo(21, 10); // 252 / 12
+  });
+
+  it("reports a positive buffer (and zero deficit) when staged dough exceeds demand", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState(
+        {
+          casesNeeded: 100,
+          pizzasPerCase: 12,
+          casesPerSkid: 48,
+          casesPerLayer: 6,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
+          speedAdjustment: 1,
+          freezerTime: 15,
+          doughballsPerTray: 60,
+          doughBatchYield: 300,
+          doughballWeightOz: 8,
+          crustsPerCase: 12,
+        },
+        { skidsCompleted: 1, casesOnCurrentSkid: 3, traysOnLine: 5, batchesReady: 1 },
+        true,
+      ),
+      NOW,
+      "dough",
+    );
+    expect(d.casesLeftToRun).toBe(5); // 100 - 48 - 3 - 50 + 6
+    expect(d.totalPizzasLeft).toBe(60); // 5 * 12
+    expect(d.doughOnHand).toBe(600); // 5*60 + 1*300
+    expect(d.doughDeficit).toBe(0); // max(0, 60 - 600)
+    expect(d.batchesNeeded).toBe(0);
+    expect(d.traysNeeded).toBe(0);
+    expect(d.casesLeftToOpen).toBe(0); // max(0, 60 - 300) -> 0
+    expect(d.stacksNeededTotal).toBe(0);
+    expect(d.buffer).toBeCloseTo(45, 10); // (600 - 60) / 12
+    expect(d.doughShortCases).toBe(0);
+  });
+
+  it("derives batch yield from the dough recipe + doughball weight when present", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({
+        casesNeeded: 50,
+        pizzasPerCase: 12,
+        casesPerSkid: 48,
+        casesPerLayer: 6,
+        crustsPerCycle: 4,
+        cycleSpeed: 10,
+        speedAdjustment: 1,
+        doughballsPerTray: 60,
+        doughBatchYield: 300, // overridden by the recipe below
+        doughballWeightOz: 8,
+        crustsPerCase: 12,
+        doughRecipe: [
+          { ingredient: "Flour", lbs: 50 },
+          { ingredient: "Water", lbs: 30 },
+        ],
+      }),
+      NOW,
+      "dough",
+    );
+    // (80 lbs * 16) / 8 oz = 160 doughballs/batch -> overrides the flat 300.
+    expect(d.perBatch).toBeCloseTo(160, 10);
+    expect(d.totalPizzasLeft).toBe(672); // (50 + 6) * 12
+    expect(d.doughDeficit).toBe(672);
+    expect(d.batchesNeeded).toBeCloseTo(4.2, 10); // 672 / 160
+    expect(d.stacksNeededTotal).toBe(12); // ceil(672 / 60) = ceil(11.2)
+  });
+});
+
+describe("computeDoughSupply (mobile) — crusts mode unit coverage", () => {
+  it("uses crustsPerStack as the per-tray basis (perBatch keeps batch yield)", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({
+        casesNeeded: 100,
+        pizzasPerCase: 12,
+        casesPerSkid: 48,
+        casesPerLayer: 6,
+        crustsPerCycle: 4,
+        cycleSpeed: 10,
+        speedAdjustment: 1,
+        crustsPerStack: 40,
+        doughballsPerTray: 60, // ignored in crusts mode
+        doughBatchYield: 300,
+        doughballWeightOz: 8,
+        crustsPerCase: 12,
+      }),
+      NOW,
+      "crusts",
+    );
+    expect(d.perTray).toBe(40); // crustsPerStack, not doughballsPerTray
+    expect(d.perBatch).toBe(300); // mobile keeps effectiveDoughBatchYield even in crusts
+    expect(d.casesLeftToRun).toBe(106);
+    expect(d.totalPizzasLeft).toBe(1272);
+    expect(d.traysNeeded).toBeCloseTo(31.8, 10); // 1272 / 40
+    expect(d.stacksNeededTotal).toBe(32); // ceil(1272 / 40) = ceil(31.8)
+    expect(d.casesLeftToOpen).toBe(106); // ceil(1272 / 12)
+  });
+});
+
+describe("computeDoughSupply (mobile) — ceil/floor edge cases", () => {
+  const base = {
+    casesNeeded: 0,
+    pizzasPerCase: 1, // 1 pizza per case so totalPizzasLeft == casesLeftToRun
+    casesPerSkid: 48,
+    casesPerLayer: 0,
+    crustsPerCycle: 4,
+    cycleSpeed: 10,
+    speedAdjustment: 1,
+    doughballsPerTray: 25,
+    doughBatchYield: 300,
+    doughballWeightOz: 8,
+    crustsPerCase: 25,
+  };
+
+  it("casesLeftToOpen / stacksNeededTotal hit the boundary exactly on a clean multiple", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({ ...base, casesNeeded: 100 }),
+      NOW,
+      "dough",
+    );
+    expect(d.totalPizzasLeft).toBe(100);
+    expect(d.casesLeftToOpen).toBe(4); // ceil(100 / 25) -> exact 4
+    expect(d.stacksNeededTotal).toBe(4); // ceil(100 / 25) -> exact 4
+  });
+
+  it("a single pizza over the boundary rounds both up by one", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({ ...base, casesNeeded: 101 }),
+      NOW,
+      "dough",
+    );
+    expect(d.totalPizzasLeft).toBe(101);
+    expect(d.casesLeftToOpen).toBe(5); // ceil(101 / 25) = ceil(4.04)
+    expect(d.stacksNeededTotal).toBe(5); // ceil(101 / 25) = ceil(4.04)
+  });
+
+  it("returns 0 cases-to-open / stacks when the divisors are 0 (no divide-by-zero)", () => {
+    const d = mobile.computeDoughSupply(
+      supplyState({
+        ...base,
+        casesNeeded: 100,
+        crustsPerCase: 0, // guards casesLeftToOpen
+        doughballsPerTray: 0, // guards stacksNeededTotal (perTray 0)
+      }),
+      NOW,
+      "dough",
+    );
+    expect(d.casesLeftToOpen).toBe(0);
+    expect(d.stacksNeededTotal).toBe(0);
+  });
+
+  it("floors casesOnLine (partial case on the line is not counted)", () => {
+    // ppm 40, freezerTime 15, pizzasPerCase 13 -> 600 / 13 = 46.15 -> floor 46.
+    const d = mobile.computeDoughSupply(
+      supplyState(
+        {
+          casesNeeded: 200,
+          pizzasPerCase: 13,
+          casesPerSkid: 48,
+          casesPerLayer: 0,
+          crustsPerCycle: 4,
+          cycleSpeed: 10,
+          speedAdjustment: 1,
+          freezerTime: 15,
+          doughballsPerTray: 60,
+          doughBatchYield: 300,
+          doughballWeightOz: 8,
+          crustsPerCase: 12,
+        },
+        {},
+        true,
+      ),
+      NOW,
+      "dough",
+    );
+    expect(d.casesOnLine).toBe(46); // floor(40 * 15 / 13)
+  });
+});
+
+// ── 5b. Web <-> mobile supply parity guard ───────────────────────────────────
+
+describe("supply parity: web inline useMemo (webDoughSupply) <-> mobile computeDoughSupply", () => {
+  // Fields whose formulas are identical across the two engines (given the
+  // field-name mapping). perBatch is compared only in dough mode (see the
+  // crust-mode divergence test below).
+  const SHARED_FIELDS = [
+    "perTray",
+    "casesOnLine",
+    "casesLeftToRun",
+    "totalPizzasLeft",
+    "doughOnHand",
+    "doughDeficit",
+    "batchesNeeded",
+    "traysNeeded",
+    "casesLeftToOpen",
+    "stacksNeededTotal",
+    "buffer",
+    "doughShortCases",
+  ] as const;
+
+  const runParity = (sc: {
+    settings: Record<string, any>;
+    progress?: Record<string, any>;
+    started?: boolean;
+    mode: "dough" | "crusts";
+  }) => {
+    const started = sc.started ?? false;
+    const progress = sc.progress ?? {};
+    const liveFreezerMin = started ? (sc.settings.freezerTime ?? 0) : 0;
+    const web = webDoughSupply(
+      {
+        approxLineSpeed: sc.settings.lineSpeedPPM ?? 0,
+        crustsPerCycle: sc.settings.crustsPerCycle ?? 0,
+        cycleSpeed: sc.settings.cycleSpeed ?? 0,
+        speedAdjustment: sc.settings.speedAdjustment ?? 1,
+        crustsPerStack: sc.settings.crustsPerStack ?? 0,
+        doughballsPerTray: sc.settings.doughballsPerTray ?? 0,
+        doughRecipe: sc.settings.doughRecipe ?? [],
+        targetDoughballWeight: sc.settings.doughballWeightOz ?? 0, // web name
+        doughBatchYield: sc.settings.doughBatchYield ?? 0,
+        crustsPerCase: sc.settings.crustsPerCase ?? 0,
+        casesNeeded: sc.settings.casesNeeded ?? 0,
+        casesPerSkid: sc.settings.casesPerSkid ?? 0,
+        casesPerLayer: sc.settings.casesPerLayer ?? 0,
+        pizzasPerCase: sc.settings.pizzasPerCase ?? 0,
+        // web reads these progress values from settings:
+        skidsCompleted: progress.skidsCompleted ?? 0,
+        casesOnCurrentSkid: progress.casesOnCurrentSkid ?? 0,
+        traysOnLine: progress.traysOnLine ?? 0,
+        batchesReady: progress.batchesReady ?? 0,
+      },
+      liveFreezerMin,
+      sc.mode,
+    );
+    const m = mobile.computeDoughSupply(
+      supplyState(sc.settings, progress, started),
+      NOW,
+      sc.mode,
+    );
+    return { web, m };
+  };
+
+  const assertSharedParity = (
+    web: Record<string, number>,
+    m: Record<string, number>,
+  ) => {
+    for (const key of SHARED_FIELDS) {
+      expect(m[key], `mobile ${key} should match web ${key}`).toBeCloseTo(
+        web[key],
+        9,
+      );
+    }
+  };
+
+  const doughSettings = {
+    casesNeeded: 137,
+    pizzasPerCase: 12,
+    casesPerSkid: 48,
+    casesPerLayer: 6,
+    crustsPerCycle: 4,
+    cycleSpeed: 10,
+    speedAdjustment: 1,
+    freezerTime: 15,
+    doughballsPerTray: 60,
+    doughBatchYield: 300,
+    doughballWeightOz: 8,
+    crustsPerCase: 12,
+  };
+
+  it("matches in dough mode for an unstarted run with no staged dough", () => {
+    const { web, m } = runParity({ settings: doughSettings, mode: "dough" });
+    assertSharedParity(web, m);
+    expect(m.perBatch).toBeCloseTo(web.perBatch, 9); // dough mode: both = yield
+  });
+
+  it("matches in dough mode for a started run with skids + staged dough", () => {
+    const { web, m } = runParity({
+      settings: doughSettings,
+      progress: { skidsCompleted: 1, casesOnCurrentSkid: 7, traysOnLine: 3, batchesReady: 2 },
+      started: true,
+      mode: "dough",
+    });
+    assertSharedParity(web, m);
+    expect(m.casesOnLine).toBe(web.casesOnLine);
+    expect(m.casesOnLine).toBeGreaterThan(0); // the started path is actually exercised
+    expect(m.perBatch).toBeCloseTo(web.perBatch, 9);
+  });
+
+  it("matches in dough mode when batch yield is recipe-derived", () => {
+    const { web, m } = runParity({
+      settings: {
+        ...doughSettings,
+        doughRecipe: [
+          { ingredient: "Flour", lbs: 55 },
+          { ingredient: "Water", lbs: 33 },
+        ],
+      },
+      progress: { traysOnLine: 4 },
+      started: true,
+      mode: "dough",
+    });
+    assertSharedParity(web, m);
+    expect(m.perBatch).toBeCloseTo(web.perBatch, 9);
+  });
+
+  it("matches the shared supply fields in crusts mode for an unstarted run", () => {
+    // Unstarted -> casesOnLine 0 in both, so the ppm-source divergence (web
+    // approxLineSpeed vs mobile dough ppm) does not affect any shared field.
+    const { web, m } = runParity({
+      settings: { ...doughSettings, crustsPerStack: 40, lineSpeedPPM: 999 },
+      progress: { traysOnLine: 2, batchesReady: 1 },
+      mode: "crusts",
+    });
+    assertSharedParity(web, m);
+  });
+});
+
+// ── 5c. Intentional crust-mode supply divergences, encoded as expectations ────
+
+describe("intentional crust-mode supply divergences (web vs mobile)", () => {
+  it("perBatch: web uses crustsPerCase, mobile keeps the batch yield", () => {
+    const settings = {
+      casesNeeded: 100,
+      pizzasPerCase: 12,
+      casesPerSkid: 48,
+      casesPerLayer: 6,
+      crustsPerStack: 40,
+      crustsPerCase: 12,
+      doughBatchYield: 300,
+      doughballWeightOz: 8,
+    };
+    const web = webDoughSupply(
+      {
+        approxLineSpeed: 0,
+        crustsPerCycle: 0,
+        cycleSpeed: 0,
+        speedAdjustment: 1,
+        crustsPerStack: settings.crustsPerStack,
+        doughballsPerTray: 0,
+        doughRecipe: [],
+        targetDoughballWeight: settings.doughballWeightOz,
+        doughBatchYield: settings.doughBatchYield,
+        crustsPerCase: settings.crustsPerCase,
+        casesNeeded: settings.casesNeeded,
+        casesPerSkid: settings.casesPerSkid,
+        casesPerLayer: settings.casesPerLayer,
+        pizzasPerCase: settings.pizzasPerCase,
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        traysOnLine: 0,
+        batchesReady: 0,
+      },
+      0,
+      "crusts",
+    );
+    const m = mobile.computeDoughSupply(supplyState(settings), NOW, "crusts");
+    expect(web.perBatch).toBe(12); // crustsPerCase
+    expect(m.perBatch).toBe(300); // effectiveDoughBatchYield
+    expect(m.perBatch).not.toBe(web.perBatch);
+  });
+
+  it("casesOnLine ppm source: web uses approxLineSpeed, mobile reuses dough ppm once started", () => {
+    const settings = {
+      casesNeeded: 100,
+      pizzasPerCase: 12,
+      casesPerSkid: 48,
+      casesPerLayer: 0,
+      crustsPerCycle: 4,
+      cycleSpeed: 10,
+      speedAdjustment: 1, // mobile crust ppm = 40
+      freezerTime: 15,
+      crustsPerStack: 40,
+      crustsPerCase: 12,
+      lineSpeedPPM: 24, // web crust ppm = approxLineSpeed = 24
+      doughBatchYield: 300,
+      doughballWeightOz: 8,
+    };
+    const web = webDoughSupply(
+      {
+        approxLineSpeed: settings.lineSpeedPPM,
+        crustsPerCycle: settings.crustsPerCycle,
+        cycleSpeed: settings.cycleSpeed,
+        speedAdjustment: settings.speedAdjustment,
+        crustsPerStack: settings.crustsPerStack,
+        doughballsPerTray: 0,
+        doughRecipe: [],
+        targetDoughballWeight: settings.doughballWeightOz,
+        doughBatchYield: settings.doughBatchYield,
+        crustsPerCase: settings.crustsPerCase,
+        casesNeeded: settings.casesNeeded,
+        casesPerSkid: settings.casesPerSkid,
+        casesPerLayer: settings.casesPerLayer,
+        pizzasPerCase: settings.pizzasPerCase,
+        skidsCompleted: 0,
+        casesOnCurrentSkid: 0,
+        traysOnLine: 0,
+        batchesReady: 0,
+      },
+      settings.freezerTime, // started
+      "crusts",
+    );
+    const m = mobile.computeDoughSupply(
+      supplyState(settings, {}, true),
+      NOW,
+      "crusts",
+    );
+    expect(web.casesOnLine).toBe(30); // floor(24 * 15 / 12)
+    expect(m.casesOnLine).toBe(50); // floor(40 * 15 / 12)
+    expect(m.casesOnLine).not.toBe(web.casesOnLine);
   });
 });
