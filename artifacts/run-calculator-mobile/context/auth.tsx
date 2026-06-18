@@ -9,6 +9,7 @@
 
 import { setAuthTokenGetter } from "@workspace/api-client-react";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -30,6 +31,45 @@ import {
 import { setUnauthorizedHandler } from "./authEvents";
 
 const TOKEN_KEY = "rc_auth_token";
+
+// expo-secure-store has no web implementation (its native module methods are
+// undefined on web), so the Expo web build — used by the Replit preview and the
+// UI test harness — crashes if we call SecureStore directly. Branch on platform:
+// native keeps the secure keychain/keystore; web falls back to localStorage.
+const tokenStorage = {
+  async get(): Promise<string | null> {
+    if (Platform.OS === "web") {
+      try {
+        return globalThis.localStorage?.getItem(TOKEN_KEY) ?? null;
+      } catch {
+        return null;
+      }
+    }
+    return SecureStore.getItemAsync(TOKEN_KEY);
+  },
+  async set(token: string): Promise<void> {
+    if (Platform.OS === "web") {
+      try {
+        globalThis.localStorage?.setItem(TOKEN_KEY, token);
+      } catch {
+        /* ignore quota/availability errors */
+      }
+      return;
+    }
+    await SecureStore.setItemAsync(TOKEN_KEY, token);
+  },
+  async remove(): Promise<void> {
+    if (Platform.OS === "web") {
+      try {
+        globalThis.localStorage?.removeItem(TOKEN_KEY);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  },
+};
 
 type AuthContextValue = {
   me: StaffMember | null;
@@ -81,9 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     tokenRef.current = token;
     if (token) {
       forcedOutRef.current = false; // a real sign-in clears the reset latch
-      await SecureStore.setItemAsync(TOKEN_KEY, token);
+      await tokenStorage.set(token);
     } else {
-      await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await tokenStorage.remove();
     }
   }, []);
 
@@ -92,7 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+        const stored = await tokenStorage.get();
         if (!stored) return;
         tokenRef.current = stored;
         const user = await fetchMe();
@@ -100,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (err) {
         // 401 (or any failure) → treat as signed out and discard the token.
         tokenRef.current = null;
-        await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+        await tokenStorage.remove().catch(() => {});
         if (
           !cancelled &&
           !(err instanceof InventoryApiError && err.status === 401)

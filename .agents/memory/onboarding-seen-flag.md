@@ -1,30 +1,24 @@
 ---
-name: Onboarding "Get Started" overview
-description: How the first-login app overview is gated and kept at web+mobile parity
+name: First-login "Get Started" overview onboarding flag
+description: How the once-only welcome overview is gated and where the shared latch lives.
 ---
+The first-login "Get Started" overview is gated by a server-side per-user flag
+`users.onboardingSeen`. It auto-opens once when the server reports
+`onboardingSeen === false`, never re-opens within the session after dismissal
+(a `useRef` latch that holds even if `me` re-emits while still unseen, before
+the seen flag round-trips), and is reopenable from the header menu. Dismissing
+marks it seen.
 
-The "Get Started" overview (what the app does + tabs/menu) auto-shows on a user's
-first login and is reopenable from the header menu on both apps.
+**Single source of truth (parity):** the open/latch/dismiss logic is ONE shared
+hook in lib `@workspace/onboarding`, consumed by both web and mobile (separate
+artifacts that can't import each other, so shared React logic must live in
+`lib/*`). Keep it shared — do not re-inline the latch into either app or they
+drift.
 
-- **Gating is server-side, per-user:** `users.onboardingSeen` boolean (NOT device-local).
-  Exposed through StaffMember and the `/me` payload; flipped by `POST /me/onboarding-seen`.
-- **Auto-open once:** each app uses a `useRef` latch so the dialog/modal opens a single
-  time when `me.onboardingSeen === false`, never re-triggering within a session.
-- **Mark seen on dismiss only if still false** to avoid redundant writes when reopened
-  manually from the menu.
-- **Parity:** web `GetStartedDialog.tsx` (in home.tsx) and mobile `GetStartedModal.tsx`
-  (in (tabs)/_layout.tsx) must keep identical copy/section structure; icons differ
-  (lucide vs Feather) by platform.
+**Why:** web and mobile previously duplicated the latch inline; centralizing it
+is the only way to guarantee the once-only behavior stays identical across both.
 
-**Why:** parity rule in replit.md; the flag must survive device changes so it lives on
-the user record, not AsyncStorage/localStorage.
-
-## Guided tour (revisit-only, no flag)
-
-A separate multi-step "Guided Tour" (`GuidedTour.tsx` on both apps) walks through the
-6 main tabs in sequence: as each step activates it switches the underlying tab (web
-`onNavigate`→`setActiveTab`; mobile `onNavigate`→`router.push("/(tabs)/...")`) so the
-real screen shows behind the step card. It is **opt-in only — never auto-shown**, so it
-needs no server flag. Launch points (both apps, parity): a "Take a guided tour" button
-in the Get Started overview footer, plus a "Guided Tour" header-menu item. Step copy
-mirrors the Get Started TABS copy; keep web+mobile in sync.
+**Lib gotcha:** a React-hook lib needs `react` in BOTH peerDependencies (for
+consumers) AND devDependencies so it resolves standalone under `tsc --build`,
+vitest, and metro — a pure peer dep alone fails to resolve `react` when the lib
+is compiled/bundled in isolation.

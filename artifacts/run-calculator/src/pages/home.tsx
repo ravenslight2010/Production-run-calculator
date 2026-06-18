@@ -102,6 +102,7 @@ import AssistantTab from "../components/AssistantTab";
 import IncidentsTab from "../components/IncidentsTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
@@ -1802,18 +1803,15 @@ export default function Home() {
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
-  const [showGetStarted, setShowGetStarted] = useState(false);
+  // Latch + dismiss behavior lives in a shared hook kept at web/mobile parity.
+  const {
+    open: showGetStarted,
+    setOpen: setShowGetStarted,
+    dismiss: dismissGetStarted,
+  } = useGetStartedOverview(me, markOnboardingSeen);
   // Multi-step guided tour that walks through each tab; opened on demand from
   // the Get Started overview or the header menu (never auto-shown).
   const [showTour, setShowTour] = useState(false);
-  const autoOpenedGetStarted = useRef(false);
-  useEffect(() => {
-    if (autoOpenedGetStarted.current) return;
-    if (me && me.onboardingSeen === false) {
-      autoOpenedGetStarted.current = true;
-      setShowGetStarted(true);
-    }
-  }, [me]);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -8751,9 +8749,7 @@ export default function Home() {
         <GetStartedDialog
           open={showGetStarted}
           onOpenChange={setShowGetStarted}
-          onDismiss={() => {
-            if (me && me.onboardingSeen === false) void markOnboardingSeen();
-          }}
+          onDismiss={dismissGetStarted}
           onStartTour={() => setShowTour(true)}
           isManager={isManager}
         />

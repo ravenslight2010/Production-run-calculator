@@ -59,6 +59,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/space-mono": "^0.4.2",
+    "@workspace/onboarding": "workspace:*",
     "expo-file-system": "~19.0.23",
     "expo-image-manipulator": "~14.0.8",
     "expo-notifications": "~0.32.17",

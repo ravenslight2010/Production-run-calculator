@@ -13,6 +13,7 @@ import { useMe } from "@/hooks/useRole";
 import ReportIssueModal from "@/components/ReportIssueModal";
 import GetStartedModal from "@/components/GetStartedModal";
 import GuidedTour from "@/components/GuidedTour";
+import { useGetStartedOverview } from "@workspace/onboarding";
 
 const MENU_ITEMS: {
   label: string;
@@ -40,18 +41,15 @@ export default function TabLayout() {
   const [reportOpen, setReportOpen] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
-  const [getStartedOpen, setGetStartedOpen] = useState(false);
+  // Latch + dismiss behavior lives in a shared hook kept at web/mobile parity.
+  const {
+    open: getStartedOpen,
+    setOpen: setGetStartedOpen,
+    closeOverview: closeGetStarted,
+  } = useGetStartedOverview(me, markOnboardingSeen);
   // Multi-step guided tour that walks through each tab; opened on demand from
   // the Get Started overview or the header menu (never auto-shown).
   const [tourOpen, setTourOpen] = useState(false);
-  const autoOpenedGetStarted = useRef(false);
-  useEffect(() => {
-    if (autoOpenedGetStarted.current) return;
-    if (me && me.onboardingSeen === false) {
-      autoOpenedGetStarted.current = true;
-      setGetStartedOpen(true);
-    }
-  }, [me]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -401,10 +399,7 @@ export default function TabLayout() {
         visible={getStartedOpen}
         isManager={isManager}
         onStartTour={() => setTourOpen(true)}
-        onDismiss={() => {
-          setGetStartedOpen(false);
-          if (me && me.onboardingSeen === false) void markOnboardingSeen();
-        }}
+        onDismiss={closeGetStarted}
       />
 
       <GuidedTour

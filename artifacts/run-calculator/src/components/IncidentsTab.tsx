@@ -238,36 +238,36 @@ export default function IncidentsTab() {
       <CardContent className="space-y-3">
         {hasIncidents && (
           <div className="space-y-2 pb-1">
-            <FilterRow<StatusFilter>
+            <FilterRow
               label="Status"
               value={status}
-              onChange={setStatus}
+              onChange={(v: StatusFilter) => setStatus(v)}
               options={[
                 ["all", "All"],
                 ["new", "New"],
                 ["reviewed", "Reviewed"],
                 ["resolved", "Resolved"],
-              ]}
+              ] as [StatusFilter, string][]}
             />
-            <FilterRow<PlatformFilter>
+            <FilterRow
               label="Platform"
               value={platform}
-              onChange={setPlatform}
+              onChange={(v: PlatformFilter) => setPlatform(v)}
               options={[
                 ["all", "All"],
                 ["web", "Web"],
                 ["mobile", "Mobile"],
-              ]}
+              ] as [PlatformFilter, string][]}
             />
-            <FilterRow<SourceFilter>
+            <FilterRow
               label="Source"
               value={source}
-              onChange={setSource}
+              onChange={(v: SourceFilter) => setSource(v)}
               options={[
                 ["all", "All"],
                 ["user_report", "Reported"],
                 ["auto_crash", "Auto-crash"],
-              ]}
+              ] as [SourceFilter, string][]}
             />
           </div>
         )}
