@@ -1182,9 +1182,19 @@ function PhotoIntakeCard({
             </View>
           )}
           {noResults && (
-            <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
-              Couldn't identify any items. Try a clearer photo, or add stock manually above.
-            </Text>
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                Couldn't identify any items. Try a clearer photo, or add stock manually above.
+              </Text>
+              <Button
+                label="Take another photo"
+                icon="camera"
+                variant="outline"
+                size="sm"
+                disabled={analyzing}
+                onPress={takePhoto}
+              />
+            </View>
           )}
 
           {rows.length > 0 && (

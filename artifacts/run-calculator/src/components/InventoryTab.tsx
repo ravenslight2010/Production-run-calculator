@@ -1027,9 +1027,20 @@ function PhotoIntakeCard({
             </div>
           )}
           {noResults && (
-            <p className="text-xs text-muted-foreground">
-              Couldn't identify any items. Try a clearer photo, or add stock manually above.
-            </p>
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground">
+                Couldn't identify any items. Try a clearer photo, or add stock manually above.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 w-full text-xs"
+                disabled={analyzing}
+                onClick={() => fileRef.current?.click()}
+              >
+                <Camera className="w-3.5 h-3.5" /> Retake photo
+              </Button>
+            </div>
           )}
 
           {rows.length > 0 && (
