@@ -22,7 +22,7 @@ import { createHmac } from "node:crypto";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
@@ -209,5 +209,95 @@ describe("daily-reset session fence", () => {
     await writeReset(todayStr(), Date.now() - 60_000);
     const res = await meWith(legacyToken(USER));
     expect(res.status).toBe(200);
+  });
+});
+
+// Write side of the same fence. The previous block exercises requireAuth READING
+// the boundary; this block proves the midnight rollover actually WRITES it. The
+// rollover is a client-pushed payload persisted by the sync endpoints, so these
+// tests go through the real HTTP PUT path (auth-gated, like production) instead
+// of poking the row directly — if a future change stopped persisting
+// dayState.resetAt, the read-side tests above would still pass but these fail.
+
+// PUT a day-state payload through the real sync write path the client uses at
+// rollover. `date` is either "today" (→ /sync/today) or an explicit YYYY-MM-DD.
+async function putSync(
+  date: "today" | string,
+  payload: unknown,
+  token: string,
+): Promise<Response> {
+  const reqPath = date === "today" ? "/api/sync/today" : `/api/sync/${date}`;
+  return fetch(`${baseUrl}${reqPath}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ senderId: "test", payload }),
+  });
+}
+
+// Read the persisted dayState.resetAt for `date`, or undefined when no row /
+// boundary was recorded.
+async function readResetAt(date: string): Promise<number | undefined> {
+  const [row] = await db.select().from(dailySyncTable).where(eq(dailySyncTable.date, date));
+  const data = row?.data as { dayState?: { resetAt?: unknown } } | null | undefined;
+  const resetAt = data?.dayState?.resetAt;
+  return typeof resetAt === "number" ? resetAt : undefined;
+}
+
+describe("daily-reset rollover write", () => {
+  it("PUT /sync/today persists a sane (recent, > 0) resetAt on today's row", async () => {
+    const before = Date.now();
+    const res = await putSync("today", { dayState: { runs: [], resetAt: Date.now() } }, signToken(USER));
+    expect(res.status).toBe(200);
+
+    const resetAt = await readResetAt(todayStr());
+    expect(typeof resetAt).toBe("number");
+    expect(resetAt!).toBeGreaterThan(0);
+    // Recent: between the start of this test and now (small slack for clock skew).
+    expect(resetAt!).toBeGreaterThanOrEqual(before);
+    expect(resetAt!).toBeLessThanOrEqual(Date.now() + 1000);
+  });
+
+  it("stamps the boundary on today's row only, leaving a future scheduled day untouched", async () => {
+    // A future production day is scheduled ahead of time, carrying its own data
+    // and its own resetAt. The rollover that advances TODAY's boundary writes to
+    // today's date key only; it must not bleed into that future row.
+    const token = signToken(USER);
+    const futureResetAt = 111_111;
+    await putSync(
+      tomorrowStr(),
+      { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: futureResetAt } },
+      token,
+    );
+
+    const rolloverResetAt = Date.now();
+    const res = await putSync("today", { dayState: { runs: [], resetAt: rolloverResetAt } }, token);
+    expect(res.status).toBe(200);
+
+    // Today carries the rollover boundary…
+    expect(await readResetAt(todayStr())).toBe(rolloverResetAt);
+    // …and the future scheduled day is completely unaffected.
+    expect(await readResetAt(tomorrowStr())).toBe(futureResetAt);
+  });
+
+  it("fences out a session that was valid before the rollover write (write + read tie-in)", async () => {
+    const token = signToken(USER);
+
+    // Before any rollover there is no boundary, so the session is accepted.
+    expect((await meWith(token)).status).toBe(200);
+
+    // The midnight rollover advances today's boundary past this token's issue
+    // time, going through the very same sync write path the client uses. (+1s
+    // keeps the boundary strictly ahead of the just-minted token's second-
+    // granularity iat, with no dependence on sub-millisecond timing.)
+    const res = await putSync("today", { dayState: { runs: [], resetAt: Date.now() + 1000 } }, token);
+    expect(res.status).toBe(200);
+
+    // Drop the brief boundary cache so the next request reads the freshly
+    // written value rather than the pre-rollover 0.
+    clearSessionBoundaryCache();
+
+    // Same token, now rejected: the read side honours the boundary the write
+    // side just persisted.
+    expect((await meWith(token)).status).toBe(401);
   });
 });
