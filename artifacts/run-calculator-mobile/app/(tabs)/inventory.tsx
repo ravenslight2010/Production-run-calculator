@@ -31,6 +31,7 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  photoErrorMessage,
   rankCandidatesByName,
   deriveCandidateItems,
   isLowStock,
@@ -949,7 +950,7 @@ function PhotoIntakeCard({
       setRows(next);
       setNoResults(next.length === 0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to analyze photo");
+      setError(photoErrorMessage(e));
     } finally {
       setAnalyzing(false);
     }

@@ -177,6 +177,26 @@ export function inventoryClientId(): string {
   return clientId;
 }
 
+// Typed error so callers can react to specific HTTP statuses (e.g. the photo
+// endpoint's rate limit 429 / size cap 413) instead of parsing message strings.
+export class InventoryApiError extends Error {
+  status: number;
+  retryAfterSec: number | null;
+  serverMessage: string | null;
+  constructor(
+    status: number,
+    message: string,
+    retryAfterSec: number | null,
+    serverMessage: string | null,
+  ) {
+    super(message);
+    this.name = "InventoryApiError";
+    this.status = status;
+    this.retryAfterSec = retryAfterSec;
+    this.serverMessage = serverMessage;
+  }
+}
+
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...opts,
@@ -186,7 +206,26 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
       ...(opts?.headers ?? {}),
     },
   });
-  if (!res.ok) throw new Error(`Inventory request failed (${res.status}): ${path}`);
+  if (!res.ok) {
+    const retryAfterRaw = res.headers.get("Retry-After");
+    const retryAfterSec =
+      retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))
+        ? Number(retryAfterRaw)
+        : null;
+    let serverMessage: string | null = null;
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (body && typeof body.error === "string") serverMessage = body.error;
+    } catch {
+      // non-JSON error body; ignore and fall back to the generic message
+    }
+    throw new InventoryApiError(
+      res.status,
+      `Inventory request failed (${res.status}): ${path}`,
+      retryAfterSec,
+      serverMessage,
+    );
+  }
   if (res.status === 204) return null as T;
   return (await res.json()) as T;
 }
@@ -231,6 +270,25 @@ export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
     method: "POST",
     body: JSON.stringify(body),
   });
+
+// Maps a photo-intake failure to a friendly, human message. The server guards
+// this endpoint with a rate limit (429) and image-size cap (413); surface those
+// as intentional, actionable guidance rather than a generic failure.
+export function photoErrorMessage(e: unknown): string {
+  if (e instanceof InventoryApiError) {
+    if (e.status === 429) {
+      const wait =
+        e.retryAfterSec && e.retryAfterSec > 0
+          ? `try again in about ${e.retryAfterSec} second${e.retryAfterSec === 1 ? "" : "s"}`
+          : "try again in a minute";
+      return `You're going a bit fast — ${wait}.`;
+    }
+    if (e.status === 413) {
+      return "That image is too large. Try retaking the photo at a lower resolution.";
+    }
+  }
+  return e instanceof Error ? e.message : "Failed to analyze photo";
+}
 
 // Score how closely a free-text guess name matches a known candidate name.
 // Higher is closer. Used to surface the closest inventory items when the AI
