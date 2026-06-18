@@ -44,6 +44,19 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+/**
+ * Resolve the current bearer auth token using the registered getter, or `null`
+ * when no getter is configured (or it yields no token).
+ *
+ * Useful for non-component transports (e.g. SSE streams and raw `fetch`
+ * helpers) that need to attach `Authorization: Bearer <token>` themselves
+ * because they bypass `customFetch`.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  if (!_authTokenGetter) return null;
+  return (await _authTokenGetter()) ?? null;
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }

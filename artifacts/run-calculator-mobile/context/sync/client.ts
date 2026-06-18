@@ -3,6 +3,7 @@
 // `react-native-sse` polyfill; on web we use the browser's global EventSource.
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthToken } from "@workspace/api-client-react";
 import { Platform } from "react-native";
 import type { SyncPayload } from "./payloadTypes";
 
@@ -33,8 +34,22 @@ export async function getOrCreateClientId(): Promise<string> {
   return id;
 }
 
+// Mobile has no browser cookie jar, so the Clerk bearer token must be attached
+// explicitly to every authenticated request (web sends the session cookie).
+async function authHeaders(
+  extra?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const token = await getAuthToken();
+  return {
+    ...(extra ?? {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 export async function fetchToday(baseUrl: string): Promise<SyncPayload | null> {
-  const res = await fetch(`${baseUrl}/api/sync/today`);
+  const res = await fetch(`${baseUrl}/api/sync/today`, {
+    headers: await authHeaders(),
+  });
   if (!res.ok) throw new Error(`GET /api/sync/today -> ${res.status}`);
   return (await res.json()) as SyncPayload | null;
 }
@@ -46,7 +61,7 @@ export async function putToday(
 ): Promise<void> {
   const res = await fetch(`${baseUrl}/api/sync/today`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ senderId, payload }),
   });
   if (!res.ok) throw new Error(`PUT /api/sync/today -> ${res.status}`);
@@ -94,17 +109,33 @@ export function openSyncStream(
     return { close: () => es.close() };
   }
 
-  // Native: react-native-sse
-  const RNEventSource = require("react-native-sse").default as new (
-    url: string,
-    opts?: Record<string, unknown>,
-  ) => {
-    addEventListener: (type: string, listener: (event: SseMessageEvent) => void) => void;
-    close: () => void;
+  // Native: react-native-sse. Resolve the bearer token first (async), then open
+  // the stream with an Authorization header. close() is safe before connect.
+  let closed = false;
+  let es: { close: () => void } | null = null;
+  void (async () => {
+    const token = await getAuthToken();
+    if (closed) return;
+    const RNEventSource = require("react-native-sse").default as new (
+      url: string,
+      opts?: Record<string, unknown>,
+    ) => {
+      addEventListener: (type: string, listener: (event: SseMessageEvent) => void) => void;
+      close: () => void;
+    };
+    const inst = new RNEventSource(url, {
+      pollingInterval: 0,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    inst.addEventListener("open", () => handlers.onOpen?.());
+    inst.addEventListener("message", (event: SseMessageEvent) => handleData(event.data));
+    inst.addEventListener("error", () => handlers.onError?.());
+    es = inst;
+  })();
+  return {
+    close: () => {
+      closed = true;
+      es?.close();
+    },
   };
-  const es = new RNEventSource(url, { pollingInterval: 0 });
-  es.addEventListener("open", () => handlers.onOpen?.());
-  es.addEventListener("message", (event: SseMessageEvent) => handleData(event.data));
-  es.addEventListener("error", () => handlers.onError?.());
-  return { close: () => es.close() };
 }

@@ -158,7 +158,9 @@ import {
   Warehouse,
   Boxes,
   Menu,
+  LogOut,
 } from "lucide-react";
+import { useClerk } from "@clerk/react";
 import * as XLSX from "xlsx";
 import {
   buildRunExportRow,
@@ -1464,6 +1466,7 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
 }
 
 export default function Home() {
+  const { signOut } = useClerk();
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
@@ -5647,6 +5650,9 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => signOut({ redirectUrl: import.meta.env.BASE_URL.replace(/\/$/, "") || "/" })}>
+                  <LogOut className="w-4 h-4 mr-2" /> Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

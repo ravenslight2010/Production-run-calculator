@@ -23,10 +23,11 @@ import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 
 const router: IRouter = Router();
 
-// Cost/abuse guards for the paid AI vision endpoint. The API is unauthenticated,
-// so cap how often it can be called. Size/shape guards live in photoIdentify.ts.
+// Cost/abuse guards for the paid AI vision endpoint. All routes require a
+// signed-in user, so cap per-user (falling back to IP) rather than per-IP only.
+// Size/shape guards live in photoIdentify.ts.
 const PHOTO_RATE_WINDOW_MS = 60_000;
-const PHOTO_RATE_MAX = 10; // requests per IP per minute
+const PHOTO_RATE_MAX = 10; // requests per user per minute
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string };
@@ -258,7 +259,11 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 
 router.post(
   "/inventory/identify-photo",
-  rateLimit({ windowMs: PHOTO_RATE_WINDOW_MS, max: PHOTO_RATE_MAX }),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+  }),
   async (req, res): Promise<void> => {
   const validation = validateIdentifyPhotoBody(req.body);
   if (!validation.ok) {

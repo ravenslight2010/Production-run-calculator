@@ -1,0 +1,11 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Run Calculator">
+  <rect width="96" height="96" rx="22" fill="#0F1117"/>
+  <path d="M48 20C32.536 20 20 32.536 20 48c0 2.21 1.79 4 4 4h24a4 4 0 0 0 4-4V24c0-2.21-1.79-4.04-4-4z" fill="#FF9500"/>
+  <circle cx="33" cy="38" r="3.2" fill="#0F1117"/>
+  <circle cx="42" cy="31" r="3.2" fill="#0F1117"/>
+  <circle cx="33.5" cy="47" r="3.2" fill="#0F1117"/>
+  <rect x="56" y="56" width="20" height="20" rx="4" fill="#FF9500"/>
+  <rect x="60" y="60.5" width="12" height="3.4" rx="1.7" fill="#0F1117"/>
+  <rect x="60" y="66.5" width="5" height="5" rx="1.2" fill="#0F1117"/>
+  <rect x="67" y="66.5" width="5" height="5" rx="1.2" fill="#0F1117"/>
+</svg>

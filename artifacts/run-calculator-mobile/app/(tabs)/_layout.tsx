@@ -1,5 +1,6 @@
+import { useAuth, useClerk } from "@clerk/expo";
 import { BlurView } from "expo-blur";
-import { Tabs, useRouter } from "expo-router";
+import { Redirect, Tabs, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
@@ -24,10 +25,16 @@ const MENU_ITEMS: {
 export default function TabLayout() {
   const colors = useColors();
   const router = useRouter();
+  const { signOut } = useClerk();
+  const { isLoaded, isSignedIn } = useAuth();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const [menuOpen, setMenuOpen] = useState(false);
+
+  if (isLoaded && !isSignedIn) {
+    return <Redirect href="/(auth)/sign-in" />;
+  }
 
   return (
     <>
@@ -176,6 +183,33 @@ export default function TabLayout() {
                 <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
               </Pressable>
             ))}
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                void signOut();
+              }}
+              style={({ pressed }) => [
+                styles.menuItem,
+                {
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <View style={[styles.menuIcon, { backgroundColor: colors.destructive + "22" }]}>
+                <Feather name="log-out" size={18} color={colors.destructive} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                  Sign out
+                </Text>
+                <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                  End your session on this device
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>

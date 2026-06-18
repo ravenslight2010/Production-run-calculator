@@ -9,6 +9,7 @@
 // Item keys are quantity-independent stable identities shared with the web app
 // (same backend DB), so the same material lines up regardless of platform.
 
+import { getAuthToken } from "@workspace/api-client-react";
 import { Platform } from "react-native";
 import type { RunSettings, RecipeRow } from "./RunContext";
 import { DEFAULT_PEP_TYPES } from "./RunContext";
@@ -228,11 +229,14 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const base = getApiBaseUrl();
   if (!base) throw new Error("No API base URL (sync disabled)");
   const clientId = await getOrCreateClientId();
+  // Mobile has no cookie jar — attach the Clerk bearer token explicitly.
+  const token = await getAuthToken();
   const res = await fetch(`${base}/api${path}`, {
     ...opts,
     headers: {
       "Content-Type": "application/json",
       "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(opts?.headers ?? {}),
     },
   });
@@ -413,14 +417,30 @@ export function openInventoryStream(
     return { close: () => es.close() };
   }
 
-  const RNEventSource = require("react-native-sse").default as new (
-    url: string,
-    opts?: Record<string, unknown>,
-  ) => {
-    addEventListener: (type: string, listener: (event: SseMessageEvent) => void) => void;
-    close: () => void;
+  // Native: resolve the bearer token first, then open with an Authorization header.
+  let closed = false;
+  let es: { close: () => void } | null = null;
+  void (async () => {
+    const token = await getAuthToken();
+    if (closed) return;
+    const RNEventSource = require("react-native-sse").default as new (
+      url: string,
+      opts?: Record<string, unknown>,
+    ) => {
+      addEventListener: (type: string, listener: (event: SseMessageEvent) => void) => void;
+      close: () => void;
+    };
+    const inst = new RNEventSource(url, {
+      pollingInterval: 0,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    inst.addEventListener("message", (event: SseMessageEvent) => handleData(event.data));
+    es = inst;
+  })();
+  return {
+    close: () => {
+      closed = true;
+      es?.close();
+    },
   };
-  const es = new RNEventSource(url, { pollingInterval: 0 });
-  es.addEventListener("message", (event: SseMessageEvent) => handleData(event.data));
-  return { close: () => es.close() };
 }
