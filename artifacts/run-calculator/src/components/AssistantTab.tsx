@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
   Loader2,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
   Check,
   Zap,
+  Undo2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -41,19 +42,47 @@ function impactClass(impact: OptimizeImpact): string {
   return "bg-sky-500/15 text-sky-400 border-sky-500/30";
 }
 
+const UNDO_WINDOW_MS = 6000;
+
 function RecCard({
   rec,
   onApply,
 }: {
   rec: OptimizeRecommendation;
-  onApply: (action: OptimizeAction) => { ok: boolean; message: string };
+  onApply: (action: OptimizeAction) => { ok: boolean; message: string; undo?: () => void };
 }) {
   const [applied, setApplied] = useState<{ ok: boolean; message: string } | null>(null);
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  }, []);
+
+  function clearUndoTimer() {
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+  }
 
   function handleApply() {
     if (!rec.action) return;
     const result = onApply(rec.action);
     setApplied(result);
+    if (result.ok && result.undo) {
+      const fn = result.undo;
+      setUndo(() => fn);
+      clearUndoTimer();
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+  }
+
+  function handleUndo() {
+    if (undo) undo();
+    clearUndoTimer();
+    setUndo(null);
+    setApplied(null);
   }
 
   return (
@@ -83,6 +112,18 @@ function RecCard({
             {applied?.ok ? <Check className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
             {applied?.ok ? "Applied" : rec.action.label}
           </Button>
+          {undo && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 gap-1.5 text-xs"
+              onClick={handleUndo}
+              data-testid="button-undo-action"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              Undo
+            </Button>
+          )}
           {applied && (
             <span
               className={`text-[11px] font-medium ${applied.ok ? "text-emerald-400" : "text-red-400"}`}

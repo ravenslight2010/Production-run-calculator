@@ -3033,12 +3033,17 @@ export default function Home() {
   // Apply a one-tap AI recommendation action by routing it to the existing
   // run/schedule mutations. Returns a result the AssistantTab renders inline;
   // nothing is applied without the manager's explicit tap.
-  function applyOptimizeAction(action: OptimizeAction): { ok: boolean; message: string } {
+  function applyOptimizeAction(action: OptimizeAction): { ok: boolean; message: string; undo?: () => void } {
     if (action.kind === "set_target_time") {
       const time = (action.time ?? "").trim();
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
+      const prevTime = runToTime;
       setRunToTime(time);
-      return { ok: true, message: `Finish time set to ${time}` };
+      return {
+        ok: true,
+        message: `Finish time set to ${time}`,
+        undo: () => setRunToTime(prevTime),
+      };
     }
 
     if (action.kind === "set_run_target") {
@@ -3047,15 +3052,26 @@ export default function Home() {
       if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
       const idx = dayState.runs.findIndex((r) => r.id === runId);
       if (idx < 0) return { ok: false, message: "Run no longer exists" };
-      if (runId === currentRunId) {
-        form.setValue("casesNeeded", cases, { shouldDirty: true });
-        saveRunValues(currentRunId, form.getValues());
-      } else {
-        const vals = loadRunValues(runId);
-        saveRunValues(runId, { ...vals, casesNeeded: cases });
-      }
-      schedulePush(dayState, 0);
-      return { ok: true, message: `Target set to ${cases} cases` };
+      const prevCases =
+        runId === currentRunId
+          ? (form.getValues("casesNeeded") as number)
+          : loadRunValues(runId).casesNeeded;
+      const writeCases = (value: number) => {
+        if (runId === currentRunId) {
+          form.setValue("casesNeeded", value, { shouldDirty: true });
+          saveRunValues(currentRunId, form.getValues());
+        } else {
+          const vals = loadRunValues(runId);
+          saveRunValues(runId, { ...vals, casesNeeded: value });
+        }
+        schedulePush(dayStateRef.current, 0);
+      };
+      writeCases(cases);
+      return {
+        ok: true,
+        message: `Target set to ${cases} cases`,
+        undo: () => writeCases(prevCases),
+      };
     }
 
     // reorder_run
@@ -3073,8 +3089,19 @@ export default function Home() {
       toIdx = beforePos;
     }
     if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
+    const prevRuns = dayState.runs;
+    const prevIndex = dayState.currentIndex;
     moveRun(fromIdx, toIdx);
-    return { ok: true, message: "Run order updated" };
+    return {
+      ok: true,
+      message: "Run order updated",
+      undo: () => {
+        const restored = { ...dayStateRef.current, runs: prevRuns, currentIndex: prevIndex };
+        setDayState(restored);
+        saveDayState(restored);
+        schedulePush(restored);
+      },
+    };
   }
 
   function flashSaved() {

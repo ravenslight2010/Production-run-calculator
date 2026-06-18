@@ -35,20 +35,52 @@ function impactColors(impact: OptimizeImpact): { bg: string; fg: string } {
   return { bg: "rgba(14,165,233,0.15)", fg: "#38bdf8" };
 }
 
+const UNDO_WINDOW_MS = 6000;
+
 function RecCard({
   rec,
   onApply,
 }: {
   rec: OptimizeRecommendation;
-  onApply: (action: OptimizeAction) => { ok: boolean; message: string };
+  onApply: (action: OptimizeAction) => { ok: boolean; message: string; undo?: () => void };
 }) {
   const colors = useColors();
   const ic = impactColors(rec.impact);
   const [applied, setApplied] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const [undo, setUndo] = React.useState<(() => void) | null>(null);
+  const undoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    },
+    [],
+  );
+
+  function clearUndoTimer() {
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+  }
 
   function handleApply() {
     if (!rec.action) return;
-    setApplied(onApply(rec.action));
+    const result = onApply(rec.action);
+    setApplied(result);
+    if (result.ok && result.undo) {
+      const fn = result.undo;
+      setUndo(() => fn);
+      clearUndoTimer();
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+  }
+
+  function handleUndo() {
+    if (undo) undo();
+    clearUndoTimer();
+    setUndo(null);
+    setApplied(null);
   }
 
   return (
@@ -73,6 +105,15 @@ function RecCard({
             disabled={!!applied?.ok}
             onPress={handleApply}
           />
+          {undo ? (
+            <Button
+              label="Undo"
+              icon="rotate-ccw"
+              size="sm"
+              variant="outline"
+              onPress={handleUndo}
+            />
+          ) : null}
           {applied ? (
             <Text
               style={[styles.actionMsg, { color: applied.ok ? "#34d399" : "#f87171" }]}
@@ -107,21 +148,32 @@ export default function AssistantScreen() {
   // Apply a one-tap AI recommendation action via the existing context
   // mutations. Mirrors the web applyOptimizeAction; nothing is applied without
   // the manager's explicit tap.
-  function applyAction(action: OptimizeAction): { ok: boolean; message: string } {
+  function applyAction(action: OptimizeAction): { ok: boolean; message: string; undo?: () => void } {
     if (action.kind === "set_target_time") {
       const time = (action.time ?? "").trim();
       if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
+      const prevTime = runToTime;
       setRunToTime(time);
-      return { ok: true, message: `Finish time set to ${time}` };
+      return {
+        ok: true,
+        message: `Finish time set to ${time}`,
+        undo: () => setRunToTime(prevTime),
+      };
     }
 
     if (action.kind === "set_run_target") {
       const runId = action.runId ?? "";
       const cases = Math.round(action.casesNeeded ?? NaN);
       if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
-      if (!allRuns.some((r) => r.id === runId)) return { ok: false, message: "Run no longer exists" };
+      const target = allRuns.find((r) => r.id === runId);
+      if (!target) return { ok: false, message: "Run no longer exists" };
+      const prevCases = target.settings.casesNeeded;
       updateRunSettingsById(runId, { casesNeeded: cases });
-      return { ok: true, message: `Target set to ${cases} cases` };
+      return {
+        ok: true,
+        message: `Target set to ${cases} cases`,
+        undo: () => updateRunSettingsById(runId, { casesNeeded: prevCases }),
+      };
     }
 
     // reorder_run
@@ -140,7 +192,11 @@ export default function AssistantScreen() {
     }
     if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
     moveRun(fromIdx, toIdx);
-    return { ok: true, message: "Run order updated" };
+    return {
+      ok: true,
+      message: "Run order updated",
+      undo: () => moveRun(toIdx, fromIdx),
+    };
   }
 
   async function analyze() {

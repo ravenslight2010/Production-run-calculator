@@ -3,6 +3,10 @@ name: AI optimize assistant
 description: How the /ai/optimize assistant feature is shaped and kept at web+mobile parity.
 ---
 
+## Apply-action undo (web + mobile)
+apply functions (web `applyOptimizeAction`, mobile `applyAction`) return optional `undo: () => void`; RecCard shows a ~6s Undo button.
+**reorder undo diverges by platform — intentional:** web `moveRun` reads `dayState` from a stale closure, so undo must snapshot prior `runs`+`currentIndex` and restore via setDayState/saveDayState/schedulePush. Mobile `moveRun` is a functional `setAppState`, so undo just reverse-moves `moveRun(toIdx, fromIdx)`. Both restore prior order; don't "unify" by copying web's snapshot to mobile or mobile's reverse-move to web.
+
 The AI assistant (`POST /ai/optimize`) reuses the photo-intake plumbing: OpenAI
 JSON-mode call, Zod-validated contract via OpenAPI codegen (`AiOptimizeBody`),
 rateLimit, `requireRole("manager")`, and the same raw-fetch client convention.
