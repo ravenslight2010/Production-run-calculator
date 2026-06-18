@@ -852,6 +852,7 @@ function PhotoIntakeCard({
   const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryIn, setRetryIn] = useState(0);
@@ -921,12 +922,15 @@ function PhotoIntakeCard({
   async function onPick(file: File | null) {
     if (!file) return;
     let imageBase64: string;
+    setError(null);
+    setPreparing(true);
     try {
       imageBase64 = await fileToBase64Jpeg(file);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to read photo");
       return;
     } finally {
+      setPreparing(false);
       if (fileRef.current) fileRef.current.value = "";
     }
     await analyze(imageBase64);
@@ -1018,10 +1022,14 @@ function PhotoIntakeCard({
           <Button
             size="sm"
             className="h-9 w-full text-sm"
-            disabled={analyzing}
+            disabled={preparing || analyzing}
             onClick={() => fileRef.current?.click()}
           >
-            {analyzing ? (
+            {preparing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
+              </>
+            ) : analyzing ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…
               </>

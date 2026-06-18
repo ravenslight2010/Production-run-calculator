@@ -962,6 +962,7 @@ function PhotoIntakeCard({
   const colors = useColors();
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryIn, setRetryIn] = useState(0);
@@ -1044,6 +1045,7 @@ function PhotoIntakeCard({
   async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
     if (!asset?.uri) return;
     let base64: string | null;
+    setPreparing(true);
     try {
       base64 = await prepareImageBase64(
         asset.uri,
@@ -1053,6 +1055,8 @@ function PhotoIntakeCard({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to process photo");
       return;
+    } finally {
+      setPreparing(false);
     }
     await analyze(base64);
   }
@@ -1151,18 +1155,18 @@ function PhotoIntakeCard({
           </Text>
           <View style={styles.formRow}>
             <View style={{ flex: 1 }}>
-              <Button label="Take photo" icon="camera" size="sm" disabled={analyzing} onPress={takePhoto} />
+              <Button label="Take photo" icon="camera" size="sm" disabled={preparing || analyzing} onPress={takePhoto} />
             </View>
             <View style={{ flex: 1 }}>
-              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={analyzing} onPress={pickPhoto} />
+              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={preparing || analyzing} onPress={pickPhoto} />
             </View>
           </View>
 
-          {analyzing && (
+          {(preparing || analyzing) && (
             <View style={styles.analyzingRow}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
-                Analyzing photo…
+                {preparing ? "Preparing photo…" : "Analyzing photo…"}
               </Text>
             </View>
           )}
