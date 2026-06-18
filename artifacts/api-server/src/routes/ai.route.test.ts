@@ -48,8 +48,18 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
 
 // Pass-through role gate so the route runs without a DB or real auth. Role
 // enforcement itself is exercised in roles.integration.test.ts.
+//
+// It also honors an optional `x-test-user` header by populating req.userId,
+// which lets the rate-limit tests vary the limiter's bucket key per request.
+// Without the header, userId stays undefined and the limiter falls back to
+// req.ip (same for every request here), matching the route's keyGenerator.
 vi.mock("../middlewares/requireRole", () => ({
-  requireRole: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  requireRole: () => (req: any, _res: unknown, next: () => void) => {
+    const u = req.headers?.["x-test-user"];
+    if (typeof u === "string") req.userId = u;
+    next();
+  },
 }));
 
 let server: Server;
@@ -116,6 +126,17 @@ async function postOptimize(body: unknown): Promise<Response> {
   return fetch(`${baseUrl}/ai/optimize`, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// Posts as a specific user so the limiter buckets requests under that key
+// (the route's keyGenerator uses req.userId first). Distinct users get
+// independent buckets.
+async function postOptimizeAsUser(user: string, body: unknown): Promise<Response> {
+  return fetch(`${baseUrl}/ai/optimize`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-test-user": user },
     body: JSON.stringify(body),
   });
 }
@@ -246,5 +267,56 @@ describe("POST /ai/optimize — model failure glue", () => {
     };
     expect(json.recommendations).toEqual([]);
     expect(typeof json.generatedAt).toBe("number");
+  });
+});
+
+describe("POST /ai/optimize — rate-limit guard (cost/abuse protection)", () => {
+  // The limiter allows 10 requests/minute per user. These tests use distinct
+  // per-test user keys (via x-test-user) so they never collide with each other
+  // or with the IP-keyed requests issued by the other describe blocks in this
+  // file — the limiter's bucket map is shared across the whole file because the
+  // router module is imported once in beforeAll.
+  const RATE_MAX = 10;
+
+  it("lets the surplus requests through with 429 + rate-limit headers once the window cap is exceeded", async () => {
+    const user = "rate-user-exceed";
+
+    // The first RATE_MAX requests within the window are allowed.
+    for (let i = 0; i < RATE_MAX; i += 1) {
+      const ok = await postOptimizeAsUser(user, makeBody());
+      expect(ok.status).toBe(200);
+    }
+
+    // The very next request (the surplus) is rejected with 429.
+    const blocked = await postOptimizeAsUser(user, makeBody());
+    expect(blocked.status).toBe(429);
+    const json = (await blocked.json()) as { error: string };
+    expect(json.error).toBeTruthy();
+
+    // Rate-limit headers are set so clients can back off correctly.
+    expect(blocked.headers.get("ratelimit-limit")).toBe(String(RATE_MAX));
+    expect(blocked.headers.get("ratelimit-remaining")).toBe("0");
+    expect(blocked.headers.get("ratelimit-reset")).toBeTruthy();
+    expect(blocked.headers.get("retry-after")).toBeTruthy();
+
+    // A rejected request never reaches the (paid) model.
+    expect(mock.calls).toBe(RATE_MAX);
+  });
+
+  it("does not penalize a different user (separate bucket per key)", async () => {
+    const heavyUser = "rate-user-heavy";
+    const otherUser = "rate-user-other";
+
+    // Exhaust the heavy user's allowance and then one more to trip the limit.
+    for (let i = 0; i < RATE_MAX + 1; i += 1) {
+      await postOptimizeAsUser(heavyUser, makeBody());
+    }
+    const heavyBlocked = await postOptimizeAsUser(heavyUser, makeBody());
+    expect(heavyBlocked.status).toBe(429);
+
+    // A different user is on a fresh bucket and is unaffected.
+    const otherOk = await postOptimizeAsUser(otherUser, makeBody());
+    expect(otherOk.status).toBe(200);
+    expect(otherOk.headers.get("ratelimit-remaining")).toBe(String(RATE_MAX - 1));
   });
 });
