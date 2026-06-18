@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
+import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireRole } from "../middlewares/requireRole";
 import {
   buildOptimizePrompt,
@@ -15,6 +16,15 @@ const router: IRouter = Router();
 const OPTIMIZE_RATE_WINDOW_MS = 60_000;
 const OPTIMIZE_RATE_MAX = 10;
 
+// In production the API may run with more than one instance, so the cost cap is
+// backed by a shared Postgres store to keep it effective across instances.
+// Everywhere else (dev/test, a single process) the limiter falls back to its
+// in-memory store — identical behavior and headers, no DB dependency.
+const optimizeRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(OPTIMIZE_RATE_WINDOW_MS)
+    : undefined;
+
 router.post(
   "/ai/optimize",
   requireRole("manager"),
@@ -22,6 +32,7 @@ router.post(
     windowMs: OPTIMIZE_RATE_WINDOW_MS,
     max: OPTIMIZE_RATE_MAX,
     keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: optimizeRateStore,
   }),
   async (req, res): Promise<void> => {
     const validation = validateOptimizeBody(req.body);

@@ -31,3 +31,4 @@
 - [Password-reset nav badge](reset-request-nav-badge.md) — manager nav badge via usePendingResetCount hook; reuses ["passwordResetRequests"] key, gated enabled:isManager; web+mobile parity.
 - [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
+- [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.

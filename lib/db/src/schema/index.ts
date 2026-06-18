@@ -23,3 +23,4 @@ export * from "./inventory";
 export * from "./users";
 export * from "./userRoles";
 export * from "./passwordResets";
+export * from "./rateLimit";
