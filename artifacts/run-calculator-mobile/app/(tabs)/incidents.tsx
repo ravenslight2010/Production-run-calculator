@@ -1,17 +1,22 @@
 import { Feather } from "@expo/vector-icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FONTS } from "@/constants/fonts";
 import {
   fetchIncidents,
+  markIncidentResolved,
   markIncidentReviewed,
   type Incident,
 } from "@/context/inventoryShared";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
+
+type StatusFilter = "all" | "new" | "reviewed" | "resolved";
+type PlatformFilter = "all" | "web" | "mobile";
+type SourceFilter = "all" | "user_report" | "auto_crash";
 
 function timeAgo(iso: string): string {
   const then = Date.parse(iso);
@@ -29,13 +34,19 @@ function IncidentCard({ incident }: { incident: Incident }) {
   const colors = useColors();
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(incident.status === "new");
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["incidents"] });
+    void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
+  };
   const review = useMutation({
     mutationFn: () => markIncidentReviewed(incident.id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["incidents"] });
-      void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
-    },
+    onSuccess: invalidate,
   });
+  const resolve = useMutation({
+    mutationFn: () => markIncidentResolved(incident.id),
+    onSuccess: invalidate,
+  });
+  const busy = review.isPending || resolve.isPending;
 
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
@@ -53,8 +64,18 @@ function IncidentCard({ incident }: { incident: Incident }) {
               {isCrash ? "Auto-captured crash" : "Reported issue"}
             </Text>
             {incident.status === "new" && (
-              <View style={[styles.newBadge, { backgroundColor: (colors.warning ?? colors.primary) + "22" }]}>
-                <Text style={[styles.newBadgeText, { color: colors.warning ?? colors.primary }]}>NEW</Text>
+              <View style={[styles.statusBadge, { backgroundColor: (colors.warning ?? colors.primary) + "22" }]}>
+                <Text style={[styles.statusBadgeText, { color: colors.warning ?? colors.primary }]}>NEW</Text>
+              </View>
+            )}
+            {incident.status === "reviewed" && (
+              <View style={[styles.statusBadge, { backgroundColor: colors.primary + "22" }]}>
+                <Text style={[styles.statusBadgeText, { color: colors.primary }]}>REVIEWED</Text>
+              </View>
+            )}
+            {incident.status === "resolved" && (
+              <View style={[styles.statusBadge, { backgroundColor: "#34d39922" }]}>
+                <Text style={[styles.statusBadgeText, { color: "#34d399" }]}>RESOLVED</Text>
               </View>
             )}
           </View>
@@ -86,34 +107,65 @@ function IncidentCard({ incident }: { incident: Incident }) {
           {incident.workaround ? (
             <Field label="Suggested workaround" value={incident.workaround} colors={colors} />
           ) : null}
-          {incident.status === "new" ? (
-            <Pressable
-              onPress={() => review.mutate()}
-              disabled={review.isPending}
-              style={({ pressed }) => [
-                styles.reviewBtn,
-                { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
-              ]}
-            >
-              {review.isPending ? (
-                <ActivityIndicator color={colors.primaryForeground} />
-              ) : (
-                <>
-                  <Feather name="check" size={16} color={colors.primaryForeground} />
-                  <Text style={[styles.reviewBtnText, { color: colors.primaryForeground }]}>
-                    Mark reviewed
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          ) : (
-            <View style={styles.reviewedRow}>
-              <Feather name="check" size={14} color="#34d399" />
-              <Text style={[styles.reviewedText, { color: "#34d399" }]}>
-                Reviewed{incident.reviewedAt ? ` ${timeAgo(incident.reviewedAt)}` : ""}
-              </Text>
-            </View>
-          )}
+          <View style={styles.actionsRow}>
+            {incident.status === "new" ? (
+              <Pressable
+                onPress={() => review.mutate()}
+                disabled={busy}
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  styles.actionBtnOutline,
+                  { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                {review.isPending ? (
+                  <ActivityIndicator color={colors.foreground} />
+                ) : (
+                  <>
+                    <Feather name="check" size={16} color={colors.foreground} />
+                    <Text style={[styles.actionBtnText, { color: colors.foreground }]}>
+                      Mark reviewed
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            ) : incident.status === "reviewed" ? (
+              <View style={styles.statusLine}>
+                <Feather name="check" size={14} color={colors.primary} />
+                <Text style={[styles.statusLineText, { color: colors.primary }]}>
+                  Reviewed{incident.reviewedAt ? ` ${timeAgo(incident.reviewedAt)}` : ""}
+                </Text>
+              </View>
+            ) : null}
+            {incident.status !== "resolved" ? (
+              <Pressable
+                onPress={() => resolve.mutate()}
+                disabled={busy}
+                style={({ pressed }) => [
+                  styles.actionBtn,
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.9 : 1 },
+                ]}
+              >
+                {resolve.isPending ? (
+                  <ActivityIndicator color={colors.primaryForeground} />
+                ) : (
+                  <>
+                    <Feather name="check-circle" size={16} color={colors.primaryForeground} />
+                    <Text style={[styles.actionBtnText, { color: colors.primaryForeground }]}>
+                      Mark resolved
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            ) : (
+              <View style={styles.statusLine}>
+                <Feather name="check-circle" size={14} color="#34d399" />
+                <Text style={[styles.statusLineText, { color: "#34d399" }]}>
+                  Resolved{incident.resolvedAt ? ` ${timeAgo(incident.resolvedAt)}` : ""}
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
       )}
     </View>
@@ -172,13 +224,66 @@ export default function IncidentsScreen() {
     );
   }
 
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [platform, setPlatform] = useState<PlatformFilter>("all");
+  const [source, setSource] = useState<SourceFilter>("all");
+
   const incidents = data ?? [];
+  const filtered = useMemo(
+    () =>
+      incidents.filter(
+        (i) =>
+          (status === "all" || i.status === status) &&
+          (platform === "all" || i.appPlatform === platform) &&
+          (source === "all" || i.source === source),
+      ),
+    [incidents, status, platform, source],
+  );
+  const hasIncidents = incidents.length > 0;
 
   return (
     <ScrollView
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 100 }]}
     >
+      {hasIncidents && (
+        <View style={styles.filters}>
+          <FilterRow<StatusFilter>
+            label="Status"
+            value={status}
+            onChange={setStatus}
+            options={[
+              ["all", "All"],
+              ["new", "New"],
+              ["reviewed", "Reviewed"],
+              ["resolved", "Resolved"],
+            ]}
+            colors={colors}
+          />
+          <FilterRow<PlatformFilter>
+            label="Platform"
+            value={platform}
+            onChange={setPlatform}
+            options={[
+              ["all", "All"],
+              ["web", "Web"],
+              ["mobile", "Mobile"],
+            ]}
+            colors={colors}
+          />
+          <FilterRow<SourceFilter>
+            label="Source"
+            value={source}
+            onChange={setSource}
+            options={[
+              ["all", "All"],
+              ["user_report", "Reported"],
+              ["auto_crash", "Auto-crash"],
+            ]}
+            colors={colors}
+          />
+        </View>
+      )}
       {isLoading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.primary} />
@@ -187,15 +292,67 @@ export default function IncidentsScreen() {
         <Text style={[styles.emptyText, { color: colors.destructive }]}>
           Couldn't load reported issues.
         </Text>
-      ) : incidents.length === 0 ? (
+      ) : !hasIncidents ? (
         <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
           No issues reported yet. When staff report a problem or the app hits a
           crash, it'll show up here.
         </Text>
+      ) : filtered.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+          No issues match these filters.
+        </Text>
       ) : (
-        incidents.map((incident) => <IncidentCard key={incident.id} incident={incident} />)
+        filtered.map((incident) => <IncidentCard key={incident.id} incident={incident} />)
       )}
     </ScrollView>
+  );
+}
+
+// A labelled row of mutually-exclusive filter chips.
+function FilterRow<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+  colors,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: [T, string][];
+  colors: ReturnType<typeof useColors>;
+}) {
+  return (
+    <View style={styles.filterRow}>
+      <Text style={[styles.filterLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <View style={styles.filterChips}>
+        {options.map(([val, text]) => {
+          const active = value === val;
+          return (
+            <Pressable
+              key={val}
+              onPress={() => onChange(val)}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: active ? colors.primary : "transparent",
+                  borderColor: active ? colors.primary : colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  { color: active ? colors.primaryForeground : colors.mutedForeground },
+                ]}
+              >
+                {text}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -208,21 +365,36 @@ const styles = StyleSheet.create({
   iconBox: { width: 34, height: 34, borderRadius: 9, alignItems: "center", justifyContent: "center" },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   cardTitle: { fontSize: 15, fontFamily: FONTS.semibold },
-  newBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  newBadgeText: { fontSize: 9, fontFamily: FONTS.bold, letterSpacing: 0.5 },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  statusBadgeText: { fontSize: 9, fontFamily: FONTS.bold, letterSpacing: 0.5 },
   meta: { fontSize: 12, fontFamily: FONTS.regular, marginTop: 2 },
   body: { borderTopWidth: 1, padding: 14, gap: 12 },
   fieldLabel: { fontSize: 11, fontFamily: FONTS.semibold, textTransform: "uppercase", letterSpacing: 0.4 },
   fieldValue: { fontSize: 14, fontFamily: FONTS.regular, lineHeight: 20 },
-  reviewBtn: {
+  actionsRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10 },
+  actionBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     paddingVertical: 11,
+    paddingHorizontal: 16,
     borderRadius: 10,
   },
-  reviewBtnText: { fontSize: 14, fontFamily: FONTS.semibold },
-  reviewedRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  reviewedText: { fontSize: 12, fontFamily: FONTS.medium },
+  actionBtnOutline: { borderWidth: 1, backgroundColor: "transparent" },
+  actionBtnText: { fontSize: 14, fontFamily: FONTS.semibold },
+  statusLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  statusLineText: { fontSize: 12, fontFamily: FONTS.medium },
+  filters: { gap: 8, paddingBottom: 4 },
+  filterRow: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  filterLabel: {
+    fontSize: 11,
+    fontFamily: FONTS.semibold,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    width: 64,
+  },
+  filterChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  chip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1 },
+  chipText: { fontSize: 12, fontFamily: FONTS.medium },
 });

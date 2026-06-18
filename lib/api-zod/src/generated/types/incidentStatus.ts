@@ -12,4 +12,5 @@ export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus];
 export const IncidentStatus = {
   new: 'new',
   reviewed: 'reviewed',
+  resolved: 'resolved',
 } as const;

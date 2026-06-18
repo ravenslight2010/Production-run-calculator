@@ -593,9 +593,10 @@ export const ListIncidentsResponseItem = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
-  "status": zod.enum(['new', 'reviewed']),
+  "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
-  "reviewedAt": zod.coerce.date().nullable()
+  "reviewedAt": zod.coerce.date().nullable(),
+  "resolvedAt": zod.coerce.date().nullable()
 })
 export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
 
@@ -633,9 +634,10 @@ export const GetIncidentResponse = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
-  "status": zod.enum(['new', 'reviewed']),
+  "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
-  "reviewedAt": zod.coerce.date().nullable()
+  "reviewedAt": zod.coerce.date().nullable(),
+  "resolvedAt": zod.coerce.date().nullable()
 })
 
 
@@ -663,9 +665,42 @@ export const ReviewIncidentResponse = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
-  "status": zod.enum(['new', 'reviewed']),
+  "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
-  "reviewedAt": zod.coerce.date().nullable()
+  "reviewedAt": zod.coerce.date().nullable(),
+  "resolvedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * Marks an incident resolved (its underlying problem is considered fixed/handled). "resolved" implies "reviewed".
+ * @summary Mark an incident resolved (manager only)
+ */
+export const ResolveIncidentParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ResolveIncidentResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "reporterId": zod.string().nullable(),
+  "reporterName": zod.string().nullable(),
+  "reporterRole": zod.string().nullable(),
+  "screen": zod.string(),
+  "appPlatform": zod.string(),
+  "appVersion": zod.string().nullable(),
+  "context": zod.object({
+  "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
+  "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
+  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+}).describe('Captured details about a reported issue or a crash'),
+  "diagnosis": zod.string().nullable(),
+  "workaround": zod.string().nullable(),
+  "status": zod.enum(['new', 'reviewed', 'resolved']),
+  "createdAt": zod.coerce.date(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "resolvedAt": zod.coerce.date().nullable()
 })
 
 

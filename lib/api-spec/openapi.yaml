@@ -664,6 +664,32 @@ paths:
         "404":
           description: No incident with that id
 
+  /incidents/{id}/resolve:
+    post:
+      operationId: resolveIncident
+      tags: [incidents]
+      summary: Mark an incident resolved (manager only)
+      description: >-
+        Marks an incident resolved (its underlying problem is considered
+        fixed/handled). "resolved" implies "reviewed".
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "403":
+          description: Manager role required
+        "404":
+          description: No incident with that id
+
   /me:
     get:
       operationId: getMe
@@ -1630,6 +1656,7 @@ components:
         - status
         - createdAt
         - reviewedAt
+        - resolvedAt
       properties:
         id:
           type: string
@@ -1656,11 +1683,14 @@ components:
           type: [string, "null"]
         status:
           type: string
-          enum: [new, reviewed]
+          enum: [new, reviewed, resolved]
         createdAt:
           type: string
           format: date-time
         reviewedAt:
+          type: [string, "null"]
+          format: date-time
+        resolvedAt:
           type: [string, "null"]
           format: date-time
 

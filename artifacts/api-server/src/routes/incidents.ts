@@ -9,6 +9,7 @@ import {
   createIncident,
   getIncident,
   listIncidents,
+  markIncidentResolved,
   markIncidentReviewed,
 } from "../lib/incidents";
 import {
@@ -158,6 +159,20 @@ router.post(
   requireRole("manager"),
   async (req, res): Promise<void> => {
     const incident = await markIncidentReviewed(pathId(req.params.id));
+    if (!incident) {
+      res.status(404).json({ error: "No incident with that id" });
+      return;
+    }
+    res.json(incident);
+  },
+);
+
+// POST /incidents/:id/resolve — manager marks an incident resolved (fixed).
+router.post(
+  "/incidents/:id/resolve",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const incident = await markIncidentResolved(pathId(req.params.id));
     if (!incident) {
       res.status(404).json({ error: "No incident with that id" });
       return;

@@ -546,6 +546,7 @@ export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus];
 export const IncidentStatus = {
   new: 'new',
   reviewed: 'reviewed',
+  resolved: 'resolved',
 } as const;
 
 export interface Incident {
@@ -570,6 +571,8 @@ export interface Incident {
   createdAt: string;
   /** @nullable */
   reviewedAt: string | null;
+  /** @nullable */
+  resolvedAt: string | null;
 }
 
 export interface UnreviewedIncidentCount {

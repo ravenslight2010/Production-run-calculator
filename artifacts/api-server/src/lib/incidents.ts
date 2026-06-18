@@ -31,6 +31,7 @@ export type IncidentDTO = {
   status: string;
   createdAt: string;
   reviewedAt: string | null;
+  resolvedAt: string | null;
 };
 
 function toDTO(row: Incident): IncidentDTO {
@@ -49,6 +50,7 @@ function toDTO(row: Incident): IncidentDTO {
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
+    resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
   };
 }
 
@@ -102,18 +104,44 @@ export async function getIncident(id: string): Promise<IncidentDTO | null> {
   return row ? toDTO(row) : null;
 }
 
-// Mark an incident reviewed. Guarded on the current status so a re-review is a
-// no-op that still returns the (already reviewed) row rather than 404'ing.
+// Mark an incident reviewed. Guarded on the current status so it only applies to
+// a still-new incident: re-reviewing — or marking an already-resolved incident
+// reviewed — is a no-op that returns the existing row rather than downgrading it
+// or 404'ing.
 export async function markIncidentReviewed(id: string): Promise<IncidentDTO | null> {
   const [existing] = await db
     .select()
     .from(incidentsTable)
     .where(eq(incidentsTable.id, id));
   if (!existing) return null;
-  if (existing.status === "reviewed") return toDTO(existing);
+  if (existing.status !== "new") return toDTO(existing);
   const [row] = await db
     .update(incidentsTable)
     .set({ status: "reviewed", reviewedAt: new Date() })
+    .where(eq(incidentsTable.id, id))
+    .returning();
+  return row ? toDTO(row) : toDTO(existing);
+}
+
+// Mark an incident resolved (the underlying problem is considered fixed/handled).
+// "resolved" implies "reviewed", so we also stamp reviewedAt if it wasn't set
+// yet — this keeps the unreviewed nav-badge count correct when a manager jumps
+// a still-new incident straight to resolved. Re-resolving is a no-op.
+export async function markIncidentResolved(id: string): Promise<IncidentDTO | null> {
+  const [existing] = await db
+    .select()
+    .from(incidentsTable)
+    .where(eq(incidentsTable.id, id));
+  if (!existing) return null;
+  if (existing.status === "resolved") return toDTO(existing);
+  const now = new Date();
+  const [row] = await db
+    .update(incidentsTable)
+    .set({
+      status: "resolved",
+      resolvedAt: now,
+      reviewedAt: existing.reviewedAt ?? now,
+    })
     .where(eq(incidentsTable.id, id))
     .returning();
   return row ? toDTO(row) : toDTO(existing);

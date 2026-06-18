@@ -314,3 +314,82 @@ describe("incident review — manager only", () => {
     expect(body.context.description).toContain("Save button");
   });
 });
+
+describe("incident resolve — manager only", () => {
+  // Seed directly through the DB (rather than the rate-limited POST /incidents)
+  // so these tests don't share the per-user report budget with the rest of the
+  // file and can't be tipped into a 429 by test ordering.
+  async function seedIncident(): Promise<string> {
+    const id = `inc_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    await db.insert(incidentsTable).values({
+      id,
+      source: "user_report",
+      reporterId: OPERATOR,
+      reporterName: "operator",
+      reporterRole: "operator",
+      screen: "Run",
+      appPlatform: "web",
+      context: { description: "The Save button does nothing when I tap it." },
+      diagnosis: "The save didn't go through.",
+      workaround: "Try again in a moment.",
+    });
+    return id;
+  }
+
+  it("resolves a still-new incident directly and drops the unreviewed count", async () => {
+    const id = await seedIncident();
+
+    const before = await req(MANAGER, "GET", "/api/incidents/unreviewed-count");
+    expect(((await before.json()) as { count: number }).count).toBe(1);
+
+    const res = await req(MANAGER, "POST", `/api/incidents/${id}/resolve`);
+    expect(res.status).toBe(200);
+    const resolved = (await res.json()) as {
+      status: string;
+      reviewedAt: string | null;
+      resolvedAt: string | null;
+    };
+    expect(resolved.status).toBe("resolved");
+    // Resolving implies reviewed, so both stamps are set.
+    expect(resolved.resolvedAt).toBeTruthy();
+    expect(resolved.reviewedAt).toBeTruthy();
+
+    const after = await req(MANAGER, "GET", "/api/incidents/unreviewed-count");
+    expect(((await after.json()) as { count: number }).count).toBe(0);
+  });
+
+  it("preserves the original reviewedAt when resolving an already-reviewed incident", async () => {
+    const id = await seedIncident();
+    const reviewRes = await req(MANAGER, "POST", `/api/incidents/${id}/review`);
+    const reviewed = (await reviewRes.json()) as { reviewedAt: string };
+
+    const res = await req(MANAGER, "POST", `/api/incidents/${id}/resolve`);
+    const resolved = (await res.json()) as {
+      status: string;
+      reviewedAt: string;
+      resolvedAt: string;
+    };
+    expect(resolved.status).toBe("resolved");
+    expect(resolved.reviewedAt).toBe(reviewed.reviewedAt);
+    expect(resolved.resolvedAt).toBeTruthy();
+  });
+
+  it("does not downgrade a resolved incident when marked reviewed", async () => {
+    const id = await seedIncident();
+    await req(MANAGER, "POST", `/api/incidents/${id}/resolve`);
+
+    const res = await req(MANAGER, "POST", `/api/incidents/${id}/review`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string };
+    expect(body.status).toBe("resolved");
+  });
+
+  it("rejects operators and 404s an unknown id", async () => {
+    const id = await seedIncident();
+    const forbidden = await req(OPERATOR, "POST", `/api/incidents/${id}/resolve`);
+    expect(forbidden.status).toBe(403);
+
+    const missing = await req(MANAGER, "POST", "/api/incidents/does-not-exist/resolve");
+    expect(missing.status).toBe(404);
+  });
+});

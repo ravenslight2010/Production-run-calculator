@@ -31,4 +31,6 @@ export interface Incident {
   createdAt: Date;
   /** @nullable */
   reviewedAt: Date | null;
+  /** @nullable */
+  resolvedAt: Date | null;
 }

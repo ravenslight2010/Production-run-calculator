@@ -14,9 +14,18 @@ badge and can mark reviewed.
 - DB: `incidents` table in lib/db.
 - Contract: OpenAPI `ReportIncidentInput`, `IncidentDiagnosis`, `Incident`,
   `IncidentContext`, `UnreviewedCount`; paths POST/GET `/incidents`,
-  GET `/incidents/{id}`, POST `/incidents/{id}/review`, GET `/incidents/unreviewed-count`.
+  GET `/incidents/{id}`, POST `/incidents/{id}/review`, POST `/incidents/{id}/resolve`,
+  GET `/incidents/unreviewed-count`.
 - Server: src/lib/incidents.ts (CRUD), routes/incidentsAi.ts (prompt + sanitize),
   routes/incidents.ts (mount + auth/rate-limit).
+
+**Status model (new → reviewed → resolved):** status is `new` | `reviewed` | `resolved`.
+`resolved` IMPLIES reviewed — resolving sets `resolvedAt` AND backfills `reviewedAt`
+(`existing ?? now`) so the unreviewed-count drops even when resolving a still-`new`
+incident. Don't let a later "review" downgrade a resolved incident (review guard is
+`if status !== "new" return`). Filtering (status/platform/source) is CLIENT-SIDE in both
+tab components — no server query params. Keep web (IncidentsTab.tsx) + mobile
+(incidents.tsx) filters and resolve buttons at parity.
 
 **Auth rules (don't regress):**
 - Reporting (POST /incidents) is open to ALL authed users — gated `requireRole` *operator*
@@ -38,3 +47,8 @@ The mobile nav badge sums pending-reset + unreviewed-incident counts; the manage
 
 **Mobile gotcha:** expo-constants is NOT installed, so the mobile report path sends no
 app version — don't reintroduce a `Constants`/appVersion import.
+
+**Integration-test gotcha:** the POST /incidents per-user report rate limit uses an
+in-memory store SHARED across the whole vitest file (non-prod), so accumulated
+`seedIncident(OPERATOR)` calls eventually 429 → order-dependent failures. In new test
+blocks seed via direct `db.insert(incidentsTable)` rather than the rate-limited POST.

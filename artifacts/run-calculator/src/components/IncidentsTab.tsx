@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   LifeBuoy,
@@ -7,6 +7,7 @@ import {
   Bug,
   MessageSquare,
   Check,
+  CheckCheck,
   ChevronRight,
   Lock,
 } from "lucide-react";
@@ -15,9 +16,14 @@ import { Button } from "@/components/ui/button";
 import {
   fetchIncidents,
   markIncidentReviewed,
+  markIncidentResolved,
   type Incident,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
+
+type StatusFilter = "all" | "new" | "reviewed" | "resolved";
+type PlatformFilter = "all" | "web" | "mobile";
+type SourceFilter = "all" | "user_report" | "auto_crash";
 
 function timeAgo(iso: string): string {
   const then = Date.parse(iso);
@@ -34,13 +40,19 @@ function timeAgo(iso: string): string {
 function IncidentRow({ incident }: { incident: Incident }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(incident.status === "new");
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ["incidents"] });
+    void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
+  };
   const review = useMutation({
     mutationFn: () => markIncidentReviewed(incident.id),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["incidents"] });
-      void qc.invalidateQueries({ queryKey: ["unreviewedIncidentCount"] });
-    },
+    onSuccess: invalidate,
   });
+  const resolve = useMutation({
+    mutationFn: () => markIncidentResolved(incident.id),
+    onSuccess: invalidate,
+  });
+  const busy = review.isPending || resolve.isPending;
 
   const isCrash = incident.source === "auto_crash";
   const ctx = incident.context ?? {};
@@ -67,6 +79,16 @@ function IncidentRow({ incident }: { incident: Incident }) {
             {incident.status === "new" && (
               <span className="px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold uppercase tracking-wide">
                 New
+              </span>
+            )}
+            {incident.status === "reviewed" && (
+              <span className="px-1.5 py-0.5 rounded-full bg-sky-500/15 text-sky-400 text-[10px] font-bold uppercase tracking-wide">
+                Reviewed
+              </span>
+            )}
+            {incident.status === "resolved" && (
+              <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-[10px] font-bold uppercase tracking-wide">
+                Resolved
               </span>
             )}
           </div>
@@ -125,25 +147,39 @@ function IncidentRow({ incident }: { incident: Incident }) {
               </p>
             </div>
           )}
-          {incident.status === "new" ? (
-            <Button
-              size="sm"
-              onClick={() => review.mutate()}
-              disabled={review.isPending}
-            >
-              {review.isPending ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              ) : (
-                <Check className="w-4 h-4 mr-2" />
-              )}
-              Mark reviewed
-            </Button>
-          ) : (
-            <p className="flex items-center gap-1.5 text-xs text-emerald-400">
-              <Check className="w-3.5 h-3.5" /> Reviewed
-              {incident.reviewedAt ? ` ${timeAgo(incident.reviewedAt)}` : ""}
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {incident.status === "new" && (
+              <Button size="sm" variant="outline" onClick={() => review.mutate()} disabled={busy}>
+                {review.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4 mr-2" />
+                )}
+                Mark reviewed
+              </Button>
+            )}
+            {incident.status === "reviewed" && (
+              <p className="flex items-center gap-1.5 text-xs text-sky-400">
+                <Check className="w-3.5 h-3.5" /> Reviewed
+                {incident.reviewedAt ? ` ${timeAgo(incident.reviewedAt)}` : ""}
+              </p>
+            )}
+            {incident.status !== "resolved" ? (
+              <Button size="sm" onClick={() => resolve.mutate()} disabled={busy}>
+                {resolve.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <CheckCheck className="w-4 h-4 mr-2" />
+                )}
+                Mark resolved
+              </Button>
+            ) : (
+              <p className="flex items-center gap-1.5 text-xs text-emerald-400">
+                <CheckCheck className="w-3.5 h-3.5" /> Resolved
+                {incident.resolvedAt ? ` ${timeAgo(incident.resolvedAt)}` : ""}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -161,6 +197,22 @@ export default function IncidentsTab() {
     refetchInterval: 20_000,
   });
 
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const [platform, setPlatform] = useState<PlatformFilter>("all");
+  const [source, setSource] = useState<SourceFilter>("all");
+
+  const incidents = data ?? [];
+  const filtered = useMemo(
+    () =>
+      incidents.filter(
+        (i) =>
+          (status === "all" || i.status === status) &&
+          (platform === "all" || i.appPlatform === platform) &&
+          (source === "all" || i.source === source),
+      ),
+    [incidents, status, platform, source],
+  );
+
   if (!roleLoading && !isManager) {
     return (
       <Card>
@@ -174,7 +226,7 @@ export default function IncidentsTab() {
     );
   }
 
-  const incidents = data ?? [];
+  const hasIncidents = incidents.length > 0;
 
   return (
     <Card>
@@ -184,6 +236,41 @@ export default function IncidentsTab() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {hasIncidents && (
+          <div className="space-y-2 pb-1">
+            <FilterRow<StatusFilter>
+              label="Status"
+              value={status}
+              onChange={setStatus}
+              options={[
+                ["all", "All"],
+                ["new", "New"],
+                ["reviewed", "Reviewed"],
+                ["resolved", "Resolved"],
+              ]}
+            />
+            <FilterRow<PlatformFilter>
+              label="Platform"
+              value={platform}
+              onChange={setPlatform}
+              options={[
+                ["all", "All"],
+                ["web", "Web"],
+                ["mobile", "Mobile"],
+              ]}
+            />
+            <FilterRow<SourceFilter>
+              label="Source"
+              value={source}
+              onChange={setSource}
+              options={[
+                ["all", "All"],
+                ["user_report", "Reported"],
+                ["auto_crash", "Auto-crash"],
+              ]}
+            />
+          </div>
+        )}
         {isLoading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -192,17 +279,58 @@ export default function IncidentsTab() {
           <p className="flex items-center gap-2 text-sm text-red-400">
             <AlertTriangle className="w-4 h-4" /> Couldn't load reported issues.
           </p>
-        ) : incidents.length === 0 ? (
+        ) : !hasIncidents ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
             No issues reported yet. When staff report a problem or the app hits a
             crash, it'll show up here.
           </p>
+        ) : filtered.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">
+            No issues match these filters.
+          </p>
         ) : (
-          incidents.map((incident) => (
+          filtered.map((incident) => (
             <IncidentRow key={incident.id} incident={incident} />
           ))
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// A labelled row of mutually-exclusive filter chips.
+function FilterRow<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: T;
+  onChange: (v: T) => void;
+  options: [T, string][];
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground w-16 shrink-0">
+        {label}
+      </span>
+      <div className="flex gap-1.5 flex-wrap">
+        {options.map(([val, text]) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => onChange(val)}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+              value === val
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-transparent text-muted-foreground border-border hover:text-foreground"
+            }`}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

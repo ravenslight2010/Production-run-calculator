@@ -2338,6 +2338,77 @@ export const useReviewIncident = <TError = ErrorType<void>,
       return useMutation(getReviewIncidentMutationOptions(options));
     }
 
+export const getResolveIncidentUrl = (id: string,) => {
+
+
+
+
+  return `/api/incidents/${id}/resolve`
+}
+
+/**
+ * Marks an incident resolved (its underlying problem is considered fixed/handled). "resolved" implies "reviewed".
+ * @summary Mark an incident resolved (manager only)
+ */
+export const resolveIncident = async (id: string, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getResolveIncidentUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getResolveIncidentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveIncident>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resolveIncident>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['resolveIncident'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveIncident>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  resolveIncident(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResolveIncidentMutationResult = NonNullable<Awaited<ReturnType<typeof resolveIncident>>>
+
+    export type ResolveIncidentMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark an incident resolved (manager only)
+ */
+export const useResolveIncident = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveIncident>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resolveIncident>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getResolveIncidentMutationOptions(options));
+    }
+
 export const getGetMeUrl = () => {
 
 

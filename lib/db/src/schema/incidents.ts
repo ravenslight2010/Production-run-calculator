@@ -41,10 +41,14 @@ export const incidentsTable = pgTable("incidents", {
   // could not produce one (the incident is still recorded).
   diagnosis: text("diagnosis"),
   workaround: text("workaround"),
-  // "new" (unreviewed) | "reviewed".
+  // "new" (unreviewed) | "reviewed" (a manager has seen it) | "resolved" (the
+  // underlying problem is considered fixed/handled). "resolved" implies the
+  // incident has also been reviewed.
   status: text("status").notNull().default("new"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  // When a manager marked the incident resolved; null until then.
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
 });
 
 export type Incident = typeof incidentsTable.$inferSelect;

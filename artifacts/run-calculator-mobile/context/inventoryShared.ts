@@ -456,9 +456,10 @@ export type Incident = {
   context: IncidentContext;
   diagnosis: string | null;
   workaround: string | null;
-  status: "new" | "reviewed";
+  status: "new" | "reviewed" | "resolved";
   createdAt: string;
   reviewedAt: string | null;
+  resolvedAt: string | null;
 };
 
 // Report a problem (or auto-submit a crash) and get back a plain-language
@@ -475,6 +476,8 @@ export const fetchUnreviewedIncidentCount = () =>
   api<{ count: number }>("/incidents/unreviewed-count");
 export const markIncidentReviewed = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/review`, { method: "POST" });
+export const markIncidentResolved = (id: string) =>
+  api<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`, { method: "POST" });
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
