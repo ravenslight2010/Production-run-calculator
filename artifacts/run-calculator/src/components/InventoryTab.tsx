@@ -772,17 +772,35 @@ function encodeJpeg(img: HTMLImageElement, maxEdge: number, quality: number): st
 // the payload fits, so oversized originals are handled gracefully instead of
 // being rejected with a 413 after the upload.
 async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
+  // iPhones often hand the picker a HEIC/HEIF photo that most desktop browsers
+  // can't decode via <img>/canvas. Transparently convert it to a JPEG Blob
+  // first so intake just works; if conversion fails we fall through to the
+  // <img> decode below, which surfaces the actionable HEIC guidance.
+  let source: Blob = file;
+  if (isHeicFile(file)) {
+    try {
+      const heic2any = (await import("heic2any")).default;
+      const converted = await heic2any({ blob: file, toType: "image/jpeg", quality: 0.9 });
+      source = Array.isArray(converted) ? converted[0] : converted;
+    } catch {
+      // Conversion failed — leave `source` as the original so the <img> decode
+      // below rejects with the clear HEIC_UNSUPPORTED_MESSAGE fallback.
+      source = file;
+    }
+  }
+
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => resolve(fr.result as string);
     fr.onerror = () => reject(new Error("Failed to read file"));
-    fr.readAsDataURL(file);
+    fr.readAsDataURL(source);
   });
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
     // HEIC/HEIF from iPhones can't be decoded by <img> in most desktop
-    // browsers; surface actionable guidance instead of a cryptic failure.
+    // browsers; if we get here the conversion above didn't succeed, so surface
+    // actionable guidance instead of a cryptic failure.
     i.onerror = () =>
       reject(new Error(isHeicFile(file) ? HEIC_UNSUPPORTED_MESSAGE : "Failed to load image"));
     i.src = dataUrl;
