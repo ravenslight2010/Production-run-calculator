@@ -115,3 +115,98 @@ describe("rateLimit — fails open when the store errors", () => {
     expect(meta.err).toBeInstanceOf(Error);
   });
 });
+
+// Middleware-level enforcement test.
+//
+// The store-level sweep test above proves counting/expiry, and the fail-open
+// test proves the catch branch, but neither exercises the middleware's actual
+// gate: requests at or under `max` must call next(), the first request *over*
+// `max` must return 429 with the friendly error body, and the RateLimit-* /
+// Retry-After headers must be set. A regression here (off-by-one on the cap, a
+// broken 429 response, or missing headers) would either let abuse through or
+// block legitimate users with nothing failing. This drives several requests
+// through the real middleware backed by a real MemoryRateLimitStore and asserts
+// the boundary behavior exactly.
+describe("rateLimit — enforces the cap and returns 429 over the limit", () => {
+  beforeEach(() => {
+    // Pin the clock so RateLimit-Reset / Retry-After are deterministic.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Drives one request through the middleware and returns the captured
+  // next()/status/json/header activity for assertions.
+  async function fire(middleware: ReturnType<typeof rateLimit>) {
+    const headers: Record<string, string> = {};
+    const setHeader = vi.fn((name: string, value: string) => {
+      headers[name] = value;
+    });
+    const json = vi.fn(() => res);
+    const status = vi.fn(() => res);
+    const res = { setHeader, status, json } as unknown as Response;
+
+    const req = {
+      ip: "9.9.9.9",
+      log: { error: vi.fn(), warn: vi.fn() },
+    } as unknown as Request;
+
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    // The middleware does its work in a fire-and-forget async IIFE, so wait for
+    // either next() or a response to be produced before asserting.
+    await vi.waitFor(() => {
+      expect(
+        (next as unknown as ReturnType<typeof vi.fn>).mock.calls.length +
+          status.mock.calls.length,
+      ).toBeGreaterThan(0);
+    });
+
+    return { next, status, json, setHeader, headers };
+  }
+
+  it("allows requests up to max and 429s the one that exceeds it", async () => {
+    const windowMs = 60_000;
+    const max = 3;
+    const middleware = rateLimit({
+      windowMs,
+      max,
+      store: new MemoryRateLimitStore(windowMs),
+    });
+
+    // The first `max` requests are under/at the cap and must pass through.
+    for (let i = 1; i <= max; i++) {
+      const { next, status, json, headers } = await fire(middleware);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(status).not.toHaveBeenCalled();
+      expect(json).not.toHaveBeenCalled();
+
+      // Headers reflect the cap and the shrinking remaining budget.
+      expect(headers["RateLimit-Limit"]).toBe(String(max));
+      expect(headers["RateLimit-Remaining"]).toBe(String(max - i));
+      expect(headers["RateLimit-Reset"]).toBe("60");
+      // No Retry-After while the request is allowed.
+      expect(headers["Retry-After"]).toBeUndefined();
+    }
+
+    // The next request crosses the cap (count = max + 1) and must be blocked.
+    const blocked = await fire(middleware);
+    expect(blocked.next).not.toHaveBeenCalled();
+    expect(blocked.status).toHaveBeenCalledWith(429);
+    expect(blocked.json).toHaveBeenCalledWith({
+      error: "Too many requests. Please wait a moment and try again.",
+    });
+
+    // Headers stay informative on the blocked response: remaining is clamped to
+    // 0 and Retry-After tells the client how long until the window resets.
+    expect(blocked.headers["RateLimit-Limit"]).toBe(String(max));
+    expect(blocked.headers["RateLimit-Remaining"]).toBe("0");
+    expect(blocked.headers["RateLimit-Reset"]).toBe("60");
+    expect(blocked.headers["Retry-After"]).toBe("60");
+  });
+});
