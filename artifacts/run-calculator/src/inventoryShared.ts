@@ -1,9 +1,29 @@
 import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
-import { computeSummaryStats } from "./utils";
+import {
+  computeRunLines as computeRunLinesShared,
+  computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  deriveCandidateItems as deriveCandidateItemsShared,
+  type RunLinesInput,
+  type InventoryCategory,
+  type ConsumeLine,
+  type CandidateItem,
+  type RunLine,
+} from "@workspace/inventory-math";
+
+// Consumption/summary math now lives in @workspace/inventory-math (shared with
+// mobile so the two can't drift). Re-export the types so this module's public
+// surface stays stable for existing web call sites (they're also imported above
+// for use within this file).
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine };
+
+// Web `FormValues` uses `targetDoughballWeight`; the shared lib's canonical
+// field name is `doughballWeightOz`. Map it here so the formulas stay shared.
+function toRunLinesInput(vals: FormValues): RunLinesInput {
+  return { ...vals, doughballWeightOz: vals.targetDoughballWeight };
+}
 
 // ── Types (mirror the API server's inventory responses) ──────────────────────
-export type InventoryCategory = "ingredient" | "packaging";
 
 export type InventoryLot = {
   id: number;
@@ -40,105 +60,17 @@ export type LedgerEntry = {
   createdAt: string;
 };
 
-export type ConsumeLine = { itemKey: string; qty: number };
-export type CandidateItem = { key: string; category: InventoryCategory; name: string; unit: string };
-export type RunLine = CandidateItem & { qty: number };
-
 // ── Per-run consumption mapping ──────────────────────────────────────────────
-// Mirrors the warehouse roll-up (aggregateNeedRows + aggregatePackagingNeeds in
-// home.tsx) so inventory item keys line up exactly with production demand. Keys
-// are stable identities; the server treats unknown keys as no-ops.
-export function computeRunLines(vals: FormValues): RunLine[] {
-  const map = new Map<string, RunLine>();
-  const add = (key: string, category: InventoryCategory, name: string, unit: string, qty: number) => {
-    if (!(qty > 0)) return;
-    const ex = map.get(key);
-    if (ex) ex.qty += qty;
-    else map.set(key, { key, category, name, unit, qty });
-  };
+// Thin wrappers over @workspace/inventory-math so existing web call sites keep
+// their `FormValues` signatures; the formulas (shared with mobile) live there.
+export const computeRunLines = (vals: FormValues) =>
+  computeRunLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
 
-  const s = computeSummaryStats(vals);
+export const computeRunConsumptionLines = (vals: FormValues) =>
+  computeRunConsumptionLinesShared(toRunLinesInput(vals), DEFAULT_PEP_TYPES);
 
-  // Dough — batches = ceil(totalPizzas / effective yield)
-  const dRecipeLbs = (vals.doughRecipe ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
-  const effYield =
-    dRecipeLbs > 0 && vals.targetDoughballWeight > 0
-      ? (dRecipeLbs * 16) / vals.targetDoughballWeight
-      : vals.doughBatchYield;
-  if (effYield > 0 && vals.targetDoughballWeight > 0) {
-    const batches = Math.ceil(s.totalPizzas / effYield);
-    add("ingredient:Dough:batches", "ingredient", "Dough", "batches", batches);
-  }
-
-  // Sauce
-  if (s.sauceBatches > 0) {
-    add("ingredient:Sauce:batches", "ingredient", "Sauce", "batches", s.sauceBatches);
-  }
-
-  // Applicators (cheese / mixes)
-  const apps = [
-    { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
-    { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },
-    { type: s.app3Type, lbs: s.app3Lbs, batches: s.app3Batches },
-    { type: s.app4Type, lbs: s.app4Lbs, batches: s.app4Batches },
-  ];
-  for (const a of apps) {
-    const type = (a.type ?? "").trim();
-    if (!type) continue;
-    const isMix = type.toLowerCase().includes("mix");
-    if (isMix && a.lbs > 0) add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", a.lbs);
-    else if (!isMix && a.batches > 0) add(`ingredient:${type}:batches`, "ingredient", type, "batches", a.batches);
-  }
-
-  // Pepperoni / toppings — trim type identically to mobile so keys/std-vs-batch
-  // classification stay in parity even when the type has stray whitespace.
-  const pep1Type = (s.pep1Type ?? "").trim();
-  if (pep1Type && s.pep1Lbs > 0) {
-    const std = DEFAULT_PEP_TYPES.includes(pep1Type);
-    if (std) add(`ingredient:${pep1Type}:lbs`, "ingredient", pep1Type, "lbs", s.pep1Lbs);
-    else add(`ingredient:${pep1Type}:batches`, "ingredient", pep1Type, "batches", s.pep1Batches);
-  }
-  const pep2Type = (s.pep2Type ?? "").trim();
-  if (pep2Type && s.pep2Lbs > 0) {
-    const std = DEFAULT_PEP_TYPES.includes(pep2Type);
-    if (std) add(`ingredient:${pep2Type}:lbs`, "ingredient", pep2Type, "lbs", s.pep2Lbs);
-    else add(`ingredient:${pep2Type}:batches`, "ingredient", pep2Type, "batches", s.pep2Batches);
-  }
-
-  // Packaging — only cartoned runs consume packaging
-  if ((vals.cartoned ?? "").trim().toLowerCase() === "yes") {
-    const circle = (vals.circles ?? "").trim();
-    if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
-      add(`packaging:circles:${circle}`, "packaging", `Circles — ${circle}`, "circles", s.totalPizzas);
-    }
-    const shipper = (vals.shipper ?? "").trim();
-    if (shipper && shipper.toLowerCase() !== "none" && s.totalCases > 0) {
-      add(`packaging:shippers:${shipper}`, "packaging", `Shippers — ${shipper}`, "shippers", s.totalCases);
-    }
-    const perCase = Number(vals.cartonsPerCase) || 0;
-    if (perCase > 0 && s.totalPizzas > 0) {
-      add("packaging:cartons:cases", "packaging", "Cartons", "cases", Math.ceil(s.totalPizzas / perCase));
-    }
-  }
-
-  return [...map.values()];
-}
-
-export function computeRunConsumptionLines(vals: FormValues): ConsumeLine[] {
-  return computeRunLines(vals).map((l) => ({ itemKey: l.key, qty: l.qty }));
-}
-
-// Distinct candidate items across the given runs, for the "add from production"
-// picker. Deduped by stable key; quantities are dropped.
-export function deriveCandidateItems(valsList: FormValues[]): CandidateItem[] {
-  const map = new Map<string, CandidateItem>();
-  for (const vals of valsList) {
-    for (const l of computeRunLines(vals)) {
-      if (!map.has(l.key)) map.set(l.key, { key: l.key, category: l.category, name: l.name, unit: l.unit });
-    }
-  }
-  return [...map.values()];
-}
+export const deriveCandidateItems = (valsList: FormValues[]) =>
+  deriveCandidateItemsShared(valsList.map(toRunLinesInput), DEFAULT_PEP_TYPES);
 
 // ── Expiration helpers ───────────────────────────────────────────────────────
 // Default expiry lead time; overridden by the user-configured value loaded from

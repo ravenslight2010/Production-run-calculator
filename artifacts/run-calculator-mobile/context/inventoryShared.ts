@@ -11,13 +11,29 @@
 
 import { getAuthToken } from "@workspace/api-client-react";
 import { Platform } from "react-native";
-import type { RunSettings, RecipeRow } from "./RunContext";
+import type { RunSettings } from "./RunContext";
 import { DEFAULT_PEP_TYPES } from "./RunContext";
+import {
+  computeRunLines as computeRunLinesShared,
+  computeRunConsumptionLines as computeRunConsumptionLinesShared,
+  deriveCandidateItems as deriveCandidateItemsShared,
+  type InventoryCategory,
+  type ConsumeLine,
+  type CandidateItem,
+  type RunLine,
+} from "@workspace/inventory-math";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 import { notifyUnauthorized } from "./authEvents";
 
+// Consumption/summary math now lives in @workspace/inventory-math (shared with
+// the web app so the two can't drift). Re-export the types so this module's
+// public surface stays stable for existing mobile call sites (they're also
+// imported above for use within this file). RunSettings already uses the lib's
+// canonical `doughballWeightOz` field name, so it is passed straight through;
+// only DEFAULT_PEP_TYPES is injected (owned per-app).
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine };
+
 // ── Types (mirror the API server's inventory responses) ──────────────────────
-export type InventoryCategory = "ingredient" | "packaging";
 
 export interface InventoryLot {
   id: number;
@@ -54,119 +70,17 @@ export interface LedgerEntry {
   createdAt: string;
 }
 
-export interface ConsumeLine {
-  itemKey: string;
-  qty: number;
-}
-export interface CandidateItem {
-  key: string;
-  category: InventoryCategory;
-  name: string;
-  unit: string;
-}
-export interface RunLine extends CandidateItem {
-  qty: number;
-}
+// ── Per-run consumption mapping (shared with web via @workspace/inventory-math) ─
+// Thin wrappers so existing mobile call sites keep their `RunSettings`
+// signatures; the formulas live in the shared lib.
+export const computeRunLines = (s: RunSettings) =>
+  computeRunLinesShared(s, DEFAULT_PEP_TYPES);
 
-function sumRecipe(rows: RecipeRow[] | undefined): number {
-  return (rows ?? []).reduce((acc, r) => acc + Number(r.lbs ?? 0), 0);
-}
+export const computeRunConsumptionLines = (s: RunSettings) =>
+  computeRunConsumptionLinesShared(s, DEFAULT_PEP_TYPES);
 
-// ── Per-run consumption mapping (mirrors web computeSummaryStats) ────────────
-export function computeRunLines(s: RunSettings): RunLine[] {
-  const map = new Map<string, RunLine>();
-  const add = (key: string, category: InventoryCategory, name: string, unit: string, qty: number) => {
-    if (!(qty > 0)) return;
-    const ex = map.get(key);
-    if (ex) ex.qty += qty;
-    else map.set(key, { key, category, name, unit, qty });
-  };
-
-  const totalPizzas = s.casesNeeded * s.pizzasPerCase;
-  const totalPizzasForSauce = totalPizzas + s.casesPerLayer * s.pizzasPerCase;
-
-  // Dough — effective yield from recipe (lbs * 16 / doughball oz) or flat yield.
-  const dRecipeLbs = sumRecipe(s.doughRecipe);
-  const effYield =
-    dRecipeLbs > 0 && s.doughballWeightOz > 0
-      ? (dRecipeLbs * 16) / s.doughballWeightOz
-      : s.doughBatchYield;
-  if (effYield > 0 && s.doughballWeightOz > 0) {
-    const batches = Math.ceil(totalPizzas / effYield);
-    add("ingredient:Dough:batches", "ingredient", "Dough", "batches", batches);
-  }
-
-  // Sauce
-  const frontlineLbs = sumRecipe(s.frontlineRecipe);
-  const sauceEffBarrel = frontlineLbs > 0 ? frontlineLbs : s.sauceBarrelLbs;
-  const sauceLbs = (totalPizzasForSauce * s.sauceOzPerPizza) / 16 + 30;
-  const sauceBatches = sauceEffBarrel > 0 ? sauceLbs / sauceEffBarrel : 0;
-  if (sauceBatches > 0) add("ingredient:Sauce:batches", "ingredient", "Sauce", "batches", sauceBatches);
-
-  // Applicators 1–4
-  const apps = [
-    { type: s.app1Type, oz: s.app1OzPerPizza, recipe: s.app1CheeseRecipe, batch: s.app1BatchLbs },
-    { type: s.app2Type, oz: s.app2OzPerPizza, recipe: s.app2CheeseRecipe, batch: s.app2BatchLbs },
-    { type: s.app3Type, oz: s.app3OzPerPizza, recipe: s.app3CheeseRecipe, batch: s.app3BatchLbs },
-    { type: s.app4Type, oz: s.app4OzPerPizza, recipe: s.app4CheeseRecipe, batch: s.app4BatchLbs },
-  ];
-  for (const a of apps) {
-    const type = (a.type ?? "").trim();
-    if (!type) continue;
-    const lbs = (totalPizzasForSauce * a.oz) / 16 + 20;
-    const isMix = type.toLowerCase().includes("mix");
-    const effBatch = sumRecipe(a.recipe) > 0 ? sumRecipe(a.recipe) : a.batch;
-    if (isMix && lbs > 0) add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", lbs);
-    else if (!isMix && effBatch > 0) add(`ingredient:${type}:batches`, "ingredient", type, "batches", lbs / effBatch);
-  }
-
-  // Pepperoni 1–2
-  const peps = [
-    { type: s.pep1Type, oz: s.pep1OzPerPizza, sticks: s.pep1Sticks, batch: s.pep1BatchLbs },
-    { type: s.pep2Type, oz: s.pep2OzPerPizza, sticks: s.pep2Sticks, batch: s.pep2BatchLbs },
-  ];
-  for (const pep of peps) {
-    const type = (pep.type ?? "").trim();
-    if (!type) continue;
-    const lbs = (totalPizzasForSauce * pep.oz) / 16 + pep.sticks;
-    if (!(lbs > 0)) continue;
-    const std = DEFAULT_PEP_TYPES.includes(type);
-    if (std) add(`ingredient:${type}:lbs`, "ingredient", type, "lbs", lbs);
-    else if (pep.batch > 0) add(`ingredient:${type}:batches`, "ingredient", type, "batches", lbs / pep.batch);
-  }
-
-  // Packaging — only cartoned runs consume packaging
-  if ((s.cartoned ?? "").trim().toLowerCase() === "yes") {
-    const circle = (s.circles ?? "").trim();
-    if (circle && circle.toLowerCase() !== "none" && totalPizzas > 0) {
-      add(`packaging:circles:${circle}`, "packaging", `Circles — ${circle}`, "circles", totalPizzas);
-    }
-    const shipper = (s.shipper ?? "").trim();
-    if (shipper && shipper.toLowerCase() !== "none" && s.casesNeeded > 0) {
-      add(`packaging:shippers:${shipper}`, "packaging", `Shippers — ${shipper}`, "shippers", s.casesNeeded);
-    }
-    const perCase = Number(s.cartonsPerCase) || 0;
-    if (perCase > 0 && totalPizzas > 0) {
-      add("packaging:cartons:cases", "packaging", "Cartons", "cases", Math.ceil(totalPizzas / perCase));
-    }
-  }
-
-  return [...map.values()];
-}
-
-export function computeRunConsumptionLines(s: RunSettings): ConsumeLine[] {
-  return computeRunLines(s).map((l) => ({ itemKey: l.key, qty: l.qty }));
-}
-
-export function deriveCandidateItems(settingsList: RunSettings[]): CandidateItem[] {
-  const map = new Map<string, CandidateItem>();
-  for (const s of settingsList) {
-    for (const l of computeRunLines(s)) {
-      if (!map.has(l.key)) map.set(l.key, { key: l.key, category: l.category, name: l.name, unit: l.unit });
-    }
-  }
-  return [...map.values()];
-}
+export const deriveCandidateItems = (settingsList: RunSettings[]) =>
+  deriveCandidateItemsShared(settingsList, DEFAULT_PEP_TYPES);
 
 // ── Expiration helpers ───────────────────────────────────────────────────────
 // Default expiry lead time; overridden by the user-configured value loaded from

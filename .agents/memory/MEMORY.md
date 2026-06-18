@@ -39,4 +39,5 @@
 - [Fill-missing assistant](fill-missing-assistant.md) — run-setup "fill missing data" panel: source priority profile→spec→default→AI→none; never auto-apply (per-field confirm via existing update paths); AI read-only; recipes excluded from detection; web+mobile parity.
 - [Web test harness](web-test-harness.md) — web artifact owns shared web+mobile vitest; mobile module loaded via strip-imports→transpile→temp-mjs; serialize files + big timeouts or validation flakes under dev-workflow contention.
 - [Fill-missing shared lib](fill-missing-shared-lib.md) — fill-missing pure logic now in @workspace/fill-missing; each app keeps only platform glue + re-exports; test imports lib directly.
+- [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.
 - [Run-calc parity test](run-calc-parity-test.md) — web computeCalc is inline (not importable); parity guard uses web computeSummaryStats vs mobile computeCalc on a coinciding basis; mobile loaded via strip-imports harness.

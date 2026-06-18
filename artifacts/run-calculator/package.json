@@ -85,6 +85,7 @@
   },
   "dependencies": {
     "@workspace/fill-missing": "workspace:*",
+    "@workspace/inventory-math": "workspace:*",
     "@workspace/onboarding": "workspace:*"
   }
 }

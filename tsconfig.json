@@ -19,6 +19,9 @@
       "path": "./lib/fill-missing"
     },
     {
+      "path": "./lib/inventory-math"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]

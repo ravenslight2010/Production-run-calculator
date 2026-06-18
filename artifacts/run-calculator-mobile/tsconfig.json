@@ -23,6 +23,9 @@
     },
     {
       "path": "../../lib/fill-missing"
+    },
+    {
+      "path": "../../lib/inventory-math"
     }
   ]
 }

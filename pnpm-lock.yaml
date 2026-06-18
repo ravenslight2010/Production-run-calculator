@@ -426,6 +426,9 @@ importers:
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
+      '@workspace/inventory-math':
+        specifier: workspace:*
+        version: link:../../lib/inventory-math
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -652,6 +655,9 @@ importers:
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
+      '@workspace/inventory-math':
+        specifier: workspace:*
+        version: link:../../lib/inventory-math
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -857,6 +863,8 @@ importers:
         version: 0.31.10
 
   lib/fill-missing: {}
+
+  lib/inventory-math: {}
 
   lib/integrations-openai-ai-server:
     dependencies:
