@@ -47,3 +47,11 @@ export async function getSessionBoundaryMs(): Promise<number> {
     return cachedBoundaryMs;
   }
 }
+
+// Drops the cached boundary so the next read hits the database. Intended for
+// tests, which set up distinct daily_sync rows per case against this shared
+// module-level cache; production never needs it (the cache simply ages out).
+export function clearSessionBoundaryCache(): void {
+  cachedBoundaryMs = 0;
+  cachedAt = 0;
+}
