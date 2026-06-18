@@ -70,11 +70,11 @@ function AuthForm({ mode }: { mode: Mode }) {
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+          className="rounded-2xl border border-card-border bg-card p-6 shadow-xl"
         >
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="username" className="text-slate-700">
+              <Label htmlFor="username" className="text-foreground">
                 Username
               </Label>
               <Input
@@ -87,11 +87,11 @@ function AuthForm({ mode }: { mode: Mode }) {
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="border-slate-300 text-slate-900"
+                className="text-foreground"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-slate-700">
+              <Label htmlFor="password" className="text-foreground">
                 Password
               </Label>
               <Input
@@ -102,16 +102,16 @@ function AuthForm({ mode }: { mode: Mode }) {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="border-slate-300 text-slate-900"
+                className="text-foreground"
               />
             </div>
 
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <Button
               type="submit"
               disabled={submitting}
-              className="w-full bg-amber-500 font-semibold text-white hover:bg-amber-600"
+              className="w-full font-semibold"
             >
               {submitting
                 ? isSignUp
@@ -123,13 +123,13 @@ function AuthForm({ mode }: { mode: Mode }) {
             </Button>
           </div>
 
-          <p className="mt-5 text-center text-sm text-slate-500">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
             {isSignUp ? (
               <>
                 Already have an account?{" "}
                 <button
                   type="button"
-                  className="font-medium text-amber-600 hover:text-amber-700"
+                  className="font-medium text-primary hover:text-primary/90"
                   onClick={() => setLocation("/sign-in")}
                 >
                   Sign in
@@ -140,7 +140,7 @@ function AuthForm({ mode }: { mode: Mode }) {
                 Need an account?{" "}
                 <button
                   type="button"
-                  className="font-medium text-amber-600 hover:text-amber-700"
+                  className="font-medium text-primary hover:text-primary/90"
                   onClick={() => setLocation("/sign-up")}
                 >
                   Create one

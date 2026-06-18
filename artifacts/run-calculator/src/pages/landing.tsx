@@ -24,7 +24,7 @@ export default function Landing() {
         <div className="mt-8 flex flex-col gap-3">
           <Button
             size="lg"
-            className="w-full bg-amber-500 text-white hover:bg-amber-600"
+            className="w-full"
             onClick={() => setLocation("/sign-in")}
           >
             Sign in
