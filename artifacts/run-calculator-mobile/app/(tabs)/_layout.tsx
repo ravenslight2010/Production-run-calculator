@@ -12,6 +12,7 @@ import { useUnreviewedIncidentCount } from "@/hooks/useUnreviewedIncidentCount";
 import { useMe } from "@/hooks/useRole";
 import ReportIssueModal from "@/components/ReportIssueModal";
 import GetStartedModal from "@/components/GetStartedModal";
+import GuidedTour from "@/components/GuidedTour";
 
 const MENU_ITEMS: {
   label: string;
@@ -40,6 +41,9 @@ export default function TabLayout() {
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
   const [getStartedOpen, setGetStartedOpen] = useState(false);
+  // Multi-step guided tour that walks through each tab; opened on demand from
+  // the Get Started overview or the header menu (never auto-shown).
+  const [tourOpen, setTourOpen] = useState(false);
   const autoOpenedGetStarted = useRef(false);
   useEffect(() => {
     if (autoOpenedGetStarted.current) return;
@@ -290,6 +294,33 @@ export default function TabLayout() {
               </View>
               <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
             </Pressable>
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                setTourOpen(true);
+              }}
+              style={({ pressed }) => [
+                styles.menuItem,
+                {
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <View style={[styles.menuIcon, { backgroundColor: colors.primary + "22" }]}>
+                <Feather name="compass" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                  Guided Tour
+                </Text>
+                <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                  Step through each tab one at a time
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
             {isManager && (
               <Pressable
                 onPress={() => {
@@ -369,10 +400,18 @@ export default function TabLayout() {
       <GetStartedModal
         visible={getStartedOpen}
         isManager={isManager}
+        onStartTour={() => setTourOpen(true)}
         onDismiss={() => {
           setGetStartedOpen(false);
           if (me && me.onboardingSeen === false) void markOnboardingSeen();
         }}
+      />
+
+      <GuidedTour
+        visible={tourOpen}
+        isManager={isManager}
+        onClose={() => setTourOpen(false)}
+        onNavigate={(route) => router.push(route as never)}
       />
     </>
   );

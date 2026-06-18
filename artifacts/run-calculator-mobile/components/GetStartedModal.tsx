@@ -64,12 +64,15 @@ const MENU: Entry[] = [
 export default function GetStartedModal({
   visible,
   onDismiss,
+  onStartTour,
   isManager,
 }: {
   visible: boolean;
   // Called whenever the overview is dismissed (button, swipe, or back), so the
   // caller can mark it seen and close it.
   onDismiss: () => void;
+  // Launch the step-by-step guided tour from within the overview.
+  onStartTour: () => void;
   isManager: boolean;
 }) {
   const colors = useColors();
@@ -140,6 +143,22 @@ export default function GetStartedModal({
           </ScrollView>
 
           <Pressable
+            onPress={() => {
+              onDismiss();
+              onStartTour();
+            }}
+            style={({ pressed }) => [
+              styles.tourBtn,
+              { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Feather name="compass" size={16} color={colors.foreground} />
+            <Text style={[styles.tourBtnText, { color: colors.foreground }]}>
+              Take a guided tour
+            </Text>
+          </Pressable>
+
+          <Pressable
             onPress={onDismiss}
             style={({ pressed }) => [
               styles.btn,
@@ -183,4 +202,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   btnText: { fontSize: 15, fontFamily: FONTS.semibold },
+  tourBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 4,
+  },
+  tourBtnText: { fontSize: 15, fontFamily: FONTS.semibold },
 });

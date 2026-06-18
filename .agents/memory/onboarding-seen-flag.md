@@ -18,3 +18,13 @@ first login and is reopenable from the header menu on both apps.
 
 **Why:** parity rule in replit.md; the flag must survive device changes so it lives on
 the user record, not AsyncStorage/localStorage.
+
+## Guided tour (revisit-only, no flag)
+
+A separate multi-step "Guided Tour" (`GuidedTour.tsx` on both apps) walks through the
+6 main tabs in sequence: as each step activates it switches the underlying tab (web
+`onNavigate`→`setActiveTab`; mobile `onNavigate`→`router.push("/(tabs)/...")`) so the
+real screen shows behind the step card. It is **opt-in only — never auto-shown**, so it
+needs no server flag. Launch points (both apps, parity): a "Take a guided tour" button
+in the Get Started overview footer, plus a "Guided Tour" header-menu item. Step copy
+mirrors the Get Started TABS copy; keep web+mobile in sync.

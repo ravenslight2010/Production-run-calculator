@@ -102,6 +102,7 @@ import AssistantTab from "../components/AssistantTab";
 import IncidentsTab from "../components/IncidentsTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   computeRunConsumptionLines,
@@ -172,6 +173,7 @@ import {
   CircleDot,
   Sparkles,
   CalendarPlus,
+  Compass,
   CalendarDays,
   ListChecks,
   PauseCircle,
@@ -1801,6 +1803,9 @@ export default function Home() {
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
   const [showGetStarted, setShowGetStarted] = useState(false);
+  // Multi-step guided tour that walks through each tab; opened on demand from
+  // the Get Started overview or the header menu (never auto-shown).
+  const [showTour, setShowTour] = useState(false);
   const autoOpenedGetStarted = useRef(false);
   useEffect(() => {
     if (autoOpenedGetStarted.current) return;
@@ -6086,6 +6091,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowGetStarted(true)}>
                   <Boxes className="w-4 h-4 mr-2" /> Get Started
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowTour(true)}>
+                  <Compass className="w-4 h-4 mr-2" /> Guided Tour
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { void signOut(); }}>
                   <LogOut className="w-4 h-4 mr-2" /> Sign out
                 </DropdownMenuItem>
@@ -8746,6 +8754,14 @@ export default function Home() {
           onDismiss={() => {
             if (me && me.onboardingSeen === false) void markOnboardingSeen();
           }}
+          onStartTour={() => setShowTour(true)}
+          isManager={isManager}
+        />
+
+        <GuidedTour
+          open={showTour}
+          onClose={() => setShowTour(false)}
+          onNavigate={setActiveTab}
           isManager={isManager}
         />
 

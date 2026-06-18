@@ -11,6 +11,7 @@ import {
   BarChart2,
   Boxes,
   ClipboardList,
+  Compass,
   Droplets,
   Factory,
   Layers,
@@ -90,6 +91,7 @@ export default function GetStartedDialog({
   open,
   onOpenChange,
   onDismiss,
+  onStartTour,
   isManager,
 }: {
   open: boolean;
@@ -97,6 +99,8 @@ export default function GetStartedDialog({
   // Called when the user actively dismisses the overview (button or close), so
   // the caller can mark it seen. Fired once per dismissal.
   onDismiss: () => void;
+  // Launch the step-by-step guided tour from within the overview.
+  onStartTour: () => void;
   isManager: boolean;
 }) {
   return (
@@ -149,7 +153,17 @@ export default function GetStartedDialog({
           </section>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              onDismiss();
+              onOpenChange(false);
+              onStartTour();
+            }}
+          >
+            <Compass className="mr-2 h-4 w-4" /> Take a guided tour
+          </Button>
           <Button
             onClick={() => {
               onDismiss();
