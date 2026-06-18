@@ -719,6 +719,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffMember"
 
+  /me/tour-completed:
+    post:
+      operationId: markTourCompleted
+      tags: [roles]
+      summary: Mark the guided tour as completed
+      description: >-
+        Sets the current user's tourCompleted flag once they reach the guided
+        tour's final step, so the app can tell a brand-new user from one who has
+        already finished the tour. Idempotent.
+      responses:
+        "200":
+          description: Updated current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+
   /users:
     get:
       operationId: listStaff
@@ -1284,6 +1301,7 @@ components:
         - email
         - name
         - onboardingSeen
+        - tourCompleted
       properties:
         userId:
           type: string
@@ -1299,6 +1317,11 @@ components:
           description: >-
             Whether the user has dismissed the first-login "Get Started"
             overview.
+        tourCompleted:
+          type: boolean
+          description: >-
+            Whether the user has finished the guided tour (reached its final
+            step).
 
     StaffRoleUpdate:
       type: object

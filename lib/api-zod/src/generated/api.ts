@@ -58,7 +58,8 @@ export const SignInResponse = zod.object({
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
 })
 })
 
@@ -713,7 +714,8 @@ export const GetMeResponse = zod.object({
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
 })
 
 
@@ -726,7 +728,22 @@ export const MarkOnboardingSeenResponse = zod.object({
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+})
+
+
+/**
+ * Sets the current user's tourCompleted flag once they reach the guided tour's final step, so the app can tell a brand-new user from one who has already finished the tour. Idempotent.
+ * @summary Mark the guided tour as completed
+ */
+export const MarkTourCompletedResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
 })
 
 
@@ -738,7 +755,8 @@ export const ListStaffResponseItem = zod.object({
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
 })
 export const ListStaffResponse = zod.array(ListStaffResponseItem)
 
@@ -759,7 +777,8 @@ export const SetStaffRoleResponse = zod.object({
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
-  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
 })
 
 

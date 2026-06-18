@@ -1493,7 +1493,8 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
 }
 
 export default function Home() {
-  const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen } = useAuth();
+  const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen, markTourCompleted } =
+    useAuth();
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
@@ -8757,6 +8758,7 @@ export default function Home() {
         <GuidedTour
           open={showTour}
           onClose={() => setShowTour(false)}
+          onComplete={() => void markTourCompleted()}
           onNavigate={setActiveTab}
           isManager={isManager}
         />

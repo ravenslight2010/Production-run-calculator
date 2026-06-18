@@ -10,6 +10,7 @@ import {
   changePasswordRequest,
   fetchMe,
   markOnboardingSeenRequest,
+  markTourCompletedRequest,
   setUnauthorizedHandler,
   signInRequest,
   signOutRequest,
@@ -40,6 +41,9 @@ type AuthContextValue = {
   // Mark the first-login "Get Started" overview as seen, persisting it
   // server-side and updating the cached identity so it won't auto-open again.
   markOnboardingSeen: () => Promise<void>;
+  // Mark the guided tour as completed (user reached its final step), persisting
+  // it server-side and updating the cached identity.
+  markTourCompleted: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -132,6 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     qc.setQueryData(["me"], updated);
   }, [qc]);
 
+  // Persist the guided-tour completion server-side, then write the updated
+  // identity straight into the cache so the app knows this user finished it.
+  const markTourCompleted = useCallback(async () => {
+    const updated = await markTourCompletedRequest();
+    qc.setQueryData(["me"], updated);
+  }, [qc]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -145,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         revalidate,
         changePassword,
         markOnboardingSeen,
+        markTourCompleted,
       }}
     >
       {children}

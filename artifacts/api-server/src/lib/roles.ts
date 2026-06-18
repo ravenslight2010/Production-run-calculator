@@ -21,6 +21,8 @@ export type StaffMember = {
   name: string | null;
   // Whether the user has dismissed the first-login "Get Started" overview.
   onboardingSeen: boolean;
+  // Whether the user has finished the guided tour (reached its final step).
+  tourCompleted: boolean;
 };
 
 async function managerCount(): Promise<number> {
@@ -74,6 +76,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     .select({
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
+      tourCompleted: usersTable.tourCompleted,
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
@@ -83,6 +86,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     email: null,
     name: user?.username ?? null,
     onboardingSeen: user?.onboardingSeen ?? false,
+    tourCompleted: user?.tourCompleted ?? false,
   };
 }
 
@@ -96,6 +100,17 @@ export async function markOnboardingSeen(userId: string): Promise<StaffMember> {
   return getStaffMember(userId);
 }
 
+// Mark the guided tour as completed for this user once they reach its final
+// step, so the app can tell a brand-new user from one who already finished the
+// tour. Idempotent.
+export async function markTourCompleted(userId: string): Promise<StaffMember> {
+  await db
+    .update(usersTable)
+    .set({ tourCompleted: true })
+    .where(eq(usersTable.id, userId));
+  return getStaffMember(userId);
+}
+
 export async function listStaff(): Promise<StaffMember[]> {
   const rows = await db
     .select({
@@ -103,6 +118,7 @@ export async function listStaff(): Promise<StaffMember[]> {
       role: userRolesTable.role,
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
+      tourCompleted: usersTable.tourCompleted,
     })
     .from(userRolesTable)
     .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
@@ -113,6 +129,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     email: null,
     name: r.username,
     onboardingSeen: r.onboardingSeen,
+    tourCompleted: r.tourCompleted,
   }));
 }
 

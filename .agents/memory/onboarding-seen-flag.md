@@ -22,3 +22,12 @@ is the only way to guarantee the once-only behavior stays identical across both.
 consumers) AND devDependencies so it resolves standalone under `tsc --build`,
 vitest, and metro — a pure peer dep alone fails to resolve `react` when the lib
 is compiled/bundled in isolation.
+
+**Sibling flag `tourCompleted`:** a second independent per-user boolean on
+`users` mirrors `onboardingSeen` through the exact same layers (DB column,
+StaffMember schema/type, `/me` payload, idempotent `POST /me/tour-completed`,
+`markTourCompletedRequest` in both `inventoryShared`, `markTourCompleted` on
+both AuthContexts). It flips true when the GuidedTour reaches its final "Done"
+step via an optional `onComplete` prop (Skip/X never fire it). The two flags are
+deliberately separate — finishing the tour must NOT mark onboarding seen and
+vice-versa. Add any future per-user UI flag by cloning this same path.

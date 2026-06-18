@@ -86,11 +86,15 @@ function buildSteps(isManager: boolean): TourStep[] {
 export default function GuidedTour({
   open,
   onClose,
+  onComplete,
   onNavigate,
   isManager,
 }: {
   open: boolean;
   onClose: () => void;
+  // Fired when the user reaches the final step and taps "Done", so the caller
+  // can record that this user finished the tour. Skipping/closing won't fire it.
+  onComplete?: () => void;
   // Switch the underlying app to a given tab as tour steps advance.
   onNavigate: (tab: string) => void;
   isManager: boolean;
@@ -170,7 +174,13 @@ export default function GuidedTour({
             </Button>
           )}
           {isLast ? (
-            <Button size="sm" onClick={onClose}>
+            <Button
+              size="sm"
+              onClick={() => {
+                onComplete?.();
+                onClose();
+              }}
+            >
               <Check className="mr-1 h-4 w-4" /> Done
             </Button>
           ) : (

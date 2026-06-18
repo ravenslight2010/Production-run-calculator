@@ -496,6 +496,95 @@ describe("first-login onboarding overview", () => {
   });
 });
 
+describe("guided tour completion", () => {
+  // A freshly created account starts with tourCompleted=false (the opt-in tour
+  // has never been finished). POST /me/tour-completed flips it true permanently
+  // and idempotently once the user reaches the tour's final step, and the change
+  // is visible in the /me payload both apps read on every load. Mirrors the
+  // onboardingSeen plumbing.
+  it("a brand-new signed-up user starts with tourCompleted=false", async () => {
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "tour-newbie",
+      password: "first-password",
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      token: string;
+      user: { userId: string; tourCompleted: boolean };
+    };
+    expect(body.user.tourCompleted).toBe(false);
+
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${body.user.userId}`);
+    expect(row.tourCompleted).toBe(false);
+  });
+
+  it("POST /me/tour-completed flips the flag and returns the updated StaffMember", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "tour-newbie2",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    const marked = await req(user.userId, "POST", "/api/me/tour-completed");
+    expect(marked.status).toBe(200);
+    const markedBody = (await marked.json()) as { tourCompleted: boolean };
+    expect(markedBody.tourCompleted).toBe(true);
+
+    // The /me payload now reflects it.
+    const me = await req(user.userId, "GET", "/api/me");
+    const meBody = (await me.json()) as { tourCompleted: boolean };
+    expect(meBody.tourCompleted).toBe(true);
+
+    // And the DB row is persisted true.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${user.userId}`);
+    expect(row.tourCompleted).toBe(true);
+  });
+
+  it("POST /me/tour-completed is idempotent (stays true on repeat calls)", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "tour-newbie3",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    const first = await req(user.userId, "POST", "/api/me/tour-completed");
+    expect(first.status).toBe(200);
+    const second = await req(user.userId, "POST", "/api/me/tour-completed");
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as { tourCompleted: boolean };
+    expect(secondBody.tourCompleted).toBe(true);
+
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${user.userId}`);
+    expect(row.tourCompleted).toBe(true);
+  });
+
+  it("completing the tour does not flip onboardingSeen (independent flags)", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "tour-newbie4",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    await req(user.userId, "POST", "/api/me/tour-completed");
+    const me = await req(user.userId, "GET", "/api/me");
+    const meBody = (await me.json()) as {
+      onboardingSeen: boolean;
+      tourCompleted: boolean;
+    };
+    expect(meBody.tourCompleted).toBe(true);
+    expect(meBody.onboardingSeen).toBe(false);
+  });
+});
+
 describe("removed staff lose access immediately", () => {
   // A removed user's stateless session token would otherwise keep working until
   // its natural expiry (up to 30 days). After deletion the very next request

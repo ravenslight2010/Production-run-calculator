@@ -247,6 +247,8 @@ export interface StaffMember {
   name: string | null;
   /** Whether the user has dismissed the first-login "Get Started" overview. */
   onboardingSeen: boolean;
+  /** Whether the user has finished the guided tour (reached its final step). */
+  tourCompleted: boolean;
 }
 
 export interface AuthResponse {

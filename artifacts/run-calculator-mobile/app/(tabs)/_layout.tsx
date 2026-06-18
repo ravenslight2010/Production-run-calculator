@@ -33,7 +33,8 @@ const MENU_ITEMS: {
 export default function TabLayout() {
   const colors = useColors();
   const router = useRouter();
-  const { signOut, isLoading, isAuthenticated, me, markOnboardingSeen } = useAuth();
+  const { signOut, isLoading, isAuthenticated, me, markOnboardingSeen, markTourCompleted } =
+    useAuth();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
@@ -406,6 +407,7 @@ export default function TabLayout() {
         visible={tourOpen}
         isManager={isManager}
         onClose={() => setTourOpen(false)}
+        onComplete={() => void markTourCompleted()}
         onNavigate={(route) => router.push(route as never)}
       />
     </>

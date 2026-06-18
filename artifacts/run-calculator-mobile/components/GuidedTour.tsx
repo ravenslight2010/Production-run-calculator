@@ -75,11 +75,15 @@ function buildSteps(isManager: boolean): TourStep[] {
 export default function GuidedTour({
   visible,
   onClose,
+  onComplete,
   onNavigate,
   isManager,
 }: {
   visible: boolean;
   onClose: () => void;
+  // Fired when the user reaches the final step and taps "Done", so the caller
+  // can record that this user finished the tour. Skipping/closing won't fire it.
+  onComplete?: () => void;
   // Navigate the app to a given route as tour steps advance.
   onNavigate: (route: string) => void;
   isManager: boolean;
@@ -159,7 +163,12 @@ export default function GuidedTour({
             </Pressable>
             <Pressable
               onPress={
-                isLast ? onClose : () => setIndex((i) => Math.min(steps.length - 1, i + 1))
+                isLast
+                  ? () => {
+                      onComplete?.();
+                      onClose();
+                    }
+                  : () => setIndex((i) => Math.min(steps.length - 1, i + 1))
               }
               style={({ pressed }) => [
                 styles.primaryBtn,

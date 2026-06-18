@@ -5,6 +5,7 @@ import {
   getStaffMember,
   listStaff,
   markOnboardingSeen,
+  markTourCompleted,
   resetUserPassword,
   setUserRole,
 } from "../lib/roles";
@@ -34,6 +35,14 @@ router.get("/me", async (req, res): Promise<void> => {
 router.post("/me/onboarding-seen", async (req, res): Promise<void> => {
   const userId = req.userId!;
   res.json(await markOnboardingSeen(userId));
+});
+
+// Mark the guided tour as completed for the current user once they reach its
+// final step. Idempotent; returns the updated StaffMember so the client can
+// refresh its cached identity without a second round-trip.
+router.post("/me/tour-completed", async (req, res): Promise<void> => {
+  const userId = req.userId!;
+  res.json(await markTourCompleted(userId));
 });
 
 // Staff roster — manager only. Lists every account so a manager can

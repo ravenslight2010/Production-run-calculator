@@ -328,12 +328,17 @@ export interface StaffMember {
   email: string | null;
   name: string | null;
   onboardingSeen: boolean;
+  tourCompleted: boolean;
 }
 export const fetchMe = () => api<StaffMember>("/me");
 // Mark the first-login "Get Started" overview as seen. Returns the updated
 // StaffMember so the caller can refresh its cached identity.
 export const markOnboardingSeenRequest = () =>
   api<StaffMember>("/me/onboarding-seen", { method: "POST" });
+// Mark the guided tour as completed (user reached its final step). Returns the
+// updated StaffMember so the caller can refresh its cached identity.
+export const markTourCompletedRequest = () =>
+  api<StaffMember>("/me/tour-completed", { method: "POST" });
 
 // Auth — username + password. Mobile has no cookie jar, so the server's session
 // token is returned in the response body; the auth context persists it in

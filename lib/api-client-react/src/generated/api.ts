@@ -2557,6 +2557,77 @@ export const useMarkOnboardingSeen = <TError = ErrorType<unknown>,
       return useMutation(getMarkOnboardingSeenMutationOptions(options));
     }
 
+export const getMarkTourCompletedUrl = () => {
+
+
+
+
+  return `/api/me/tour-completed`
+}
+
+/**
+ * Sets the current user's tourCompleted flag once they reach the guided tour's final step, so the app can tell a brand-new user from one who has already finished the tour. Idempotent.
+ * @summary Mark the guided tour as completed
+ */
+export const markTourCompleted = async ( options?: RequestInit): Promise<StaffMember> => {
+
+  return customFetch<StaffMember>(getMarkTourCompletedUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getMarkTourCompletedMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markTourCompleted>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markTourCompleted>>, TError,void, TContext> => {
+
+const mutationKey = ['markTourCompleted'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markTourCompleted>>, void> = () => {
+
+
+          return  markTourCompleted(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkTourCompletedMutationResult = NonNullable<Awaited<ReturnType<typeof markTourCompleted>>>
+
+    export type MarkTourCompletedMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Mark the guided tour as completed
+ */
+export const useMarkTourCompleted = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markTourCompleted>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof markTourCompleted>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getMarkTourCompletedMutationOptions(options));
+    }
+
 export const getListStaffUrl = () => {
 
 
