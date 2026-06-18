@@ -102,11 +102,28 @@ export function openSyncStream(
 
   if (Platform.OS === "web" && typeof globalThis !== "undefined" && "EventSource" in globalThis) {
     const ES = (globalThis as unknown as { EventSource: typeof EventSource }).EventSource;
-    const es = new ES(url);
-    es.onopen = () => handlers.onOpen?.();
-    es.onmessage = (e: MessageEvent) => handleData(e.data as string);
-    es.onerror = () => handlers.onError?.();
-    return { close: () => es.close() };
+    // The browser EventSource can't set an Authorization header, so on web we
+    // pass the Clerk bearer token as a `?token=` query param (the API promotes
+    // it to a bearer header in dev/preview). Token resolution is async, so open
+    // the stream once it resolves; close() before then is safe.
+    let closed = false;
+    let es: EventSource | null = null;
+    void (async () => {
+      const token = await getAuthToken();
+      if (closed) return;
+      const withAuth = token ? `${url}&token=${encodeURIComponent(token)}` : url;
+      const src = new ES(withAuth);
+      src.onopen = () => handlers.onOpen?.();
+      src.onmessage = (e: MessageEvent) => handleData(e.data as string);
+      src.onerror = () => handlers.onError?.();
+      es = src;
+    })();
+    return {
+      close: () => {
+        closed = true;
+        es?.close();
+      },
+    };
   }
 
   // Native: react-native-sse. Resolve the bearer token first (async), then open
