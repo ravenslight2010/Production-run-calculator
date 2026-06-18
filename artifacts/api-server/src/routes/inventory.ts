@@ -348,28 +348,22 @@ router.post(
   res.json({ items: sanitizeGuesses(raw, candidateKeys) });
 });
 
-router.post("/inventory/adjust", async (req, res): Promise<void> => {
-  const parsed = AdjustInventoryBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const { itemId, qtyDelta, note } = parsed.data;
-  const [item] = await db
-    .select()
-    .from(inventoryItemsTable)
-    .where(eq(inventoryItemsTable.id, itemId));
-  if (!item) {
-    res.status(404).json({ error: "Item not found" });
-    return;
-  }
-  if (qtyDelta === 0) {
-    res.json(await loadItemResponse(itemId));
-    return;
-  }
-  // Lot mutation + ledger + item touch are one atomic unit so a mid-step failure
-  // can't leave stock and audit trail out of sync.
-  await db.transaction(async (tx) => {
+// Apply a manual stock correction. A positive delta lands in a new lot; a
+// negative delta draws stock down through the same FIFO/FEFO `drawDown` logic as
+// run completion, capped at what's on hand so stock never goes negative. The
+// ledger records the ACTUAL applied delta (the capped amount for downward
+// corrections), not the requested one. Lot mutation + ledger + item touch are
+// one atomic unit so a mid-step failure can't leave stock and audit trail out of
+// sync. A zero delta is a no-op (no lot, no ledger row). Exported so the DB
+// wiring (new-lot insert, cap-at-available drawdown, applied-delta ledger,
+// transaction boundaries) can be integration-tested against a real Postgres.
+export async function adjustInventory(
+  itemId: number,
+  qtyDelta: number,
+  note?: string,
+): Promise<{ appliedDelta: number; lotId: number | null }> {
+  if (qtyDelta === 0) return { appliedDelta: 0, lotId: null };
+  return db.transaction(async (tx) => {
     let appliedDelta = qtyDelta;
     let lotId: number | null = null;
     if (qtyDelta > 0) {
@@ -401,7 +395,30 @@ router.post("/inventory/adjust", async (req, res): Promise<void> => {
       .update(inventoryItemsTable)
       .set({ updatedAt: new Date() })
       .where(eq(inventoryItemsTable.id, itemId));
+    return { appliedDelta, lotId };
   });
+}
+
+router.post("/inventory/adjust", async (req, res): Promise<void> => {
+  const parsed = AdjustInventoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { itemId, qtyDelta, note } = parsed.data;
+  const [item] = await db
+    .select()
+    .from(inventoryItemsTable)
+    .where(eq(inventoryItemsTable.id, itemId));
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  if (qtyDelta === 0) {
+    res.json(await loadItemResponse(itemId));
+    return;
+  }
+  await adjustInventory(itemId, qtyDelta, note);
   broadcast(headerSenderId(req));
   res.json(await loadItemResponse(itemId));
 });

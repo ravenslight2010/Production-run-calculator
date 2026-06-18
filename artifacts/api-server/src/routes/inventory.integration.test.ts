@@ -35,6 +35,7 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let consumeRun: InvModule["consumeRun"];
 let drawDown: InvModule["drawDown"];
+let adjustInventory: InvModule["adjustInventory"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -79,6 +80,7 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   consumeRun = invMod.consumeRun;
   drawDown = invMod.drawDown;
+  adjustInventory = invMod.adjustInventory;
 }, 60_000);
 
 afterAll(async () => {
@@ -135,6 +137,16 @@ async function onHand(itemId: number): Promise<number> {
 async function consumeLedgerCount(itemId: number): Promise<number> {
   const rows = await db.select().from(inventoryLedgerTable);
   return rows.filter((r) => r.itemId === itemId && r.type === "consume").length;
+}
+
+// All "adjust" ledger rows for an item, oldest first, so a test can assert the
+// recorded delta is the actual applied amount (not the requested one).
+async function adjustLedger(itemId: number): Promise<Array<{ qtyDelta: number }>> {
+  const rows = await db.select().from(inventoryLedgerTable);
+  return rows
+    .filter((r) => r.itemId === itemId && r.type === "adjust")
+    .sort((a, b) => a.id - b.id)
+    .map((r) => ({ qtyDelta: r.qtyDelta }));
 }
 
 describe("inventory auto-deduct against a real database", () => {
@@ -253,5 +265,81 @@ describe("inventory auto-deduct against a real database", () => {
     const totalDrawn = draws.reduce((acc, n) => acc + n, 0);
     expect(totalDrawn).toBe(8);
     expect(await onHand(itemId)).toBe(0);
+  });
+});
+
+describe("inventory manual adjust against a real database", () => {
+  it("caps a downward adjustment at available stock and records the capped delta", async () => {
+    const itemId = await makeItem("ingredient:Flour:lbs");
+    // Two lots; FEFO should empty the earlier-expiring one first.
+    await addLot(itemId, 3, { expirationDate: "2026-03-01" });
+    await addLot(itemId, 2, { expirationDate: "2026-01-01" });
+    expect(await onHand(itemId)).toBe(5);
+
+    // Request to remove more than is on hand (-100); only the 5 available can go.
+    const result = await adjustInventory(itemId, -100, "spilled a bag");
+    expect(result).toEqual({ appliedDelta: -5, lotId: null });
+    // Stock never goes negative — it bottoms out at zero.
+    expect(await onHand(itemId)).toBe(0);
+    // The ledger records the ACTUAL applied delta (-5), not the requested -100.
+    expect(await adjustLedger(itemId)).toEqual([{ qtyDelta: -5 }]);
+
+    // No lot is left negative; both were emptied.
+    const lots = await db.select().from(inventoryLotsTable);
+    expect(lots.filter((l) => l.itemId === itemId).every((l) => l.qtyRemaining === 0)).toBe(
+      true,
+    );
+  });
+
+  it("records the exact delta when a downward adjustment fits within stock", async () => {
+    const itemId = await makeItem("ingredient:Yeast:lbs");
+    await addLot(itemId, 10);
+
+    const result = await adjustInventory(itemId, -4);
+    expect(result.appliedDelta).toBe(-4);
+    expect(result.lotId).toBeNull();
+    expect(await onHand(itemId)).toBe(6);
+    expect(await adjustLedger(itemId)).toEqual([{ qtyDelta: -4 }]);
+  });
+
+  it("lands a positive adjustment as a new lot and a positive ledger row", async () => {
+    const itemId = await makeItem("ingredient:Salt:lbs");
+    expect(await onHand(itemId)).toBe(0);
+
+    const result = await adjustInventory(itemId, 12, "found extra stock");
+    expect(result.appliedDelta).toBe(12);
+    expect(result.lotId).not.toBeNull();
+    expect(await onHand(itemId)).toBe(12);
+
+    // The new lot exists, points at the returned id, and carries the full qty.
+    const lots = (await db.select().from(inventoryLotsTable)).filter(
+      (l) => l.itemId === itemId,
+    );
+    expect(lots).toHaveLength(1);
+    expect(lots[0].id).toBe(result.lotId);
+    expect(lots[0].qtyReceived).toBe(12);
+    expect(lots[0].qtyRemaining).toBe(12);
+    // The ledger row references that lot and records the positive delta.
+    const ledger = await db.select().from(inventoryLedgerTable);
+    const adjustRows = ledger.filter((r) => r.itemId === itemId && r.type === "adjust");
+    expect(adjustRows).toHaveLength(1);
+    expect(adjustRows[0].qtyDelta).toBe(12);
+    expect(adjustRows[0].lotId).toBe(result.lotId);
+  });
+
+  it("treats an exactly-zero adjustment as a no-op (no lot, no ledger row)", async () => {
+    const itemId = await makeItem("ingredient:Sugar:lbs");
+    await addLot(itemId, 7);
+
+    const result = await adjustInventory(itemId, 0, "noticed nothing changed");
+    expect(result).toEqual({ appliedDelta: 0, lotId: null });
+    // Stock is untouched and only the seeded lot exists.
+    expect(await onHand(itemId)).toBe(7);
+    const lots = (await db.select().from(inventoryLotsTable)).filter(
+      (l) => l.itemId === itemId,
+    );
+    expect(lots).toHaveLength(1);
+    // No adjust ledger row was written.
+    expect(await adjustLedger(itemId)).toEqual([]);
   });
 });
