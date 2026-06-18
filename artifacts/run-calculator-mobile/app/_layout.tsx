@@ -25,6 +25,23 @@ import { RunContextProvider } from "@/context/RunContext";
 
 SplashScreen.preventAutoHideAsync();
 
+// Expo web mounts into #root, which has no intrinsic height. react-native-web's
+// flex:1 app tree then measures against a zero-height parent and collapses to a
+// blank screen. The HTML shell (with #root) already exists when this bundle is
+// evaluated, so we set the heights *synchronously here* — before React renders
+// and measures — rather than in a useEffect, which applied too late and left the
+// first paint blank. No-op on native.
+if (Platform.OS === "web" && typeof document !== "undefined") {
+  document.documentElement.style.height = "100%";
+  document.body.style.height = "100%";
+  document.body.style.margin = "0";
+  const root = document.getElementById("root");
+  if (root) {
+    root.style.height = "100%";
+    root.style.display = "flex";
+  }
+}
+
 const queryClient = new QueryClient();
 
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -73,21 +90,6 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
-
-  // Expo web mounts into #root, which has no intrinsic height; without this the
-  // flex:1 app tree collapses to zero height and renders blank. No-op on native.
-  useEffect(() => {
-    if (Platform.OS === "web" && typeof document !== "undefined") {
-      document.documentElement.style.height = "100%";
-      document.body.style.height = "100%";
-      document.body.style.margin = "0";
-      const root = document.getElementById("root");
-      if (root) {
-        root.style.height = "100%";
-        root.style.display = "flex";
-      }
-    }
-  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 
