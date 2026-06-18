@@ -20,6 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
+import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireRole } from "../middlewares/requireRole";
 import { getOrCreateUserRole } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
@@ -37,6 +38,15 @@ const router: IRouter = Router();
 // Size/shape guards live in photoIdentify.ts.
 const PHOTO_RATE_WINDOW_MS = 60_000;
 const PHOTO_RATE_MAX = 10; // requests per user per minute
+
+// In production the API may run with more than one instance, so the cost cap is
+// backed by a shared Postgres store to keep it effective across instances.
+// Everywhere else (dev/test, a single process) the limiter falls back to its
+// in-memory store — identical behavior and headers, no DB dependency.
+const photoRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
+    : undefined;
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
 type SseClient = { res: Response; clientId: string };
@@ -279,6 +289,7 @@ router.post(
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
     keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: photoRateStore,
   }),
   async (req, res): Promise<void> => {
   const validation = validateIdentifyPhotoBody(req.body);
