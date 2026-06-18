@@ -1141,6 +1141,8 @@ interface RunContextValue {
   addRun: () => void;
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
+  moveRun: (fromIdx: number, toIdx: number) => void;
+  updateRunSettingsById: (runId: string, partial: Partial<RunSettings>) => void;
   resetRun: () => void;
   shiftNotes: string;
   setShiftNotes: (notes: string) => void;
@@ -1849,6 +1851,48 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Reorder runs, keeping currentIndex pointed at the same run after the move.
+  // Mirrors the web moveRun so AI "reorder run" actions apply at parity.
+  const moveRun = useCallback(
+    (fromIdx: number, toIdx: number) => {
+      setAppState((prev) => {
+        if (
+          fromIdx < 0 ||
+          fromIdx >= prev.runs.length ||
+          toIdx < 0 ||
+          toIdx >= prev.runs.length
+        )
+          return prev;
+        const runs = [...prev.runs];
+        const focused = runs[prev.currentIndex];
+        const [moved] = runs.splice(fromIdx, 1);
+        runs.splice(toIdx, 0, moved);
+        const currentIndex = runs.indexOf(focused);
+        const next = { ...prev, runs, currentIndex };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  // Update a specific run's settings by id (not just the focused run), so AI
+  // "set run target" actions can apply to any of today's runs at parity.
+  const updateRunSettingsById = useCallback(
+    (runId: string, partial: Partial<RunSettings>) => {
+      setAppState((prev) => {
+        const idx = prev.runs.findIndex((r) => r.id === runId);
+        if (idx < 0) return prev;
+        const runs = [...prev.runs];
+        runs[idx] = { ...runs[idx], settings: { ...runs[idx].settings, ...partial } };
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   const resetRun = useCallback(() => {
     updateCurrentRun(() => makeNewRun());
   }, [updateCurrentRun]);
@@ -2439,6 +2483,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         addRun,
         switchRun,
         deleteRun,
+        moveRun,
+        updateRunSettingsById,
         resetRun,
         shiftNotes: appState.shiftNotes,
         setShiftNotes,

@@ -24,6 +24,8 @@ export * from './listInventoryLedgerParams';
 export * from './mergeInventoryInput';
 export * from './mergeInventoryItem';
 export * from './mergeInventoryResult';
+export * from './optimizeAction';
+export * from './optimizeActionKind';
 export * from './optimizeInput';
 export * from './optimizeRecommendation';
 export * from './optimizeRecommendationCategory';

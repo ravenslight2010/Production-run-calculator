@@ -8,6 +8,8 @@ import {
   Lock,
   AlertTriangle,
   RefreshCw,
+  Check,
+  Zap,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,7 @@ import {
   type OptimizeRecommendation,
   type OptimizeCategory,
   type OptimizeImpact,
+  type OptimizeAction,
   requestOptimize,
   optimizeErrorMessage,
 } from "../aiOptimize";
@@ -38,7 +41,21 @@ function impactClass(impact: OptimizeImpact): string {
   return "bg-sky-500/15 text-sky-400 border-sky-500/30";
 }
 
-function RecCard({ rec }: { rec: OptimizeRecommendation }) {
+function RecCard({
+  rec,
+  onApply,
+}: {
+  rec: OptimizeRecommendation;
+  onApply: (action: OptimizeAction) => { ok: boolean; message: string };
+}) {
+  const [applied, setApplied] = useState<{ ok: boolean; message: string } | null>(null);
+
+  function handleApply() {
+    if (!rec.action) return;
+    const result = onApply(rec.action);
+    setApplied(result);
+  }
+
   return (
     <div className="rounded-lg border border-border bg-card/60 p-3">
       <div className="flex items-start justify-between gap-2">
@@ -53,11 +70,39 @@ function RecCard({ rec }: { rec: OptimizeRecommendation }) {
       {rec.appliesTo && (
         <p className="mt-1.5 text-[11px] font-medium text-primary/80">{rec.appliesTo}</p>
       )}
+      {rec.action && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            variant={applied?.ok ? "secondary" : "default"}
+            className="h-7 gap-1.5 text-xs"
+            onClick={handleApply}
+            disabled={applied?.ok}
+            data-testid="button-apply-action"
+          >
+            {applied?.ok ? <Check className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+            {applied?.ok ? "Applied" : rec.action.label}
+          </Button>
+          {applied && (
+            <span
+              className={`text-[11px] font-medium ${applied.ok ? "text-emerald-400" : "text-red-400"}`}
+            >
+              {applied.message}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-export default function AssistantTab({ buildInput }: { buildInput: () => OptimizeInput }) {
+export default function AssistantTab({
+  buildInput,
+  onApplyAction,
+}: {
+  buildInput: () => OptimizeInput;
+  onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
+}) {
   const { isManager, isLoading: roleLoading } = useMe();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +222,7 @@ export default function AssistantTab({ buildInput }: { buildInput: () => Optimiz
               </CardHeader>
               <CardContent className="space-y-2">
                 {recs.map((r, i) => (
-                  <RecCard key={i} rec={r} />
+                  <RecCard key={i} rec={r} onApply={onApplyAction} />
                 ))}
               </CardContent>
             </Card>

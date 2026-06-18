@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OptimizeAction } from './optimizeAction';
 import type { OptimizeRecommendationCategory } from './optimizeRecommendationCategory';
 import type { OptimizeRecommendationImpact } from './optimizeRecommendationImpact';
 
@@ -18,4 +19,6 @@ export interface OptimizeRecommendation {
      * @nullable
      */
   appliesTo: string | null;
+  /** Optional one-tap action, or null when nothing is safely applicable */
+  action?: OptimizeAction | null;
 }

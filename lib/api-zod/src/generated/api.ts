@@ -424,7 +424,15 @@ export const AiOptimizeResponse = zod.object({
   "title": zod.string(),
   "detail": zod.string(),
   "impact": zod.enum(['high', 'medium', 'low']),
-  "appliesTo": zod.string().nullable().describe('Run label or scope this applies to, or null for shift-wide')
+  "appliesTo": zod.string().nullable().describe('Run label or scope this applies to, or null for shift-wide'),
+  "action": zod.union([zod.object({
+  "kind": zod.enum(['set_target_time', 'set_run_target', 'reorder_run']),
+  "label": zod.string().describe('Short imperative button caption'),
+  "time": zod.string().optional().describe('Target finish time HH:MM (set_target_time)'),
+  "runId": zod.string().optional().describe('Target run id (set_run_target, reorder_run)'),
+  "casesNeeded": zod.number().optional().describe('New case target (set_run_target)'),
+  "beforeRunId": zod.string().nullish().describe('reorder_run: move runId immediately before this run id, or null to move it last')
+}).describe('Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today\'s run ids.'),zod.null()]).optional().describe('Optional one-tap action, or null when nothing is safely applicable')
 })),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Optional message when data is insufficient for analysis')

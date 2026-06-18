@@ -307,6 +307,35 @@ export interface OptimizeInput {
   historyRuns?: OptimizeRun[];
 }
 
+export type OptimizeActionKind = typeof OptimizeActionKind[keyof typeof OptimizeActionKind];
+
+
+export const OptimizeActionKind = {
+  set_target_time: 'set_target_time',
+  set_run_target: 'set_run_target',
+  reorder_run: 'reorder_run',
+} as const;
+
+/**
+ * Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today's run ids.
+ */
+export interface OptimizeAction {
+  kind: OptimizeActionKind;
+  /** Short imperative button caption */
+  label: string;
+  /** Target finish time HH:MM (set_target_time) */
+  time?: string;
+  /** Target run id (set_run_target, reorder_run) */
+  runId?: string;
+  /** New case target (set_run_target) */
+  casesNeeded?: number;
+  /**
+     * reorder_run: move runId immediately before this run id, or null to move it last
+     * @nullable
+     */
+  beforeRunId?: string | null;
+}
+
 export type OptimizeRecommendationCategory = typeof OptimizeRecommendationCategory[keyof typeof OptimizeRecommendationCategory];
 
 
@@ -335,6 +364,8 @@ export interface OptimizeRecommendation {
      * @nullable
      */
   appliesTo: string | null;
+  /** Optional one-tap action, or null when nothing is safely applicable */
+  action?: OptimizeAction | null;
 }
 
 export interface OptimizeResult {

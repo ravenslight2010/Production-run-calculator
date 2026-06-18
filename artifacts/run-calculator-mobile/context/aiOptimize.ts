@@ -60,12 +60,24 @@ export type OptimizeInput = {
   historyRuns: OptimizeRun[];
 };
 
+export type OptimizeActionKind = "set_target_time" | "set_run_target" | "reorder_run";
+
+export type OptimizeAction = {
+  kind: OptimizeActionKind;
+  label: string;
+  time?: string;
+  runId?: string;
+  casesNeeded?: number;
+  beforeRunId?: string | null;
+};
+
 export type OptimizeRecommendation = {
   category: OptimizeCategory;
   title: string;
   detail: string;
   impact: OptimizeImpact;
   appliesTo: string | null;
+  action?: OptimizeAction | null;
 };
 
 export type OptimizeResult = {

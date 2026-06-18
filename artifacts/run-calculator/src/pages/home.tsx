@@ -99,7 +99,7 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
-import { buildOptimizeInput } from "../aiOptimize";
+import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   computeRunConsumptionLines,
   deriveCandidateItems,
@@ -3016,6 +3016,53 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+  }
+
+  // Apply a one-tap AI recommendation action by routing it to the existing
+  // run/schedule mutations. Returns a result the AssistantTab renders inline;
+  // nothing is applied without the manager's explicit tap.
+  function applyOptimizeAction(action: OptimizeAction): { ok: boolean; message: string } {
+    if (action.kind === "set_target_time") {
+      const time = (action.time ?? "").trim();
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
+      setRunToTime(time);
+      return { ok: true, message: `Finish time set to ${time}` };
+    }
+
+    if (action.kind === "set_run_target") {
+      const runId = action.runId ?? "";
+      const cases = Math.round(action.casesNeeded ?? NaN);
+      if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
+      const idx = dayState.runs.findIndex((r) => r.id === runId);
+      if (idx < 0) return { ok: false, message: "Run no longer exists" };
+      if (runId === currentRunId) {
+        form.setValue("casesNeeded", cases, { shouldDirty: true });
+        saveRunValues(currentRunId, form.getValues());
+      } else {
+        const vals = loadRunValues(runId);
+        saveRunValues(runId, { ...vals, casesNeeded: cases });
+      }
+      schedulePush(dayState, 0);
+      return { ok: true, message: `Target set to ${cases} cases` };
+    }
+
+    // reorder_run
+    const runId = action.runId ?? "";
+    const fromIdx = dayState.runs.findIndex((r) => r.id === runId);
+    if (fromIdx < 0) return { ok: false, message: "Run no longer exists" };
+    const beforeId = action.beforeRunId ?? null;
+    let toIdx: number;
+    if (beforeId === null) {
+      toIdx = dayState.runs.length - 1;
+    } else {
+      const remaining = dayState.runs.filter((r) => r.id !== runId);
+      const beforePos = remaining.findIndex((r) => r.id === beforeId);
+      if (beforePos < 0) return { ok: false, message: "Target run no longer exists" };
+      toIdx = beforePos;
+    }
+    if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
+    moveRun(fromIdx, toIdx);
+    return { ok: true, message: "Run order updated" };
   }
 
   function flashSaved() {
@@ -6908,6 +6955,7 @@ export default function Home() {
                       })),
                     })
                   }
+                  onApplyAction={applyOptimizeAction}
                 />
               </TabsContent>
 

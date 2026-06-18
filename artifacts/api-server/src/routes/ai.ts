@@ -59,7 +59,8 @@ router.post(
       return;
     }
 
-    const { recommendations, note } = sanitizeRecommendations(raw);
+    const knownRunIds = new Set(validation.data.runs.map((r) => r.id));
+    const { recommendations, note } = sanitizeRecommendations(raw, knownRunIds);
     res.json({
       recommendations,
       generatedAt: Date.now(),

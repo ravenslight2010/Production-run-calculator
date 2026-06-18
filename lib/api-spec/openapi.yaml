@@ -1049,6 +1049,37 @@ components:
           items:
             $ref: "#/components/schemas/OptimizeRun"
 
+    OptimizeAction:
+      type: object
+      description: >-
+        Optional one-tap action a manager can apply from a recommendation.
+        Advisory until explicitly tapped; each kind maps to an existing client
+        mutation. Run-targeted kinds reference today's run ids.
+      required:
+        - kind
+        - label
+      properties:
+        kind:
+          type: string
+          enum: [set_target_time, set_run_target, reorder_run]
+        label:
+          type: string
+          description: Short imperative button caption
+        time:
+          type: string
+          description: "Target finish time HH:MM (set_target_time)"
+        runId:
+          type: string
+          description: Target run id (set_run_target, reorder_run)
+        casesNeeded:
+          type: number
+          description: New case target (set_run_target)
+        beforeRunId:
+          type: [string, "null"]
+          description: >-
+            reorder_run: move runId immediately before this run id, or null to
+            move it last
+
     OptimizeRecommendation:
       type: object
       required:
@@ -1071,6 +1102,11 @@ components:
         appliesTo:
           type: [string, "null"]
           description: Run label or scope this applies to, or null for shift-wide
+        action:
+          oneOf:
+            - $ref: "#/components/schemas/OptimizeAction"
+            - type: "null"
+          description: Optional one-tap action, or null when nothing is safely applicable
 
     OptimizeResult:
       type: object

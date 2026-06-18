@@ -9,6 +9,7 @@ import {
   buildOptimizeInput,
   optimizeErrorMessage,
   requestOptimize,
+  type OptimizeAction,
   type OptimizeCategory,
   type OptimizeImpact,
   type OptimizeRecommendation,
@@ -34,9 +35,22 @@ function impactColors(impact: OptimizeImpact): { bg: string; fg: string } {
   return { bg: "rgba(14,165,233,0.15)", fg: "#38bdf8" };
 }
 
-function RecCard({ rec }: { rec: OptimizeRecommendation }) {
+function RecCard({
+  rec,
+  onApply,
+}: {
+  rec: OptimizeRecommendation;
+  onApply: (action: OptimizeAction) => { ok: boolean; message: string };
+}) {
   const colors = useColors();
   const ic = impactColors(rec.impact);
+  const [applied, setApplied] = React.useState<{ ok: boolean; message: string } | null>(null);
+
+  function handleApply() {
+    if (!rec.action) return;
+    setApplied(onApply(rec.action));
+  }
+
   return (
     <View style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
       <View style={styles.recHeader}>
@@ -49,6 +63,25 @@ function RecCard({ rec }: { rec: OptimizeRecommendation }) {
       {rec.appliesTo ? (
         <Text style={[styles.recApplies, { color: colors.primary }]}>{rec.appliesTo}</Text>
       ) : null}
+      {rec.action ? (
+        <View style={styles.actionRow}>
+          <Button
+            label={applied?.ok ? "Applied" : rec.action.label}
+            icon={applied?.ok ? "check" : "zap"}
+            size="sm"
+            variant={applied?.ok ? "outline" : "primary"}
+            disabled={!!applied?.ok}
+            onPress={handleApply}
+          />
+          {applied ? (
+            <Text
+              style={[styles.actionMsg, { color: applied.ok ? "#34d399" : "#f87171" }]}
+            >
+              {applied.message}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -57,11 +90,58 @@ export default function AssistantScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { isManager, isLoading: roleLoading } = useMe();
-  const { allRuns, history, runToTime, scheduled } = useRun();
+  const {
+    allRuns,
+    history,
+    runToTime,
+    scheduled,
+    setRunToTime,
+    moveRun,
+    updateRunSettingsById,
+  } = useRun();
 
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<OptimizeResult | null>(null);
+
+  // Apply a one-tap AI recommendation action via the existing context
+  // mutations. Mirrors the web applyOptimizeAction; nothing is applied without
+  // the manager's explicit tap.
+  function applyAction(action: OptimizeAction): { ok: boolean; message: string } {
+    if (action.kind === "set_target_time") {
+      const time = (action.time ?? "").trim();
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { ok: false, message: "Invalid time" };
+      setRunToTime(time);
+      return { ok: true, message: `Finish time set to ${time}` };
+    }
+
+    if (action.kind === "set_run_target") {
+      const runId = action.runId ?? "";
+      const cases = Math.round(action.casesNeeded ?? NaN);
+      if (!Number.isFinite(cases) || cases <= 0) return { ok: false, message: "Invalid target" };
+      if (!allRuns.some((r) => r.id === runId)) return { ok: false, message: "Run no longer exists" };
+      updateRunSettingsById(runId, { casesNeeded: cases });
+      return { ok: true, message: `Target set to ${cases} cases` };
+    }
+
+    // reorder_run
+    const runId = action.runId ?? "";
+    const fromIdx = allRuns.findIndex((r) => r.id === runId);
+    if (fromIdx < 0) return { ok: false, message: "Run no longer exists" };
+    const beforeId = action.beforeRunId ?? null;
+    let toIdx: number;
+    if (beforeId === null) {
+      toIdx = allRuns.length - 1;
+    } else {
+      const remaining = allRuns.filter((r) => r.id !== runId);
+      const beforePos = remaining.findIndex((r) => r.id === beforeId);
+      if (beforePos < 0) return { ok: false, message: "Target run no longer exists" };
+      toIdx = beforePos;
+    }
+    if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
+    moveRun(fromIdx, toIdx);
+    return { ok: true, message: "Run order updated" };
+  }
 
   async function analyze() {
     setLoading(true);
@@ -172,7 +252,7 @@ export default function AssistantScreen() {
                 <Text style={[styles.catDesc, { color: colors.mutedForeground }]}>{meta.desc}</Text>
                 <View style={{ gap: 8 }}>
                   {recs.map((r, i) => (
-                    <RecCard key={i} rec={r} />
+                    <RecCard key={i} rec={r} onApply={applyAction} />
                   ))}
                 </View>
               </Card>
@@ -206,6 +286,8 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 9, fontFamily: FONTS.bold, letterSpacing: 0.5 },
   recDetail: { marginTop: 6, fontSize: 12, lineHeight: 18, fontFamily: FONTS.regular },
   recApplies: { marginTop: 6, fontSize: 11, fontFamily: FONTS.medium },
+  actionRow: { marginTop: 10, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
+  actionMsg: { fontSize: 11, fontFamily: FONTS.medium },
   emptyBox: { alignItems: "center", gap: 8, paddingVertical: 24 },
   emptyTitle: { fontSize: 14, fontFamily: FONTS.semibold },
   emptyText: { fontSize: 12, lineHeight: 18, textAlign: "center", maxWidth: 280, fontFamily: FONTS.regular },
