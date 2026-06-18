@@ -17,6 +17,7 @@ const MENU_ITEMS: {
   { label: "Stoppages", icon: "clock", route: "/stoppages", desc: "Log and review downtime" },
   { label: "Summary", icon: "list", route: "/summary", desc: "Shift totals and export" },
   { label: "Stock", icon: "clipboard", route: "/inventory", desc: "On-hand stock, lots, and restocks" },
+  { label: "AI Assistant", icon: "zap", route: "/assistant", desc: "Run, break, and efficiency recommendations" },
   { label: "Schedule", icon: "calendar", route: "/schedule", desc: "Plan future production days" },
   { label: "Setup", icon: "sliders", route: "/configure", desc: "Run config and recipes" },
   { label: "Settings", icon: "settings", route: "/settings", desc: "App options and master data" },
@@ -128,6 +129,7 @@ export default function TabLayout() {
         />
         {/* Menu-reachable screens (hidden from the bottom tab bar) */}
         <Tabs.Screen name="inventory" options={{ href: null, title: "Inventory" }} />
+        <Tabs.Screen name="assistant" options={{ href: null, title: "AI Assistant" }} />
         <Tabs.Screen name="stoppages" options={{ href: null, title: "Stoppages" }} />
         <Tabs.Screen name="summary" options={{ href: null, title: "Summary" }} />
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />

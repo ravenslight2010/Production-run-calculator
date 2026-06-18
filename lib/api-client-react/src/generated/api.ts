@@ -33,6 +33,8 @@ import type {
   ListInventoryLedgerParams,
   MergeInventoryInput,
   MergeInventoryResult,
+  OptimizeInput,
+  OptimizeResult,
   ProductionRun,
   ProductionRunInput,
   RestockInput,
@@ -1225,6 +1227,78 @@ export const useIdentifyInventoryPhoto = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getIdentifyInventoryPhotoMutationOptions(options));
+    }
+
+export const getAiOptimizeUrl = () => {
+
+
+
+
+  return `/api/ai/optimize`
+}
+
+/**
+ * Analyzes the current day's runs, scheduled runs, and recent history and returns grouped/ranked recommendation cards. Read-only — never applies any change.
+ * @summary AI optimization recommendations for runs and break timing
+ */
+export const aiOptimize = async (optimizeInput: OptimizeInput, options?: RequestInit): Promise<OptimizeResult> => {
+
+  return customFetch<OptimizeResult>(getAiOptimizeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      optimizeInput,)
+  }
+);}
+
+
+
+
+export const getAiOptimizeMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,{data: BodyType<OptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,{data: BodyType<OptimizeInput>}, TContext> => {
+
+const mutationKey = ['aiOptimize'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiOptimize>>, {data: BodyType<OptimizeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiOptimize(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiOptimizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiOptimize>>>
+    export type AiOptimizeMutationBody = BodyType<OptimizeInput>
+    export type AiOptimizeMutationError = ErrorType<void>
+
+    /**
+ * @summary AI optimization recommendations for runs and break timing
+ */
+export const useAiOptimize = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiOptimize>>, TError,{data: BodyType<OptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiOptimize>>,
+        TError,
+        {data: BodyType<OptimizeInput>},
+        TContext
+      > => {
+      return useMutation(getAiOptimizeMutationOptions(options));
     }
 
 export const getGetMeUrl = () => {

@@ -96,6 +96,7 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
           brand: run.brand ?? "",
           flavor: run.flavor ?? "",
           casesNeeded: runValues[run.id]?.casesNeeded ?? 0,
+          dieType: runValues[run.id]?.dieType ?? "",
         }));
       }
       return base;

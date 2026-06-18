@@ -220,6 +220,112 @@ export interface StaffRoleUpdate {
   role: StaffRoleUpdateRole;
 }
 
+export interface OptimizeStoppage {
+  reason: string;
+  durationSec: number;
+  /** True if the stoppage is still in progress (no end time) */
+  open: boolean;
+}
+
+export type OptimizeRunStatus = typeof OptimizeRunStatus[keyof typeof OptimizeRunStatus];
+
+
+export const OptimizeRunStatus = {
+  running: 'running',
+  upcoming: 'upcoming',
+  finished: 'finished',
+} as const;
+
+export interface OptimizeRun {
+  id: string;
+  label: string;
+  brand: string;
+  flavor: string;
+  dieType: string;
+  status: OptimizeRunStatus;
+  casesNeeded: number;
+  casesMade: number;
+  casesLeft: number;
+  /** Planned pizzas-per-minute from line config */
+  plannedPpm: number;
+  /**
+     * Observed pizzas-per-minute, or null if not yet measurable
+     * @nullable
+     */
+  actualPpm: number | null;
+  /** @nullable */
+  minutesRemaining: number | null;
+  netElapsedSec: number;
+  downtimeSec: number;
+  stoppages: OptimizeStoppage[];
+}
+
+export interface OptimizeScheduledRun {
+  date: string;
+  brand: string;
+  flavor: string;
+  dieType: string;
+  casesNeeded: number;
+}
+
+export interface OptimizeInput {
+  date: string;
+  /** Client clock (ms epoch) so the model can reason about timing */
+  nowMs: number;
+  /** Target completion time of day (HH:MM), or empty if unset */
+  runToTime?: string;
+  /** Today's aggregate pizzas-per-minute so far */
+  todayPpm?: number;
+  /**
+     * Historical average pizzas-per-minute, or null if no history
+     * @nullable
+     */
+  benchmarkPpm?: number | null;
+  /** Today's runs (running, upcoming, and finished) */
+  runs: OptimizeRun[];
+  /** Future planned runs */
+  scheduledRuns?: OptimizeScheduledRun[];
+  /** Recent finished runs from prior days */
+  historyRuns?: OptimizeRun[];
+}
+
+export type OptimizeRecommendationCategory = typeof OptimizeRecommendationCategory[keyof typeof OptimizeRecommendationCategory];
+
+
+export const OptimizeRecommendationCategory = {
+  run: 'run',
+  break: 'break',
+  efficiency: 'efficiency',
+} as const;
+
+export type OptimizeRecommendationImpact = typeof OptimizeRecommendationImpact[keyof typeof OptimizeRecommendationImpact];
+
+
+export const OptimizeRecommendationImpact = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface OptimizeRecommendation {
+  category: OptimizeRecommendationCategory;
+  title: string;
+  detail: string;
+  impact: OptimizeRecommendationImpact;
+  /**
+     * Run label or scope this applies to, or null for shift-wide
+     * @nullable
+     */
+  appliesTo: string | null;
+}
+
+export interface OptimizeResult {
+  recommendations: OptimizeRecommendation[];
+  generatedAt: number;
+  /** Optional message when data is insufficient for analysis */
+  note?: string;
+}
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };

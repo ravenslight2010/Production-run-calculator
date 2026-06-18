@@ -98,6 +98,8 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
+import AssistantTab from "../components/AssistantTab";
+import { buildOptimizeInput } from "../aiOptimize";
 import {
   computeRunConsumptionLines,
   deriveCandidateItems,
@@ -1875,7 +1877,7 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -2054,7 +2056,7 @@ export default function Home() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number}[]}[]>([]);
+  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
@@ -2121,7 +2123,7 @@ export default function Home() {
         body: JSON.stringify({ payload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
       }
     } catch {}
@@ -2493,7 +2495,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               return;
             }
           }
@@ -3287,7 +3289,7 @@ export default function Home() {
         body: JSON.stringify({ payload: outPayload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
     setShowImportDialog(false);
@@ -3387,7 +3389,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               scheduleReset();
               return;
             }
@@ -5909,8 +5911,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
                   <ClipboardList className="w-4 h-4 mr-2" /> Stock
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("ai")}>
+                  <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
+                </DropdownMenuItem>
                 {isSupervisor && (
-                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
+                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
                       <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center leading-none">
@@ -6849,7 +6854,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
                         }}
                         title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
@@ -6880,6 +6885,30 @@ export default function Home() {
                   const valsList = dayState.runs.map(r => r.id === currentRunId ? form.getValues() : loadRunValues(r.id));
                   return <InventoryTab candidates={deriveCandidateItems(valsList)} />;
                 })()}
+              </TabsContent>
+
+              <TabsContent value="ai">
+                <AssistantTab
+                  buildInput={() =>
+                    buildOptimizeInput({
+                      date: todayStr(),
+                      nowMs: Date.now(),
+                      runToTime,
+                      runs: dayState.runs,
+                      runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
+                      history,
+                      scheduledDays: scheduledDays.map((d) => ({
+                        date: d.date,
+                        runs: (d.runs ?? []).map((r) => ({
+                          brand: r.brand,
+                          flavor: r.flavor,
+                          casesNeeded: r.casesNeeded,
+                          dieType: r.dieType,
+                        })),
+                      })),
+                    })
+                  }
+                />
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>

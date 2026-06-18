@@ -4,6 +4,7 @@ import runsRouter from "./runs";
 import syncRouter from "./sync";
 import inventoryRouter from "./inventory";
 import rolesRouter from "./roles";
+import aiRouter from "./ai";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -18,5 +19,6 @@ router.use(rolesRouter);
 router.use(runsRouter);
 router.use(syncRouter);
 router.use(inventoryRouter);
+router.use(aiRouter);
 
 export default router;

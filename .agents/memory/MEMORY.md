@@ -24,3 +24,4 @@
 - [Excel import/export + QuickBooks CSV](excel-import-export.md) — export totals must use one shared formula (not platform calc engines); import must merge full day payload (no clobber).
 - [Clerk auth gating](clerk-auth-gating.md) — web auths via cookie, mobile threads Clerk bearer into client+SSE+REST; requireAuth gates all /api except /healthz; expo-web preview blank is a native-first quirk, verify mobile auth via 401 logs not screenshot.
 - [Role gating](role-gating.md) — manager/operator: gate only requireRole-protected endpoints (item CRUD, AI photo, settings, staff admin); never gate /sync day-state (recipes, master-data) — can't role-split + breaks parity.
+- [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).

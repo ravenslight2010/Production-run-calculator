@@ -16,6 +16,8 @@ tags:
     description: Stock / inventory control
   - name: roles
     description: Staff roles and access control
+  - name: ai
+    description: AI assistant (optimization recommendations)
 paths:
   /healthz:
     get:
@@ -321,6 +323,33 @@ paths:
           description: Invalid input
         "502":
           description: Vision provider error
+
+  /ai/optimize:
+    post:
+      operationId: aiOptimize
+      tags: [ai]
+      summary: AI optimization recommendations for runs and break timing
+      description: >-
+        Analyzes the current day's runs, scheduled runs, and recent history and
+        returns grouped/ranked recommendation cards. Read-only — never applies
+        any change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OptimizeInput"
+      responses:
+        "200":
+          description: Optimization recommendations (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptimizeResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
 
   /me:
     get:
@@ -806,3 +835,169 @@ components:
         role:
           type: string
           enum: [manager, operator]
+
+    OptimizeStoppage:
+      type: object
+      required:
+        - reason
+        - durationSec
+        - open
+      properties:
+        reason:
+          type: string
+        durationSec:
+          type: number
+        open:
+          type: boolean
+          description: True if the stoppage is still in progress (no end time)
+
+    OptimizeRun:
+      type: object
+      required:
+        - id
+        - label
+        - brand
+        - flavor
+        - dieType
+        - status
+        - casesNeeded
+        - casesMade
+        - casesLeft
+        - plannedPpm
+        - actualPpm
+        - minutesRemaining
+        - netElapsedSec
+        - downtimeSec
+        - stoppages
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        status:
+          type: string
+          enum: [running, upcoming, finished]
+        casesNeeded:
+          type: number
+        casesMade:
+          type: number
+        casesLeft:
+          type: number
+        plannedPpm:
+          type: number
+          description: Planned pizzas-per-minute from line config
+        actualPpm:
+          type: [number, "null"]
+          description: Observed pizzas-per-minute, or null if not yet measurable
+        minutesRemaining:
+          type: [number, "null"]
+        netElapsedSec:
+          type: number
+        downtimeSec:
+          type: number
+        stoppages:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptimizeStoppage"
+
+    OptimizeScheduledRun:
+      type: object
+      required:
+        - date
+        - brand
+        - flavor
+        - dieType
+        - casesNeeded
+      properties:
+        date:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        casesNeeded:
+          type: number
+
+    OptimizeInput:
+      type: object
+      required:
+        - date
+        - nowMs
+        - runs
+      properties:
+        date:
+          type: string
+        nowMs:
+          type: number
+          description: Client clock (ms epoch) so the model can reason about timing
+        runToTime:
+          type: string
+          description: Target completion time of day (HH:MM), or empty if unset
+        todayPpm:
+          type: number
+          description: Today's aggregate pizzas-per-minute so far
+        benchmarkPpm:
+          type: [number, "null"]
+          description: Historical average pizzas-per-minute, or null if no history
+        runs:
+          type: array
+          description: Today's runs (running, upcoming, and finished)
+          items:
+            $ref: "#/components/schemas/OptimizeRun"
+        scheduledRuns:
+          type: array
+          description: Future planned runs
+          items:
+            $ref: "#/components/schemas/OptimizeScheduledRun"
+        historyRuns:
+          type: array
+          description: Recent finished runs from prior days
+          items:
+            $ref: "#/components/schemas/OptimizeRun"
+
+    OptimizeRecommendation:
+      type: object
+      required:
+        - category
+        - title
+        - detail
+        - impact
+        - appliesTo
+      properties:
+        category:
+          type: string
+          enum: [run, break, efficiency]
+        title:
+          type: string
+        detail:
+          type: string
+        impact:
+          type: string
+          enum: [high, medium, low]
+        appliesTo:
+          type: [string, "null"]
+          description: Run label or scope this applies to, or null for shift-wide
+
+    OptimizeResult:
+      type: object
+      required:
+        - recommendations
+        - generatedAt
+      properties:
+        recommendations:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptimizeRecommendation"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when data is insufficient for analysis
