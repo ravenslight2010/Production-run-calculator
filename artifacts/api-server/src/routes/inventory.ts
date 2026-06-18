@@ -508,18 +508,61 @@ export type MergeSpec = {
   category: string;
 };
 
-export async function mergeInventoryItems(merges: MergeSpec[]): Promise<number> {
+// Why a fold was skipped instead of applied. `blank-key`/`same-key` are
+// malformed inputs; `source-not-tracked` means nothing is in inventory under
+// the source name (benign — only master-data names are being merged);
+// `same-item` means the source and target keys resolve to the same row.
+export type MergeSkipReason =
+  | "blank-key"
+  | "same-key"
+  | "source-not-tracked"
+  | "same-item";
+
+// Per-entry outcome so callers can tell exactly which folds applied and which
+// were skipped (and why) instead of just seeing a total count. `fromKey`/`toKey`
+// echo the caller's original (untrimmed) input so a client can match a result
+// back to the pair it submitted.
+export type MergeOutcome = {
+  fromKey: string;
+  toKey: string;
+  status: "applied" | "skipped";
+  reason?: MergeSkipReason;
+};
+
+export type MergeReport = {
+  merged: number;
+  results: MergeOutcome[];
+};
+
+export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeReport> {
+  const results: MergeOutcome[] = [];
   let merged = 0;
   await db.transaction(async (tx) => {
     for (const m of merges) {
       const fromKey = m.fromKey.trim();
       const toKey = m.toKey.trim();
-      if (!fromKey || !toKey || fromKey === toKey) continue;
+      if (!fromKey || !toKey) {
+        results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "skipped", reason: "blank-key" });
+        continue;
+      }
+      if (fromKey === toKey) {
+        results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "skipped", reason: "same-key" });
+        continue;
+      }
       const [source] = await tx
         .select()
         .from(inventoryItemsTable)
         .where(eq(inventoryItemsTable.key, fromKey));
-      if (!source) continue; // nothing tracked under the source name
+      if (!source) {
+        // nothing tracked under the source name
+        results.push({
+          fromKey: m.fromKey,
+          toKey: m.toKey,
+          status: "skipped",
+          reason: "source-not-tracked",
+        });
+        continue;
+      }
       // Ensure the target item exists (create if the target ingredient isn't
       // tracked yet) and capture its id.
       const [target] = await tx
@@ -530,7 +573,10 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<number> 
           set: { name: m.toName, unit: m.unit, category: m.category, updatedAt: new Date() },
         })
         .returning();
-      if (target.id === source.id) continue;
+      if (target.id === source.id) {
+        results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "skipped", reason: "same-item" });
+        continue;
+      }
       // Move lots + ledger to the target BEFORE deleting the source (ledger/lots
       // cascade-delete with the item, so re-point first or history is lost).
       await tx
@@ -555,10 +601,11 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<number> 
         .update(inventoryItemsTable)
         .set({ updatedAt: new Date() })
         .where(eq(inventoryItemsTable.id, target.id));
+      results.push({ fromKey: m.fromKey, toKey: m.toKey, status: "applied" });
       merged++;
     }
   });
-  return merged;
+  return { merged, results };
 }
 
 router.post("/inventory/merge", async (req, res): Promise<void> => {
@@ -567,9 +614,9 @@ router.post("/inventory/merge", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const merged = await mergeInventoryItems(parsed.data.merges);
-  if (merged > 0) broadcast(headerSenderId(req));
-  res.json({ merged });
+  const report = await mergeInventoryItems(parsed.data.merges);
+  if (report.merged > 0) broadcast(headerSenderId(req));
+  res.json(report);
 });
 
 router.get("/inventory/ledger", async (req, res): Promise<void> => {

@@ -737,13 +737,36 @@ components:
           items:
             $ref: "#/components/schemas/MergeInventoryItem"
 
+    MergeOutcome:
+      type: object
+      required:
+        - fromKey
+        - toKey
+        - status
+      properties:
+        fromKey:
+          type: string
+        toKey:
+          type: string
+        status:
+          type: string
+          enum: [applied, skipped]
+        reason:
+          type: string
+          enum: [blank-key, same-key, source-not-tracked, same-item]
+
     MergeInventoryResult:
       type: object
       required:
         - merged
+        - results
       properties:
         merged:
           type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/MergeOutcome"
 
     ConsumeResult:
       type: object

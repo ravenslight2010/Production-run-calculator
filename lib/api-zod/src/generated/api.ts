@@ -287,7 +287,13 @@ export const MergeInventoryBody = zod.object({
 })
 
 export const MergeInventoryResponse = zod.object({
-  "merged": zod.number()
+  "merged": zod.number(),
+  "results": zod.array(zod.object({
+  "fromKey": zod.string(),
+  "toKey": zod.string(),
+  "status": zod.enum(['applied', 'skipped']),
+  "reason": zod.enum(['blank-key', 'same-key', 'source-not-tracked', 'same-item']).optional()
+}))
 })
 
 

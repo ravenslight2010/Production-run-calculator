@@ -450,7 +450,7 @@ describe("inventory merge against a real database", () => {
     expect(await onHand(sourceId)).toBe(15);
     expect(await onHand(targetId)).toBe(4);
 
-    const merged = await mergeInventoryItems([
+    const { merged, results } = await mergeInventoryItems([
       {
         fromKey: "ingredient:Mozz Whole:lbs",
         toKey: "ingredient:Mozzarella:lbs",
@@ -460,6 +460,13 @@ describe("inventory merge against a real database", () => {
       },
     ]);
     expect(merged).toBe(1);
+    expect(results).toEqual([
+      {
+        fromKey: "ingredient:Mozz Whole:lbs",
+        toKey: "ingredient:Mozzarella:lbs",
+        status: "applied",
+      },
+    ]);
 
     // The source item is gone; all its lots/ledger now belong to the target.
     expect(await findItem("ingredient:Mozz Whole:lbs")).toBeNull();
@@ -492,7 +499,7 @@ describe("inventory merge against a real database", () => {
     await addLot(sourceId, 8);
     expect(await onHand(sourceId)).toBe(8);
 
-    const merged = await mergeInventoryItems([
+    const { merged, results } = await mergeInventoryItems([
       {
         fromKey: "ingredient:Old Name:lbs",
         toKey: "ingredient:New Name:lbs",
@@ -502,6 +509,13 @@ describe("inventory merge against a real database", () => {
       },
     ]);
     expect(merged).toBe(1);
+    expect(results).toEqual([
+      {
+        fromKey: "ingredient:Old Name:lbs",
+        toKey: "ingredient:New Name:lbs",
+        status: "applied",
+      },
+    ]);
 
     // Source is gone; a brand-new target now holds the stock + a merge marker.
     expect(await findItem("ingredient:Old Name:lbs")).toBeNull();
@@ -546,7 +560,7 @@ describe("inventory merge against a real database", () => {
       });
     }
 
-    const merged = await mergeInventoryItems(
+    const { merged, results } = await mergeInventoryItems(
       sources.map((s) => ({
         fromKey: s.key,
         toKey: "ingredient:Cheese:lbs",
@@ -557,6 +571,14 @@ describe("inventory merge against a real database", () => {
     );
     // Every source in the batch was folded.
     expect(merged).toBe(3);
+    // Each entry is reported as applied, in order.
+    expect(results).toEqual(
+      sources.map((s) => ({
+        fromKey: s.key,
+        toKey: "ingredient:Cheese:lbs",
+        status: "applied",
+      })),
+    );
 
     // All three sources are gone; only the target remains.
     for (const s of sources) {
@@ -672,7 +694,7 @@ describe("inventory merge against a real database", () => {
     const itemId = await makeItem("ingredient:Self:lbs");
     await addLot(itemId, 6);
 
-    const merged = await mergeInventoryItems([
+    const { merged, results } = await mergeInventoryItems([
       {
         fromKey: "ingredient:Self:lbs",
         toKey: "ingredient:Self:lbs",
@@ -682,6 +704,14 @@ describe("inventory merge against a real database", () => {
       },
     ]);
     expect(merged).toBe(0);
+    expect(results).toEqual([
+      {
+        fromKey: "ingredient:Self:lbs",
+        toKey: "ingredient:Self:lbs",
+        status: "skipped",
+        reason: "same-key",
+      },
+    ]);
 
     // Nothing moved, nothing deleted, no audit row written.
     const item = await findItem("ingredient:Self:lbs");
@@ -689,5 +719,117 @@ describe("inventory merge against a real database", () => {
     expect(item!.id).toBe(itemId);
     expect(await onHand(itemId)).toBe(6);
     expect(await ledgerFor(itemId)).toHaveLength(0);
+  });
+
+  it("reports an untracked source as skipped instead of silently swallowing it", async () => {
+    // No item exists under the source key, so there is nothing to fold.
+    const { merged, results } = await mergeInventoryItems([
+      {
+        fromKey: "ingredient:Ghost:lbs",
+        toKey: "ingredient:Real:lbs",
+        toName: "Real",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+    expect(merged).toBe(0);
+    expect(results).toEqual([
+      {
+        fromKey: "ingredient:Ghost:lbs",
+        toKey: "ingredient:Real:lbs",
+        status: "skipped",
+        reason: "source-not-tracked",
+      },
+    ]);
+    // The target was never minted just because we asked to merge into it.
+    expect(await findItem("ingredient:Real:lbs")).toBeNull();
+  });
+
+  it("reports blank keys as skipped with a blank-key reason", async () => {
+    const { merged, results } = await mergeInventoryItems([
+      {
+        fromKey: "   ",
+        toKey: "ingredient:Real:lbs",
+        toName: "Real",
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "ingredient:Real:lbs",
+        toKey: "",
+        toName: "Real",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+    expect(merged).toBe(0);
+    expect(results).toEqual([
+      { fromKey: "   ", toKey: "ingredient:Real:lbs", status: "skipped", reason: "blank-key" },
+      { fromKey: "ingredient:Real:lbs", toKey: "", status: "skipped", reason: "blank-key" },
+    ]);
+    // No items were created or touched.
+    expect(await db.select().from(inventoryItemsTable)).toHaveLength(0);
+  });
+
+  it("reports a per-entry mix of applied and skipped folds in one batch", async () => {
+    // One valid, tracked source; one untracked; one self-merge; one blank.
+    const okId = await makeItem("ingredient:Provolone:lbs");
+    await addLot(okId, 9);
+
+    const { merged, results } = await mergeInventoryItems([
+      {
+        fromKey: "ingredient:Provolone:lbs",
+        toKey: "ingredient:Cheese:lbs",
+        toName: "Cheese",
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "ingredient:Nope:lbs",
+        toKey: "ingredient:Cheese:lbs",
+        toName: "Cheese",
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "ingredient:Cheese:lbs",
+        toKey: "ingredient:Cheese:lbs",
+        toName: "Cheese",
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "",
+        toKey: "ingredient:Cheese:lbs",
+        toName: "Cheese",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+
+    // Only the first fold applied; the count reflects just that one.
+    expect(merged).toBe(1);
+    expect(results).toEqual([
+      { fromKey: "ingredient:Provolone:lbs", toKey: "ingredient:Cheese:lbs", status: "applied" },
+      {
+        fromKey: "ingredient:Nope:lbs",
+        toKey: "ingredient:Cheese:lbs",
+        status: "skipped",
+        reason: "source-not-tracked",
+      },
+      {
+        fromKey: "ingredient:Cheese:lbs",
+        toKey: "ingredient:Cheese:lbs",
+        status: "skipped",
+        reason: "same-key",
+      },
+      { fromKey: "", toKey: "ingredient:Cheese:lbs", status: "skipped", reason: "blank-key" },
+    ]);
+
+    // The one valid fold really happened: source gone, stock carried to target.
+    expect(await findItem("ingredient:Provolone:lbs")).toBeNull();
+    const target = await findItem("ingredient:Cheese:lbs");
+    expect(target).not.toBeNull();
+    expect(await onHand(target!.id)).toBe(9);
   });
 });

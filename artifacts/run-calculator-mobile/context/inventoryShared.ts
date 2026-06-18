@@ -376,12 +376,30 @@ export type MergeInventoryLine = {
   category: string;
   unit: string;
 };
+// Why the server skipped a fold instead of applying it. `source-not-tracked` is
+// benign (the name simply isn't in inventory); the others flag bad input.
+export type MergeSkipReason =
+  | "blank-key"
+  | "same-key"
+  | "source-not-tracked"
+  | "same-item";
+export type MergeOutcome = {
+  fromKey: string;
+  toKey: string;
+  status: "applied" | "skipped";
+  reason?: MergeSkipReason;
+};
+export type MergeInventoryResult = {
+  merged: number;
+  results: MergeOutcome[];
+};
 // Fold each source item's stock + ledger history into the target item server-
 // side. Safe to call even when no source name is tracked in inventory — the
-// server skips unknown keys. Returns how many folds were actually applied.
+// server skips unknown keys. Returns a per-entry report (applied vs
+// skipped-with-reason) so callers can surface which pairs didn't fold and why.
 // Mirrors the web client at `run-calculator/src/inventoryShared.ts`.
 export const mergeInventory = (merges: MergeInventoryLine[]) =>
-  api<{ merged: number }>("/inventory/merge", {
+  api<MergeInventoryResult>("/inventory/merge", {
     method: "POST",
     body: JSON.stringify({ merges }),
   });

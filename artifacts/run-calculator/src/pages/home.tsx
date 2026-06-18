@@ -2040,7 +2040,19 @@ export default function Home() {
           unit: item.unit,
         });
       }
-      if (lines.length > 0) await mergeInventory(lines);
+      // Surface any inventory folds the server skipped (e.g. an item deleted
+      // between the fetch above and the merge). All lines here come from tracked
+      // inventory, so a skip is unexpected and worth flagging before we reload.
+      const skipped = lines.length > 0 ? (await mergeInventory(lines)).results.filter(r => r.status === "skipped") : [];
+      if (skipped.length > 0) {
+        const summary = skipped
+          .map(s => `• ${s.fromKey} → ${s.toKey} (${s.reason ?? "unknown"})`)
+          .join("\n");
+        window.alert(
+          `Some inventory stock wasn't folded into the target:\n\n${summary}\n\n` +
+            "Ingredient names were still merged everywhere else. Check these items' stock in Inventory.",
+        );
+      }
       // Rewrite every localStorage surface, then reload so React re-initializes
       // from the merged data and the live-sync push carries the merged lists.
       applyIngredientMerge(map);

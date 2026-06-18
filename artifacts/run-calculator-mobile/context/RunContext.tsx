@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Alert } from "react-native";
 import { MIX_SEED } from "@/data/mixSeed";
 import {
   SPEC_BRANDS,
@@ -2270,7 +2271,21 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           unit: item.unit,
         });
       }
-      if (lines.length > 0) await mergeInventory(lines);
+      // Surface any inventory folds the server skipped (e.g. an item deleted
+      // between the fetch above and the merge). All lines here come from tracked
+      // inventory, so a skip is unexpected and worth flagging to the user.
+      const skipped =
+        lines.length > 0 ? (await mergeInventory(lines)).results.filter((r) => r.status === "skipped") : [];
+      if (skipped.length > 0) {
+        const summary = skipped
+          .map((s) => `• ${s.fromKey} → ${s.toKey} (${s.reason ?? "unknown"})`)
+          .join("\n");
+        Alert.alert(
+          "Some stock wasn't folded",
+          `These inventory items weren't folded into the target:\n\n${summary}\n\n` +
+            "Ingredient names were still merged everywhere else. Check these items' stock in Inventory.",
+        );
+      }
 
       // The shared helper is constrained to `Record<string, unknown>` (it is
       // mirrored verbatim with the web copy, which operates on parsed JSON). Our

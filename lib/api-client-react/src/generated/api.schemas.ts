@@ -119,8 +119,34 @@ export interface MergeInventoryInput {
   merges: MergeInventoryItem[];
 }
 
+export type MergeOutcomeStatus = typeof MergeOutcomeStatus[keyof typeof MergeOutcomeStatus];
+
+
+export const MergeOutcomeStatus = {
+  applied: 'applied',
+  skipped: 'skipped',
+} as const;
+
+export type MergeOutcomeReason = typeof MergeOutcomeReason[keyof typeof MergeOutcomeReason];
+
+
+export const MergeOutcomeReason = {
+  'blank-key': 'blank-key',
+  'same-key': 'same-key',
+  'source-not-tracked': 'source-not-tracked',
+  'same-item': 'same-item',
+} as const;
+
+export interface MergeOutcome {
+  fromKey: string;
+  toKey: string;
+  status: MergeOutcomeStatus;
+  reason?: MergeOutcomeReason;
+}
+
 export interface MergeInventoryResult {
   merged: number;
+  results: MergeOutcome[];
 }
 
 export interface ConsumeResult {
