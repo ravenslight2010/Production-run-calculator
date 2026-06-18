@@ -10,8 +10,9 @@
 // These tests stand up the *real* router against a *disposable* Postgres
 // database (created from the dev DATABASE_URL's server, schema pushed via
 // drizzle-kit, dropped on teardown) so nothing here ever touches real data.
-// Clerk is mocked so we can drive the signed-in identity per request, and the
-// OpenAI vision client is mocked so the photo endpoint never makes a paid call.
+// Auth is the self-contained username + password system: each request carries a
+// real HMAC-signed session token in the Authorization header, and the OpenAI
+// vision client is mocked so the photo endpoint never makes a paid call.
 //
 // @workspace/db binds its pool to process.env.DATABASE_URL at import time, so we
 // must create the throwaway DB and point DATABASE_URL at it BEFORE importing the
@@ -25,26 +26,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-
-// Mutable identity the mocked Clerk getAuth reports. null means "signed out".
-const authState = vi.hoisted(() => ({ userId: null as string | null }));
-
-// Mock Clerk so requireAuth resolves whatever identity a test sets, and so the
-// best-effort identity lookup in lib/roles never makes a network call.
-vi.mock("@clerk/express", () => ({
-  getAuth: () => ({ userId: authState.userId }),
-  clerkClient: {
-    users: {
-      getUser: async (id: string) => ({
-        primaryEmailAddress: { emailAddress: `${id}@example.com` },
-        emailAddresses: [{ emailAddress: `${id}@example.com` }],
-        firstName: "Test",
-        lastName: id,
-        username: id,
-      }),
-    },
-  },
-}));
+import { signToken } from "../lib/auth";
 
 // Mock the OpenAI vision client so POST /inventory/identify-photo returns a
 // valid (empty) result without making a paid call.
@@ -69,6 +51,7 @@ let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let userRolesTable: DbModule["userRolesTable"];
+let usersTable: DbModule["usersTable"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -118,6 +101,7 @@ beforeAll(async () => {
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
   userRolesTable = dbMod.userRolesTable;
+  usersTable = dbMod.usersTable;
 
   // Minimal app: the real router, behind a no-op req.log so handlers that log
   // don't crash without pino-http. Mounted at /api to match production paths.
@@ -151,29 +135,35 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  authState.userId = null;
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
   );
   // A manager and an operator we have already "seen". Seeding rows directly
   // bypasses the first-user bootstrap so each test starts from a known roster.
+  await db.insert(usersTable).values([
+    { id: MANAGER, username: "manager", passwordHash: "x" },
+    { id: OPERATOR, username: "operator", passwordHash: "x" },
+  ]);
   await db.insert(userRolesTable).values([
-    { clerkUserId: MANAGER, role: "manager", email: `${MANAGER}@example.com`, name: "Manager" },
-    { clerkUserId: OPERATOR, role: "operator", email: `${OPERATOR}@example.com`, name: "Operator" },
+    { userId: MANAGER, role: "manager" },
+    { userId: OPERATOR, role: "operator" },
   ]);
 });
 
-// Issue a request as the given user (or signed out when userId is null).
+// Issue a request as the given user (or signed out when userId is null). A real
+// signed session token is attached as a bearer header for signed-in callers.
 async function req(
   userId: string | null,
   method: string,
   pathname: string,
   body?: unknown,
 ): Promise<Response> {
-  authState.userId = userId;
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (userId) headers["authorization"] = `Bearer ${signToken(userId)}`;
   return fetch(`${baseUrl}${pathname}`, {
     method,
-    headers: body !== undefined ? { "content-type": "application/json" } : {},
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 }
@@ -294,24 +284,27 @@ describe("last-manager guard", () => {
     const [row] = await db
       .select()
       .from(userRolesTable)
-      .where(sql`${userRolesTable.clerkUserId} = ${MANAGER}`);
+      .where(sql`${userRolesTable.userId} = ${MANAGER}`);
     expect(row.role).toBe("manager");
   });
 
   it("allows demoting a manager when another manager remains (→ 200)", async () => {
     // Promote the operator so there are two managers, then demote one.
+    await db.insert(usersTable).values({
+      id: "manager-2",
+      username: "manager-2",
+      passwordHash: "x",
+    });
     await db.insert(userRolesTable).values({
-      clerkUserId: "manager-2",
+      userId: "manager-2",
       role: "manager",
-      email: "manager-2@example.com",
-      name: "Manager Two",
     });
     const res = await req(MANAGER, "PUT", `/api/users/manager-2/role`, { role: "operator" });
     expect(res.status).toBe(200);
     const [row] = await db
       .select()
       .from(userRolesTable)
-      .where(sql`${userRolesTable.clerkUserId} = ${"manager-2"}`);
+      .where(sql`${userRolesTable.userId} = ${"manager-2"}`);
     expect(row.role).toBe("operator");
   });
 });

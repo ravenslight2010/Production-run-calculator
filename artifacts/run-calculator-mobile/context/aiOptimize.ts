@@ -3,7 +3,7 @@
 // (replit.md parity rule). Per-run shaping matches the web buildOptimizeRun:
 // downtime = completed stoppages, planned PPM = crustsPerCycle * cycleSpeed *
 // speedAdjustment, live cases-made from skid progress. The one platform
-// difference is plumbing: mobile threads the Clerk bearer token + client id
+// difference is plumbing: mobile threads the session bearer token + client id
 // through fetch (no cookie jar), exactly like context/inventoryShared.ts.
 
 import { getAuthToken } from "@workspace/api-client-react";

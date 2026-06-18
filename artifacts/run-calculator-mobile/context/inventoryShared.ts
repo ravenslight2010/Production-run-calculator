@@ -229,7 +229,7 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const base = getApiBaseUrl();
   if (!base) throw new Error("No API base URL (sync disabled)");
   const clientId = await getOrCreateClientId();
-  // Mobile has no cookie jar — attach the Clerk bearer token explicitly.
+  // Mobile has no cookie jar — attach the session bearer token explicitly.
   const token = await getAuthToken();
   const res = await fetch(`${base}/api${path}`, {
     ...opts,
@@ -318,6 +318,24 @@ export interface StaffMember {
   name: string | null;
 }
 export const fetchMe = () => api<StaffMember>("/me");
+
+// Auth — username + password. Mobile has no cookie jar, so the server's session
+// token is returned in the response body; the auth context persists it in
+// expo-secure-store and replays it as a bearer header via setAuthTokenGetter.
+export type AuthResult = { token: string; user: StaffMember };
+export const signUpRequest = (username: string, password: string) =>
+  api<AuthResult>("/auth/sign-up", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+export const signInRequest = (username: string, password: string) =>
+  api<AuthResult>("/auth/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+export const signOutRequest = () =>
+  api<null>("/auth/sign-out", { method: "POST" });
+
 export const fetchStaff = () => api<StaffMember[]>("/users");
 export const setStaffRole = (userId: string, role: Role) =>
   api<StaffMember>(`/users/${encodeURIComponent(userId)}/role`, {

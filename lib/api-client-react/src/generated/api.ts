@@ -21,6 +21,8 @@ import type {
 
 import type {
   AdjustInput,
+  AuthCredentials,
+  AuthResponse,
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
@@ -133,6 +135,219 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
+
+export const getSignUpUrl = () => {
+
+
+
+
+  return `/api/auth/sign-up`
+}
+
+/**
+ * Creates a new username + password account. The first account ever created becomes a manager; all later accounts default to operator.
+ * @summary Create a staff account and start a session
+ */
+export const signUp = async (authCredentials: AuthCredentials, options?: RequestInit): Promise<AuthResponse> => {
+
+  return customFetch<AuthResponse>(getSignUpUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authCredentials,)
+  }
+);}
+
+
+
+
+export const getSignUpMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext> => {
+
+const mutationKey = ['signUp'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signUp>>, {data: BodyType<AuthCredentials>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  signUp(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignUpMutationResult = NonNullable<Awaited<ReturnType<typeof signUp>>>
+    export type SignUpMutationBody = BodyType<AuthCredentials>
+    export type SignUpMutationError = ErrorType<void>
+
+    /**
+ * @summary Create a staff account and start a session
+ */
+export const useSignUp = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signUp>>,
+        TError,
+        {data: BodyType<AuthCredentials>},
+        TContext
+      > => {
+      return useMutation(getSignUpMutationOptions(options));
+    }
+
+export const getSignInUrl = () => {
+
+
+
+
+  return `/api/auth/sign-in`
+}
+
+/**
+ * @summary Sign in with username and password
+ */
+export const signIn = async (authCredentials: AuthCredentials, options?: RequestInit): Promise<AuthResponse> => {
+
+  return customFetch<AuthResponse>(getSignInUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      authCredentials,)
+  }
+);}
+
+
+
+
+export const getSignInMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signIn>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signIn>>, TError,{data: BodyType<AuthCredentials>}, TContext> => {
+
+const mutationKey = ['signIn'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signIn>>, {data: BodyType<AuthCredentials>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  signIn(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignInMutationResult = NonNullable<Awaited<ReturnType<typeof signIn>>>
+    export type SignInMutationBody = BodyType<AuthCredentials>
+    export type SignInMutationError = ErrorType<void>
+
+    /**
+ * @summary Sign in with username and password
+ */
+export const useSignIn = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signIn>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signIn>>,
+        TError,
+        {data: BodyType<AuthCredentials>},
+        TContext
+      > => {
+      return useMutation(getSignInMutationOptions(options));
+    }
+
+export const getSignOutUrl = () => {
+
+
+
+
+  return `/api/auth/sign-out`
+}
+
+/**
+ * @summary Sign out (clears the session cookie)
+ */
+export const signOut = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getSignOutUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getSignOutMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOut>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signOut>>, TError,void, TContext> => {
+
+const mutationKey = ['signOut'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signOut>>, void> = () => {
+
+
+          return  signOut(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignOutMutationResult = NonNullable<Awaited<ReturnType<typeof signOut>>>
+
+    export type SignOutMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Sign out (clears the session cookie)
+ */
+export const useSignOut = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signOut>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof signOut>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getSignOutMutationOptions(options));
+    }
 
 export const getListRunsUrl = () => {
 

@@ -7,6 +7,8 @@
  */
 
 export * from './adjustInput';
+export * from './authCredentials';
+export * from './authResponse';
 export * from './consumeInput';
 export * from './consumeLine';
 export * from './consumeResult';

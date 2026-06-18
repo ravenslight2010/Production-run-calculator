@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
 import runsRouter from "./runs";
 import syncRouter from "./sync";
 import inventoryRouter from "./inventory";
@@ -11,6 +12,10 @@ const router: IRouter = Router();
 
 // Health check stays public so platform probes work without a session.
 router.use(healthRouter);
+
+// Auth endpoints (sign-up/in/out) must be public — they are how a session is
+// established in the first place.
+router.use(authRouter);
 
 // Everything else requires a signed-in user. This gates all reads/writes,
 // the live-sync SSE streams, and the paid AI photo endpoint behind auth.

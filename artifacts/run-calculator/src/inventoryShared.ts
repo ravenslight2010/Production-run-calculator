@@ -344,6 +344,24 @@ export type StaffMember = {
   name: string | null;
 };
 export const fetchMe = () => api<StaffMember>("/me");
+
+// Auth — username + password. On the web the server sets an httpOnly `rc_auth`
+// session cookie, which same-origin fetches send automatically, so we ignore the
+// token in the response body and rely on the cookie for subsequent requests.
+export type AuthResult = { token: string; user: StaffMember };
+export const signUpRequest = (username: string, password: string) =>
+  api<AuthResult>("/auth/sign-up", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+export const signInRequest = (username: string, password: string) =>
+  api<AuthResult>("/auth/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+export const signOutRequest = () =>
+  api<null>("/auth/sign-out", { method: "POST" });
+
 export const fetchStaff = () => api<StaffMember[]>("/users");
 export const setStaffRole = (userId: string, role: Role) =>
   api<StaffMember>(`/users/${encodeURIComponent(userId)}/role`, {

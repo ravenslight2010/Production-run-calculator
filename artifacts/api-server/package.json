@@ -11,8 +11,6 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@clerk/express": "^2.1.27",
-    "@clerk/shared": "^4.18.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",

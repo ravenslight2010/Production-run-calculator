@@ -1,8 +1,5 @@
-import { useSignIn, useSSO } from "@clerk/expo";
 import { Feather } from "@expo/vector-icons";
-import * as AuthSession from "expo-auth-session";
 import { Link, useRouter, type Href } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
 import React from "react";
 import {
   ActivityIndicator,
@@ -20,127 +17,40 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
-
-// Preload the browser on Android to reduce OAuth latency.
-function useWarmUpBrowser() {
-  React.useEffect(() => {
-    if (Platform.OS !== "android") return;
-    void WebBrowser.warmUpAsync();
-    return () => {
-      void WebBrowser.coolDownAsync();
-    };
-  }, []);
-}
-
-WebBrowser.maybeCompleteAuthSession();
+import { useAuth } from "@/context/auth";
+import { InventoryApiError } from "@/context/inventoryShared";
 
 export default function SignInScreen() {
-  useWarmUpBrowser();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
-  const { signIn, errors, fetchStatus } = useSignIn();
-  const { startSSOFlow } = useSSO();
+  const { signIn } = useAuth();
 
-  const [emailAddress, setEmailAddress] = React.useState("");
+  const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
-  const [code, setCode] = React.useState("");
-  const [oauthBusy, setOauthBusy] = React.useState(false);
-
-  const busy = fetchStatus === "fetching" || oauthBusy;
-
-  const navigateHome = ({
-    decorateUrl,
-  }: {
-    session?: { currentTask?: unknown } | null;
-    decorateUrl: (url: string) => string;
-  }) => {
-    const url = decorateUrl("/(tabs)");
-    router.replace(url as Href);
-  };
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
 
   const handleSubmit = async () => {
-    const { error } = await signIn.password({ emailAddress, password });
-    if (error) return;
-
-    if (signIn.status === "complete") {
-      await signIn.finalize({ navigate: navigateHome });
-    } else if (signIn.status === "needs_client_trust") {
-      const emailCodeFactor = signIn.supportedSecondFactors?.find(
-        (f) => f.strategy === "email_code",
-      );
-      if (emailCodeFactor) await signIn.mfa.sendEmailCode();
-    }
-  };
-
-  const handleVerify = async () => {
-    await signIn.mfa.verifyEmailCode({ code });
-    if (signIn.status === "complete") {
-      await signIn.finalize({ navigate: navigateHome });
-    }
-  };
-
-  const handleGoogle = async () => {
+    setError(null);
+    setBusy(true);
     try {
-      setOauthBusy(true);
-      const { createdSessionId, setActive } = await startSSOFlow({
-        strategy: "oauth_google",
-        redirectUrl: AuthSession.makeRedirectUri(),
-      });
-      if (createdSessionId && setActive) {
-        await setActive({
-          session: createdSessionId,
-          navigate: async ({ decorateUrl }) => {
-            router.replace(decorateUrl("/(tabs)") as Href);
-          },
-        });
+      await signIn(username.trim(), password);
+      router.replace("/(tabs)" as Href);
+    } catch (err) {
+      if (err instanceof InventoryApiError && err.status === 401) {
+        setError("Incorrect username or password.");
+      } else if (err instanceof InventoryApiError && err.status === 400) {
+        setError("Username must be 3–64 characters and password at least 6.");
+      } else {
+        setError("Something went wrong. Please try again.");
       }
-    } catch {
-      /* user cancelled or OAuth failed; stay on screen */
-    } finally {
-      setOauthBusy(false);
+      setBusy(false);
     }
   };
 
   const styles = makeStyles(colors);
-
-  if (signIn.status === "needs_client_trust") {
-    return (
-      <View
-        style={[
-          styles.screen,
-          { paddingTop: insets.top + 24, minHeight: windowHeight },
-        ]}
-      >
-        <View style={styles.card}>
-          <Text style={styles.title}>Verify your account</Text>
-          <Text style={styles.subtitle}>Enter the code we emailed you.</Text>
-          <TextInput
-            style={styles.input}
-            value={code}
-            placeholder="Verification code"
-            placeholderTextColor={colors.mutedForeground}
-            onChangeText={setCode}
-            keyboardType="numeric"
-          />
-          {errors.fields.code && (
-            <Text style={styles.error}>{errors.fields.code.message}</Text>
-          )}
-          <Pressable
-            style={[styles.primaryBtn, busy && styles.btnDisabled]}
-            onPress={handleVerify}
-            disabled={busy}
-          >
-            <Text style={styles.primaryBtnText}>Verify</Text>
-          </Pressable>
-          <Pressable style={styles.linkBtn} onPress={() => signIn.mfa.sendEmailCode()}>
-            <Text style={styles.linkText}>Send a new code</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -166,41 +76,17 @@ export default function SignInScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>Sign in</Text>
 
-          <Pressable
-            style={[styles.googleBtn, busy && styles.btnDisabled]}
-            onPress={handleGoogle}
-            disabled={busy}
-          >
-            {oauthBusy ? (
-              <ActivityIndicator color={colors.foreground} />
-            ) : (
-              <>
-                <Feather name="log-in" size={18} color={colors.foreground} />
-                <Text style={styles.googleBtnText}>Continue with Google</Text>
-              </>
-            )}
-          </Pressable>
-
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          <Text style={styles.label}>Email address</Text>
+          <Text style={styles.label}>Username</Text>
           <TextInput
             style={styles.input}
             autoCapitalize="none"
-            autoComplete="email"
-            value={emailAddress}
-            placeholder="you@company.com"
+            autoCorrect={false}
+            autoComplete="username"
+            value={username}
+            placeholder="Enter username"
             placeholderTextColor={colors.mutedForeground}
-            onChangeText={setEmailAddress}
-            keyboardType="email-address"
+            onChangeText={setUsername}
           />
-          {errors.fields.identifier && (
-            <Text style={styles.error}>{errors.fields.identifier.message}</Text>
-          )}
 
           <Text style={styles.label}>Password</Text>
           <TextInput
@@ -212,25 +98,21 @@ export default function SignInScreen() {
             autoComplete="current-password"
             onChangeText={setPassword}
           />
-          {errors.fields.password && (
-            <Text style={styles.error}>{errors.fields.password.message}</Text>
-          )}
-          {errors.global?.[0] && (
-            <Text style={styles.error}>{errors.global[0].message}</Text>
-          )}
+
+          {error && <Text style={styles.error}>{error}</Text>}
 
           <Pressable
             style={[
               styles.primaryBtn,
-              (!emailAddress || !password || busy) && styles.btnDisabled,
+              (!username || !password || busy) && styles.btnDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={!emailAddress || !password || busy}
+            disabled={!username || !password || busy}
           >
-            {fetchStatus === "fetching" && !oauthBusy ? (
+            {busy ? (
               <ActivityIndicator color={colors.primaryForeground} />
             ) : (
-              <Text style={styles.primaryBtnText}>Continue</Text>
+              <Text style={styles.primaryBtnText}>Sign in</Text>
             )}
           </Pressable>
 
@@ -291,36 +173,6 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
       color: colors.cardForeground,
       marginBottom: 16,
     },
-    subtitle: {
-      fontFamily: FONTS.regular,
-      fontSize: 14,
-      color: colors.mutedForeground,
-      marginBottom: 16,
-    },
-    googleBtn: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 10,
-      height: 48,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.background,
-    },
-    googleBtnText: {
-      fontFamily: FONTS.semibold,
-      fontSize: 15,
-      color: colors.foreground,
-    },
-    divider: { flexDirection: "row", alignItems: "center", marginVertical: 18 },
-    dividerLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
-    dividerText: {
-      marginHorizontal: 12,
-      fontFamily: FONTS.regular,
-      fontSize: 13,
-      color: colors.mutedForeground,
-    },
     label: {
       fontFamily: FONTS.medium,
       fontSize: 13,
@@ -353,13 +205,11 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
       color: colors.primaryForeground,
     },
     btnDisabled: { opacity: 0.5 },
-    linkBtn: { alignItems: "center", marginTop: 14 },
-    linkText: { fontFamily: FONTS.medium, fontSize: 14, color: colors.primary },
     error: {
       fontFamily: FONTS.regular,
       fontSize: 13,
       color: colors.destructive,
-      marginTop: -8,
+      marginTop: -4,
       marginBottom: 12,
     },
     footer: {

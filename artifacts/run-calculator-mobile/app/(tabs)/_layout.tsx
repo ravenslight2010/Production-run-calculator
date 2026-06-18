@@ -1,4 +1,4 @@
-import { useAuth, useClerk } from "@clerk/expo";
+import { useAuth } from "@/context/auth";
 import { BlurView } from "expo-blur";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -26,14 +26,13 @@ const MENU_ITEMS: {
 export default function TabLayout() {
   const colors = useColors();
   const router = useRouter();
-  const { signOut } = useClerk();
-  const { isLoaded, isSignedIn } = useAuth();
+  const { signOut, isLoading, isAuthenticated } = useAuth();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const [menuOpen, setMenuOpen] = useState(false);
 
-  if (isLoaded && !isSignedIn) {
+  if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;
   }
 

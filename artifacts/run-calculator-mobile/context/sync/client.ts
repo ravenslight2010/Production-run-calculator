@@ -34,7 +34,7 @@ export async function getOrCreateClientId(): Promise<string> {
   return id;
 }
 
-// Mobile has no browser cookie jar, so the Clerk bearer token must be attached
+// Mobile has no browser cookie jar, so the session bearer token must be attached
 // explicitly to every authenticated request (web sends the session cookie).
 async function authHeaders(
   extra?: Record<string, string>,
@@ -147,7 +147,7 @@ export function openSyncStream(
     if (isWeb) {
       const ES = (globalThis as unknown as { EventSource: typeof EventSource }).EventSource;
       // The browser EventSource can't set an Authorization header, so on web we
-      // pass the Clerk bearer token as a `?token=` query param (the API promotes
+      // pass the session bearer token as a `?token=` query param (the API promotes
       // it to a bearer header in dev/preview).
       const withAuth = token ? `${url}&token=${encodeURIComponent(token)}` : url;
       const src = new ES(withAuth);

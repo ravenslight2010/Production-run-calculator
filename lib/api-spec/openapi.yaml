@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Username + password authentication
   - name: runs
     description: Production run history
   - name: inventory
@@ -32,6 +34,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/sign-up:
+    post:
+      operationId: signUp
+      tags: [auth]
+      summary: Create a staff account and start a session
+      description: >-
+        Creates a new username + password account. The first account ever
+        created becomes a manager; all later accounts default to operator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthCredentials"
+      responses:
+        "201":
+          description: Account created and signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input
+        "409":
+          description: Username already taken
+
+  /auth/sign-in:
+    post:
+      operationId: signIn
+      tags: [auth]
+      summary: Sign in with username and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthCredentials"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input
+        "401":
+          description: Invalid username or password
+
+  /auth/sign-out:
+    post:
+      operationId: signOut
+      tags: [auth]
+      summary: Sign out (clears the session cookie)
+      responses:
+        "204":
+          description: Signed out
 
   /runs:
     get:
@@ -808,6 +868,32 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PhotoGuess"
+
+    AuthCredentials:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        password:
+          type: string
+          minLength: 6
+          maxLength: 200
+
+    AuthResponse:
+      type: object
+      required:
+        - token
+        - user
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/StaffMember"
 
     StaffMember:
       type: object

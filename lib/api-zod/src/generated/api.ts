@@ -18,6 +18,51 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * Creates a new username + password account. The first account ever created becomes a manager; all later accounts default to operator.
+ * @summary Create a staff account and start a session
+ */
+export const signUpBodyUsernameMin = 3;
+export const signUpBodyUsernameMax = 64;
+
+export const signUpBodyPasswordMin = 6;
+export const signUpBodyPasswordMax = 200;
+
+
+
+export const SignUpBody = zod.object({
+  "username": zod.string().min(signUpBodyUsernameMin).max(signUpBodyUsernameMax),
+  "password": zod.string().min(signUpBodyPasswordMin).max(signUpBodyPasswordMax)
+})
+
+
+/**
+ * @summary Sign in with username and password
+ */
+export const signInBodyUsernameMin = 3;
+export const signInBodyUsernameMax = 64;
+
+export const signInBodyPasswordMin = 6;
+export const signInBodyPasswordMax = 200;
+
+
+
+export const SignInBody = zod.object({
+  "username": zod.string().min(signInBodyUsernameMin).max(signInBodyUsernameMax),
+  "password": zod.string().min(signInBodyPasswordMin).max(signInBodyPasswordMax)
+})
+
+export const SignInResponse = zod.object({
+  "token": zod.string(),
+  "user": zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable()
+})
+})
+
+
+/**
  * @summary List saved production runs
  */
 export const ListRunsResponseItem = zod.object({

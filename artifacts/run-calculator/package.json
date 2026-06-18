@@ -76,9 +76,5 @@
     "wouter": "^3.3.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "catalog:"
-  },
-  "dependencies": {
-    "@clerk/react": "^6.10.0",
-    "@clerk/themes": "^2.4.57"
   }
 }

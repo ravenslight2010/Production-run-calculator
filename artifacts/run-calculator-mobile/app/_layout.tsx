@@ -9,18 +9,17 @@ import {
   SpaceMono_400Regular,
   SpaceMono_700Bold,
 } from "@expo-google-fonts/space-mono";
-import { ClerkLoaded, ClerkLoading, ClerkProvider, useAuth } from "@clerk/expo";
-import { tokenCache } from "@clerk/expo/token-cache";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
+import { setBaseUrl } from "@workspace/api-client-react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AuthProvider } from "@/context/auth";
 import { RunContextProvider } from "@/context/RunContext";
 
 SplashScreen.preventAutoHideAsync();
@@ -47,24 +46,7 @@ const queryClient = new QueryClient();
 const domain = process.env.EXPO_PUBLIC_DOMAIN;
 if (domain) setBaseUrl(`https://${domain}`);
 
-const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
-const proxyUrl = process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined;
-
 function RootLayoutNav() {
-  const { isLoaded, isSignedIn, getToken } = useAuth();
-
-  // Mobile has no browser cookie jar, so the generated API client and the raw
-  // SSE/REST transports attach the Clerk bearer token explicitly via this getter.
-  useEffect(() => {
-    if (isSignedIn) {
-      setAuthTokenGetter(() => getToken());
-    } else {
-      setAuthTokenGetter(null);
-    }
-  }, [isSignedIn, getToken]);
-
-  if (!isLoaded) return null;
-
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -94,36 +76,18 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <ClerkProvider
-      publishableKey={publishableKey}
-      tokenCache={tokenCache}
-      proxyUrl={proxyUrl}
-    >
-      <SafeAreaProvider>
-        <ClerkLoading>
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: "#131720",
-            }}
-          >
-            <ActivityIndicator size="large" color="#ff9900" />
-          </View>
-        </ClerkLoading>
-        <ClerkLoaded>
-          <ErrorBoundary>
-            <QueryClientProvider client={queryClient}>
-              <GestureHandlerRootView style={{ flex: 1 }}>
-                <RunContextProvider>
-                  <RootLayoutNav />
-                </RunContextProvider>
-              </GestureHandlerRootView>
-            </QueryClientProvider>
-          </ErrorBoundary>
-        </ClerkLoaded>
-      </SafeAreaProvider>
-    </ClerkProvider>
+    <SafeAreaProvider>
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <AuthProvider>
+              <RunContextProvider>
+                <RootLayoutNav />
+              </RunContextProvider>
+            </AuthProvider>
+          </GestureHandlerRootView>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </SafeAreaProvider>
   );
 }

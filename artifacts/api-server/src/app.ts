@@ -1,13 +1,7 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
-import { clerkMiddleware } from "@clerk/express";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-  getClerkProxyHost,
-} from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -79,20 +73,18 @@ app.use(
   }),
 );
 
-// Clerk Frontend API proxy must run before body parsers (it streams raw bytes).
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
-
 app.use(cors(buildCorsOptions()));
+app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // The expo-web preview of the mobile app is served from a *.expo.worf.replit.dev
 // origin and reaches the API cross-origin via EventSource, which cannot set an
-// Authorization header. The web SSE client therefore passes the Clerk bearer
-// token as a `?token=` query param; promote it to a bearer header before Clerk's
-// middleware runs so the normal auth path applies. Dev/preview only — native
-// (header) and same-origin web (cookie) never need this, so production auth
-// posture is unchanged (no token-in-URL acceptance there).
+// Authorization header. The web SSE client therefore passes the bearer token as
+// a `?token=` query param; promote it to a bearer header before auth runs so the
+// normal auth path applies. Dev/preview only — native (header) and same-origin
+// web (cookie) never need this, so production auth posture is unchanged (no
+// token-in-URL acceptance there).
 if (process.env.NODE_ENV !== "production") {
   app.use((req, _res, next) => {
     if (
@@ -105,18 +97,6 @@ if (process.env.NODE_ENV !== "production") {
     next();
   });
 }
-
-// Resolve the publishable key from the incoming request host so the same server
-// can serve multiple Clerk custom domains. Falls back to CLERK_PUBLISHABLE_KEY
-// when the host doesn't map to a custom domain.
-app.use(
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
 
 app.use("/api", router);
 

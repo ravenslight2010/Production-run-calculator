@@ -1,6 +1,5 @@
-import { clerkClient } from "@clerk/express";
 import { and, eq, ne, sql } from "drizzle-orm";
-import { db, userRolesTable, type UserRole } from "@workspace/db";
+import { db, userRolesTable, usersTable } from "@workspace/db";
 
 export type Role = "manager" | "operator";
 
@@ -10,27 +9,15 @@ export function isRole(value: unknown): value is Role {
   return value === "manager" || value === "operator";
 }
 
-// Best-effort identity snapshot from Clerk so the staff roster can show a
-// human-readable name/email without a Clerk call per render. Never throws —
-// roles must keep working even if the Clerk lookup fails.
-async function fetchClerkIdentity(
-  userId: string,
-): Promise<{ email: string | null; name: string | null }> {
-  try {
-    const user = await clerkClient.users.getUser(userId);
-    const email =
-      user.primaryEmailAddress?.emailAddress ??
-      user.emailAddresses[0]?.emailAddress ??
-      null;
-    const name =
-      [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
-      user.username ||
-      null;
-    return { email, name };
-  } catch {
-    return { email: null, name: null };
-  }
-}
+// StaffMember as exposed by the API. `name` carries the username and `email` is
+// always null — the shape is kept stable so the OpenAPI contract and both
+// roster UIs are unchanged from the Clerk era.
+export type StaffMember = {
+  userId: string;
+  role: Role;
+  email: string | null;
+  name: string | null;
+};
 
 async function managerCount(): Promise<number> {
   const [row] = await db
@@ -42,33 +29,66 @@ async function managerCount(): Promise<number> {
 
 // Resolve the current user's role, creating their row on first sight.
 //
-// Bootstrap rule: the very first signed-in user (when no manager exists yet)
-// becomes the manager, so a fresh install has an admin without any out-of-band
-// setup. Everyone after that defaults to operator; a manager promotes them via
-// PUT /users/{id}/role. Creation is race-safe via onConflictDoNothing.
-export async function getOrCreateUserRole(userId: string): Promise<UserRole> {
+// Bootstrap rule: the very first user (when no manager exists yet) becomes the
+// manager so a fresh install has an admin without any out-of-band setup. The
+// role row is normally created at sign-up, but this keeps a race-safe fallback
+// for any user row that predates its role row.
+export async function getOrCreateUserRole(userId: string): Promise<{ role: Role }> {
   const [existing] = await db
-    .select()
+    .select({ role: userRolesTable.role })
     .from(userRolesTable)
-    .where(eq(userRolesTable.clerkUserId, userId));
-  if (existing) return existing;
+    .where(eq(userRolesTable.userId, userId));
+  if (existing) return { role: existing.role as Role };
 
   const role: Role = (await managerCount()) === 0 ? "manager" : "operator";
-  const identity = await fetchClerkIdentity(userId);
   await db
     .insert(userRolesTable)
-    .values({ clerkUserId: userId, role, email: identity.email, name: identity.name })
-    .onConflictDoNothing({ target: userRolesTable.clerkUserId });
+    .values({ userId, role })
+    .onConflictDoNothing({ target: userRolesTable.userId });
 
   const [row] = await db
-    .select()
+    .select({ role: userRolesTable.role })
     .from(userRolesTable)
-    .where(eq(userRolesTable.clerkUserId, userId));
-  return row;
+    .where(eq(userRolesTable.userId, userId));
+  return { role: (row?.role as Role) ?? role };
 }
 
-export async function listUserRoles(): Promise<UserRole[]> {
-  return db.select().from(userRolesTable).orderBy(userRolesTable.email);
+// Assign a role at account creation. First account (no managers yet) becomes the
+// manager; everyone after defaults to operator.
+export async function createRoleForNewUser(userId: string): Promise<Role> {
+  const role: Role = (await managerCount()) === 0 ? "manager" : "operator";
+  await db
+    .insert(userRolesTable)
+    .values({ userId, role })
+    .onConflictDoNothing({ target: userRolesTable.userId });
+  return role;
+}
+
+export async function getStaffMember(userId: string): Promise<StaffMember> {
+  const { role } = await getOrCreateUserRole(userId);
+  const [user] = await db
+    .select({ username: usersTable.username })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  return { userId, role, email: null, name: user?.username ?? null };
+}
+
+export async function listStaff(): Promise<StaffMember[]> {
+  const rows = await db
+    .select({
+      userId: userRolesTable.userId,
+      role: userRolesTable.role,
+      username: usersTable.username,
+    })
+    .from(userRolesTable)
+    .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
+    .orderBy(usersTable.username);
+  return rows.map((r) => ({
+    userId: r.userId,
+    role: r.role as Role,
+    email: null,
+    name: r.username,
+  }));
 }
 
 // Set a user's role, ensuring at least one manager always remains so the team
@@ -76,14 +96,12 @@ export async function listUserRoles(): Promise<UserRole[]> {
 export async function setUserRole(
   targetUserId: string,
   role: Role,
-): Promise<{ ok: true; row: UserRole } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; row: StaffMember } | { ok: false; status: number; error: string }> {
   if (role === "operator") {
     const [other] = await db
-      .select({ id: userRolesTable.clerkUserId })
+      .select({ id: userRolesTable.userId })
       .from(userRolesTable)
-      .where(
-        and(eq(userRolesTable.role, "manager"), ne(userRolesTable.clerkUserId, targetUserId)),
-      )
+      .where(and(eq(userRolesTable.role, "manager"), ne(userRolesTable.userId, targetUserId)))
       .limit(1);
     if (!other) {
       return {
@@ -93,28 +111,22 @@ export async function setUserRole(
       };
     }
   }
-  // Ensure the target exists (a manager may set the role of a user we have not
-  // seen issue a request yet); pull identity if we are creating the row.
-  const [existing] = await db
-    .select()
-    .from(userRolesTable)
-    .where(eq(userRolesTable.clerkUserId, targetUserId));
-  if (!existing) {
-    const identity = await fetchClerkIdentity(targetUserId);
-    const [created] = await db
-      .insert(userRolesTable)
-      .values({ clerkUserId: targetUserId, role, email: identity.email, name: identity.name })
-      .onConflictDoUpdate({
-        target: userRolesTable.clerkUserId,
-        set: { role, updatedAt: new Date() },
-      })
-      .returning();
-    return { ok: true, row: created };
+
+  const [user] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.id, targetUserId));
+  if (!user) {
+    return { ok: false, status: 404, error: "User not found" };
   }
-  const [updated] = await db
-    .update(userRolesTable)
-    .set({ role, updatedAt: new Date() })
-    .where(eq(userRolesTable.clerkUserId, targetUserId))
-    .returning();
-  return { ok: true, row: updated };
+
+  await db
+    .insert(userRolesTable)
+    .values({ userId: targetUserId, role })
+    .onConflictDoUpdate({
+      target: userRolesTable.userId,
+      set: { role, updatedAt: new Date() },
+    });
+
+  return { ok: true, row: await getStaffMember(targetUserId) };
 }

@@ -191,6 +191,19 @@ export interface IdentifyPhotoResult {
   items: PhotoGuess[];
 }
 
+export interface AuthCredentials {
+  /**
+     * @minLength 3
+     * @maxLength 64
+     */
+  username: string;
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  password: string;
+}
+
 export type StaffMemberRole = typeof StaffMemberRole[keyof typeof StaffMemberRole];
 
 
@@ -206,6 +219,11 @@ export interface StaffMember {
   email: string | null;
   /** @nullable */
   name: string | null;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: StaffMember;
 }
 
 export type StaffRoleUpdateRole = typeof StaffRoleUpdateRole[keyof typeof StaffRoleUpdateRole];
