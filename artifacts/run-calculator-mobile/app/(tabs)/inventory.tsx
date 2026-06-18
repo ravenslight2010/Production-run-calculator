@@ -49,6 +49,7 @@ import {
 import { getOrCreateClientId } from "@/context/sync/client";
 import { useMe } from "@/hooks/useRole";
 import StaffRolesCard from "@/components/StaffRolesCard";
+import ChangePasswordCard from "@/components/ChangePasswordCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -320,6 +321,9 @@ export default function InventoryScreen() {
             </Text>
           </Card>
         )}
+
+        {/* Account self-service (any signed-in user) */}
+        <ChangePasswordCard />
 
         {/* Staff & roles (manager only) */}
         {isManager && <StaffRolesCard />}

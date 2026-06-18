@@ -18,6 +18,7 @@ import React, {
   useState,
 } from "react";
 import {
+  changePasswordRequest,
   fetchMe,
   signInRequest,
   signOutRequest,
@@ -35,6 +36,10 @@ type AuthContextValue = {
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -121,6 +126,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyToken]);
 
+  // Changing a password doesn't rotate the session token, so the stored token
+  // stays valid — nothing to update locally beyond surfacing success/failure.
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      await changePasswordRequest(currentPassword, newPassword);
+    },
+    [],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -130,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn,
         signUp,
         signOut,
+        changePassword,
       }}
     >
       {children}

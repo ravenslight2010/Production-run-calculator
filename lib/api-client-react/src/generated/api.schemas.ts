@@ -252,6 +252,19 @@ export interface AuthResponse {
   user: StaffMember;
 }
 
+export interface ChangePasswordCredentials {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  currentPassword: string;
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  newPassword: string;
+}
+
 export type StaffRoleUpdateRole = typeof StaffRoleUpdateRole[keyof typeof StaffRoleUpdateRole];
 
 

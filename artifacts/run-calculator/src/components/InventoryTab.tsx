@@ -50,6 +50,7 @@ import {
 } from "../inventoryShared";
 import { useMe } from "../useRole";
 import StaffRolesCard from "./StaffRolesCard";
+import ChangePasswordCard from "./ChangePasswordCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -313,6 +314,9 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
           </CardContent>
         </Card>
       )}
+
+      {/* Account self-service (any signed-in user) */}
+      <ChangePasswordCard />
 
       {/* Staff & roles (manager only) */}
       {isManager && <StaffRolesCard />}

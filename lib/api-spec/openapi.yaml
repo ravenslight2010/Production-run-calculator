@@ -93,6 +93,28 @@ paths:
         "204":
           description: Signed out
 
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change the signed-in user's password
+      description: >-
+        Updates the signed-in user's password. The current password must be
+        provided and is verified before the stored scrypt hash is replaced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordCredentials"
+      responses:
+        "204":
+          description: Password changed
+        "400":
+          description: Invalid input
+        "401":
+          description: Not signed in, or current password incorrect
+
   /runs:
     get:
       operationId: listRuns
@@ -917,6 +939,21 @@ components:
           type: string
         user:
           $ref: "#/components/schemas/StaffMember"
+
+    ChangePasswordCredentials:
+      type: object
+      required:
+        - currentPassword
+        - newPassword
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 200
 
     StaffMember:
       type: object

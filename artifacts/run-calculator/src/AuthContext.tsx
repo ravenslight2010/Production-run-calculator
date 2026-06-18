@@ -6,6 +6,7 @@ import {
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  changePasswordRequest,
   fetchMe,
   signInRequest,
   signOutRequest,
@@ -21,6 +22,10 @@ type AuthContextValue = {
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string,
+  ) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -76,6 +81,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [qc]);
 
+  // Changing a password doesn't rotate the session, so there's nothing to
+  // refresh client-side — callers just surface success/failure.
+  const changePassword = useCallback(
+    async (currentPassword: string, newPassword: string) => {
+      await changePasswordRequest(currentPassword, newPassword);
+    },
+    [],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -85,6 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
         signOut,
+        changePassword,
       }}
     >
       {children}

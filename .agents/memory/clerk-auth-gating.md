@@ -7,7 +7,11 @@ description: How sign-in gating is wired across the three artifacts and the auth
 
 The whole product is gated behind sign-in. Auth is **self-contained username+password** (Clerk fully removed): `users` table (uuid id, unique username, scrypt passwordHash) + `user_roles` keyed by `userId`. First account created → `manager`, every later account → `operator`. Session token is an HMAC-SHA256 signed compact token (Node `crypto`), secret `AUTH_TOKEN_SECRET` || `SESSION_SECRET` fallback. Password hashing is `crypto.scrypt` + `timingSafeEqual` — no external auth dep.
 
-Auth endpoints live in OpenAPI for codegen: `/auth/sign-up`, `/auth/sign-in`, `/auth/sign-out`. Generated zod body names are capitalized: `SignUpBody`, `SignInBody`. `StaffMember` shape is UNCHANGED `{userId, role, email, name}` — set `name = username`, `email = null`, so both roster UIs + OpenAPI stayed untouched.
+Auth endpoints live in OpenAPI for codegen: `/auth/sign-up`, `/auth/sign-in`, `/auth/sign-out`, `/auth/change-password`. Generated zod body names are capitalized: `SignUpBody`, `SignInBody`, `ChangePasswordBody`. `StaffMember` shape is UNCHANGED `{userId, role, email, name}` — set `name = username`, `email = null`, so both roster UIs + OpenAPI stayed untouched.
+
+**Orval name collision gotcha:** the request-body schema in `components/schemas` must NOT share a name with the operation's generated zod body (`<operationId>Body`), or `lib/api-zod` re-exports the same name from both `generated/types` and `generated/api` → TS2308. That's why sign-up/in use schema `AuthCredentials` (→ zod `SignUpBody`), and change-password uses schema `ChangePasswordCredentials` (→ zod `ChangePasswordBody`).
+
+**change-password gating:** the auth router is mounted publicly (before the global `requireAuth`), so `/auth/change-password` applies `requireAuth` **inline** as per-route middleware. It verifies `currentPassword` against the stored hash, then `updateUserPassword` rewrites the scrypt hash. Session is NOT rotated (token still valid). UI lives in the InventoryTab settings area (any signed-in user), next to the manager-only StaffRolesCard, on both web + mobile.
 
 ## Transport split (the key non-obvious thing)
 - **Web** (`run-calculator`): authenticates via an **httpOnly cookie `rc_auth`** set by the server on sign-up/in; same-origin requests send it automatically — no token threading. Web client uses raw fetch by design (not generated hooks).

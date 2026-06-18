@@ -63,6 +63,23 @@ export const SignInResponse = zod.object({
 
 
 /**
+ * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced.
+ * @summary Change the signed-in user's password
+ */
+export const changePasswordBodyCurrentPasswordMax = 200;
+
+export const changePasswordBodyNewPasswordMin = 6;
+export const changePasswordBodyNewPasswordMax = 200;
+
+
+
+export const ChangePasswordBody = zod.object({
+  "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
+  "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
+})
+
+
+/**
  * @summary List saved production runs
  */
 export const ListRunsResponseItem = zod.object({

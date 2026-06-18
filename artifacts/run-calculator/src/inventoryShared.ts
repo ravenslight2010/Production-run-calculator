@@ -361,6 +361,14 @@ export const signInRequest = (username: string, password: string) =>
   });
 export const signOutRequest = () =>
   api<null>("/auth/sign-out", { method: "POST" });
+export const changePasswordRequest = (
+  currentPassword: string,
+  newPassword: string,
+) =>
+  api<null>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
 
 export const fetchStaff = () => api<StaffMember[]>("/users");
 export const setStaffRole = (userId: string, role: Role) =>

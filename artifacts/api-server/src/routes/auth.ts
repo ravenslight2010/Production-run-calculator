@@ -1,13 +1,19 @@
 import { Router, type IRouter } from "express";
-import { SignInBody, SignUpBody } from "@workspace/api-zod";
+import { ChangePasswordBody, SignInBody, SignUpBody } from "@workspace/api-zod";
 import {
   SESSION_COOKIE,
   SESSION_COOKIE_MAX_AGE_MS,
   signToken,
   verifyPassword,
 } from "../lib/auth";
-import { createUser, findUserByUsername } from "../lib/users";
+import {
+  createUser,
+  findUserByUsername,
+  getUserById,
+  updateUserPassword,
+} from "../lib/users";
 import { createRoleForNewUser, getStaffMember } from "../lib/roles";
+import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
 
@@ -68,5 +74,28 @@ router.post("/auth/sign-out", (_req, res): void => {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
   res.status(204).end();
 });
+
+// Change the signed-in user's password. Gated by requireAuth (this router is
+// otherwise mounted publicly, before the global auth gate). The current
+// password is verified against the stored hash before it is replaced.
+router.post(
+  "/auth/change-password",
+  requireAuth,
+  async (req, res): Promise<void> => {
+    const parsed = ChangePasswordBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { currentPassword, newPassword } = parsed.data;
+    const user = await getUserById(req.userId!);
+    if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+      res.status(401).json({ error: "Current password is incorrect." });
+      return;
+    }
+    await updateUserPassword(user.id, newPassword);
+    res.status(204).end();
+  },
+);
 
 export default router;
