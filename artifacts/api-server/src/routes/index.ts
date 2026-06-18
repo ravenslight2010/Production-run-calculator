@@ -3,6 +3,7 @@ import healthRouter from "./health";
 import runsRouter from "./runs";
 import syncRouter from "./sync";
 import inventoryRouter from "./inventory";
+import rolesRouter from "./roles";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -13,6 +14,7 @@ router.use(healthRouter);
 // Everything else requires a signed-in user. This gates all reads/writes,
 // the live-sync SSE streams, and the paid AI photo endpoint behind auth.
 router.use(requireAuth);
+router.use(rolesRouter);
 router.use(runsRouter);
 router.use(syncRouter);
 router.use(inventoryRouter);

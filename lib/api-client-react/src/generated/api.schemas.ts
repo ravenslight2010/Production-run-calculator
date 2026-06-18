@@ -191,6 +191,35 @@ export interface IdentifyPhotoResult {
   items: PhotoGuess[];
 }
 
+export type StaffMemberRole = typeof StaffMemberRole[keyof typeof StaffMemberRole];
+
+
+export const StaffMemberRole = {
+  manager: 'manager',
+  operator: 'operator',
+} as const;
+
+export interface StaffMember {
+  userId: string;
+  role: StaffMemberRole;
+  /** @nullable */
+  email: string | null;
+  /** @nullable */
+  name: string | null;
+}
+
+export type StaffRoleUpdateRole = typeof StaffRoleUpdateRole[keyof typeof StaffRoleUpdateRole];
+
+
+export const StaffRoleUpdateRole = {
+  manager: 'manager',
+  operator: 'operator',
+} as const;
+
+export interface StaffRoleUpdate {
+  role: StaffRoleUpdateRole;
+}
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };

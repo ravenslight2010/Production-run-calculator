@@ -20,6 +20,8 @@ import {
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
+import { requireRole } from "../middlewares/requireRole";
+import { getOrCreateUserRole } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 import { applyRunConsumption, planDrawDown, sortLotsForConsumption } from "./inventoryLogic";
 
@@ -119,7 +121,7 @@ router.get("/inventory", async (_req, res): Promise<void> => {
   res.json(out);
 });
 
-router.post("/inventory/items", async (req, res): Promise<void> => {
+router.post("/inventory/items", requireRole("manager"), async (req, res): Promise<void> => {
   const parsed = CreateInventoryItemBody.safeParse(req.body);
   if (!parsed.success) {
     req.log.warn({ errors: parsed.error.message }, "Invalid inventory item body");
@@ -145,7 +147,7 @@ router.post("/inventory/items", async (req, res): Promise<void> => {
   res.status(201).json(await loadItemResponse(item.id));
 });
 
-router.patch("/inventory/items/:id", async (req, res): Promise<void> => {
+router.patch("/inventory/items/:id", requireRole("manager"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -172,7 +174,7 @@ router.patch("/inventory/items/:id", async (req, res): Promise<void> => {
   res.json(await loadItemResponse(id));
 });
 
-router.delete("/inventory/items/:id", async (req, res): Promise<void> => {
+router.delete("/inventory/items/:id", requireRole("manager"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -202,14 +204,39 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
     res.status(400).json({ error: "qty must be positive" });
     return;
   }
-  const [item] = await db
-    .insert(inventoryItemsTable)
-    .values({ key: itemKey, category, name, unit })
-    .onConflictDoUpdate({
-      target: inventoryItemsTable.key,
-      set: { name, unit, category, updatedAt: new Date() },
-    })
-    .returning();
+  // Restock is a daily-ops, quantity-only action open to operators. It must NOT
+  // mutate master data: we never overwrite an existing item's name/unit/category
+  // here (that is the manager-only PATCH /inventory/items path). Creating a
+  // brand-new item is master-data creation, so it is gated to managers — an
+  // operator restocking an unknown key gets a 403 rather than silently minting
+  // a new item.
+  let [item] = await db
+    .select()
+    .from(inventoryItemsTable)
+    .where(eq(inventoryItemsTable.key, itemKey));
+  if (!item) {
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    const { role } = await getOrCreateUserRole(userId);
+    if (role !== "manager") {
+      res.status(403).json({ error: "Manager role required to create a new item" });
+      return;
+    }
+    [item] = await db
+      .insert(inventoryItemsTable)
+      .values({ key: itemKey, category, name, unit })
+      .onConflictDoNothing({ target: inventoryItemsTable.key })
+      .returning();
+    if (!item) {
+      [item] = await db
+        .select()
+        .from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.key, itemKey));
+    }
+  }
   const [lot] = await db
     .insert(inventoryLotsTable)
     .values({
@@ -242,6 +269,7 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 
 router.post(
   "/inventory/identify-photo",
+  requireRole("manager"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -543,7 +571,7 @@ router.get("/inventory/settings", async (_req, res): Promise<void> => {
   res.json({ expirySoonDays: row.expirySoonDays });
 });
 
-router.put("/inventory/settings", async (req, res): Promise<void> => {
+router.put("/inventory/settings", requireRole("manager"), async (req, res): Promise<void> => {
   const parsed = UpdateInventorySettingsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

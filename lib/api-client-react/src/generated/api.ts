@@ -36,6 +36,8 @@ import type {
   ProductionRun,
   ProductionRunInput,
   RestockInput,
+  StaffMember,
+  StaffRoleUpdate,
   UpdateInventoryItemInput,
   UpdateInventorySettingsInput
 } from './api.schemas';
@@ -1223,5 +1225,231 @@ export const useIdentifyInventoryPhoto = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getIdentifyInventoryPhotoMutationOptions(options));
+    }
+
+export const getGetMeUrl = () => {
+
+
+
+
+  return `/api/me`
+}
+
+/**
+ * @summary Current signed-in user's identity and role
+ */
+export const getMe = async ( options?: RequestInit): Promise<StaffMember> => {
+
+  return customFetch<StaffMember>(getGetMeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMeQueryKey = () => {
+    return [
+    `/api/me`
+    ] as const;
+    }
+
+
+export const getGetMeQueryOptions = <TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({ signal }) => getMe({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMeQueryResult = NonNullable<Awaited<ReturnType<typeof getMe>>>
+export type GetMeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Current signed-in user's identity and role
+ */
+
+export function useGetMe<TData = Awaited<ReturnType<typeof getMe>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListStaffUrl = () => {
+
+
+
+
+  return `/api/users`
+}
+
+/**
+ * @summary List staff members and their roles (manager only)
+ */
+export const listStaff = async ( options?: RequestInit): Promise<StaffMember[]> => {
+
+  return customFetch<StaffMember[]>(getListStaffUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListStaffQueryKey = () => {
+    return [
+    `/api/users`
+    ] as const;
+    }
+
+
+export const getListStaffQueryOptions = <TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListStaffQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listStaff>>> = ({ signal }) => listStaff({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListStaffQueryResult = NonNullable<Awaited<ReturnType<typeof listStaff>>>
+export type ListStaffQueryError = ErrorType<void>
+
+
+/**
+ * @summary List staff members and their roles (manager only)
+ */
+
+export function useListStaff<TData = Awaited<ReturnType<typeof listStaff>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listStaff>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListStaffQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSetStaffRoleUrl = (userId: string,) => {
+
+
+
+
+  return `/api/users/${userId}/role`
+}
+
+/**
+ * @summary Change a staff member's role (manager only)
+ */
+export const setStaffRole = async (userId: string,
+    staffRoleUpdate: StaffRoleUpdate, options?: RequestInit): Promise<StaffMember> => {
+
+  return customFetch<StaffMember>(getSetStaffRoleUrl(userId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      staffRoleUpdate,)
+  }
+);}
+
+
+
+
+export const getSetStaffRoleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStaffRole>>, TError,{userId: string;data: BodyType<StaffRoleUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setStaffRole>>, TError,{userId: string;data: BodyType<StaffRoleUpdate>}, TContext> => {
+
+const mutationKey = ['setStaffRole'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setStaffRole>>, {userId: string;data: BodyType<StaffRoleUpdate>}> = (props) => {
+          const {userId,data} = props ?? {};
+
+          return  setStaffRole(userId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetStaffRoleMutationResult = NonNullable<Awaited<ReturnType<typeof setStaffRole>>>
+    export type SetStaffRoleMutationBody = BodyType<StaffRoleUpdate>
+    export type SetStaffRoleMutationError = ErrorType<void>
+
+    /**
+ * @summary Change a staff member's role (manager only)
+ */
+export const useSetStaffRole = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStaffRole>>, TError,{userId: string;data: BodyType<StaffRoleUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setStaffRole>>,
+        TError,
+        {userId: string;data: BodyType<StaffRoleUpdate>},
+        TContext
+      > => {
+      return useMutation(getSetStaffRoleMutationOptions(options));
     }
 

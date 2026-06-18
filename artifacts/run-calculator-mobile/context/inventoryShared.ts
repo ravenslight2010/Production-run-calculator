@@ -309,6 +309,22 @@ export interface IdentifyPhotoBody {
   candidates?: CandidateItem[];
 }
 
+// ── Staff roles / access control ─────────────────────────────────────────────
+export type Role = "manager" | "operator";
+export interface StaffMember {
+  userId: string;
+  role: Role;
+  email: string | null;
+  name: string | null;
+}
+export const fetchMe = () => api<StaffMember>("/me");
+export const fetchStaff = () => api<StaffMember[]>("/users");
+export const setStaffRole = (userId: string, role: Role) =>
+  api<StaffMember>(`/users/${encodeURIComponent(userId)}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");

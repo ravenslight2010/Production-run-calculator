@@ -312,3 +312,45 @@ export const IdentifyInventoryPhotoResponse = zod.object({
 })
 
 
+/**
+ * @summary Current signed-in user's identity and role
+ */
+export const GetMeResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable()
+})
+
+
+/**
+ * @summary List staff members and their roles (manager only)
+ */
+export const ListStaffResponseItem = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable()
+})
+export const ListStaffResponse = zod.array(ListStaffResponseItem)
+
+
+/**
+ * @summary Change a staff member's role (manager only)
+ */
+export const SetStaffRoleParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const SetStaffRoleBody = zod.object({
+  "role": zod.enum(['manager', 'operator'])
+})
+
+export const SetStaffRoleResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable()
+})
+
+

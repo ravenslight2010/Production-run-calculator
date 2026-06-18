@@ -14,6 +14,8 @@ tags:
     description: Production run history
   - name: inventory
     description: Stock / inventory control
+  - name: roles
+    description: Staff roles and access control
 paths:
   /healthz:
     get:
@@ -319,6 +321,65 @@ paths:
           description: Invalid input
         "502":
           description: Vision provider error
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [roles]
+      summary: Current signed-in user's identity and role
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+
+  /users:
+    get:
+      operationId: listStaff
+      tags: [roles]
+      summary: List staff members and their roles (manager only)
+      responses:
+        "200":
+          description: Staff roster
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StaffMember"
+        "403":
+          description: Manager role required
+
+  /users/{userId}/role:
+    put:
+      operationId: setStaffRole
+      tags: [roles]
+      summary: Change a staff member's role (manager only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffRoleUpdate"
+      responses:
+        "200":
+          description: Updated staff member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
 
 components:
   schemas:
@@ -718,3 +779,30 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PhotoGuess"
+
+    StaffMember:
+      type: object
+      required:
+        - userId
+        - role
+        - email
+        - name
+      properties:
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [manager, operator]
+        email:
+          type: [string, "null"]
+        name:
+          type: [string, "null"]
+
+    StaffRoleUpdate:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+          enum: [manager, operator]

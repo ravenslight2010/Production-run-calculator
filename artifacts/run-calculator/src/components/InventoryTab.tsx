@@ -46,6 +46,8 @@ import {
   type PhotoGuess,
   type InventoryCategory,
 } from "../inventoryShared";
+import { useMe } from "../useRole";
+import StaffRolesCard from "./StaffRolesCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -82,6 +84,7 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
   const [showAdd, setShowAdd] = useState(false);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
+  const { isManager } = useMe();
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -210,37 +213,39 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         </Card>
       )}
 
-      {/* Add item */}
-      <Card className="bg-card/50 border-border/50 shadow-md">
-        <CardHeader className="pb-2 pt-4 px-5">
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <PackagePlus className="w-4 h-4" /> Add Item
-            </CardTitle>
-            <button
-              type="button"
-              onClick={() => setShowAdd((v) => !v)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
-            >
-              {showAdd ? <ChevronDown className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {showAdd ? "Close" : "New"}
-            </button>
-          </div>
-        </CardHeader>
-        {showAdd && (
-          <CardContent className="px-4 pb-4">
-            <AddItemForm
-              candidates={candidates.filter((c) => !existingKeys.has(c.key))}
-              onAdded={() => {
-                setShowAdd(false);
-                load();
-              }}
-            />
-          </CardContent>
-        )}
-      </Card>
+      {/* Add item (manager only: creating master-data items) */}
+      {isManager && (
+        <Card className="bg-card/50 border-border/50 shadow-md">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <PackagePlus className="w-4 h-4" /> Add Item
+              </CardTitle>
+              <button
+                type="button"
+                onClick={() => setShowAdd((v) => !v)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+              >
+                {showAdd ? <ChevronDown className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {showAdd ? "Close" : "New"}
+              </button>
+            </div>
+          </CardHeader>
+          {showAdd && (
+            <CardContent className="px-4 pb-4">
+              <AddItemForm
+                candidates={candidates.filter((c) => !existingKeys.has(c.key))}
+                onAdded={() => {
+                  setShowAdd(false);
+                  load();
+                }}
+              />
+            </CardContent>
+          )}
+        </Card>
+      )}
 
-      {/* Photo stock intake */}
-      <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />
+      {/* Photo stock intake (manager only: paid AI action) */}
+      {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -273,37 +278,42 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         />
       )}
 
-      {/* Settings: configurable expiry lead time */}
-      <Card className="bg-card/50 border-border/50 shadow-md">
-        <CardHeader className="pb-2 pt-4 px-5">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Settings
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-5 pb-4">
-          <div className="flex items-center justify-between gap-3">
-            <label htmlFor="expiry-lead" className="text-sm text-muted-foreground">
-              Expiring-soon lead time (days)
-            </label>
-            <Input
-              id="expiry-lead"
-              type="number"
-              min={0}
-              inputMode="numeric"
-              className="w-20 text-right"
-              value={expiryInput}
-              onChange={(e) => setExpiryInput(e.target.value)}
-              onBlur={saveExpiryLeadTime}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Lots within this many days of expiring are flagged as expiring soon.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Settings: configurable expiry lead time (manager only) */}
+      {isManager && (
+        <Card className="bg-card/50 border-border/50 shadow-md">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-5 pb-4">
+            <div className="flex items-center justify-between gap-3">
+              <label htmlFor="expiry-lead" className="text-sm text-muted-foreground">
+                Expiring-soon lead time (days)
+              </label>
+              <Input
+                id="expiry-lead"
+                type="number"
+                min={0}
+                inputMode="numeric"
+                className="w-20 text-right"
+                value={expiryInput}
+                onChange={(e) => setExpiryInput(e.target.value)}
+                onBlur={saveExpiryLeadTime}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Lots within this many days of expiring are flagged as expiring soon.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Staff & roles (manager only) */}
+      {isManager && <StaffRolesCard />}
     </div>
   );
 }
@@ -384,6 +394,7 @@ function ItemRow({
 }
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
+  const { isManager } = useMe();
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -444,10 +455,14 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </div>
 
-      {/* Reorder threshold */}
+      {/* Reorder threshold (editing is a master-data write → manager only) */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">Reorder at</span>
-        {editThreshold ? (
+        {!isManager ? (
+          <span className="text-xs font-mono tabular-nums text-foreground">
+            {fmtQty(item.reorderThreshold)} {item.unit}
+          </span>
+        ) : editThreshold ? (
           <span className="flex items-center gap-1.5">
             <Input
               type="number"
@@ -510,19 +525,23 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </div>
       )}
 
-      <Separator className="bg-border/40" />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          if (confirm(`Delete "${item.name}" and all its lots? This cannot be undone.`)) {
-            run(() => deleteInventoryItem(item.id));
-          }
-        }}
-        className="flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-400 disabled:opacity-50"
-      >
-        <Trash2 className="w-3.5 h-3.5" /> Delete item
-      </button>
+      {isManager && (
+        <>
+          <Separator className="bg-border/40" />
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (confirm(`Delete "${item.name}" and all its lots? This cannot be undone.`)) {
+                run(() => deleteInventoryItem(item.id));
+              }
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-400 disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete item
+          </button>
+        </>
+      )}
     </div>
   );
 }

@@ -47,6 +47,8 @@ import {
   type PhotoGuess,
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
+import { useMe } from "@/hooks/useRole";
+import StaffRolesCard from "@/components/StaffRolesCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -68,6 +70,7 @@ export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { allRuns } = useRun();
+  const { isManager } = useMe();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -227,35 +230,37 @@ export default function InventoryScreen() {
           </Card>
         )}
 
-        {/* Add item */}
-        <Card title="Add Item" icon="plus-square" style={{ marginBottom: 16 }}>
-          <Pressable
-            onPress={() => setShowAdd((v) => !v)}
-            style={({ pressed }) => [
-              styles.toggleBtn,
-              { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
-            ]}
-          >
-            <Feather name={showAdd ? "chevron-down" : "plus"} size={14} color={colors.mutedForeground} />
-            <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
-              {showAdd ? "Close" : "New"}
-            </Text>
-          </Pressable>
-          {showAdd && (
-            <View style={{ marginTop: 12 }}>
-              <AddItemForm
-                candidates={candidates.filter((c) => !existingKeys.has(c.key))}
-                onAdded={() => {
-                  setShowAdd(false);
-                  load();
-                }}
-              />
-            </View>
-          )}
-        </Card>
+        {/* Add item (manager only: creating master-data items) */}
+        {isManager && (
+          <Card title="Add Item" icon="plus-square" style={{ marginBottom: 16 }}>
+            <Pressable
+              onPress={() => setShowAdd((v) => !v)}
+              style={({ pressed }) => [
+                styles.toggleBtn,
+                { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Feather name={showAdd ? "chevron-down" : "plus"} size={14} color={colors.mutedForeground} />
+              <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+                {showAdd ? "Close" : "New"}
+              </Text>
+            </Pressable>
+            {showAdd && (
+              <View style={{ marginTop: 12 }}>
+                <AddItemForm
+                  candidates={candidates.filter((c) => !existingKeys.has(c.key))}
+                  onAdded={() => {
+                    setShowAdd(false);
+                    load();
+                  }}
+                />
+              </View>
+            )}
+          </Card>
+        )}
 
-        {/* Photo stock intake */}
-        <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />
+        {/* Photo stock intake (manager only: paid AI action) */}
+        {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
 
         {loading && (
           <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading inventory…</Text>
@@ -290,29 +295,34 @@ export default function InventoryScreen() {
           />
         )}
 
-        {/* Settings: configurable expiry lead time */}
-        <Card title="Settings" icon="settings" style={{ marginBottom: 16 }}>
-          <View style={styles.settingsRow}>
-            <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
-              Expiring-soon lead time (days)
+        {/* Settings: configurable expiry lead time (manager only) */}
+        {isManager && (
+          <Card title="Settings" icon="settings" style={{ marginBottom: 16 }}>
+            <View style={styles.settingsRow}>
+              <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
+                Expiring-soon lead time (days)
+              </Text>
+              <TextInput
+                style={[
+                  styles.settingsInput,
+                  { borderColor: colors.border, color: colors.foreground },
+                ]}
+                keyboardType="number-pad"
+                value={expiryInput}
+                onChangeText={setExpiryInput}
+                onBlur={saveExpiryLeadTime}
+                returnKeyType="done"
+                onSubmitEditing={saveExpiryLeadTime}
+              />
+            </View>
+            <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>
+              Lots within this many days of expiring are flagged as expiring soon.
             </Text>
-            <TextInput
-              style={[
-                styles.settingsInput,
-                { borderColor: colors.border, color: colors.foreground },
-              ]}
-              keyboardType="number-pad"
-              value={expiryInput}
-              onChangeText={setExpiryInput}
-              onBlur={saveExpiryLeadTime}
-              returnKeyType="done"
-              onSubmitEditing={saveExpiryLeadTime}
-            />
-          </View>
-          <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>
-            Lots within this many days of expiring are flagged as expiring soon.
-          </Text>
-        </Card>
+          </Card>
+        )}
+
+        {/* Staff & roles (manager only) */}
+        {isManager && <StaffRolesCard />}
       </ScrollView>
     </View>
   );
@@ -402,6 +412,7 @@ function ItemRow({
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
   const colors = useColors();
+  const { isManager } = useMe();
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -479,10 +490,14 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </View>
 
-      {/* Reorder threshold */}
+      {/* Reorder threshold (editing is a master-data write → manager only) */}
       <View style={styles.thresholdRow}>
         <Text style={[styles.detailInline, { color: colors.mutedForeground }]}>Reorder at</Text>
-        {editThreshold ? (
+        {!isManager ? (
+          <Text style={[styles.thresholdValText, { color: colors.foreground }]}>
+            {fmtQty(item.reorderThreshold)} {item.unit}
+          </Text>
+        ) : editThreshold ? (
           <View style={styles.thresholdEdit}>
             <TextInput
               value={thresholdVal}
@@ -556,15 +571,19 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </View>
       )}
 
-      <View style={[styles.sep, { backgroundColor: colors.border }]} />
-      <Button
-        label="Delete item"
-        icon="trash-2"
-        variant="destructive"
-        size="sm"
-        disabled={busy}
-        onPress={() => run(() => deleteInventoryItem(item.id))}
-      />
+      {isManager && (
+        <>
+          <View style={[styles.sep, { backgroundColor: colors.border }]} />
+          <Button
+            label="Delete item"
+            icon="trash-2"
+            variant="destructive"
+            size="sm"
+            disabled={busy}
+            onPress={() => run(() => deleteInventoryItem(item.id))}
+          />
+        </>
+      )}
     </View>
   );
 }
