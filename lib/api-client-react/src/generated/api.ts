@@ -21,12 +21,14 @@ import type {
 
 import type {
   AdjustInput,
+  ApprovePasswordResetResult,
   AuthCredentials,
   AuthResponse,
   ChangePasswordCredentials,
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
+  ForgotPasswordRequest,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -36,10 +38,13 @@ import type {
   ListInventoryLedgerParams,
   MergeInventoryInput,
   MergeInventoryResult,
+  OkResponse,
   OptimizeInput,
   OptimizeResult,
+  PasswordResetRequest,
   ProductionRun,
   ProductionRunInput,
+  ResetPasswordRequest,
   ResetStaffPassword,
   RestockInput,
   StaffMember,
@@ -421,6 +426,299 @@ export const useChangePassword = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getChangePasswordMutationOptions(options));
+    }
+
+export const getForgotPasswordUrl = () => {
+
+
+
+
+  return `/api/auth/forgot-password`
+}
+
+/**
+ * A signed-out user requests recovery for a forgotten password. Always responds 200 regardless of whether the username exists, so the endpoint never reveals which accounts are real. When the account exists a pending reset request is recorded for a manager to approve.
+ * @summary Request a manager-approved password reset
+ */
+export const forgotPassword = async (forgotPasswordRequest: ForgotPasswordRequest, options?: RequestInit): Promise<OkResponse> => {
+
+  return customFetch<OkResponse>(getForgotPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      forgotPasswordRequest,)
+  }
+);}
+
+
+
+
+export const getForgotPasswordMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgotPassword>>, TError,{data: BodyType<ForgotPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof forgotPassword>>, TError,{data: BodyType<ForgotPasswordRequest>}, TContext> => {
+
+const mutationKey = ['forgotPassword'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forgotPassword>>, {data: BodyType<ForgotPasswordRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  forgotPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ForgotPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof forgotPassword>>>
+    export type ForgotPasswordMutationBody = BodyType<ForgotPasswordRequest>
+    export type ForgotPasswordMutationError = ErrorType<void>
+
+    /**
+ * @summary Request a manager-approved password reset
+ */
+export const useForgotPassword = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgotPassword>>, TError,{data: BodyType<ForgotPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof forgotPassword>>,
+        TError,
+        {data: BodyType<ForgotPasswordRequest>},
+        TContext
+      > => {
+      return useMutation(getForgotPasswordMutationOptions(options));
+    }
+
+export const getResetPasswordUrl = () => {
+
+
+
+
+  return `/api/auth/reset-password`
+}
+
+/**
+ * Verifies the single-use, short-lived code a manager issued for the account and, if valid and unexpired, replaces the password. The code is consumed on success so it can never be reused.
+ * @summary Complete a password reset using a manager-issued code
+ */
+export const resetPassword = async (resetPasswordRequest: ResetPasswordRequest, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getResetPasswordUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      resetPasswordRequest,)
+  }
+);}
+
+
+
+
+export const getResetPasswordMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPassword>>, TError,{data: BodyType<ResetPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetPassword>>, TError,{data: BodyType<ResetPasswordRequest>}, TContext> => {
+
+const mutationKey = ['resetPassword'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetPassword>>, {data: BodyType<ResetPasswordRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  resetPassword(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResetPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof resetPassword>>>
+    export type ResetPasswordMutationBody = BodyType<ResetPasswordRequest>
+    export type ResetPasswordMutationError = ErrorType<void>
+
+    /**
+ * @summary Complete a password reset using a manager-issued code
+ */
+export const useResetPassword = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetPassword>>, TError,{data: BodyType<ResetPasswordRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resetPassword>>,
+        TError,
+        {data: BodyType<ResetPasswordRequest>},
+        TContext
+      > => {
+      return useMutation(getResetPasswordMutationOptions(options));
+    }
+
+export const getListPasswordResetRequestsUrl = () => {
+
+
+
+
+  return `/api/password-reset-requests`
+}
+
+/**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
+ * @summary List pending password reset requests (manager only)
+ */
+export const listPasswordResetRequests = async ( options?: RequestInit): Promise<PasswordResetRequest[]> => {
+
+  return customFetch<PasswordResetRequest[]>(getListPasswordResetRequestsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPasswordResetRequestsQueryKey = () => {
+    return [
+    `/api/password-reset-requests`
+    ] as const;
+    }
+
+
+export const getListPasswordResetRequestsQueryOptions = <TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPasswordResetRequestsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPasswordResetRequests>>> = ({ signal }) => listPasswordResetRequests({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPasswordResetRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof listPasswordResetRequests>>>
+export type ListPasswordResetRequestsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List pending password reset requests (manager only)
+ */
+
+export function useListPasswordResetRequests<TData = Awaited<ReturnType<typeof listPasswordResetRequests>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPasswordResetRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPasswordResetRequestsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getApprovePasswordResetUrl = (id: string,) => {
+
+
+
+
+  return `/api/password-reset-requests/${id}/approve`
+}
+
+/**
+ * Approves a pending reset request and returns a short-lived single-use code shown to the manager exactly once. The manager relays it to the locked-out staff member, who uses it with /auth/reset-password.
+ * @summary Approve a password reset and mint a relay code (manager only)
+ */
+export const approvePasswordReset = async (id: string, options?: RequestInit): Promise<ApprovePasswordResetResult> => {
+
+  return customFetch<ApprovePasswordResetResult>(getApprovePasswordResetUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getApprovePasswordResetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approvePasswordReset>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approvePasswordReset>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['approvePasswordReset'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approvePasswordReset>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  approvePasswordReset(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApprovePasswordResetMutationResult = NonNullable<Awaited<ReturnType<typeof approvePasswordReset>>>
+
+    export type ApprovePasswordResetMutationError = ErrorType<void>
+
+    /**
+ * @summary Approve a password reset and mint a relay code (manager only)
+ */
+export const useApprovePasswordReset = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approvePasswordReset>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approvePasswordReset>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getApprovePasswordResetMutationOptions(options));
     }
 
 export const getListRunsUrl = () => {

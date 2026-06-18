@@ -285,6 +285,49 @@ export interface ResetStaffPassword {
   newPassword: string;
 }
 
+export interface OkResponse {
+  ok: boolean;
+}
+
+export interface ForgotPasswordRequest {
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  username: string;
+}
+
+export interface ResetPasswordRequest {
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  username: string;
+  /**
+     * @minLength 1
+     * @maxLength 64
+     */
+  code: string;
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  newPassword: string;
+}
+
+export interface PasswordResetRequest {
+  id: string;
+  userId: string;
+  username: string;
+  requestedAt: string;
+}
+
+export interface ApprovePasswordResetResult {
+  username: string;
+  code: string;
+  expiresAt: string;
+}
+
 export interface OptimizeStoppage {
   reason: string;
   durationSec: number;

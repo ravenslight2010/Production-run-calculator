@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, Loader2, MoreVertical, KeyRound, Trash2 } from "lucide-react";
+import {
+  Users,
+  Loader2,
+  MoreVertical,
+  KeyRound,
+  Trash2,
+  ShieldCheck,
+} from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,11 +37,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  approvePasswordReset,
   deleteStaffMember,
+  fetchPasswordResetRequests,
   fetchStaff,
   InventoryApiError,
   resetStaffPassword,
   setStaffRole,
+  type ApproveResetResult,
+  type PasswordResetRequestItem,
   type Role,
   type StaffMember,
 } from "../inventoryShared";
@@ -66,6 +77,24 @@ export default function StaffRolesCard() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetClientError, setResetClientError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [approvedCode, setApprovedCode] = useState<ApproveResetResult | null>(
+    null,
+  );
+
+  const resetRequestsQuery = useQuery({
+    queryKey: ["passwordResetRequests"],
+    queryFn: fetchPasswordResetRequests,
+    // Poll so a manager sees new requests without manually refreshing.
+    refetchInterval: 20_000,
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => approvePasswordReset(id),
+    onSuccess: (result) => {
+      setApprovedCode(result);
+      qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
+    },
+  });
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: Role }) =>
@@ -129,6 +158,50 @@ export default function StaffRolesCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="px-4 pb-4 space-y-2">
+        {(resetRequestsQuery.data ?? []).length > 0 && (
+          <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5" /> Password reset requests
+            </p>
+            {(resetRequestsQuery.data ?? []).map(
+              (reqItem: PasswordResetRequestItem) => (
+                <div
+                  key={reqItem.id}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-background/60 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {reqItem.username}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Requested{" "}
+                      {new Date(reqItem.requestedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    disabled={approveMutation.isPending}
+                    onClick={() => approveMutation.mutate(reqItem.id)}
+                  >
+                    {approveMutation.isPending &&
+                      approveMutation.variables === reqItem.id && (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                      )}
+                    Approve
+                  </Button>
+                </div>
+              ),
+            )}
+            {approveMutation.isError && (
+              <p className="text-xs text-red-500">
+                {serverMessage(
+                  approveMutation.error,
+                  "Could not approve request.",
+                )}
+              </p>
+            )}
+          </div>
+        )}
         {isLoading && (
           <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading staff…
@@ -301,6 +374,43 @@ export default function StaffRolesCard() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approved reset code (shown once to relay to the user) */}
+      <Dialog
+        open={approvedCode !== null}
+        onOpenChange={(open) => {
+          if (!open) setApprovedCode(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset code for {approvedCode?.username}</DialogTitle>
+            <DialogDescription>
+              Give this one-time code to {approvedCode?.username} now. It works
+              once and won't be shown again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="rounded-lg border border-border bg-muted px-4 py-4 text-center font-mono text-2xl font-bold tracking-widest text-foreground">
+              {approvedCode?.code}
+            </p>
+            {approvedCode && (
+              <p className="mt-2 text-center text-xs text-muted-foreground">
+                Expires {new Date(approvedCode.expiresAt).toLocaleString()}
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setApprovedCode(null)}
+            >
+              Done
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

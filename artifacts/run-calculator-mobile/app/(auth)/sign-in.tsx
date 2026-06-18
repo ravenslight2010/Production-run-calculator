@@ -99,6 +99,12 @@ export default function SignInScreen() {
             onChangeText={setPassword}
           />
 
+          <Link href={"/forgot-password" as Href} asChild>
+            <Pressable style={styles.forgotWrap}>
+              <Text style={styles.forgotLink}>Forgot password?</Text>
+            </Pressable>
+          </Link>
+
           {error && <Text style={styles.error}>{error}</Text>}
 
           <Pressable
@@ -205,6 +211,12 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
       color: colors.primaryForeground,
     },
     btnDisabled: { opacity: 0.5 },
+    forgotWrap: { alignSelf: "flex-end", marginTop: -4, marginBottom: 12 },
+    forgotLink: {
+      fontFamily: FONTS.semibold,
+      fontSize: 13,
+      color: colors.primary,
+    },
     error: {
       fontFamily: FONTS.regular,
       fontSize: 13,

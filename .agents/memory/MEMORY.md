@@ -26,3 +26,5 @@
 - [Role gating](role-gating.md) — manager/operator: gate only requireRole-protected endpoints (item CRUD, AI photo, settings, staff admin); never gate /sync day-state (recipes, master-data) — can't role-split + breaks parity.
 - [Daily-reset auth boundary](daily-reset-auth-boundary.md) — stateless HMAC tokens force-expired at midnight via today's resetAt; client-pushed boundary, mobile forcedOutRef latch, reactive 401 bounce.
 - [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).
+- [Password reset relay](password-reset-relay.md) — no-email forgot-password = manager approves & relays one-time code; enumeration-safe; /auth/* exempt from 401 bounce.
+- [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.

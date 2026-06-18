@@ -1,5 +1,11 @@
 import { Router, type IRouter } from "express";
-import { ChangePasswordBody, SignInBody, SignUpBody } from "@workspace/api-zod";
+import {
+  ChangePasswordBody,
+  ForgotPasswordBody,
+  ResetPasswordBody,
+  SignInBody,
+  SignUpBody,
+} from "@workspace/api-zod";
 import {
   SESSION_COOKIE,
   SESSION_COOKIE_MAX_AGE_MS,
@@ -12,6 +18,7 @@ import {
   getUserById,
   updateUserPassword,
 } from "../lib/users";
+import { createResetRequest, resetPasswordWithCode } from "../lib/passwordResets";
 import { createRoleForNewUser, getStaffMember } from "../lib/roles";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -97,5 +104,36 @@ router.post(
     res.status(204).end();
   },
 );
+
+// Request a manager-approved password reset for a forgotten password. Public —
+// the user is signed out. Always responds 200 with { ok: true } whether or not
+// the account exists, so the endpoint can't be used to discover usernames.
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const parsed = ForgotPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  await createResetRequest(parsed.data.username);
+  res.json({ ok: true });
+});
+
+// Complete a reset with the single-use code a manager issued. Public. Verifies
+// the code belongs to an approved, unused, unexpired request for the named user
+// before replacing the password; a bad/expired/used code yields a 401.
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const parsed = ResetPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { username, code, newPassword } = parsed.data;
+  const result = await resetPasswordWithCode(username, code, newPassword);
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(204).end();
+});
 
 export default router;

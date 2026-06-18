@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from "@/AuthContext";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Landing from "@/pages/landing";
-import { SignInPage, SignUpPage } from "@/pages/auth";
+import { SignInPage, SignUpPage, ForgotPasswordPage } from "@/pages/auth";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +27,7 @@ function AppRoutes() {
         <Route path="/" component={HomeGate} />
         <Route path="/sign-in" component={SignInPage} />
         <Route path="/sign-up" component={SignUpPage} />
+        <Route path="/forgot-password" component={ForgotPasswordPage} />
         <Route component={NotFound} />
       </Switch>
       <Toaster />

@@ -1,6 +1,8 @@
 import {
+  createHash,
   createHmac,
   randomBytes,
+  randomInt,
   randomUUID,
   scryptSync,
   timingSafeEqual,
@@ -112,6 +114,32 @@ export function verifyToken(token: string): VerifiedToken | null {
 
 export function newUserId(): string {
   return randomUUID();
+}
+
+// ── Password reset relay codes ───────────────────────────────────────────────
+// Short single-use codes a manager reads aloud / hands to a locked-out user.
+// Drawn from an unambiguous alphabet (no 0/O/1/I) and formatted in two groups so
+// they're easy to relay verbally. 8 chars over a 31-symbol alphabet is ~10^12
+// possibilities — combined with manager-gated issuance, single use, and a short
+// expiry, that's far beyond any practical guessing. Only the sha256 hash is
+// stored; the plaintext is shown to the manager exactly once.
+const RESET_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const RESET_CODE_LENGTH = 8;
+export const RESET_CODE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+export function newResetCode(): string {
+  let raw = "";
+  for (let i = 0; i < RESET_CODE_LENGTH; i += 1) {
+    raw += RESET_CODE_ALPHABET[randomInt(RESET_CODE_ALPHABET.length)];
+  }
+  return `${raw.slice(0, 4)}-${raw.slice(4)}`;
+}
+
+// Normalize before hashing so the user can type the code in any case and with or
+// without the separating dash / surrounding whitespace.
+export function hashResetCode(code: string): string {
+  const normalized = code.replace(/[\s-]/g, "").toUpperCase();
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 export const SESSION_COOKIE = "rc_auth";

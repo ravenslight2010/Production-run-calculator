@@ -80,6 +80,71 @@ export const ChangePasswordBody = zod.object({
 
 
 /**
+ * A signed-out user requests recovery for a forgotten password. Always responds 200 regardless of whether the username exists, so the endpoint never reveals which accounts are real. When the account exists a pending reset request is recorded for a manager to approve.
+ * @summary Request a manager-approved password reset
+ */
+export const forgotPasswordBodyUsernameMax = 64;
+
+
+
+export const ForgotPasswordBody = zod.object({
+  "username": zod.string().min(1).max(forgotPasswordBodyUsernameMax)
+})
+
+export const ForgotPasswordResponse = zod.object({
+  "ok": zod.boolean()
+})
+
+
+/**
+ * Verifies the single-use, short-lived code a manager issued for the account and, if valid and unexpired, replaces the password. The code is consumed on success so it can never be reused.
+ * @summary Complete a password reset using a manager-issued code
+ */
+export const resetPasswordBodyUsernameMax = 64;
+
+export const resetPasswordBodyCodeMax = 64;
+
+export const resetPasswordBodyNewPasswordMin = 6;
+export const resetPasswordBodyNewPasswordMax = 200;
+
+
+
+export const ResetPasswordBody = zod.object({
+  "username": zod.string().min(1).max(resetPasswordBodyUsernameMax),
+  "code": zod.string().min(1).max(resetPasswordBodyCodeMax),
+  "newPassword": zod.string().min(resetPasswordBodyNewPasswordMin).max(resetPasswordBodyNewPasswordMax)
+})
+
+
+/**
+ * Returns the staff members currently waiting for a manager to approve a forgotten-password reset.
+ * @summary List pending password reset requests (manager only)
+ */
+export const ListPasswordResetRequestsResponseItem = zod.object({
+  "id": zod.string(),
+  "userId": zod.string(),
+  "username": zod.string(),
+  "requestedAt": zod.coerce.date()
+})
+export const ListPasswordResetRequestsResponse = zod.array(ListPasswordResetRequestsResponseItem)
+
+
+/**
+ * Approves a pending reset request and returns a short-lived single-use code shown to the manager exactly once. The manager relays it to the locked-out staff member, who uses it with /auth/reset-password.
+ * @summary Approve a password reset and mint a relay code (manager only)
+ */
+export const ApprovePasswordResetParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ApprovePasswordResetResponse = zod.object({
+  "username": zod.string(),
+  "code": zod.string(),
+  "expiresAt": zod.coerce.date()
+})
+
+
+/**
  * @summary List saved production runs
  */
 export const ListRunsResponseItem = zod.object({

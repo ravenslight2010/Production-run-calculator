@@ -15,11 +15,15 @@ import { Card, Button } from "@/components/UI";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import {
+  approvePasswordReset,
   deleteStaffMember,
+  fetchPasswordResetRequests,
   fetchStaff,
   InventoryApiError,
   resetStaffPassword,
   setStaffRole,
+  type ApproveResetResult,
+  type PasswordResetRequestItem,
   type Role,
   type StaffMember,
 } from "@/context/inventoryShared";
@@ -51,6 +55,29 @@ export default function StaffRolesCard() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [approvedCode, setApprovedCode] = useState<ApproveResetResult | null>(
+    null,
+  );
+
+  const resetRequestsQuery = useQuery({
+    queryKey: ["passwordResetRequests"],
+    queryFn: fetchPasswordResetRequests,
+    // Poll so a manager sees new requests without manually refreshing.
+    refetchInterval: 20_000,
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => approvePasswordReset(id),
+    onSuccess: (result) => {
+      setApprovedCode(result);
+      qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
+    },
+    onError: (e) =>
+      Alert.alert(
+        "Could not approve",
+        serverMessage(e, "Could not approve request."),
+      ),
+  });
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: Role }) =>
@@ -118,8 +145,49 @@ export default function StaffRolesCard() {
     );
   }
 
+  const pendingRequests = resetRequestsQuery.data ?? [];
+
   return (
     <Card title="Staff & Roles" icon="users" style={{ marginBottom: 16 }}>
+      {pendingRequests.length > 0 && (
+        <View
+          style={[
+            styles.requestsBox,
+            { borderColor: colors.warning ?? colors.primary },
+          ]}
+        >
+          <View style={styles.requestsHeader}>
+            <Feather name="shield" size={13} color={colors.warning ?? colors.primary} />
+            <Text style={[styles.requestsTitle, { color: colors.warning ?? colors.primary }]}>
+              Password reset requests
+            </Text>
+          </View>
+          {pendingRequests.map((reqItem: PasswordResetRequestItem) => (
+            <View
+              key={reqItem.id}
+              style={[
+                styles.requestRow,
+                { borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            >
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={1}>
+                  {reqItem.username}
+                </Text>
+                <Text style={[styles.sub, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  Requested {new Date(reqItem.requestedAt).toLocaleString()}
+                </Text>
+              </View>
+              <Button
+                label="Approve"
+                size="sm"
+                onPress={() => approveMutation.mutate(reqItem.id)}
+                disabled={approveMutation.isPending}
+              />
+            </View>
+          ))}
+        </View>
+      )}
       {isLoading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -278,6 +346,43 @@ export default function StaffRolesCard() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={approvedCode !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setApprovedCode(null)}
+      >
+        <View style={styles.backdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>
+              Reset code for {approvedCode?.username}
+            </Text>
+            <Text style={[styles.modalDesc, { color: colors.mutedForeground }]}>
+              Give this one-time code to {approvedCode?.username} now. It works
+              once and won&apos;t be shown again.
+            </Text>
+            <View
+              style={[
+                styles.codeBox,
+                { backgroundColor: colors.muted, borderColor: colors.border },
+              ]}
+            >
+              <Text style={[styles.codeText, { color: colors.foreground }]}>
+                {approvedCode?.code}
+              </Text>
+            </View>
+            {approvedCode ? (
+              <Text style={[styles.codeExpiry, { color: colors.mutedForeground }]}>
+                Expires {new Date(approvedCode.expiresAt).toLocaleString()}
+              </Text>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Button label="Done" size="sm" onPress={() => setApprovedCode(null)} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Card>
   );
 }
@@ -349,4 +454,35 @@ const styles = StyleSheet.create({
   },
   msg: { fontSize: 12, fontFamily: FONTS.regular },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },
+  requestsBox: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+    marginBottom: 10,
+  },
+  requestsHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
+  requestsTitle: { fontSize: 12, fontFamily: FONTS.bold },
+  requestRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  codeBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 16,
+    alignItems: "center",
+  },
+  codeText: {
+    fontSize: 26,
+    fontFamily: FONTS.mono,
+    letterSpacing: 4,
+  },
+  codeExpiry: { fontSize: 12, fontFamily: FONTS.regular, textAlign: "center" },
 });

@@ -7,6 +7,10 @@ import {
   resetUserPassword,
   setUserRole,
 } from "../lib/roles";
+import {
+  approveResetRequest,
+  listPendingResetRequests,
+} from "../lib/passwordResets";
 import { requireRole } from "../middlewares/requireRole";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
@@ -71,6 +75,40 @@ router.put(
       return;
     }
     res.status(204).end();
+  },
+);
+
+// Pending forgotten-password requests — manager only. These are the staff
+// members waiting for a manager to approve a reset and hand them a relay code.
+router.get(
+  "/password-reset-requests",
+  requireRole("manager"),
+  async (_req, res): Promise<void> => {
+    res.json(await listPendingResetRequests());
+  },
+);
+
+// Approve a pending reset — manager only. Mints a short-lived single-use code
+// and returns it so the manager can relay it to the locked-out staff member.
+router.post(
+  "/password-reset-requests/:id/approve",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const id = pathUserId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid request id" });
+      return;
+    }
+    const result = await approveResetRequest(id);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.json({
+      username: result.username,
+      code: result.code,
+      expiresAt: result.expiresAt,
+    });
   },
 );
 

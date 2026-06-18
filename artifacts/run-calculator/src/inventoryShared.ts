@@ -399,6 +399,51 @@ export const resetStaffPassword = (userId: string, newPassword: string) =>
 export const deleteStaffMember = (userId: string) =>
   api<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
 
+// ── Forgot-password recovery (manager-approved) ──────────────────────────────
+// There is no email/SMS channel, so a locked-out user requests a reset, a
+// manager approves it and is shown a single-use relay code once, and the user
+// enters that code with a new password.
+export type PasswordResetRequestItem = {
+  id: string;
+  userId: string;
+  username: string;
+  requestedAt: string;
+};
+export type ApproveResetResult = {
+  username: string;
+  code: string;
+  expiresAt: string;
+};
+
+// Public (signed-out). Always resolves to { ok: true } regardless of whether the
+// username exists, so it can't be used to discover accounts.
+export const forgotPasswordRequest = (username: string) =>
+  api<{ ok: boolean }>("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ username }),
+  });
+
+// Public (signed-out). Throws InventoryApiError(401) when the code is wrong,
+// expired, or already used.
+export const resetPasswordRequest = (
+  username: string,
+  code: string,
+  newPassword: string,
+) =>
+  api<null>("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ username, code, newPassword }),
+  });
+
+// Manager-only.
+export const fetchPasswordResetRequests = () =>
+  api<PasswordResetRequestItem[]>("/password-reset-requests");
+export const approvePasswordReset = (id: string) =>
+  api<ApproveResetResult>(
+    `/password-reset-requests/${encodeURIComponent(id)}/approve`,
+    { method: "POST" },
+  );
+
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");

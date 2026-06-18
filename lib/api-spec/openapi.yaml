@@ -115,6 +115,102 @@ paths:
         "401":
           description: Not signed in, or current password incorrect
 
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request a manager-approved password reset
+      description: >-
+        A signed-out user requests recovery for a forgotten password. Always
+        responds 200 regardless of whether the username exists, so the endpoint
+        never reveals which accounts are real. When the account exists a pending
+        reset request is recorded for a manager to approve.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Request accepted (whether or not the account exists)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: Invalid input
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Complete a password reset using a manager-issued code
+      description: >-
+        Verifies the single-use, short-lived code a manager issued for the
+        account and, if valid and unexpired, replaces the password. The code is
+        consumed on success so it can never be reused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "204":
+          description: Password reset
+        "400":
+          description: Invalid input
+        "401":
+          description: Code is invalid, expired, or already used
+
+  /password-reset-requests:
+    get:
+      operationId: listPasswordResetRequests
+      tags: [auth]
+      summary: List pending password reset requests (manager only)
+      description: >-
+        Returns the staff members currently waiting for a manager to approve a
+        forgotten-password reset.
+      responses:
+        "200":
+          description: Pending reset requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PasswordResetRequest"
+        "403":
+          description: Manager role required
+
+  /password-reset-requests/{id}/approve:
+    post:
+      operationId: approvePasswordReset
+      tags: [auth]
+      summary: Approve a password reset and mint a relay code (manager only)
+      description: >-
+        Approves a pending reset request and returns a short-lived single-use
+        code shown to the manager exactly once. The manager relays it to the
+        locked-out staff member, who uses it with /auth/reset-password.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reset approved; relay code issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovePasswordResetResult"
+        "403":
+          description: Manager role required
+        "404":
+          description: No pending request with that id
+
   /runs:
     get:
       operationId: listRuns
@@ -1039,6 +1135,77 @@ components:
           type: string
           minLength: 6
           maxLength: 200
+
+    OkResponse:
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+
+    ForgotPasswordRequest:
+      type: object
+      required:
+        - username
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+
+    ResetPasswordRequest:
+      type: object
+      required:
+        - username
+        - code
+        - newPassword
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 64
+        code:
+          type: string
+          minLength: 1
+          maxLength: 64
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 200
+
+    PasswordResetRequest:
+      type: object
+      required:
+        - id
+        - userId
+        - username
+        - requestedAt
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        username:
+          type: string
+        requestedAt:
+          type: string
+          format: date-time
+
+    ApprovePasswordResetResult:
+      type: object
+      required:
+        - username
+        - code
+        - expiresAt
+      properties:
+        username:
+          type: string
+        code:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
 
     OptimizeStoppage:
       type: object
