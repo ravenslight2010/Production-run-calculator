@@ -409,6 +409,93 @@ describe("staff account administration", () => {
   });
 });
 
+describe("first-login onboarding overview", () => {
+  // A freshly created account must start with onboardingSeen=false so the
+  // "Get Started" overview auto-shows exactly once. POST /me/onboarding-seen
+  // then flips it true permanently and idempotently, and the change is visible
+  // in the /me payload both apps read on every load. This couldn't be exercised
+  // live during the feature work because the isolated dev DB predated the
+  // users-table migration — hence this coverage.
+  it("a brand-new signed-up user starts with onboardingSeen=false", async () => {
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "newbie",
+      password: "first-password",
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      token: string;
+      user: { userId: string; onboardingSeen: boolean };
+    };
+    expect(body.user.onboardingSeen).toBe(false);
+
+    // The DB row backing it is false too — not just the response shape.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${body.user.userId}`);
+    expect(row.onboardingSeen).toBe(false);
+  });
+
+  it("the new user's /me payload reports onboardingSeen=false before dismissal", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "newbie2",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    const me = await req(user.userId, "GET", "/api/me");
+    expect(me.status).toBe(200);
+    const meBody = (await me.json()) as { onboardingSeen: boolean };
+    expect(meBody.onboardingSeen).toBe(false);
+  });
+
+  it("POST /me/onboarding-seen flips the flag and returns the updated StaffMember", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "newbie3",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    const marked = await req(user.userId, "POST", "/api/me/onboarding-seen");
+    expect(marked.status).toBe(200);
+    const markedBody = (await marked.json()) as { onboardingSeen: boolean };
+    expect(markedBody.onboardingSeen).toBe(true);
+
+    // The /me payload now reflects it, so the overview never auto-opens again.
+    const me = await req(user.userId, "GET", "/api/me");
+    const meBody = (await me.json()) as { onboardingSeen: boolean };
+    expect(meBody.onboardingSeen).toBe(true);
+
+    // And the DB row is persisted true.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${user.userId}`);
+    expect(row.onboardingSeen).toBe(true);
+  });
+
+  it("POST /me/onboarding-seen is idempotent (stays true on repeat calls)", async () => {
+    const signUp = await req(null, "POST", "/api/auth/sign-up", {
+      username: "newbie4",
+      password: "first-password",
+    });
+    const { user } = (await signUp.json()) as { user: { userId: string } };
+
+    const first = await req(user.userId, "POST", "/api/me/onboarding-seen");
+    expect(first.status).toBe(200);
+    const second = await req(user.userId, "POST", "/api/me/onboarding-seen");
+    expect(second.status).toBe(200);
+    const secondBody = (await second.json()) as { onboardingSeen: boolean };
+    expect(secondBody.onboardingSeen).toBe(true);
+
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${user.userId}`);
+    expect(row.onboardingSeen).toBe(true);
+  });
+});
+
 describe("removed staff lose access immediately", () => {
   // A removed user's stateless session token would otherwise keep working until
   // its natural expiry (up to 30 days). After deletion the very next request
