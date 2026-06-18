@@ -408,6 +408,11 @@ export const resetPasswordRequest = (
 // Manager-only.
 export const fetchPasswordResetRequests = () =>
   api<PasswordResetRequestItem[]>("/password-reset-requests");
+export const declinePasswordReset = (id: string) =>
+  api<null>(
+    `/password-reset-requests/${encodeURIComponent(id)}/decline`,
+    { method: "POST" },
+  );
 export const approvePasswordReset = (id: string) =>
   api<ApproveResetResult>(
     `/password-reset-requests/${encodeURIComponent(id)}/approve`,

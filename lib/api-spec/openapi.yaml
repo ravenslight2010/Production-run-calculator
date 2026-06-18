@@ -211,6 +211,29 @@ paths:
         "404":
           description: No pending request with that id
 
+  /password-reset-requests/{id}/decline:
+    post:
+      operationId: declinePasswordReset
+      tags: [auth]
+      summary: Decline a pending password reset request (manager only)
+      description: >-
+        Declines a pending reset request, removing it from the pending list
+        without issuing a code. Useful for rejecting a suspicious or mistaken
+        request.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Request declined
+        "403":
+          description: Manager role required
+        "404":
+          description: No pending request with that id
+
   /runs:
     get:
       operationId: listRuns

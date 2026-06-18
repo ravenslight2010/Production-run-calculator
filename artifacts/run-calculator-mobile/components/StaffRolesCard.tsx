@@ -16,6 +16,7 @@ import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import {
   approvePasswordReset,
+  declinePasswordReset,
   deleteStaffMember,
   fetchPasswordResetRequests,
   fetchStaff,
@@ -78,6 +79,33 @@ export default function StaffRolesCard() {
         serverMessage(e, "Could not approve request."),
       ),
   });
+
+  const declineMutation = useMutation({
+    mutationFn: (id: string) => declinePasswordReset(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
+    },
+    onError: (e) =>
+      Alert.alert(
+        "Could not decline",
+        serverMessage(e, "Could not decline request."),
+      ),
+  });
+
+  function confirmDecline(reqItem: PasswordResetRequestItem) {
+    Alert.alert(
+      "Decline reset request?",
+      `This removes ${reqItem.username}'s request without issuing a code.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Decline",
+          style: "destructive",
+          onPress: () => declineMutation.mutate(reqItem.id),
+        },
+      ],
+    );
+  }
 
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: Role }) =>
@@ -178,12 +206,21 @@ export default function StaffRolesCard() {
                   Requested {new Date(reqItem.requestedAt).toLocaleString()}
                 </Text>
               </View>
-              <Button
-                label="Approve"
-                size="sm"
-                onPress={() => approveMutation.mutate(reqItem.id)}
-                disabled={approveMutation.isPending}
-              />
+              <View style={styles.requestActions}>
+                <Button
+                  label="Decline"
+                  variant="outline"
+                  size="sm"
+                  onPress={() => confirmDecline(reqItem)}
+                  disabled={approveMutation.isPending || declineMutation.isPending}
+                />
+                <Button
+                  label="Approve"
+                  size="sm"
+                  onPress={() => approveMutation.mutate(reqItem.id)}
+                  disabled={approveMutation.isPending || declineMutation.isPending}
+                />
+              </View>
             </View>
           ))}
         </View>
@@ -473,6 +510,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  requestActions: { flexDirection: "row", gap: 6, flexShrink: 0 },
   codeBox: {
     borderWidth: 1,
     borderRadius: 10,

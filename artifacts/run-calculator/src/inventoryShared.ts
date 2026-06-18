@@ -443,6 +443,11 @@ export const approvePasswordReset = (id: string) =>
     `/password-reset-requests/${encodeURIComponent(id)}/approve`,
     { method: "POST" },
   );
+export const declinePasswordReset = (id: string) =>
+  api<null>(
+    `/password-reset-requests/${encodeURIComponent(id)}/decline`,
+    { method: "POST" },
+  );
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>

@@ -145,6 +145,15 @@ export const ApprovePasswordResetResponse = zod.object({
 
 
 /**
+ * Declines a pending reset request, removing it from the pending list without issuing a code. Useful for rejecting a suspicious or mistaken request.
+ * @summary Decline a pending password reset request (manager only)
+ */
+export const DeclinePasswordResetParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+
+/**
  * @summary List saved production runs
  */
 export const ListRunsResponseItem = zod.object({

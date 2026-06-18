@@ -11,12 +11,16 @@ import { usersTable } from "./users";
 //      they can relay it to the locked-out user in person.
 //   3. The user enters that code with a new password. A successful reset marks the
 //      request "used" so the code can never be replayed.
+//
+// A manager may instead decline a pending request (status "declined"), which
+// removes it from the pending list without ever issuing a code.
 export const passwordResetRequestsTable = pgTable("password_reset_requests", {
   id: text("id").primaryKey(),
   userId: text("user_id")
     .notNull()
     .references(() => usersTable.id, { onDelete: "cascade" }),
-  // "pending" (awaiting a manager) | "approved" (code issued) | "used".
+  // "pending" (awaiting a manager) | "approved" (code issued) | "used" |
+  // "declined" (rejected by a manager).
   status: text("status").notNull().default("pending"),
   // sha256 hex of the relay code; null until a manager approves the request.
   codeHash: text("code_hash"),

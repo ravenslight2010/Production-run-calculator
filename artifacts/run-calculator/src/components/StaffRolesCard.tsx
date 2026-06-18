@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   approvePasswordReset,
+  declinePasswordReset,
   deleteStaffMember,
   fetchPasswordResetRequests,
   fetchStaff,
@@ -92,6 +93,13 @@ export default function StaffRolesCard() {
     mutationFn: (id: string) => approvePasswordReset(id),
     onSuccess: (result) => {
       setApprovedCode(result);
+      qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
+    },
+  });
+
+  const declineMutation = useMutation({
+    mutationFn: (id: string) => declinePasswordReset(id),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
     },
   });
@@ -178,17 +186,35 @@ export default function StaffRolesCard() {
                       {new Date(reqItem.requestedAt).toLocaleString()}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    disabled={approveMutation.isPending}
-                    onClick={() => approveMutation.mutate(reqItem.id)}
-                  >
-                    {approveMutation.isPending &&
-                      approveMutation.variables === reqItem.id && (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
-                      )}
-                    Approve
-                  </Button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        approveMutation.isPending || declineMutation.isPending
+                      }
+                      onClick={() => declineMutation.mutate(reqItem.id)}
+                    >
+                      {declineMutation.isPending &&
+                        declineMutation.variables === reqItem.id && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        )}
+                      Decline
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={
+                        approveMutation.isPending || declineMutation.isPending
+                      }
+                      onClick={() => approveMutation.mutate(reqItem.id)}
+                    >
+                      {approveMutation.isPending &&
+                        approveMutation.variables === reqItem.id && (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                        )}
+                      Approve
+                    </Button>
+                  </div>
                 </div>
               ),
             )}
@@ -197,6 +223,14 @@ export default function StaffRolesCard() {
                 {serverMessage(
                   approveMutation.error,
                   "Could not approve request.",
+                )}
+              </p>
+            )}
+            {declineMutation.isError && (
+              <p className="text-xs text-red-500">
+                {serverMessage(
+                  declineMutation.error,
+                  "Could not decline request.",
                 )}
               </p>
             )}

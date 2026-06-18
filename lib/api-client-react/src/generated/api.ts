@@ -721,6 +721,77 @@ export const useApprovePasswordReset = <TError = ErrorType<void>,
       return useMutation(getApprovePasswordResetMutationOptions(options));
     }
 
+export const getDeclinePasswordResetUrl = (id: string,) => {
+
+
+
+
+  return `/api/password-reset-requests/${id}/decline`
+}
+
+/**
+ * Declines a pending reset request, removing it from the pending list without issuing a code. Useful for rejecting a suspicious or mistaken request.
+ * @summary Decline a pending password reset request (manager only)
+ */
+export const declinePasswordReset = async (id: string, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeclinePasswordResetUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDeclinePasswordResetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof declinePasswordReset>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof declinePasswordReset>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['declinePasswordReset'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof declinePasswordReset>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  declinePasswordReset(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeclinePasswordResetMutationResult = NonNullable<Awaited<ReturnType<typeof declinePasswordReset>>>
+
+    export type DeclinePasswordResetMutationError = ErrorType<void>
+
+    /**
+ * @summary Decline a pending password reset request (manager only)
+ */
+export const useDeclinePasswordReset = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof declinePasswordReset>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof declinePasswordReset>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeclinePasswordResetMutationOptions(options));
+    }
+
 export const getListRunsUrl = () => {
 
 

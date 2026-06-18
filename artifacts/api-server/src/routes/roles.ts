@@ -9,6 +9,7 @@ import {
 } from "../lib/roles";
 import {
   approveResetRequest,
+  declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
 import { requireRole } from "../middlewares/requireRole";
@@ -109,6 +110,26 @@ router.post(
       code: result.code,
       expiresAt: result.expiresAt,
     });
+  },
+);
+
+// Decline a pending reset — manager only. Marks the request declined so it
+// drops off the list without ever issuing a code.
+router.post(
+  "/password-reset-requests/:id/decline",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const id = pathUserId(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid request id" });
+      return;
+    }
+    const result = await declineResetRequest(id);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.status(204).end();
   },
 );
 

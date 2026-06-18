@@ -20,6 +20,12 @@ instead of logging the requester out. Keep new public auth endpoints under
 uppercase) so case/format don't matter. Manager list endpoint is requireRole
 ("manager")-gated; the request/reset endpoints are public (before the auth gate).
 
+**Decline + auto-expire:** managers can also decline a pending request (status
+`"declined"`, no code issued) via `POST /password-reset-requests/{id}/decline`
+(204). `status` is plain text — adding new statuses needs no migration. The
+manager pending list also auto-drops requests older than `PENDING_REQUEST_TTL_MS`
+(7d). Decline guarded on status `"pending"` so it can't race approve/used.
+
 **Parity:** web + mobile must match — client helpers in each `inventoryShared`,
-a 3-step forgot-password screen, and the manager approve-and-show-code UI in
-`StaffRolesCard`. React Query key `["passwordResetRequests"]`, polled.
+a 3-step forgot-password screen, and the manager approve/decline + show-code UI
+in `StaffRolesCard`. React Query key `["passwordResetRequests"]`, polled.
