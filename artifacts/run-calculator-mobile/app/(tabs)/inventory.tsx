@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, Button } from "@/components/UI";
@@ -31,6 +32,7 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  MAX_IMAGE_BASE64_CHARS,
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
@@ -876,6 +878,46 @@ function AddItemForm({
 }
 
 // ── Photo stock intake ───────────────────────────────────────────────────────
+const MAX_PHOTO_EDGE = 1280;
+
+// Downscale/compress a captured or picked image to a JPEG and return its base64
+// payload, kept (best-effort) under the server's size cap. Progressively shrinks
+// the max edge and quality until the payload fits, so oversized originals are
+// handled gracefully instead of being rejected with a 413 after the upload.
+async function prepareImageBase64(
+  uri: string,
+  width: number,
+  height: number,
+): Promise<string | null> {
+  const steps: Array<{ edge: number; quality: number }> = [
+    { edge: MAX_PHOTO_EDGE, quality: 0.6 },
+    { edge: MAX_PHOTO_EDGE, quality: 0.45 },
+    { edge: 1024, quality: 0.45 },
+    { edge: 800, quality: 0.4 },
+    { edge: 640, quality: 0.4 },
+  ];
+  const longest = Math.max(width, height);
+  let last: string | null = null;
+  for (const { edge, quality } of steps) {
+    const context = ImageManipulator.ImageManipulator.manipulate(uri);
+    if (longest > edge) {
+      if (width >= height) context.resize({ width: edge });
+      else context.resize({ height: edge });
+    }
+    const image = await context.renderAsync();
+    const result = await image.saveAsync({
+      compress: quality,
+      format: ImageManipulator.SaveFormat.JPEG,
+      base64: true,
+    });
+    last = result.base64 ?? null;
+    if (last && last.length <= MAX_IMAGE_BASE64_CHARS) return last;
+  }
+  // Even the smallest step exceeded the cap (extremely unlikely): return it
+  // anyway so the server can surface its own clear 413 message.
+  return last;
+}
+
 interface ReviewRow {
   id: string;
   guessName: string;
@@ -978,6 +1020,24 @@ function PhotoIntakeCard({
     if (lastImageRef.current) void analyze(lastImageRef.current);
   }
 
+  // Downscale/compress the chosen asset before handing it to analyze(), so the
+  // payload stays under the server's size cap regardless of the original size.
+  async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
+    if (!asset?.uri) return;
+    let base64: string | null;
+    try {
+      base64 = await prepareImageBase64(
+        asset.uri,
+        asset.width ?? MAX_PHOTO_EDGE,
+        asset.height ?? MAX_PHOTO_EDGE,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process photo");
+      return;
+    }
+    await analyze(base64);
+  }
+
   async function takePhoto() {
     setError(null);
     const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -986,21 +1046,19 @@ function PhotoIntakeCard({
       return;
     }
     const res = await ImagePicker.launchCameraAsync({
-      base64: true,
-      quality: 0.5,
+      quality: 1,
       mediaTypes: ["images"],
     });
-    if (!res.canceled) await analyze(res.assets[0]?.base64);
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
   }
 
   async function pickPhoto() {
     setError(null);
     const res = await ImagePicker.launchImageLibraryAsync({
-      base64: true,
-      quality: 0.5,
+      quality: 1,
       mediaTypes: ["images"],
     });
-    if (!res.canceled) await analyze(res.assets[0]?.base64);
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
   }
 
   function patch(id: string, p: Partial<ReviewRow>) {

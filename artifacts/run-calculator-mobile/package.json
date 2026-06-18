@@ -63,6 +63,7 @@
   "dependencies": {
     "@expo-google-fonts/space-mono": "^0.4.2",
     "expo-file-system": "~19.0.23",
+    "expo-image-manipulator": "~14.0.8",
     "expo-notifications": "~0.32.17",
     "expo-sharing": "~14.0.8",
     "react-native-sse": "^1.2.1",

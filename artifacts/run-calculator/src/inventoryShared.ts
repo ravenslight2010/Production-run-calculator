@@ -265,6 +265,12 @@ export type IdentifyPhotoBody = {
   mimeType?: string;
   candidates?: CandidateItem[];
 };
+
+// Server rejects images whose base64 payload exceeds MAX_IMAGE_BASE64_CHARS
+// (8M chars) with a 413. Clients downscale/compress to stay comfortably under
+// this target so a 413 should never reach the user. The margin below the server
+// cap leaves room for the rest of the JSON body (candidates, etc.).
+export const MAX_IMAGE_BASE64_CHARS = 7_000_000;
 export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
   api<{ items: PhotoGuess[] }>("/inventory/identify-photo", {
     method: "POST",

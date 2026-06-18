@@ -34,6 +34,7 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  MAX_IMAGE_BASE64_CHARS,
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
@@ -729,7 +730,26 @@ function AddItemForm({
 }
 
 // ── Photo stock intake ───────────────────────────────────────────────────────
-// Downscale a chosen image to a JPEG data URL, then return its base64 payload.
+// Render the image onto a canvas at the given max edge + JPEG quality and return
+// the base64 payload (no data-URL prefix).
+function encodeJpeg(img: HTMLImageElement, maxEdge: number, quality: number): string {
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL("image/jpeg", quality).split(",")[1] ?? "";
+}
+
+// Downscale/compress a chosen image to a JPEG and return its base64 payload,
+// guaranteed (best-effort) to stay under the server's size cap. Starts at a
+// sensible edge/quality and progressively shrinks dimensions and quality until
+// the payload fits, so oversized originals are handled gracefully instead of
+// being rejected with a 413 after the upload.
 async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
@@ -743,16 +763,26 @@ async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
     i.onerror = () => reject(new Error("Failed to load image"));
     i.src = dataUrl;
   });
-  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-  const w = Math.max(1, Math.round(img.width * scale));
-  const h = Math.max(1, Math.round(img.height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return dataUrl.split(",")[1] ?? "";
-  ctx.drawImage(img, 0, 0, w, h);
-  return canvas.toDataURL("image/jpeg", 0.6).split(",")[1] ?? "";
+
+  // Each step reduces the max edge and/or quality. The last step is small
+  // enough that essentially any image will fit under the cap.
+  const steps: Array<{ edge: number; quality: number }> = [
+    { edge: maxEdge, quality: 0.6 },
+    { edge: maxEdge, quality: 0.45 },
+    { edge: 1024, quality: 0.45 },
+    { edge: 800, quality: 0.4 },
+    { edge: 640, quality: 0.4 },
+  ];
+
+  let last = "";
+  for (const { edge, quality } of steps) {
+    last = encodeJpeg(img, edge, quality);
+    if (!last) return dataUrl.split(",")[1] ?? "";
+    if (last.length <= MAX_IMAGE_BASE64_CHARS) return last;
+  }
+  // Even the smallest step exceeded the cap (extremely unlikely): return it
+  // anyway so the server can surface its own clear 413 message.
+  return last;
 }
 
 type ReviewRow = {
