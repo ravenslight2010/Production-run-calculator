@@ -492,6 +492,54 @@ paths:
         "403":
           description: Manager role required
 
+  /users/{userId}/password:
+    put:
+      operationId: resetStaffPassword
+      tags: [roles]
+      summary: Reset a staff member's password (manager only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetStaffPassword"
+      responses:
+        "204":
+          description: Password reset
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+        "404":
+          description: User not found
+
+  /users/{userId}:
+    delete:
+      operationId: deleteStaffMember
+      tags: [roles]
+      summary: Remove a staff member (manager only)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Staff member removed
+        "400":
+          description: Cannot remove the last manager
+        "403":
+          description: Manager role required
+        "404":
+          description: User not found
+
 components:
   schemas:
     HealthStatus:
@@ -981,6 +1029,16 @@ components:
         role:
           type: string
           enum: [manager, operator]
+
+    ResetStaffPassword:
+      type: object
+      required:
+        - newPassword
+      properties:
+        newPassword:
+          type: string
+          minLength: 6
+          maxLength: 200
 
     OptimizeStoppage:
       type: object

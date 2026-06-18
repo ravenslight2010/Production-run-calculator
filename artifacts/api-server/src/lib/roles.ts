@@ -1,5 +1,6 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { db, userRolesTable, usersTable } from "@workspace/db";
+import { updateUserPassword } from "./users";
 
 export type Role = "manager" | "operator";
 
@@ -129,4 +130,59 @@ export async function setUserRole(
     });
 
   return { ok: true, row: await getStaffMember(targetUserId) };
+}
+
+// Reset a staff member's password to a manager-supplied value. Unlike the
+// self-service change-password flow this requires no current password — it is
+// the recovery path for a locked-out operator and is gated to managers.
+export async function resetUserPassword(
+  targetUserId: string,
+  newPassword: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const [user] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.id, targetUserId));
+  if (!user) {
+    return { ok: false, status: 404, error: "User not found" };
+  }
+  await updateUserPassword(targetUserId, newPassword);
+  return { ok: true };
+}
+
+// Remove a staff member entirely. The role row is removed via the ON DELETE
+// CASCADE on user_roles. Mirrors the last-manager guard so deleting the only
+// remaining manager can never lock the team out of the manager-only controls.
+export async function deleteUser(
+  targetUserId: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const [user] = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.id, targetUserId));
+  if (!user) {
+    return { ok: false, status: 404, error: "User not found" };
+  }
+
+  const [targetRole] = await db
+    .select({ role: userRolesTable.role })
+    .from(userRolesTable)
+    .where(eq(userRolesTable.userId, targetUserId));
+  if (targetRole?.role === "manager") {
+    const [other] = await db
+      .select({ id: userRolesTable.userId })
+      .from(userRolesTable)
+      .where(and(eq(userRolesTable.role, "manager"), ne(userRolesTable.userId, targetUserId)))
+      .limit(1);
+    if (!other) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Cannot remove the last manager — promote someone else first.",
+      };
+    }
+  }
+
+  await db.delete(usersTable).where(eq(usersTable.id, targetUserId));
+  return { ok: true };
 }

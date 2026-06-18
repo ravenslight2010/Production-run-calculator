@@ -46,6 +46,7 @@ export * from './productionRun';
 export * from './productionRunInput';
 export * from './productionRunInputInputs';
 export * from './productionRunInputs';
+export * from './resetStaffPassword';
 export * from './restockInput';
 export * from './staffMember';
 export * from './staffMemberRole';

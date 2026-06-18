@@ -26,7 +26,7 @@ import { sql } from "drizzle-orm";
 import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { signToken } from "../lib/auth";
+import { signToken, verifyPassword } from "../lib/auth";
 
 // Mock the OpenAI vision client so POST /inventory/identify-photo returns a
 // valid (empty) result without making a paid call.
@@ -238,6 +238,19 @@ const GATED_ROUTES: GatedRoute[] = [
     body: { role: "manager" },
     okStatus: 200,
   },
+  {
+    name: "PUT /users/:id/password",
+    method: "PUT",
+    path: () => `/api/users/${OPERATOR}/password`,
+    body: { newPassword: "fresh-password" },
+    okStatus: 204,
+  },
+  {
+    name: "DELETE /users/:id",
+    method: "DELETE",
+    path: () => `/api/users/${OPERATOR}`,
+    okStatus: 204,
+  },
 ];
 
 describe("role-based access control", () => {
@@ -306,5 +319,85 @@ describe("last-manager guard", () => {
       .from(userRolesTable)
       .where(sql`${userRolesTable.userId} = ${"manager-2"}`);
     expect(row.role).toBe("operator");
+  });
+
+  it("rejects removing the only manager (DELETE /users/:id → 400)", async () => {
+    const res = await req(MANAGER, "DELETE", `/api/users/${MANAGER}`);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/last manager/i);
+
+    // The manager still exists.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${MANAGER}`);
+    expect(row).toBeDefined();
+  });
+
+  it("allows removing a manager when another manager remains (→ 204)", async () => {
+    await db.insert(usersTable).values({
+      id: "manager-2",
+      username: "manager-2",
+      passwordHash: "x",
+    });
+    await db.insert(userRolesTable).values({ userId: "manager-2", role: "manager" });
+    const res = await req(MANAGER, "DELETE", `/api/users/manager-2`);
+    expect(res.status).toBe(204);
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${"manager-2"}`);
+    expect(row).toBeUndefined();
+  });
+});
+
+describe("staff account administration", () => {
+  it("removes a staff member and cascades their role row (DELETE → 204)", async () => {
+    const res = await req(MANAGER, "DELETE", `/api/users/${OPERATOR}`);
+    expect(res.status).toBe(204);
+    const [user] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(user).toBeUndefined();
+    const [role] = await db
+      .select()
+      .from(userRolesTable)
+      .where(sql`${userRolesTable.userId} = ${OPERATOR}`);
+    expect(role).toBeUndefined();
+  });
+
+  it("returns 404 when removing a non-existent user", async () => {
+    const res = await req(MANAGER, "DELETE", `/api/users/does-not-exist`);
+    expect(res.status).toBe(404);
+  });
+
+  it("resets a staff member's password so they can sign in with it (PUT → 204)", async () => {
+    const res = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/password`, {
+      newPassword: "brand-new-secret",
+    });
+    expect(res.status).toBe(204);
+
+    // The new password verifies against the stored hash.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(verifyPassword("brand-new-secret", row.passwordHash)).toBe(true);
+  });
+
+  it("rejects a too-short reset password (PUT → 400)", async () => {
+    const res = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/password`, {
+      newPassword: "x",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when resetting a non-existent user's password", async () => {
+    const res = await req(MANAGER, "PUT", `/api/users/does-not-exist/password`, {
+      newPassword: "brand-new-secret",
+    });
+    expect(res.status).toBe(404);
   });
 });

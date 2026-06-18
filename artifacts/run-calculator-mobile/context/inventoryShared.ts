@@ -350,6 +350,13 @@ export const setStaffRole = (userId: string, role: Role) =>
     method: "PUT",
     body: JSON.stringify({ role }),
   });
+export const resetStaffPassword = (userId: string, newPassword: string) =>
+  api<null>(`/users/${encodeURIComponent(userId)}/password`, {
+    method: "PUT",
+    body: JSON.stringify({ newPassword }),
+  });
+export const deleteStaffMember = (userId: string) =>
+  api<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
 
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>

@@ -504,3 +504,28 @@ export const SetStaffRoleResponse = zod.object({
 })
 
 
+/**
+ * @summary Reset a staff member's password (manager only)
+ */
+export const ResetStaffPasswordParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+export const resetStaffPasswordBodyNewPasswordMin = 6;
+export const resetStaffPasswordBodyNewPasswordMax = 200;
+
+
+
+export const ResetStaffPasswordBody = zod.object({
+  "newPassword": zod.string().min(resetStaffPasswordBodyNewPasswordMin).max(resetStaffPasswordBodyNewPasswordMax)
+})
+
+
+/**
+ * @summary Remove a staff member (manager only)
+ */
+export const DeleteStaffMemberParams = zod.object({
+  "userId": zod.coerce.string()
+})
+
+

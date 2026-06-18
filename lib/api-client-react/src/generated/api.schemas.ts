@@ -277,6 +277,14 @@ export interface StaffRoleUpdate {
   role: StaffRoleUpdateRole;
 }
 
+export interface ResetStaffPassword {
+  /**
+     * @minLength 6
+     * @maxLength 200
+     */
+  newPassword: string;
+}
+
 export interface OptimizeStoppage {
   reason: string;
   durationSec: number;

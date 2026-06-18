@@ -1,7 +1,17 @@
 import { Router, type IRouter } from "express";
-import { SetStaffRoleBody } from "@workspace/api-zod";
-import { getStaffMember, listStaff, setUserRole } from "../lib/roles";
+import { ResetStaffPasswordBody, SetStaffRoleBody } from "@workspace/api-zod";
+import {
+  deleteUser,
+  getStaffMember,
+  listStaff,
+  resetUserPassword,
+  setUserRole,
+} from "../lib/roles";
 import { requireRole } from "../middlewares/requireRole";
+
+function pathUserId(raw: string | string[] | undefined): string | undefined {
+  return Array.isArray(raw) ? raw[0] : raw;
+}
 
 const router: IRouter = Router();
 
@@ -21,9 +31,7 @@ router.get("/users", requireRole("manager"), async (_req, res): Promise<void> =>
 // Change a staff member's role — manager only. Refuses to remove the last
 // manager so the team can't lock itself out.
 router.put("/users/:userId/role", requireRole("manager"), async (req, res): Promise<void> => {
-  const targetUserId = Array.isArray(req.params.userId)
-    ? req.params.userId[0]
-    : req.params.userId;
+  const targetUserId = pathUserId(req.params.userId);
   if (!targetUserId) {
     res.status(400).json({ error: "Invalid user id" });
     return;
@@ -39,6 +47,47 @@ router.put("/users/:userId/role", requireRole("manager"), async (req, res): Prom
     return;
   }
   res.json(result.row);
+});
+
+// Reset a staff member's password — manager only. Recovery path for a
+// locked-out operator; no current password is required.
+router.put(
+  "/users/:userId/password",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const targetUserId = pathUserId(req.params.userId);
+    if (!targetUserId) {
+      res.status(400).json({ error: "Invalid user id" });
+      return;
+    }
+    const parsed = ResetStaffPasswordBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const result = await resetUserPassword(targetUserId, parsed.data.newPassword);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// Remove a staff member — manager only. Refuses to delete the last remaining
+// manager so the team can't lock itself out.
+router.delete("/users/:userId", requireRole("manager"), async (req, res): Promise<void> => {
+  const targetUserId = pathUserId(req.params.userId);
+  if (!targetUserId) {
+    res.status(400).json({ error: "Invalid user id" });
+    return;
+  }
+  const result = await deleteUser(targetUserId);
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(204).end();
 });
 
 export default router;
