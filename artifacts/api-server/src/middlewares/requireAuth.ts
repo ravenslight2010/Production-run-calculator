@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
+import { getSessionBoundaryMs } from "../lib/sessionBoundary";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -26,14 +27,27 @@ function readToken(req: Request): string | null {
   return null;
 }
 
-// Rejects any request that does not carry a valid, unexpired session token.
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+// Rejects any request that does not carry a valid, unexpired session token, or
+// whose token was issued before the latest daily reset (see sessionBoundary).
+export async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
   const token = readToken(req);
-  const userId = token ? verifyToken(token) : null;
-  if (!userId) {
+  const verified = token ? verifyToken(token) : null;
+  if (!verified) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
-  req.userId = userId;
+  // Daily-reset fence: a token minted before today's reset boundary is no longer
+  // valid, so the new production day starts from a re-authenticated state. This
+  // is a single cached read, never a per-request DB query.
+  const boundaryMs = await getSessionBoundaryMs();
+  if (boundaryMs > 0 && verified.iat * 1000 < boundaryMs) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  req.userId = verified.sub;
   next();
 }

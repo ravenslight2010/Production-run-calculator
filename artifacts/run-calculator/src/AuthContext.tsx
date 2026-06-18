@@ -2,12 +2,14 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   type ReactNode,
 } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePasswordRequest,
   fetchMe,
+  setUnauthorizedHandler,
   signInRequest,
   signOutRequest,
   signUpRequest,
@@ -22,6 +24,14 @@ type AuthContextValue = {
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  // Drop straight to the signed-out UI without calling the sign-out endpoint.
+  // Used by the daily-reset rollover so the credential survives long enough for
+  // the rollover's own sync push to land (the server boundary then invalidates
+  // it), and by the 401 handler when the session is already gone server-side.
+  forceSignedOut: () => void;
+  // Re-check the session against the server (used when the SSE stream errors,
+  // which can mean the daily reset just signed us out).
+  revalidate: () => void;
   changePassword: (
     currentPassword: string,
     newPassword: string,
@@ -81,6 +91,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [qc]);
 
+  // Flip the app to the signed-out UI immediately. We set ["me"] to null rather
+  // than clearing the whole cache so we don't disturb any in-flight request
+  // (e.g. the daily-reset rollover's own sync push) — the next sign-in clears
+  // the cache to prevent cross-user leakage.
+  const forceSignedOut = useCallback(() => {
+    qc.setQueryData(["me"], null);
+  }, [qc]);
+
+  const revalidate = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["me"] });
+  }, [qc]);
+
+  // Any 401 from an authenticated request means the session is gone (typically
+  // the daily reset advanced the boundary) — bounce to the login screen.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      qc.setQueryData(["me"], null);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [qc]);
+
   // Changing a password doesn't rotate the session, so there's nothing to
   // refresh client-side — callers just surface success/failure.
   const changePassword = useCallback(
@@ -99,6 +130,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signUp,
         signOut,
+        forceSignedOut,
+        revalidate,
         changePassword,
       }}
     >

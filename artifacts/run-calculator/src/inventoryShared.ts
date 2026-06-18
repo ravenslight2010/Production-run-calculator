@@ -197,6 +197,20 @@ export class InventoryApiError extends Error {
   }
 }
 
+// A 401 from a normal (already signed-in) request means the session ended —
+// most often because the daily reset advanced the server-side session boundary.
+// AuthContext registers a handler here so any such 401 routes the user back to
+// the login screen. Sign-in/up failures and the signed-out /me probe are not
+// session expiries, so those paths are excluded by the caller below.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
+function isSessionProbePath(path: string): boolean {
+  return path === "/me" || path.startsWith("/auth/");
+}
+
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...opts,
@@ -207,6 +221,7 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
+    if (res.status === 401 && !isSessionProbePath(path)) onUnauthorized?.();
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))

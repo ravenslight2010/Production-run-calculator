@@ -14,6 +14,7 @@ import { Platform } from "react-native";
 import type { RunSettings, RecipeRow } from "./RunContext";
 import { DEFAULT_PEP_TYPES } from "./RunContext";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
+import { notifyUnauthorized } from "./authEvents";
 
 // ── Types (mirror the API server's inventory responses) ──────────────────────
 export type InventoryCategory = "ingredient" | "packaging";
@@ -241,6 +242,16 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
+    // A 401 on an already-signed-in request means the session ended (typically
+    // the daily reset advanced the server-side boundary). Sign-in/up failures
+    // and the signed-out /me probe are not session expiries, so exclude them.
+    if (
+      res.status === 401 &&
+      path !== "/me" &&
+      !path.startsWith("/auth/")
+    ) {
+      notifyUnauthorized();
+    }
     const retryAfterRaw = res.headers.get("Retry-After");
     const retryAfterSec =
       retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw))

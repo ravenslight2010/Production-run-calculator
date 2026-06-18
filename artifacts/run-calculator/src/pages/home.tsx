@@ -1483,7 +1483,7 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
 }
 
 export default function Home() {
-  const { signOut } = useAuth();
+  const { signOut, forceSignedOut, revalidate } = useAuth();
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
@@ -2416,7 +2416,12 @@ export default function Home() {
         if (msg.data) applySyncCallbackRef.current(msg.data);
       } catch {}
     };
-    es.onerror = () => { setSyncConnected(false); };
+    es.onerror = () => {
+      setSyncConnected(false);
+      // EventSource can't read the HTTP status, so a drop may be the daily reset
+      // signing us out. Re-check /me; if the session is gone we land on login.
+      revalidate();
+    };
     return () => { setSyncConnected(false); es.close(); };
   }, []);
 
@@ -2508,6 +2513,11 @@ export default function Home() {
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
               fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              // The new day's resetAt becomes the server-side session boundary
+              // (pushed above), so the daily reset signs everyone out. Drop this
+              // device to the login screen now instead of waiting for its next
+              // 401 — forceSignedOut keeps the cookie so the push lands first.
+              forceSignedOut();
               return;
             }
           }
@@ -2520,6 +2530,8 @@ export default function Home() {
         form.reset(DEFAULT_VALUES);
         resetFieldArrays(DEFAULT_VALUES);
         schedulePush(fresh, 0);
+        // See note above: the daily reset signs everyone out, including us.
+        forceSignedOut();
       }
     }
     const interval = setInterval(checkDateRollover, 60_000);

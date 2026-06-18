@@ -26,6 +26,7 @@ import {
   InventoryApiError,
   type StaffMember,
 } from "./inventoryShared";
+import { setUnauthorizedHandler } from "./authEvents";
 
 const TOKEN_KEY = "rc_auth_token";
 
@@ -36,6 +37,13 @@ type AuthContextValue = {
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  // Drop straight to the signed-out UI without discarding the token. Used by the
+  // daily-reset rollover so the token survives long enough for the rollover's own
+  // sync push to land (the server boundary then invalidates it).
+  forceSignedOut: () => void;
+  // Re-check the session against the server (used when the SSE stream errors,
+  // which can mean the daily reset just signed us out).
+  revalidate: () => void;
   changePassword: (
     currentPassword: string,
     newPassword: string,
@@ -51,6 +59,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // The getter must read the live token, so keep it in a ref the closure sees.
   const tokenRef = useRef<string | null>(null);
 
+  // Latch set by the daily-reset proactive sign-out (forceSignedOut). It keeps
+  // the in-flight launch restore and SSE revalidation from signing the user back
+  // in during the window after the reset but before the server boundary takes
+  // effect (the boundary read is cached briefly server-side). Cleared whenever a
+  // real token is applied on a fresh sign-in.
+  const forcedOutRef = useRef(false);
+
   // Register the token getter exactly once; it reads the ref each call so it
   // always returns the current token (or null when signed out).
   useEffect(() => {
@@ -61,6 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const applyToken = useCallback(async (token: string | null) => {
     tokenRef.current = token;
     if (token) {
+      forcedOutRef.current = false; // a real sign-in clears the reset latch
       await SecureStore.setItemAsync(TOKEN_KEY, token);
     } else {
       await SecureStore.deleteItemAsync(TOKEN_KEY);
@@ -76,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!stored) return;
         tokenRef.current = stored;
         const user = await fetchMe();
-        if (!cancelled) setMe(user);
+        if (!cancelled && !forcedOutRef.current) setMe(user);
       } catch (err) {
         // 401 (or any failure) → treat as signed out and discard the token.
         tokenRef.current = null;
@@ -126,6 +142,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyToken]);
 
+  // Flip to the signed-out UI immediately while keeping the token, so an
+  // in-flight request (e.g. the daily-reset rollover's own sync push) can still
+  // authenticate. The server boundary invalidates the token for real; on the
+  // next launch the /me restore probe 401s and discards it.
+  const forceSignedOut = useCallback(() => {
+    forcedOutRef.current = true;
+    setMe(null);
+  }, []);
+
+  const revalidate = useCallback(async () => {
+    if (!tokenRef.current) return;
+    try {
+      const user = await fetchMe();
+      if (!forcedOutRef.current) setMe(user);
+    } catch (err) {
+      if (err instanceof InventoryApiError && err.status === 401) {
+        await applyToken(null);
+        setMe(null);
+      }
+      // Non-auth failures (offline, etc.) leave the session as-is.
+    }
+  }, [applyToken]);
+
+  // A 401 on an already-signed-in request means the session is gone (typically
+  // the daily reset advanced the boundary) — discard the token and show login.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void applyToken(null);
+      setMe(null);
+    });
+    return () => setUnauthorizedHandler(null);
+  }, [applyToken]);
+
   // Changing a password doesn't rotate the session token, so the stored token
   // stays valid — nothing to update locally beyond surfacing success/failure.
   const changePassword = useCallback(
@@ -144,6 +193,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn,
         signUp,
         signOut,
+        forceSignedOut,
+        revalidate,
         changePassword,
       }}
     >

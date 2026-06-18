@@ -40,6 +40,7 @@ import {
   mergeInventory,
   type MergeInventoryLine,
 } from "./inventoryShared";
+import { useAuth } from "./auth";
 import {
   buildMergeMap,
   mapName,
@@ -1403,6 +1404,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const streamRef = useRef<SyncStream | null>(null);
   const syncStartedRef = useRef(false);
 
+  // Auth hooks read through refs so the boot/sync effects (which run with stable
+  // deps) always see the latest callbacks without re-subscribing.
+  const { forceSignedOut, revalidate } = useAuth();
+  const forceSignedOutRef = useRef(forceSignedOut);
+  forceSignedOutRef.current = forceSignedOut;
+  const revalidateRef = useRef(revalidate);
+  revalidateRef.current = revalidate;
+
   useEffect(() => {
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
@@ -1449,6 +1458,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
               };
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+              // The new day's resetAt (pushed to the server by the sync stream
+              // below) becomes the session boundary, so the daily reset signs
+              // everyone out. Drop to the login screen now instead of waiting for
+              // the next 401 — forceSignedOut keeps the token so the rollover's
+              // own push can still authenticate and set the boundary.
+              forceSignedOutRef.current();
             } else {
               setAppState({
                 ...base,
@@ -1621,7 +1636,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           if (senderId && senderId === clientIdRef.current) return; // ignore our own echo
           onRemote(payload);
         },
-        onError: () => setSyncStatus("connecting"),
+        onError: () => {
+          setSyncStatus("connecting");
+          // The SSE polyfill can't surface the HTTP status, so a drop may be the
+          // daily reset signing us out. Re-check /me; if the session is gone we
+          // land on login.
+          void revalidateRef.current();
+        },
       });
     })();
 

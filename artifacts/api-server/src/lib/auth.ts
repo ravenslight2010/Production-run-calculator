@@ -38,6 +38,16 @@ export function verifyPassword(password: string, stored: string): boolean {
 // signature check plus expiry check, so sessions survive server restarts.
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
 
+// Fallback issued-at (seconds) for legacy tokens minted before the `iat` field
+// existed. We use the process start time so that, on the deploy that introduces
+// daily-reset fencing, already-signed-in users are NOT logged out immediately
+// (their effective issued-at is the deploy time, which is newer than any reset
+// boundary set earlier that day) — yet the NEXT daily reset, which advances the
+// boundary past the deploy time, still signs them out. Legacy tokens are
+// replaced with `iat`-stamped tokens on every sign-in, so they disappear within
+// a day of deploy.
+const PROCESS_START_SEC = Math.floor(Date.now() / 1000);
+
 function getSecret(): string {
   const secret = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET;
   if (!secret) {
@@ -61,13 +71,19 @@ function sign(data: string): string {
 }
 
 export function signToken(userId: string): string {
+  const now = Math.floor(Date.now() / 1000);
   const payload = b64url(
-    JSON.stringify({ sub: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SEC }),
+    JSON.stringify({ sub: userId, iat: now, exp: now + SESSION_TTL_SEC }),
   );
   return `${payload}.${sign(payload)}`;
 }
 
-export function verifyToken(token: string): string | null {
+// A verified token: the subject (user id) plus its issued-at time in seconds.
+// `iat` falls back to PROCESS_START_SEC for legacy tokens that lack the field
+// (see the comment on PROCESS_START_SEC for the deploy-safety rationale).
+export type VerifiedToken = { sub: string; iat: number };
+
+export function verifyToken(token: string): VerifiedToken | null {
   const dot = token.indexOf(".");
   if (dot <= 0) return null;
   const payload = token.slice(0, dot);
@@ -81,12 +97,14 @@ export function verifyToken(token: string): string | null {
   try {
     const decoded = JSON.parse(
       Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
-    ) as { sub?: unknown; exp?: unknown };
+    ) as { sub?: unknown; iat?: unknown; exp?: unknown };
     if (typeof decoded.sub !== "string") return null;
     if (typeof decoded.exp !== "number" || decoded.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
-    return decoded.sub;
+    const iat =
+      typeof decoded.iat === "number" ? decoded.iat : PROCESS_START_SEC;
+    return { sub: decoded.sub, iat };
   } catch {
     return null;
   }

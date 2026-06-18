@@ -6,6 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getAuthToken } from "@workspace/api-client-react";
 import { Platform } from "react-native";
 import type { SyncPayload } from "./payloadTypes";
+import { notifyUnauthorized } from "../authEvents";
 
 const CLIENT_ID_KEY = "run-calc-mobile-client-id";
 
@@ -50,7 +51,12 @@ export async function fetchToday(baseUrl: string): Promise<SyncPayload | null> {
   const res = await fetch(`${baseUrl}/api/sync/today`, {
     headers: await authHeaders(),
   });
-  if (!res.ok) throw new Error(`GET /api/sync/today -> ${res.status}`);
+  if (!res.ok) {
+    // A 401 here means the session ended (typically the daily reset advanced the
+    // server-side boundary) — bounce to login via the auth bridge.
+    if (res.status === 401) notifyUnauthorized();
+    throw new Error(`GET /api/sync/today -> ${res.status}`);
+  }
   return (await res.json()) as SyncPayload | null;
 }
 
@@ -64,7 +70,10 @@ export async function putToday(
     headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ senderId, payload }),
   });
-  if (!res.ok) throw new Error(`PUT /api/sync/today -> ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized();
+    throw new Error(`PUT /api/sync/today -> ${res.status}`);
+  }
 }
 
 export interface SyncStreamHandlers {
