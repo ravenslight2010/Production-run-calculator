@@ -441,7 +441,9 @@ export function applyIngredientDedupeMigrationIfNeeded(): void {
 export function applyIngredientMerge(map: MergeMap): void {
   if (typeof localStorage === "undefined") return;
   if (Object.keys(map).length === 0) return;
-  // ── Flat master-data option lists (dieTypes excluded — sizes, not ingredients) ──
+  // ── Flat master-data option lists. dieTypes is included so a merged die-type
+  // name is removed from the selectable list (the dieType field is rewritten via
+  // MERGE_NAME_FIELDS in mergeSettingsObject). ──
   const listKeys = [
     INGREDIENT_TYPES_KEY,
     PEP_TYPES_KEY,
@@ -449,6 +451,7 @@ export function applyIngredientMerge(map: MergeMap): void {
     DOUGH_INGREDIENTS_KEY,
     FRONTLINE_INGREDIENTS_KEY,
     MIX_INGREDIENTS_KEY,
+    DIE_TYPES_KEY,
   ];
   for (const key of listKeys) {
     if (localStorage.getItem(key) === null) continue;

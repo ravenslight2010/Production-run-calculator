@@ -104,6 +104,7 @@ import {
   consumeRun,
   fetchInventory,
   mergeInventory,
+  scoreNameMatch,
   type MergeInventoryLine,
 } from "../inventoryShared";
 import {
@@ -1901,9 +1902,9 @@ export default function Home() {
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeError, setMergeError] = useState("");
 
-  // The mergeable universe: every master-data list that holds ingredient names.
-  // Die types (sizes) and brands/flavors are intentionally excluded — they are
-  // not ingredients.
+  // The mergeable universe: every master-data list whose values get rewritten by
+  // a merge — ingredient names plus die types (the `dieType` selection field is
+  // rewritten too). Brands/flavors are excluded (they have their own rename path).
   const mergeUniverse = useMemo(() => {
     const all = [
       ...ingredientTypes,
@@ -1912,6 +1913,7 @@ export default function Home() {
       ...frontlineIngredients,
       ...mixIngredients,
       ...pepTypes,
+      ...dieTypes,
     ];
     const seen = new Set<string>();
     const out: string[] = [];
@@ -1920,7 +1922,24 @@ export default function Home() {
       if (!seen.has(key)) { seen.add(key); out.push(n); }
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes]);
+  }, [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes, dieTypes]);
+
+  // Same universe, ordered closest-match-first so likely duplicates surface at the
+  // top. When sources are selected, rank by best similarity to any selected
+  // source; otherwise fall back to similarity against the typed target; otherwise
+  // alphabetical. Reuses the shared name-similarity helper.
+  const mergeUniverseRanked = useMemo(() => {
+    const probes = [...mergeSources, mergeTarget.trim()].filter(Boolean);
+    if (probes.length === 0) return mergeUniverse;
+    return mergeUniverse
+      .map((name, i) => ({
+        name,
+        i,
+        s: Math.max(...probes.map((p) => scoreNameMatch(p, name))),
+      }))
+      .sort((a, b) => b.s - a.s || a.i - b.i)
+      .map((x) => x.name);
+  }, [mergeUniverse, mergeSources, mergeTarget]);
 
   // Gather every value surface a merge would touch, so the confirmation preview
   // can count affected references. Mirrors buildSyncPayload's localStorage scan.
@@ -1932,6 +1951,7 @@ export default function Home() {
       frontlineIngredients,
       mixIngredients,
       pepTypes,
+      dieTypes,
     ];
     const settingsObjects: Record<string, unknown>[] = [];
     for (const run of dayStateRef.current.runs) {
@@ -5094,7 +5114,7 @@ export default function Home() {
                         <div className="space-y-1.5">
                           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Merge these (sources)</p>
                           <div className="border border-border rounded-lg max-h-48 overflow-y-auto overscroll-contain divide-y divide-border/40">
-                            {mergeUniverse.map(name => {
+                            {mergeUniverseRanked.map(name => {
                               const checked = mergeSources.includes(name);
                               const isTarget = name === mergeTarget.trim();
                               return (
@@ -5128,7 +5148,7 @@ export default function Home() {
                             className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                           />
                           <datalist id="merge-target-options">
-                            {mergeUniverse.map(name => <option key={name} value={name} />)}
+                            {mergeUniverseRanked.map(name => <option key={name} value={name} />)}
                           </datalist>
                         </div>
 

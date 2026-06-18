@@ -17,6 +17,7 @@ export const MERGE_NAME_FIELDS = [
   "app4Type",
   "pep1Type",
   "pep2Type",
+  "dieType",
 ] as const;
 
 // Array fields holding recipe rows whose `ingredient` is a name.

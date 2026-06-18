@@ -27,13 +27,21 @@ folded into the target.
   (Web returns early; mobile `mergeIngredients` throws and the UI catches it.)
 - **Recipe rows are renamed, never combined.** A recipe that referenced two now-merged
   names keeps both rows so its total weight is preserved exactly.
-- Mergeable universe excludes brands, flavors, and die types (sizes) — they are not
-  ingredients.
+- **dieType IS in scope.** The spec ("die type selections") requires the `dieType`
+  field to be rewritten, so `dieType` is in `MERGE_NAME_FIELDS` and `dieTypes` is part
+  of the mergeable universe + deduped list rewrite. Only brands and flavors are
+  excluded (they have their own rename path), NOT die types.
+- **Similarity-first picker.** The source/target picker must surface closest matches
+  first using the shared `scoreNameMatch` helper, not alphabetical. Rank by max
+  similarity to any selected source (or the typed target); fall back to alphabetical
+  when nothing is selected.
 
 **Why:** the whole point of the feature is a clean rewrite with no orphaned references
 and no inventory drift; silently swallowing an inventory read failure reintroduces drift.
+An earlier pass wrongly excluded dieType and used alphabetical ordering — code review
+rejected both as core spec requirements.
 
 ## Parity note
 Mobile has NO separate `ingredientTypes`/`mixIngredients` master lists (web does). The
-mobile merge universe is pepTypes + cheese + dough + frontline ingredients. This is an
+mobile merge universe is pepTypes + cheese + dough + frontline + dieTypes. This is an
 intentional asymmetry from the underlying data model, not a parity bug.

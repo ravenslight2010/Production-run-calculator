@@ -19,6 +19,7 @@ import {
   countMergeReferences,
   type MergeMap,
 } from "@/context/mergeIngredients";
+import { scoreNameMatch } from "@/context/inventoryShared";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 
@@ -182,6 +183,7 @@ function MergeManager() {
     cheeseIngredients,
     doughIngredients,
     frontlineIngredients,
+    dieTypes,
     allRuns,
     templates,
     history,
@@ -199,15 +201,17 @@ function MergeManager() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // The mergeable universe: master-data lists that hold ingredient names. Brands,
-  // flavors and die types (sizes) are intentionally excluded — they aren't
-  // ingredients. (Mobile has no separate ingredientTypes/mixIngredients lists.)
+  // The mergeable universe: master-data lists whose values a merge rewrites —
+  // ingredient names plus die types (the `dieType` selection field is rewritten
+  // too). Brands/flavors are excluded (separate rename path). (Mobile has no
+  // separate ingredientTypes/mixIngredients lists.)
   const universe = React.useMemo(() => {
     const all = [
       ...pepTypes,
       ...cheeseIngredients,
       ...doughIngredients,
       ...frontlineIngredients,
+      ...dieTypes,
     ];
     const seen = new Set<string>();
     const out: string[] = [];
@@ -219,7 +223,23 @@ function MergeManager() {
       }
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients]);
+  }, [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients, dieTypes]);
+
+  // Same universe, ordered closest-match-first so likely duplicates surface at the
+  // top. Rank by best similarity to any selected source (or the typed target);
+  // fall back to alphabetical. Reuses the shared name-similarity helper.
+  const rankedUniverse = React.useMemo(() => {
+    const probes = [...sources, target.trim()].filter(Boolean);
+    if (probes.length === 0) return universe;
+    return universe
+      .map((name, i) => ({
+        name,
+        i,
+        s: Math.max(...probes.map((p) => scoreNameMatch(p, name))),
+      }))
+      .sort((a, b) => b.s - a.s || a.i - b.i)
+      .map((x) => x.name);
+  }, [universe, sources, target]);
 
   const map: MergeMap = buildMergeMap(sources, target);
   const hasMerge = Object.keys(map).length > 0;
@@ -234,7 +254,7 @@ function MergeManager() {
     ] as unknown as Record<string, unknown>[];
     try {
       return countMergeReferences(map, {
-        lists: [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients],
+        lists: [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients, dieTypes],
         settingsObjects,
         presetMaps: [
           doughRecipePresets,
@@ -303,7 +323,7 @@ function MergeManager() {
         MERGE THESE (SOURCES)
       </Text>
       <View style={styles.chipWrap}>
-        {universe.map((name) => {
+        {rankedUniverse.map((name) => {
           const checked = sources.includes(name);
           const isTarget = name === target.trim();
           return (
@@ -352,7 +372,7 @@ function MergeManager() {
         autoCapitalize="words"
       />
       <View style={styles.chipWrap}>
-        {universe.map((name) => (
+        {rankedUniverse.map((name) => (
           <Pressable
             key={name}
             disabled={busy}

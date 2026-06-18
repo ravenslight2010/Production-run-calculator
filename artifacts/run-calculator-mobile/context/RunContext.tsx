@@ -2256,6 +2256,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           cheeseIngredients: mergeList(prev.cheeseIngredients, map),
           doughIngredients: mergeList(prev.doughIngredients, map),
           frontlineIngredients: mergeList(prev.frontlineIngredients, map),
+          dieTypes: mergeList(prev.dieTypes, map),
           doughRecipePresets: mergeRecipePresetMap(prev.doughRecipePresets, map),
           cheeseRecipePresets: mergeRecipePresetMap(prev.cheeseRecipePresets, map),
           frontlineRecipePresets: mergeRecipePresetMap(prev.frontlineRecipePresets, map),
