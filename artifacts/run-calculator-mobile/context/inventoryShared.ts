@@ -334,6 +334,23 @@ export const consumeRunInventory = (runId: string, lines: ConsumeLine[]) =>
     method: "POST",
     body: JSON.stringify({ runId, lines }),
   });
+
+export type MergeInventoryLine = {
+  fromKey: string;
+  toKey: string;
+  toName: string;
+  category: string;
+  unit: string;
+};
+// Fold each source item's stock + ledger history into the target item server-
+// side. Safe to call even when no source name is tracked in inventory — the
+// server skips unknown keys. Returns how many folds were actually applied.
+// Mirrors the web client at `run-calculator/src/inventoryShared.ts`.
+export const mergeInventory = (merges: MergeInventoryLine[]) =>
+  api<{ merged: number }>("/inventory/merge", {
+    method: "POST",
+    body: JSON.stringify({ merges }),
+  });
 // Server rejects images whose base64 payload exceeds MAX_IMAGE_BASE64_CHARS
 // (8M chars) with a 413. Clients downscale/compress to stay comfortably under
 // this target so a 413 should never reach the user. The margin below the server

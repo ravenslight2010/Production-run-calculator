@@ -229,6 +229,24 @@ export const ConsumeInventoryResponse = zod.object({
 
 
 /**
+ * @summary Fold one or more source items' stock into a target item
+ */
+export const MergeInventoryBody = zod.object({
+  "merges": zod.array(zod.object({
+  "fromKey": zod.string(),
+  "toKey": zod.string(),
+  "toName": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string()
+}))
+})
+
+export const MergeInventoryResponse = zod.object({
+  "merged": zod.number()
+})
+
+
+/**
  * @summary List movement history (optionally filtered by item)
  */
 export const ListInventoryLedgerQueryParams = zod.object({

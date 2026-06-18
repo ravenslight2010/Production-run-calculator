@@ -345,3 +345,19 @@ export const consumeRun = (runId: string, lines: ConsumeLine[]) =>
     method: "POST",
     body: JSON.stringify({ runId, lines }),
   });
+
+export type MergeInventoryLine = {
+  fromKey: string;
+  toKey: string;
+  toName: string;
+  category: string;
+  unit: string;
+};
+// Fold each source item's stock + ledger history into the target item server-
+// side. Safe to call even when no source name is tracked in inventory — the
+// server skips unknown keys. Returns how many folds were actually applied.
+export const mergeInventory = (merges: MergeInventoryLine[]) =>
+  api<{ merged: number }>("/inventory/merge", {
+    method: "POST",
+    body: JSON.stringify({ merges }),
+  });

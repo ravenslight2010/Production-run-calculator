@@ -91,13 +91,27 @@ import {
   applyDoughSpecsSeedIfNeeded,
   applySauceSpecsSeedIfNeeded,
   applyCheeseSpecsSeedIfNeeded,
+  applyIngredientMerge,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
-import { computeRunConsumptionLines, deriveCandidateItems, consumeRun } from "../inventoryShared";
+import {
+  computeRunConsumptionLines,
+  deriveCandidateItems,
+  consumeRun,
+  fetchInventory,
+  mergeInventory,
+  type MergeInventoryLine,
+} from "../inventoryShared";
+import {
+  buildMergeMap,
+  countMergeReferences,
+  mapName,
+  type MergeMap,
+} from "../mergeIngredients";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1879,6 +1893,141 @@ export default function Home() {
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [pinChangeMsg, setPinChangeMsg] = useState("");
+
+  // ── Merge ingredients ───────────────────────────────────────────────────────
+  const [mergeSources, setMergeSources] = useState<string[]>([]);
+  const [mergeTarget, setMergeTarget] = useState("");
+  const [mergeConfirming, setMergeConfirming] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeError, setMergeError] = useState("");
+
+  // The mergeable universe: every master-data list that holds ingredient names.
+  // Die types (sizes) and brands/flavors are intentionally excluded — they are
+  // not ingredients.
+  const mergeUniverse = useMemo(() => {
+    const all = [
+      ...ingredientTypes,
+      ...cheeseIngredients,
+      ...doughIngredients,
+      ...frontlineIngredients,
+      ...mixIngredients,
+      ...pepTypes,
+    ];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const n of all) {
+      const key = n.toLowerCase();
+      if (!seen.has(key)) { seen.add(key); out.push(n); }
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes]);
+
+  // Gather every value surface a merge would touch, so the confirmation preview
+  // can count affected references. Mirrors buildSyncPayload's localStorage scan.
+  function collectMergeSurfaces() {
+    const lists = [
+      ingredientTypes,
+      cheeseIngredients,
+      doughIngredients,
+      frontlineIngredients,
+      mixIngredients,
+      pepTypes,
+    ];
+    const settingsObjects: Record<string, unknown>[] = [];
+    for (const run of dayStateRef.current.runs) {
+      const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      settingsObjects.push(vals as unknown as Record<string, unknown>);
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key.startsWith("run-calc-profile-") || key.startsWith("run-calc-crust-profile-")) {
+        try {
+          const obj = JSON.parse(localStorage.getItem(key) ?? "null");
+          if (obj && typeof obj === "object") settingsObjects.push(obj as Record<string, unknown>);
+        } catch {}
+      }
+    }
+    for (const t of loadTemplates()) {
+      if (t.values) settingsObjects.push(t.values as unknown as Record<string, unknown>);
+    }
+    for (const day of loadHistory()) {
+      for (const vals of Object.values(day.runValues ?? {})) {
+        settingsObjects.push(vals as unknown as Record<string, unknown>);
+      }
+    }
+    const doughPresets = loadDoughRecipePresets();
+    const doughRows: Record<string, { ingredient?: unknown }[]> = {};
+    for (const [n, p] of Object.entries(doughPresets)) doughRows[n] = p.rows ?? [];
+    const presetMaps = [doughRows, loadFrontlineRecipePresets(), loadCheeseRecipePresets()];
+    return { lists, settingsObjects, presetMaps };
+  }
+
+  const mergeMap: MergeMap = buildMergeMap(mergeSources, mergeTarget);
+  const mergePreviewCount = useMemo(() => {
+    if (Object.keys(mergeMap).length === 0) return 0;
+    try { return countMergeReferences(mergeMap, collectMergeSurfaces()); } catch { return 0; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeSources, mergeTarget]);
+
+  function toggleMergeSource(name: string) {
+    setMergeError("");
+    setMergeConfirming(false);
+    setMergeSources(prev =>
+      prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name],
+    );
+  }
+
+  function resetMergeForm() {
+    setMergeSources([]);
+    setMergeTarget("");
+    setMergeConfirming(false);
+    setMergeBusy(false);
+    setMergeError("");
+  }
+
+  async function handleApplyMerge() {
+    const map = buildMergeMap(mergeSources, mergeTarget);
+    if (Object.keys(map).length === 0) {
+      setMergeError("Pick at least one source and a different target.");
+      return;
+    }
+    setMergeBusy(true);
+    setMergeError("");
+    try {
+      // Fold inventory stock first (server). If we can't read or fold inventory,
+      // abort BEFORE touching localStorage so the two stores can't drift apart.
+      let inv: import("../inventoryShared").InventoryItem[];
+      try {
+        inv = await fetchInventory();
+      } catch {
+        setMergeBusy(false);
+        setMergeError("Couldn't verify inventory state — merge cancelled. Check your connection and try again.");
+        return;
+      }
+      const lines: MergeInventoryLine[] = [];
+      for (const item of inv) {
+        if (item.category !== "ingredient") continue; // sizes/packaging not merged
+        const toName = mapName(item.name, map);
+        if (toName === item.name) continue; // not a source
+        lines.push({
+          fromKey: item.key,
+          toKey: `ingredient:${toName}:${item.unit}`,
+          toName,
+          category: item.category,
+          unit: item.unit,
+        });
+      }
+      if (lines.length > 0) await mergeInventory(lines);
+      // Rewrite every localStorage surface, then reload so React re-initializes
+      // from the merged data and the live-sync push carries the merged lists.
+      applyIngredientMerge(map);
+      window.location.reload();
+    } catch (e) {
+      setMergeBusy(false);
+      setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+    }
+  }
 
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
@@ -4730,6 +4879,7 @@ export default function Home() {
           { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType, onRename: renameIngredientType },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType, onRename: renamePepType },
           { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType, onRename: renameDieType },
+          { key: "merge", label: "Merge", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
         const groupedTabs = [
@@ -4926,6 +5076,110 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Standalone: Merge ingredients */}
+                {manageCategory === "merge" && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-muted-foreground">
+                      Combine duplicate or similar ingredients into one. Pick the ingredient(s)
+                      to merge away (sources), then the one to keep (target). Every recipe,
+                      list, preset, profile, run, template and history entry is updated, and
+                      inventory stock is folded into the target. This can't be undone.
+                    </p>
+
+                    {mergeUniverse.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-4">No ingredients to merge yet.</p>
+                    ) : (
+                      <>
+                        {/* Sources */}
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Merge these (sources)</p>
+                          <div className="border border-border rounded-lg max-h-48 overflow-y-auto overscroll-contain divide-y divide-border/40">
+                            {mergeUniverse.map(name => {
+                              const checked = mergeSources.includes(name);
+                              const isTarget = name === mergeTarget.trim();
+                              return (
+                                <label
+                                  key={name}
+                                  className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-muted/50 ${isTarget ? "opacity-40" : ""}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    disabled={isTarget || mergeBusy}
+                                    onChange={() => toggleMergeSource(name)}
+                                    className="accent-primary"
+                                  />
+                                  <span className={checked ? "font-semibold text-primary" : ""}>{name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Target */}
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Keep this one (target)</p>
+                          <input
+                            list="merge-target-options"
+                            value={mergeTarget}
+                            disabled={mergeBusy}
+                            onChange={e => { setMergeTarget(e.target.value); setMergeConfirming(false); setMergeError(""); }}
+                            placeholder="Type or pick the ingredient to keep…"
+                            className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                          />
+                          <datalist id="merge-target-options">
+                            {mergeUniverse.map(name => <option key={name} value={name} />)}
+                          </datalist>
+                        </div>
+
+                        {mergeError && (
+                          <p className="text-xs text-destructive font-medium">{mergeError}</p>
+                        )}
+
+                        {/* Preview / confirm */}
+                        {Object.keys(mergeMap).length > 0 && (
+                          <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 space-y-1">
+                            <p className="text-xs">
+                              Merging{" "}
+                              <span className="font-semibold text-primary">{Object.keys(mergeMap).join(", ")}</span>
+                              {" "}→{" "}
+                              <span className="font-semibold text-primary">{mergeTarget.trim()}</span>
+                            </p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {mergePreviewCount} reference{mergePreviewCount === 1 ? "" : "s"} will be updated.
+                              Inventory stock for merged items folds into the target.
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={mergeBusy}
+                            onClick={resetMergeForm}
+                            className="px-3 py-2 rounded-md border border-border text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                          >Clear</button>
+                          {!mergeConfirming ? (
+                            <button
+                              type="button"
+                              disabled={Object.keys(mergeMap).length === 0 || mergeBusy}
+                              onClick={() => { setMergeError(""); setMergeConfirming(true); }}
+                              className="flex-1 px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+                            >Merge…</button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={mergeBusy}
+                              onClick={handleApplyMerge}
+                              className="flex-1 px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                            >{mergeBusy ? "Merging…" : "Confirm merge"}</button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {/* Standalone: PIN change */}
                 {manageCategory === "pin" && (
                   <div className="space-y-3 max-w-xs mx-auto">
@@ -4952,7 +5206,7 @@ export default function Home() {
                 )}
 
                 {/* Standalone: simple list tabs (Brands, Applicator Ingredients, Pep Types, Die Types) */}
-                {!isGrouped && manageCategory !== "flavors" && manageCategory !== "pin" && standaloneTab && (
+                {!isGrouped && manageCategory !== "flavors" && manageCategory !== "pin" && manageCategory !== "merge" && standaloneTab && (
                   <ListPanel
                     items={standaloneTab.items}
                     onAdd={(v) => { standaloneTab.onAdd(v); setMgStandaloneInput(""); }}

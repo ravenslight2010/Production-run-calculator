@@ -35,7 +35,18 @@ import type { SyncPayload } from "./sync/payloadTypes";
 import {
   computeRunConsumptionLines,
   consumeRunInventory,
+  fetchInventory,
+  mergeInventory,
+  type MergeInventoryLine,
 } from "./inventoryShared";
+import {
+  buildMergeMap,
+  mapName,
+  mergeList,
+  mergeRecipePresetMap,
+  mergeSettingsObject,
+  type MergeMap,
+} from "./mergeIngredients";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
@@ -1181,6 +1192,8 @@ interface RunContextValue {
   renameListItem: (list: MasterListKey, oldName: string, newName: string) => void;
   renameBrand: (oldName: string, newName: string) => void;
   renameFlavor: (brand: string, oldFlavor: string, newFlavor: string) => void;
+  // Merge ingredient names into one canonical target across all surfaces.
+  mergeIngredients: (sources: string[], target: string) => Promise<void>;
   // Scheduling
   scheduled: Record<string, ScheduledRun[]>;
   addScheduledRun: (date: string, run: Omit<ScheduledRun, "id">) => void;
@@ -2178,6 +2191,83 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Merge one or more source ingredient names into a single target across EVERY
+  // value surface: master-data lists (deduped), every run's settings, templates,
+  // history run settings, brand profiles, and all recipe presets. Recipe rows are
+  // renamed but never combined, so totals are preserved. Inventory stock is folded
+  // into the target server-side first; if that fails we abort before touching
+  // local state so the two stores can't drift apart. Mirrors the web flow in
+  // `run-calculator/src/pages/home.tsx`.
+  const mergeIngredients = useCallback(
+    async (sources: string[], target: string) => {
+      const map: MergeMap = buildMergeMap(sources, target);
+      if (Object.keys(map).length === 0) return;
+
+      // Fold inventory stock first (server). If we can't read or fold inventory,
+      // abort BEFORE touching local state so the two stores can't drift apart.
+      let inv: Awaited<ReturnType<typeof fetchInventory>>;
+      try {
+        inv = await fetchInventory();
+      } catch {
+        throw new Error(
+          "Couldn't verify inventory state — merge cancelled. Check your connection and try again.",
+        );
+      }
+      const lines: MergeInventoryLine[] = [];
+      for (const item of inv) {
+        if (item.category !== "ingredient") continue;
+        const toName = mapName(item.name, map);
+        if (toName === item.name) continue;
+        lines.push({
+          fromKey: item.key,
+          toKey: `ingredient:${toName}:${item.unit}`,
+          toName,
+          category: item.category,
+          unit: item.unit,
+        });
+      }
+      if (lines.length > 0) await mergeInventory(lines);
+
+      // The shared helper is constrained to `Record<string, unknown>` (it is
+      // mirrored verbatim with the web copy, which operates on parsed JSON). Our
+      // settings are typed interfaces without an index signature, so cast across
+      // the boundary.
+      const mergeSettings = (s: RunSettings): RunSettings =>
+        mergeSettingsObject(s as unknown as Record<string, unknown>, map) as unknown as RunSettings;
+      const mergeProfile = (p: RunProfile): RunProfile =>
+        mergeSettingsObject(p as unknown as Record<string, unknown>, map) as unknown as RunProfile;
+      setAppState((prev) => {
+        const next: AppState = {
+          ...prev,
+          runs: prev.runs.map((r) => ({ ...r, settings: mergeSettings(r.settings) })),
+          templates: prev.templates.map((t) =>
+            t.settings ? { ...t, settings: mergeSettings(t.settings) } : t,
+          ),
+          history: prev.history.map((day) => ({
+            ...day,
+            runs: (day.runs ?? []).map((r) =>
+              r.settings ? { ...r, settings: mergeSettings(r.settings) } : r,
+            ),
+          })),
+          brandProfiles: Object.fromEntries(
+            Object.entries(prev.brandProfiles).map(([k, v]) => [k, mergeProfile(v)]),
+          ),
+          pepTypes: mergeList(prev.pepTypes, map),
+          cheeseIngredients: mergeList(prev.cheeseIngredients, map),
+          doughIngredients: mergeList(prev.doughIngredients, map),
+          frontlineIngredients: mergeList(prev.frontlineIngredients, map),
+          doughRecipePresets: mergeRecipePresetMap(prev.doughRecipePresets, map),
+          cheeseRecipePresets: mergeRecipePresetMap(prev.cheeseRecipePresets, map),
+          frontlineRecipePresets: mergeRecipePresetMap(prev.frontlineRecipePresets, map),
+          mixRecipePresets: mergeRecipePresetMap(prev.mixRecipePresets, map),
+        };
+        persistNow(next);
+        return next;
+      });
+    },
+    [persistNow],
+  );
+
   const addScheduledRun = useCallback(
     (date: string, run: Omit<ScheduledRun, "id">) => {
       setAppState((prev) => {
@@ -2389,6 +2479,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         renameListItem,
         renameBrand,
         renameFlavor,
+        mergeIngredients,
         scheduled: appState.scheduled,
         addScheduledRun,
         updateScheduledRun,

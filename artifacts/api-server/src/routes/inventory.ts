@@ -15,6 +15,7 @@ import {
   RestockInventoryBody,
   AdjustInventoryBody,
   ConsumeInventoryBody,
+  MergeInventoryBody,
   UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -430,6 +431,72 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
   }
   broadcast(headerSenderId(req));
   res.json({ applied: true, consumed: result.consumed });
+});
+
+// Fold one or more source inventory items into a target item when the user
+// merges similar ingredients. Lots and ledger rows are RE-POINTED to the target
+// (not re-created), so on-hand totals and the audit trail are preserved exactly
+// without a second stock writer. The source item is then deleted. A zero-delta
+// "adjust" ledger row documents each fold for traceability. All ops run in one
+// transaction so a mid-merge failure leaves stock + audit consistent.
+router.post("/inventory/merge", async (req, res): Promise<void> => {
+  const parsed = MergeInventoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { merges } = parsed.data;
+  let merged = 0;
+  await db.transaction(async (tx) => {
+    for (const m of merges) {
+      const fromKey = m.fromKey.trim();
+      const toKey = m.toKey.trim();
+      if (!fromKey || !toKey || fromKey === toKey) continue;
+      const [source] = await tx
+        .select()
+        .from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.key, fromKey));
+      if (!source) continue; // nothing tracked under the source name
+      // Ensure the target item exists (create if the target ingredient isn't
+      // tracked yet) and capture its id.
+      const [target] = await tx
+        .insert(inventoryItemsTable)
+        .values({ key: toKey, category: m.category, name: m.toName, unit: m.unit })
+        .onConflictDoUpdate({
+          target: inventoryItemsTable.key,
+          set: { name: m.toName, unit: m.unit, category: m.category, updatedAt: new Date() },
+        })
+        .returning();
+      if (target.id === source.id) continue;
+      // Move lots + ledger to the target BEFORE deleting the source (ledger/lots
+      // cascade-delete with the item, so re-point first or history is lost).
+      await tx
+        .update(inventoryLotsTable)
+        .set({ itemId: target.id })
+        .where(eq(inventoryLotsTable.itemId, source.id));
+      await tx
+        .update(inventoryLedgerTable)
+        .set({ itemId: target.id })
+        .where(eq(inventoryLedgerTable.itemId, source.id));
+      await tx.insert(inventoryLedgerTable).values({
+        itemId: target.id,
+        lotId: null,
+        type: "adjust",
+        qtyDelta: 0,
+        note: `Merged from ${source.name}`,
+      });
+      await tx
+        .delete(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.id, source.id));
+      await tx
+        .update(inventoryItemsTable)
+        .set({ updatedAt: new Date() })
+        .where(eq(inventoryItemsTable.id, target.id));
+      merged++;
+    }
+  });
+  if (merged > 0) broadcast(headerSenderId(req));
+  res.json({ merged });
 });
 
 router.get("/inventory/ledger", async (req, res): Promise<void> => {

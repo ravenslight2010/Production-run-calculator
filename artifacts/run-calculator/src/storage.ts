@@ -49,6 +49,12 @@ import {
 } from "./types";
 import { MIX_SEED } from "./mixSeed";
 import {
+  type MergeMap,
+  mergeList as mergeListNames,
+  mergeSettingsObject,
+  mergeRecipePresetMap,
+} from "./mergeIngredients";
+import {
   SPEC_BRANDS,
   SPEC_BRAND_FLAVORS,
   SPEC_APP_TYPES,
@@ -423,6 +429,85 @@ export function applyIngredientDedupeMigrationIfNeeded(): void {
     }
     localStorage.setItem(INGREDIENT_DEDUPE_MIGRATION_KEY, "1");
   } catch {}
+}
+
+// Persist a user-driven ingredient merge across every localStorage surface:
+// master-data option lists, recipe presets (dough/sauce/cheese), brand + crust
+// profiles, per-run values, templates, and history. Pure value rewriting lives
+// in ./mergeIngredients; this only wires it to storage. Inventory stock is
+// folded separately via the server merge endpoint. Callers reload the app after
+// this so React state re-initializes from the rewritten localStorage and the
+// merged lists get pushed to live-sync.
+export function applyIngredientMerge(map: MergeMap): void {
+  if (typeof localStorage === "undefined") return;
+  if (Object.keys(map).length === 0) return;
+  // ── Flat master-data option lists (dieTypes excluded — sizes, not ingredients) ──
+  const listKeys = [
+    INGREDIENT_TYPES_KEY,
+    PEP_TYPES_KEY,
+    CHEESE_INGREDIENTS_KEY,
+    DOUGH_INGREDIENTS_KEY,
+    FRONTLINE_INGREDIENTS_KEY,
+    MIX_INGREDIENTS_KEY,
+  ];
+  for (const key of listKeys) {
+    if (localStorage.getItem(key) === null) continue;
+    const merged = mergeListNames(loadList(key, []), map).sort((a, b) => a.localeCompare(b));
+    saveList(key, merged);
+  }
+  // ── Recipe presets ──
+  try {
+    const dough = loadDoughRecipePresets();
+    const nextDough: Record<string, DoughRecipePreset> = {};
+    for (const [name, preset] of Object.entries(dough)) {
+      nextDough[name] = { ...preset, rows: mergeRecipePresetMap({ r: preset.rows ?? [] }, map).r };
+    }
+    saveDoughRecipePresets(nextDough);
+  } catch {}
+  try { saveFrontlineRecipePresets(mergeRecipePresetMap(loadFrontlineRecipePresets(), map)); } catch {}
+  try { saveCheeseRecipePresets(mergeRecipePresetMap(loadCheeseRecipePresets(), map)); } catch {}
+  // ── Templates ──
+  try {
+    const templates = loadTemplates().map((t) =>
+      t.values ? { ...t, values: mergeSettingsObject(t.values as unknown as Record<string, unknown>, map) as unknown as typeof t.values } : t,
+    );
+    saveTemplates(templates);
+  } catch {}
+  // ── History ──
+  try {
+    const history = loadHistory().map((day) => ({
+      ...day,
+      runValues: Object.fromEntries(
+        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
+          id,
+          mergeSettingsObject(vals as unknown as Record<string, unknown>, map) as unknown as FormValues,
+        ]),
+      ),
+    }));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+  // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
+  const runPrefix = RUN_KEY("");
+  const keysToRewrite: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
+      keysToRewrite.push(k);
+    }
+  }
+  for (const k of keysToRewrite) {
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null");
+      if (obj && typeof obj === "object") {
+        localStorage.setItem(k, JSON.stringify(mergeSettingsObject(obj as Record<string, unknown>, map)));
+      }
+    } catch {}
+  }
 }
 
 export function applyMixSeedIfNeeded(): void {

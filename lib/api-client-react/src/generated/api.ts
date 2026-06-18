@@ -31,6 +31,8 @@ import type {
   InventoryLedgerEntry,
   InventorySettings,
   ListInventoryLedgerParams,
+  MergeInventoryInput,
+  MergeInventoryResult,
   ProductionRun,
   ProductionRunInput,
   RestockInput,
@@ -847,6 +849,77 @@ export const useConsumeInventory = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getConsumeInventoryMutationOptions(options));
+    }
+
+export const getMergeInventoryUrl = () => {
+
+
+
+
+  return `/api/inventory/merge`
+}
+
+/**
+ * @summary Fold one or more source items' stock into a target item
+ */
+export const mergeInventory = async (mergeInventoryInput: MergeInventoryInput, options?: RequestInit): Promise<MergeInventoryResult> => {
+
+  return customFetch<MergeInventoryResult>(getMergeInventoryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mergeInventoryInput,)
+  }
+);}
+
+
+
+
+export const getMergeInventoryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mergeInventory>>, TError,{data: BodyType<MergeInventoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof mergeInventory>>, TError,{data: BodyType<MergeInventoryInput>}, TContext> => {
+
+const mutationKey = ['mergeInventory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof mergeInventory>>, {data: BodyType<MergeInventoryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  mergeInventory(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MergeInventoryMutationResult = NonNullable<Awaited<ReturnType<typeof mergeInventory>>>
+    export type MergeInventoryMutationBody = BodyType<MergeInventoryInput>
+    export type MergeInventoryMutationError = ErrorType<void>
+
+    /**
+ * @summary Fold one or more source items' stock into a target item
+ */
+export const useMergeInventory = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mergeInventory>>, TError,{data: BodyType<MergeInventoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof mergeInventory>>,
+        TError,
+        {data: BodyType<MergeInventoryInput>},
+        TContext
+      > => {
+      return useMutation(getMergeInventoryMutationOptions(options));
     }
 
 export const getListInventoryLedgerUrl = (params?: ListInventoryLedgerParams,) => {

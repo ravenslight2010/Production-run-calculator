@@ -223,6 +223,27 @@ paths:
         "400":
           description: Invalid input
 
+  /inventory/merge:
+    post:
+      operationId: mergeInventory
+      tags: [inventory]
+      summary: Fold one or more source items' stock into a target item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeInventoryInput"
+      responses:
+        "200":
+          description: Merge result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeInventoryResult"
+        "400":
+          description: Invalid input
+
   /inventory/ledger:
     get:
       operationId: listInventoryLedger
@@ -535,6 +556,44 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ConsumeLine"
+
+    MergeInventoryItem:
+      type: object
+      required:
+        - fromKey
+        - toKey
+        - toName
+        - category
+        - unit
+      properties:
+        fromKey:
+          type: string
+        toKey:
+          type: string
+        toName:
+          type: string
+        category:
+          type: string
+        unit:
+          type: string
+
+    MergeInventoryInput:
+      type: object
+      required:
+        - merges
+      properties:
+        merges:
+          type: array
+          items:
+            $ref: "#/components/schemas/MergeInventoryItem"
+
+    MergeInventoryResult:
+      type: object
+      required:
+        - merged
+      properties:
+        merged:
+          type: integer
 
     ConsumeResult:
       type: object

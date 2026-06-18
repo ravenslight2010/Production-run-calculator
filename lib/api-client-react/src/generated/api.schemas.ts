@@ -107,6 +107,22 @@ export interface ConsumeInput {
   lines: ConsumeLine[];
 }
 
+export interface MergeInventoryItem {
+  fromKey: string;
+  toKey: string;
+  toName: string;
+  category: string;
+  unit: string;
+}
+
+export interface MergeInventoryInput {
+  merges: MergeInventoryItem[];
+}
+
+export interface MergeInventoryResult {
+  merged: number;
+}
+
 export interface ConsumeResult {
   applied: boolean;
   consumed?: number;

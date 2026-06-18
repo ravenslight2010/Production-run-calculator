@@ -13,7 +13,12 @@ import {
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
-import { useRun, type MasterListKey } from "@/context/RunContext";
+import { useRun, type MasterListKey, type RunSettings } from "@/context/RunContext";
+import {
+  buildMergeMap,
+  countMergeReferences,
+  type MergeMap,
+} from "@/context/mergeIngredients";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 
@@ -164,6 +169,301 @@ function ListManager({
           </Pressable>
         </View>
       )}
+    </View>
+  );
+}
+
+// Combine duplicate / similar ingredient names into one canonical target.
+// Mirrors the web "Merge" panel in `run-calculator/src/pages/home.tsx`.
+function MergeManager() {
+  const colors = useColors();
+  const {
+    pepTypes,
+    cheeseIngredients,
+    doughIngredients,
+    frontlineIngredients,
+    allRuns,
+    templates,
+    history,
+    brandProfiles,
+    doughRecipePresets,
+    cheeseRecipePresets,
+    frontlineRecipePresets,
+    mixRecipePresets,
+    mergeIngredients,
+  } = useRun();
+
+  const [sources, setSources] = useState<string[]>([]);
+  const [target, setTarget] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // The mergeable universe: master-data lists that hold ingredient names. Brands,
+  // flavors and die types (sizes) are intentionally excluded — they aren't
+  // ingredients. (Mobile has no separate ingredientTypes/mixIngredients lists.)
+  const universe = React.useMemo(() => {
+    const all = [
+      ...pepTypes,
+      ...cheeseIngredients,
+      ...doughIngredients,
+      ...frontlineIngredients,
+    ];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const n of all) {
+      const k = n.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(n);
+      }
+    }
+    return out.sort((a, b) => a.localeCompare(b));
+  }, [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients]);
+
+  const map: MergeMap = buildMergeMap(sources, target);
+  const hasMerge = Object.keys(map).length > 0;
+
+  const previewCount = React.useMemo(() => {
+    if (!hasMerge) return 0;
+    const settingsObjects = [
+      ...allRuns.map((r) => r.settings),
+      ...templates.map((t) => t.settings),
+      ...history.flatMap((d) => d.runs.map((r) => r.settings)),
+      ...Object.values(brandProfiles),
+    ] as unknown as Record<string, unknown>[];
+    try {
+      return countMergeReferences(map, {
+        lists: [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients],
+        settingsObjects,
+        presetMaps: [
+          doughRecipePresets,
+          cheeseRecipePresets,
+          frontlineRecipePresets,
+          mixRecipePresets,
+        ],
+      });
+    } catch {
+      return 0;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sources, target]);
+
+  const toggleSource = (name: string) => {
+    setError("");
+    setConfirming(false);
+    setSources((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
+
+  const reset = () => {
+    setSources([]);
+    setTarget("");
+    setConfirming(false);
+    setBusy(false);
+    setError("");
+  };
+
+  const apply = async () => {
+    if (!hasMerge) {
+      setError("Pick at least one source and a different target.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await mergeIngredients(sources, target);
+      reset();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+    }
+  };
+
+  if (universe.length === 0) {
+    return (
+      <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+        No ingredients to merge yet.
+      </Text>
+    );
+  }
+
+  return (
+    <View style={{ gap: 12 }}>
+      <Text style={[styles.pinHint, { color: colors.mutedForeground, marginBottom: 0 }]}>
+        Combine duplicate or similar ingredients into one. Pick the ingredient(s) to
+        merge away, then the one to keep. Every recipe, list, preset, profile, run,
+        template and history entry is updated, and inventory stock is folded into the
+        target. This can&apos;t be undone.
+      </Text>
+
+      <Text style={[styles.mergeLabel, { color: colors.mutedForeground }]}>
+        MERGE THESE (SOURCES)
+      </Text>
+      <View style={styles.chipWrap}>
+        {universe.map((name) => {
+          const checked = sources.includes(name);
+          const isTarget = name === target.trim();
+          return (
+            <Pressable
+              key={name}
+              disabled={isTarget || busy}
+              onPress={() => toggleSource(name)}
+              style={[
+                styles.chip,
+                {
+                  borderColor: checked ? colors.primary : colors.border,
+                  backgroundColor: checked ? colors.primary : colors.secondary,
+                  opacity: isTarget ? 0.4 : 1,
+                },
+              ]}
+            >
+              {checked ? (
+                <Feather name="check" size={12} color={colors.primaryForeground} />
+              ) : null}
+              <Text
+                style={[
+                  styles.chipText,
+                  { color: checked ? colors.primaryForeground : colors.foreground },
+                ]}
+              >
+                {name}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <Text style={[styles.mergeLabel, { color: colors.mutedForeground }]}>
+        KEEP THIS ONE (TARGET)
+      </Text>
+      <TextInput
+        style={[styles.input, { color: colors.foreground, borderColor: colors.border }]}
+        value={target}
+        onChangeText={(t) => {
+          setTarget(t);
+          setConfirming(false);
+          setError("");
+        }}
+        placeholder="Type or pick the ingredient to keep…"
+        placeholderTextColor={colors.mutedForeground}
+        autoCapitalize="words"
+      />
+      <View style={styles.chipWrap}>
+        {universe.map((name) => (
+          <Pressable
+            key={name}
+            disabled={busy}
+            onPress={() => {
+              setTarget(name);
+              setConfirming(false);
+              setError("");
+            }}
+            style={[
+              styles.targetChip,
+              {
+                borderColor: name === target.trim() ? colors.primary : colors.border,
+                backgroundColor:
+                  name === target.trim() ? colors.primary : "transparent",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.targetChipText,
+                {
+                  color:
+                    name === target.trim()
+                      ? colors.primaryForeground
+                      : colors.mutedForeground,
+                },
+              ]}
+            >
+              {name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {error ? (
+        <Text style={[styles.mergeError, { color: colors.destructive }]}>{error}</Text>
+      ) : null}
+
+      {hasMerge ? (
+        <View
+          style={[
+            styles.previewBox,
+            { borderColor: colors.primary, backgroundColor: colors.secondary },
+          ]}
+        >
+          <Text style={[styles.previewText, { color: colors.foreground }]}>
+            Merging{" "}
+            <Text style={{ color: colors.primary, fontFamily: FONTS.bold }}>
+              {Object.keys(map).join(", ")}
+            </Text>{" "}
+            →{" "}
+            <Text style={{ color: colors.primary, fontFamily: FONTS.bold }}>
+              {target.trim()}
+            </Text>
+          </Text>
+          <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+            {previewCount} reference{previewCount === 1 ? "" : "s"} will be updated.
+            Inventory stock for merged items folds into the target.
+          </Text>
+        </View>
+      ) : null}
+
+      <View style={styles.addRow}>
+        <Pressable
+          onPress={reset}
+          disabled={busy}
+          style={({ pressed }) => [
+            styles.clearPinBtn,
+            { borderColor: colors.border, marginTop: 0, flex: 1, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Text style={[styles.clearPinText, { color: colors.foreground }]}>Clear</Text>
+        </Pressable>
+        {!confirming ? (
+          <Pressable
+            onPress={() => {
+              setError("");
+              setConfirming(true);
+              tap();
+            }}
+            disabled={!hasMerge || busy}
+            style={({ pressed }) => [
+              styles.mergeBtn,
+              {
+                backgroundColor: colors.primary,
+                opacity: !hasMerge || busy ? 0.4 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.mergeBtnText, { color: colors.primaryForeground }]}>
+              Merge…
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={apply}
+            disabled={busy}
+            style={({ pressed }) => [
+              styles.mergeBtn,
+              {
+                backgroundColor: colors.destructive,
+                opacity: busy ? 0.6 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.mergeBtnText, { color: colors.primaryForeground }]}>
+              {busy ? "Merging…" : "Confirm merge"}
+            </Text>
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }
@@ -329,6 +629,12 @@ export default function MasterDataScreen() {
           )}
         </CardSection>
 
+        {/* Merge ingredients */}
+        <SectionHeader title="Merge Ingredients" />
+        <CardSection>
+          <MergeManager />
+        </CardSection>
+
         {/* Supervisor PIN */}
         <SectionHeader title="Supervisor PIN" />
         <CardSection>
@@ -473,4 +779,34 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   clearPinText: { fontSize: 13, fontFamily: FONTS.semibold },
+  mergeLabel: {
+    fontSize: 11,
+    fontFamily: FONTS.semibold,
+    letterSpacing: 0.6,
+  },
+  targetChip: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  targetChipText: { fontSize: 12, fontFamily: FONTS.medium },
+  mergeError: { fontSize: 12, fontFamily: FONTS.medium },
+  previewBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  previewText: { fontSize: 13, fontFamily: FONTS.regular },
+  previewSub: { fontSize: 11, fontFamily: FONTS.regular },
+  mergeBtn: {
+    flex: 1,
+    height: 40,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mergeBtnText: { fontSize: 14, fontFamily: FONTS.semibold },
 });
