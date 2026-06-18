@@ -303,6 +303,40 @@ describe("POST /ai/optimize — rate-limit guard (cost/abuse protection)", () =>
     expect(mock.calls).toBe(RATE_MAX);
   });
 
+  it("allows the same user again once the window elapses (counter resets)", async () => {
+    const user = "rate-user-recovers";
+
+    // Only fake the clock the limiter reads (Date.now); leave real timers so the
+    // HTTP server and fetch keep working. We control the window via setSystemTime.
+    const start = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(start);
+    try {
+      // Exhaust the allowance within the window.
+      for (let i = 0; i < RATE_MAX; i += 1) {
+        const ok = await postOptimizeAsUser(user, makeBody());
+        expect(ok.status).toBe(200);
+      }
+
+      // The surplus request is blocked while still inside the window.
+      const blocked = await postOptimizeAsUser(user, makeBody());
+      expect(blocked.status).toBe(429);
+
+      // Advance past the one-minute fixed window so the bucket should reset.
+      vi.setSystemTime(start + 60_000 + 1);
+
+      // The same user is allowed again on a fresh bucket, with refreshed
+      // rate-limit headers reflecting the reset counter.
+      const recovered = await postOptimizeAsUser(user, makeBody());
+      expect(recovered.status).toBe(200);
+      expect(recovered.headers.get("ratelimit-limit")).toBe(String(RATE_MAX));
+      expect(recovered.headers.get("ratelimit-remaining")).toBe(String(RATE_MAX - 1));
+      expect(recovered.headers.get("ratelimit-reset")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not penalize a different user (separate bucket per key)", async () => {
     const heavyUser = "rate-user-heavy";
     const otherUser = "rate-user-other";
