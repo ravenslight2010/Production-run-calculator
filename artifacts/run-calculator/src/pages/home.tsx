@@ -99,6 +99,7 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
+import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
@@ -2670,6 +2671,13 @@ export default function Home() {
       flashSaved();
     }
   }, [v]);
+
+  // Commit a single confirmed value from the "Fill in missing data" panel. Goes
+  // through the normal form path (setValue → autosave effect persists run values
+  // + profile), so there is no separate write path and no auto-apply.
+  function commitMissingField(key: string, value: string | number) {
+    form.setValue(key as keyof FormValues, value as never, { shouldDirty: true });
+  }
 
   function switchToRun(newIndex: number) {
     if (newIndex < 0 || newIndex >= dayState.runs.length) return;
@@ -6420,6 +6428,20 @@ export default function Home() {
 
               {/* ─── SETUP ─── */}
               <TabsContent value="setup">
+                <div className="mb-4">
+                  <FillMissingPanel
+                    getRecord={() => ({
+                      ...form.getValues(),
+                      brand: currentRun?.brand ?? "",
+                      flavor: currentRun?.flavor ?? "",
+                    })}
+                    brand={currentRun?.brand ?? ""}
+                    flavor={currentRun?.flavor ?? ""}
+                    dieType={form.getValues("dieType") ?? ""}
+                    canEdit={isSupervisor}
+                    onCommit={commitMissingField}
+                  />
+                </div>
                 <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">

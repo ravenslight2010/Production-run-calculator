@@ -554,6 +554,35 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/fill-missing:
+    post:
+      operationId: aiFillMissing
+      tags: [ai]
+      summary: Suggest values for blank run-setup fields (AI); read-only
+      description: >-
+        Given a run's known brand/flavor/context and a list of still-blank
+        scalar fields, returns a suggested value plus a short rationale for each.
+        Read-only — never writes anything; the client decides what (if anything)
+        to commit. Used by the "Fill in missing data" setup assistant for fields
+        that have no known profile/spec/default source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FillMissingInput"
+      responses:
+        "200":
+          description: Suggested values (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FillMissingResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /incidents:
     post:
       operationId: reportIncident
@@ -1614,6 +1643,107 @@ components:
         note:
           type: string
           description: Optional message when data is insufficient for analysis
+
+    FillMissingField:
+      type: object
+      description: One still-blank run-setup field the model should suggest a value for.
+      required:
+        - key
+        - label
+        - category
+        - kind
+      properties:
+        key:
+          type: string
+          description: Stable field key (matches the run-settings field name)
+        label:
+          type: string
+          description: Human-readable field label
+        category:
+          type: string
+          enum:
+            [identity, line, packaging, sauce, applicator, pepperoni, dough]
+        kind:
+          type: string
+          enum: [number, text, select]
+        options:
+          type: array
+          description: Allowed values when kind is "select"
+          items:
+            type: string
+
+    FillMissingContextItem:
+      type: object
+      description: A field already filled in, given to the model for grounding.
+      required:
+        - key
+        - label
+        - value
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        value:
+          type: string
+
+    FillMissingInput:
+      type: object
+      required:
+        - brand
+        - flavor
+        - fields
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+          description: Die/size of the run, if known
+        context:
+          type: array
+          description: Fields already known, for grounding the suggestions
+          items:
+            $ref: "#/components/schemas/FillMissingContextItem"
+        fields:
+          type: array
+          description: The blank fields needing a suggested value
+          items:
+            $ref: "#/components/schemas/FillMissingField"
+
+    FillMissingSuggestion:
+      type: object
+      required:
+        - key
+        - value
+        - rationale
+      properties:
+        key:
+          type: string
+          description: The field key this suggestion is for (echoes a requested key)
+        value:
+          type: string
+          description: Suggested value, as a string (numbers/selects coerced client-side)
+        rationale:
+          type: string
+          description: Short plain-language reason for the suggested value
+
+    FillMissingResult:
+      type: object
+      required:
+        - suggestions
+        - generatedAt
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FillMissingSuggestion"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when no suggestions could be made
 
     IncidentContext:
       type: object

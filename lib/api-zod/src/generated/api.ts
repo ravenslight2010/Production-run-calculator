@@ -539,6 +539,39 @@ export const AiOptimizeResponse = zod.object({
 
 
 /**
+ * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
+ * @summary Suggest values for blank run-setup fields (AI); read-only
+ */
+export const AiFillMissingBody = zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().optional().describe('Die\/size of the run, if known'),
+  "context": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.string()
+}).describe('A field already filled in, given to the model for grounding.')).optional().describe('Fields already known, for grounding the suggestions'),
+  "fields": zod.array(zod.object({
+  "key": zod.string().describe('Stable field key (matches the run-settings field name)'),
+  "label": zod.string().describe('Human-readable field label'),
+  "category": zod.enum(['identity', 'line', 'packaging', 'sauce', 'applicator', 'pepperoni', 'dough']),
+  "kind": zod.enum(['number', 'text', 'select']),
+  "options": zod.array(zod.string()).optional().describe('Allowed values when kind is \"select\"')
+}).describe('One still-blank run-setup field the model should suggest a value for.')).describe('The blank fields needing a suggested value')
+})
+
+export const AiFillMissingResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "key": zod.string().describe('The field key this suggestion is for (echoes a requested key)'),
+  "value": zod.string().describe('Suggested value, as a string (numbers\/selects coerced client-side)'),
+  "rationale": zod.string().describe('Short plain-language reason for the suggested value')
+})),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no suggestions could be made')
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */

@@ -36,3 +36,4 @@
 - [Onboarding flag](onboarding-seen-flag.md) — first-login "Get Started" overview gated by server-side per-user users.onboardingSeen; auto-open once via ref guard, reopen from header menu; web+mobile parity.
 - [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) — `<Comp<T>/>` typechecks but white-screens Vite dev build; drop the type arg, pin via prop casts.
 - [expo-secure-store web crash](expo-secure-store-web-crash.md) — SecureStore has no web impl; blanks Expo web build (Replit preview + UI tests); branch on Platform.OS, use localStorage on web.
+- [Fill-missing assistant](fill-missing-assistant.md) — run-setup "fill missing data" panel: source priority profile→spec→default→AI→none; never auto-apply (per-field confirm via existing update paths); AI read-only; recipes excluded from detection; web+mobile parity.

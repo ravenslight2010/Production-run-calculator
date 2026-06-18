@@ -11,6 +11,7 @@ import {
   SectionHeader,
   TextField,
 } from "@/components/UI";
+import FillMissingPanel from "@/components/FillMissingPanel";
 import {
   useRun,
   runLabel,
@@ -344,6 +345,9 @@ export default function ConfigureScreen() {
             {currentLabel}
           </Text>
         </View>
+
+        {/* Fill in missing data assistant */}
+        <FillMissingPanel />
 
         {/* Templates */}
         <SectionHeader title="Templates" />

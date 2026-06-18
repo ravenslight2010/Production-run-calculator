@@ -28,6 +28,8 @@ import type {
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
+  FillMissingInput,
+  FillMissingResult,
   ForgotPasswordRequest,
   HealthStatus,
   IdentifyPhotoInput,
@@ -1961,6 +1963,78 @@ export const useAiOptimize = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiOptimizeMutationOptions(options));
+    }
+
+export const getAiFillMissingUrl = () => {
+
+
+
+
+  return `/api/ai/fill-missing`
+}
+
+/**
+ * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
+ * @summary Suggest values for blank run-setup fields (AI); read-only
+ */
+export const aiFillMissing = async (fillMissingInput: FillMissingInput, options?: RequestInit): Promise<FillMissingResult> => {
+
+  return customFetch<FillMissingResult>(getAiFillMissingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      fillMissingInput,)
+  }
+);}
+
+
+
+
+export const getAiFillMissingMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,{data: BodyType<FillMissingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,{data: BodyType<FillMissingInput>}, TContext> => {
+
+const mutationKey = ['aiFillMissing'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiFillMissing>>, {data: BodyType<FillMissingInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiFillMissing(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiFillMissingMutationResult = NonNullable<Awaited<ReturnType<typeof aiFillMissing>>>
+    export type AiFillMissingMutationBody = BodyType<FillMissingInput>
+    export type AiFillMissingMutationError = ErrorType<void>
+
+    /**
+ * @summary Suggest values for blank run-setup fields (AI); read-only
+ */
+export const useAiFillMissing = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiFillMissing>>, TError,{data: BodyType<FillMissingInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiFillMissing>>,
+        TError,
+        {data: BodyType<FillMissingInput>},
+        TContext
+      > => {
+      return useMutation(getAiFillMissingMutationOptions(options));
     }
 
 export const getReportIncidentUrl = () => {

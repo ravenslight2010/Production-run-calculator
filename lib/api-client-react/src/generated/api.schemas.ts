@@ -469,6 +469,78 @@ export interface OptimizeResult {
   note?: string;
 }
 
+export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
+
+
+export const FillMissingFieldCategory = {
+  identity: 'identity',
+  line: 'line',
+  packaging: 'packaging',
+  sauce: 'sauce',
+  applicator: 'applicator',
+  pepperoni: 'pepperoni',
+  dough: 'dough',
+} as const;
+
+export type FillMissingFieldKind = typeof FillMissingFieldKind[keyof typeof FillMissingFieldKind];
+
+
+export const FillMissingFieldKind = {
+  number: 'number',
+  text: 'text',
+  select: 'select',
+} as const;
+
+/**
+ * One still-blank run-setup field the model should suggest a value for.
+ */
+export interface FillMissingField {
+  /** Stable field key (matches the run-settings field name) */
+  key: string;
+  /** Human-readable field label */
+  label: string;
+  category: FillMissingFieldCategory;
+  kind: FillMissingFieldKind;
+  /** Allowed values when kind is "select" */
+  options?: string[];
+}
+
+/**
+ * A field already filled in, given to the model for grounding.
+ */
+export interface FillMissingContextItem {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface FillMissingInput {
+  brand: string;
+  flavor: string;
+  /** Die/size of the run, if known */
+  dieType?: string;
+  /** Fields already known, for grounding the suggestions */
+  context?: FillMissingContextItem[];
+  /** The blank fields needing a suggested value */
+  fields: FillMissingField[];
+}
+
+export interface FillMissingSuggestion {
+  /** The field key this suggestion is for (echoes a requested key) */
+  key: string;
+  /** Suggested value, as a string (numbers/selects coerced client-side) */
+  value: string;
+  /** Short plain-language reason for the suggested value */
+  rationale: string;
+}
+
+export interface FillMissingResult {
+  suggestions: FillMissingSuggestion[];
+  generatedAt: number;
+  /** Optional message when no suggestions could be made */
+  note?: string;
+}
+
 /**
  * Captured details about a reported issue or a crash
  */
