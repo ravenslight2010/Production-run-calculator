@@ -516,6 +516,158 @@ describe("inventory merge against a real database", () => {
     expect(ledger[0].qtyDelta).toBe(0);
   });
 
+  it("folds several sources into one target in a single batch, preserving every source's stock and history", async () => {
+    // One pre-existing target plus three distinct sources, each with its own
+    // lot and a restock ledger row, all folded into the target in ONE batch.
+    const targetId = await makeItem("ingredient:Cheese:lbs");
+    await addLot(targetId, 4);
+    await db.insert(inventoryLedgerTable).values({
+      itemId: targetId,
+      lotId: null,
+      type: "restock",
+      qtyDelta: 4,
+      note: "target delivery",
+    });
+
+    const sources: Array<{ key: string; name: string; qty: number }> = [
+      { key: "ingredient:Mozz Whole:lbs", name: "Mozz Whole", qty: 10 },
+      { key: "ingredient:Mozz Shredded:lbs", name: "Mozz Shredded", qty: 5 },
+      { key: "ingredient:Mozz Block:lbs", name: "Mozz Block", qty: 8 },
+    ];
+    for (const s of sources) {
+      const id = await makeItem(s.key);
+      await addLot(id, s.qty);
+      await db.insert(inventoryLedgerTable).values({
+        itemId: id,
+        lotId: null,
+        type: "restock",
+        qtyDelta: s.qty,
+        note: `${s.name} delivery`,
+      });
+    }
+
+    const merged = await mergeInventoryItems(
+      sources.map((s) => ({
+        fromKey: s.key,
+        toKey: "ingredient:Cheese:lbs",
+        toName: "Cheese",
+        unit: "lbs",
+        category: "ingredient",
+      })),
+    );
+    // Every source in the batch was folded.
+    expect(merged).toBe(3);
+
+    // All three sources are gone; only the target remains.
+    for (const s of sources) {
+      expect(await findItem(s.key)).toBeNull();
+    }
+    const target = await findItem("ingredient:Cheese:lbs");
+    expect(target).not.toBeNull();
+    expect(target!.id).toBe(targetId);
+
+    // On-hand is the sum of all folded stock: 4 + 10 + 5 + 8 = 27.
+    expect(await onHand(targetId)).toBe(27);
+
+    // No lot is orphaned on a deleted source; all 4 now belong to the target.
+    const allLots = await db.select().from(inventoryLotsTable);
+    expect(allLots.every((l) => l.itemId === targetId)).toBe(true);
+    expect(allLots).toHaveLength(4); // 1 target + 3 source lots
+
+    const targetLedger = await ledgerFor(targetId);
+    // 1 target restock + 3 re-pointed source restocks + 3 "Merged from" markers.
+    expect(targetLedger).toHaveLength(7);
+    // Every source got its own zero-delta merge marker (note uses the source's
+    // name, which makeItem sets equal to its key).
+    for (const s of sources) {
+      const mergeRow = targetLedger.find((r) => r.note === `Merged from ${s.key}`);
+      expect(mergeRow).toBeDefined();
+      expect(mergeRow!.type).toBe("adjust");
+      expect(mergeRow!.qtyDelta).toBe(0);
+    }
+    // Every source's original history survived the re-point.
+    expect(targetLedger.some((r) => r.note === "target delivery")).toBe(true);
+    for (const s of sources) {
+      expect(targetLedger.some((r) => r.note === `${s.name} delivery`)).toBe(true);
+    }
+  });
+
+  it("rolls the whole batch back when one merge fails mid-way (all-or-nothing)", async () => {
+    // Three valid, tracked sources — each with a lot and a restock ledger row.
+    const specs: Array<{ key: string; name: string; toKey: string; qty: number }> = [
+      { key: "ingredient:Src A:lbs", name: "Src A", toKey: "ingredient:Dest A:lbs", qty: 9 },
+      { key: "ingredient:Src B:lbs", name: "Src B", toKey: "ingredient:Dest B:lbs", qty: 6 },
+      { key: "ingredient:Src C:lbs", name: "Src C", toKey: "ingredient:Dest C:lbs", qty: 3 },
+    ];
+    const sourceIds = new Map<string, number>();
+    for (const s of specs) {
+      const id = await makeItem(s.key);
+      await addLot(id, s.qty);
+      await db.insert(inventoryLedgerTable).values({
+        itemId: id,
+        lotId: null,
+        type: "restock",
+        qtyDelta: s.qty,
+        note: `${s.name} delivery`,
+      });
+      sourceIds.set(s.key, id);
+    }
+
+    // A batch whose SECOND entry is invalid: a null target name violates the
+    // NOT NULL column, throwing partway through the transaction (after the first
+    // valid fold has already run). The first and third folds must both unwind.
+    const batch = [
+      {
+        fromKey: "ingredient:Src A:lbs",
+        toKey: "ingredient:Dest A:lbs",
+        toName: "Dest A",
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "ingredient:Src B:lbs",
+        toKey: "ingredient:Dest B:lbs",
+        toName: null as unknown as string, // invalid: name is NOT NULL
+        unit: "lbs",
+        category: "ingredient",
+      },
+      {
+        fromKey: "ingredient:Src C:lbs",
+        toKey: "ingredient:Dest C:lbs",
+        toName: "Dest C",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ];
+
+    await expect(mergeInventoryItems(batch)).rejects.toThrow();
+
+    // Nothing committed: every source still exists, untouched, with its stock.
+    for (const s of specs) {
+      const src = await findItem(s.key);
+      expect(src).not.toBeNull();
+      expect(src!.id).toBe(sourceIds.get(s.key));
+      expect(await onHand(src!.id)).toBe(s.qty);
+      // Lots and ledger were never re-pointed: only the seeded restock remains.
+      const ledger = await ledgerFor(src!.id);
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0].note).toBe(`${s.name} delivery`);
+    }
+
+    // No target item was created (not even for the folds that "succeeded" first).
+    for (const s of specs) {
+      expect(await findItem(s.toKey)).toBeNull();
+    }
+
+    // Only the three original sources exist — nothing added, nothing deleted.
+    const allItems = await db.select().from(inventoryItemsTable);
+    expect(allItems).toHaveLength(3);
+
+    // Not a single "Merged from" audit row was written anywhere.
+    const allLedger = await db.select().from(inventoryLedgerTable);
+    expect(allLedger.some((r) => r.note.startsWith("Merged from"))).toBe(false);
+  });
+
   it("treats a merge into itself (fromKey == toKey) as a no-op", async () => {
     const itemId = await makeItem("ingredient:Self:lbs");
     await addLot(itemId, 6);
