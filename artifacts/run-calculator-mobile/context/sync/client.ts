@@ -81,14 +81,31 @@ interface SseMessageEvent {
   data?: string | null;
 }
 
+// Reconnect backoff: start at 1s, double each failed attempt, cap at 30s.
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30_000;
+
 // Opens the SSE stream and parses each `{ data, senderId }` envelope into a
 // payload callback. Returns a handle whose close() tears down the connection.
+//
+// The stream is self-healing: if it errors or the server drops it (token
+// expiry, network blip, restart), it reconnects with exponential backoff and a
+// freshly fetched token on every attempt. Backoff resets once a connection
+// opens. close() stops the current connection and cancels any pending retry so
+// there are no leaked reconnect loops after unmount.
 export function openSyncStream(
   baseUrl: string,
   clientId: string,
   handlers: SyncStreamHandlers,
 ): SyncStream {
   const url = `${baseUrl}/api/sync/events?clientId=${encodeURIComponent(clientId)}`;
+  const isWeb =
+    Platform.OS === "web" && typeof globalThis !== "undefined" && "EventSource" in globalThis;
+
+  let closed = false;
+  let current: { close: () => void } | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let attempts = 0;
 
   function handleData(raw: string | null | undefined): void {
     if (!raw) return;
@@ -100,39 +117,49 @@ export function openSyncStream(
     }
   }
 
-  if (Platform.OS === "web" && typeof globalThis !== "undefined" && "EventSource" in globalThis) {
-    const ES = (globalThis as unknown as { EventSource: typeof EventSource }).EventSource;
-    // The browser EventSource can't set an Authorization header, so on web we
-    // pass the Clerk bearer token as a `?token=` query param (the API promotes
-    // it to a bearer header in dev/preview). Token resolution is async, so open
-    // the stream once it resolves; close() before then is safe.
-    let closed = false;
-    let es: EventSource | null = null;
-    void (async () => {
-      const token = await getAuthToken();
-      if (closed) return;
-      const withAuth = token ? `${url}&token=${encodeURIComponent(token)}` : url;
-      const src = new ES(withAuth);
-      src.onopen = () => handlers.onOpen?.();
-      src.onmessage = (e: MessageEvent) => handleData(e.data as string);
-      src.onerror = () => handlers.onError?.();
-      es = src;
-    })();
-    return {
-      close: () => {
-        closed = true;
-        es?.close();
-      },
-    };
+  // Tear down the failed connection (so the browser EventSource doesn't also
+  // auto-reconnect with a stale token) and schedule the next attempt.
+  function handleError(): void {
+    if (closed) return;
+    handlers.onError?.();
+    current?.close();
+    current = null;
+    if (reconnectTimer) return; // a retry is already queued
+    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempts);
+    attempts += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void connect();
+    }, delay);
   }
 
-  // Native: react-native-sse. Resolve the bearer token first (async), then open
-  // the stream with an Authorization header. close() is safe before connect.
-  let closed = false;
-  let es: { close: () => void } | null = null;
-  void (async () => {
+  function handleOpen(): void {
+    attempts = 0; // healthy connection — reset backoff
+    handlers.onOpen?.();
+  }
+
+  async function connect(): Promise<void> {
+    if (closed) return;
+    // Fetch a fresh token on every attempt so reconnects survive token expiry.
     const token = await getAuthToken();
     if (closed) return;
+
+    if (isWeb) {
+      const ES = (globalThis as unknown as { EventSource: typeof EventSource }).EventSource;
+      // The browser EventSource can't set an Authorization header, so on web we
+      // pass the Clerk bearer token as a `?token=` query param (the API promotes
+      // it to a bearer header in dev/preview).
+      const withAuth = token ? `${url}&token=${encodeURIComponent(token)}` : url;
+      const src = new ES(withAuth);
+      src.onopen = () => handleOpen();
+      src.onmessage = (e: MessageEvent) => handleData(e.data as string);
+      src.onerror = () => handleError();
+      current = { close: () => src.close() };
+      return;
+    }
+
+    // Native: react-native-sse. pollingInterval: 0 disables its built-in
+    // reconnect so we own the backoff/fresh-token loop here.
     const RNEventSource = require("react-native-sse").default as new (
       url: string,
       opts?: Record<string, unknown>,
@@ -144,15 +171,23 @@ export function openSyncStream(
       pollingInterval: 0,
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
-    inst.addEventListener("open", () => handlers.onOpen?.());
+    inst.addEventListener("open", () => handleOpen());
     inst.addEventListener("message", (event: SseMessageEvent) => handleData(event.data));
-    inst.addEventListener("error", () => handlers.onError?.());
-    es = inst;
-  })();
+    inst.addEventListener("error", () => handleError());
+    current = { close: () => inst.close() };
+  }
+
+  void connect();
+
   return {
     close: () => {
       closed = true;
-      es?.close();
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      current?.close();
+      current = null;
     },
   };
 }
