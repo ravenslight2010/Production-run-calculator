@@ -497,14 +497,18 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
 // (not re-created), so on-hand totals and the audit trail are preserved exactly
 // without a second stock writer. The source item is then deleted. A zero-delta
 // "adjust" ledger row documents each fold for traceability. All ops run in one
-// transaction so a mid-merge failure leaves stock + audit consistent.
-router.post("/inventory/merge", async (req, res): Promise<void> => {
-  const parsed = MergeInventoryBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const { merges } = parsed.data;
+// transaction so a mid-merge failure leaves stock + audit consistent. Exported
+// so the correctness-critical re-point ordering (lots/ledger cascade-delete with
+// the item) can be integration-tested against a real Postgres.
+export type MergeSpec = {
+  fromKey: string;
+  toKey: string;
+  toName: string;
+  unit: string;
+  category: string;
+};
+
+export async function mergeInventoryItems(merges: MergeSpec[]): Promise<number> {
   let merged = 0;
   await db.transaction(async (tx) => {
     for (const m of merges) {
@@ -554,6 +558,16 @@ router.post("/inventory/merge", async (req, res): Promise<void> => {
       merged++;
     }
   });
+  return merged;
+}
+
+router.post("/inventory/merge", async (req, res): Promise<void> => {
+  const parsed = MergeInventoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const merged = await mergeInventoryItems(parsed.data.merges);
   if (merged > 0) broadcast(headerSenderId(req));
   res.json({ merged });
 });

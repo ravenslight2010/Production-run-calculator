@@ -36,6 +36,7 @@ let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let consumeRun: InvModule["consumeRun"];
 let drawDown: InvModule["drawDown"];
 let adjustInventory: InvModule["adjustInventory"];
+let mergeInventoryItems: InvModule["mergeInventoryItems"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -81,6 +82,7 @@ beforeAll(async () => {
   consumeRun = invMod.consumeRun;
   drawDown = invMod.drawDown;
   adjustInventory = invMod.adjustInventory;
+  mergeInventoryItems = invMod.mergeInventoryItems;
 }, 60_000);
 
 afterAll(async () => {
@@ -341,5 +343,136 @@ describe("inventory manual adjust against a real database", () => {
     expect(lots).toHaveLength(1);
     // No adjust ledger row was written.
     expect(await adjustLedger(itemId)).toEqual([]);
+  });
+});
+
+describe("inventory merge against a real database", () => {
+  // Look an item up by its key; null if it was deleted (e.g. a merged source).
+  async function findItem(key: string) {
+    const rows = await db.select().from(inventoryItemsTable);
+    return rows.find((r) => r.key === key) ?? null;
+  }
+
+  // Every ledger row for an item, oldest first.
+  async function ledgerFor(itemId: number) {
+    const rows = await db.select().from(inventoryLedgerTable);
+    return rows.filter((r) => r.itemId === itemId).sort((a, b) => a.id - b.id);
+  }
+
+  it("folds a source with lots + history into the target, preserving stock and audit trail", async () => {
+    const sourceId = await makeItem("ingredient:Mozz Whole:lbs");
+    const targetId = await makeItem("ingredient:Mozzarella:lbs");
+    // Source carries two lots (15 on hand) and a prior adjust ledger entry.
+    await addLot(sourceId, 10, { expirationDate: "2026-03-01" });
+    await addLot(sourceId, 5, { expirationDate: "2026-02-01" });
+    await db.insert(inventoryLedgerTable).values({
+      itemId: sourceId,
+      lotId: null,
+      type: "restock",
+      qtyDelta: 15,
+      note: "initial delivery",
+    });
+    // Target already has some of its own stock + history.
+    await addLot(targetId, 4);
+    await db.insert(inventoryLedgerTable).values({
+      itemId: targetId,
+      lotId: null,
+      type: "restock",
+      qtyDelta: 4,
+      note: "target delivery",
+    });
+
+    const sourceLedgerBefore = (await ledgerFor(sourceId)).length;
+    expect(sourceLedgerBefore).toBe(1); // the seeded restock
+    expect(await onHand(sourceId)).toBe(15);
+    expect(await onHand(targetId)).toBe(4);
+
+    const merged = await mergeInventoryItems([
+      {
+        fromKey: "ingredient:Mozz Whole:lbs",
+        toKey: "ingredient:Mozzarella:lbs",
+        toName: "Mozzarella",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+    expect(merged).toBe(1);
+
+    // The source item is gone; all its lots/ledger now belong to the target.
+    expect(await findItem("ingredient:Mozz Whole:lbs")).toBeNull();
+    const target = await findItem("ingredient:Mozzarella:lbs");
+    expect(target).not.toBeNull();
+    expect(target!.id).toBe(targetId);
+
+    // On-hand total is preserved: 15 (source) + 4 (target) = 19.
+    expect(await onHand(targetId)).toBe(19);
+
+    // No lot or ledger row is left orphaned on the (deleted) source id.
+    const allLots = await db.select().from(inventoryLotsTable);
+    expect(allLots.every((l) => l.itemId === targetId)).toBe(true);
+    expect(allLots).toHaveLength(3); // 2 from source + 1 from target
+
+    const targetLedger = await ledgerFor(targetId);
+    // 1 target restock + 1 source restock (re-pointed) + 1 "Merged from" row.
+    expect(targetLedger).toHaveLength(3);
+    const mergeRow = targetLedger.find((r) => r.note === "Merged from ingredient:Mozz Whole:lbs");
+    expect(mergeRow).toBeDefined();
+    expect(mergeRow!.type).toBe("adjust");
+    expect(mergeRow!.qtyDelta).toBe(0); // a zero-delta audit marker, no stock change
+    // The re-pointed source history survived intact.
+    expect(targetLedger.some((r) => r.note === "initial delivery")).toBe(true);
+    expect(targetLedger.some((r) => r.note === "target delivery")).toBe(true);
+  });
+
+  it("creates the target when it doesn't exist yet, carrying the source's stock over", async () => {
+    const sourceId = await makeItem("ingredient:Old Name:lbs");
+    await addLot(sourceId, 8);
+    expect(await onHand(sourceId)).toBe(8);
+
+    const merged = await mergeInventoryItems([
+      {
+        fromKey: "ingredient:Old Name:lbs",
+        toKey: "ingredient:New Name:lbs",
+        toName: "New Name",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+    expect(merged).toBe(1);
+
+    // Source is gone; a brand-new target now holds the stock + a merge marker.
+    expect(await findItem("ingredient:Old Name:lbs")).toBeNull();
+    const target = await findItem("ingredient:New Name:lbs");
+    expect(target).not.toBeNull();
+    expect(target!.name).toBe("New Name");
+    expect(await onHand(target!.id)).toBe(8);
+
+    const ledger = await ledgerFor(target!.id);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0].note).toBe("Merged from ingredient:Old Name:lbs");
+    expect(ledger[0].qtyDelta).toBe(0);
+  });
+
+  it("treats a merge into itself (fromKey == toKey) as a no-op", async () => {
+    const itemId = await makeItem("ingredient:Self:lbs");
+    await addLot(itemId, 6);
+
+    const merged = await mergeInventoryItems([
+      {
+        fromKey: "ingredient:Self:lbs",
+        toKey: "ingredient:Self:lbs",
+        toName: "Self",
+        unit: "lbs",
+        category: "ingredient",
+      },
+    ]);
+    expect(merged).toBe(0);
+
+    // Nothing moved, nothing deleted, no audit row written.
+    const item = await findItem("ingredient:Self:lbs");
+    expect(item).not.toBeNull();
+    expect(item!.id).toBe(itemId);
+    expect(await onHand(itemId)).toBe(6);
+    expect(await ledgerFor(itemId)).toHaveLength(0);
   });
 });
