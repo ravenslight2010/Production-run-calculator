@@ -103,6 +103,7 @@ import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
+import QRCode from "react-qr-code";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
@@ -1880,6 +1881,7 @@ export default function Home() {
   // ── Screen casting mode ────────────────────────────────────────────────────
   const screenMode = useMemo(() => new URLSearchParams(window.location.search).get("screen"), []);
   const [showScreensDialog, setShowScreensDialog] = useState(false);
+  const [showMobileQrDialog, setShowMobileQrDialog] = useState(false);
 
   // ── Fullscreen / kiosk mode ────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -4928,6 +4930,48 @@ export default function Home() {
         </div>
       )}
 
+      {/* ── Mobile App QR Dialog ────────────────────────────────────────── */}
+      {showMobileQrDialog && (() => {
+        const mobileUrl = `${window.location.origin}/mobile/`;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
+            onClick={() => setShowMobileQrDialog(false)}
+          >
+            <div
+              className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-primary" />
+                  <h2 className="font-bold text-base">Open on your phone</h2>
+                </div>
+                <button type="button" onClick={() => setShowMobileQrDialog(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-6 flex flex-col items-center gap-4">
+                <p className="text-sm text-muted-foreground text-center">
+                  Scan this code with your phone's camera to jump straight to the mobile app.
+                </p>
+                <div className="bg-white p-4 rounded-lg">
+                  <QRCode value={mobileUrl} size={200} />
+                </div>
+                <div className="text-xs text-muted-foreground break-all text-center font-mono">{mobileUrl}</div>
+                <button
+                  type="button"
+                  onClick={() => window.open(mobileUrl, "_blank", "noopener,noreferrer")}
+                  className="w-full py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                >
+                  Open in new tab
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {showManageDialog && (() => {
         // Simple list panel: add input + item list
         const ListPanel = ({
@@ -6099,7 +6143,7 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowGetStarted(true)}>
                   <Boxes className="w-4 h-4 mr-2" /> Get Started
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => window.open(`${window.location.origin}/mobile/`, "_blank", "noopener,noreferrer")}>
+                <DropdownMenuItem onClick={() => setShowMobileQrDialog(true)}>
                   <Smartphone className="w-4 h-4 mr-2" /> Mobile App
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowTour(true)}>
