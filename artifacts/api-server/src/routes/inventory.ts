@@ -20,6 +20,7 @@ import {
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
+import { applyRunConsumption, planDrawDown, sortLotsForConsumption } from "./inventoryLogic";
 
 const router: IRouter = Router();
 
@@ -62,29 +63,14 @@ async function loadItemResponse(itemId: number) {
   return { ...item, onHand, lots: sortedLots };
 }
 
-// FIFO/FEFO order: earliest expiration first (nulls last), then earliest
-// received date (nulls last), then insertion order (id).
-function sortLotsForConsumption(lots: InventoryLot[]): InventoryLot[] {
-  const byDate = (a: string | null, b: string | null): number => {
-    if (a === b) return 0;
-    if (!a) return 1; // null sorts last
-    if (!b) return -1;
-    return a < b ? -1 : 1;
-  };
-  return [...lots].sort(
-    (a, b) =>
-      byDate(a.expirationDate, b.expirationDate) ||
-      byDate(a.receivedDate, b.receivedDate) ||
-      a.id - b.id,
-  );
-}
-
 // Executor type shared by the top-level db handle and a transaction handle, so
 // drawDown can run either standalone or inside a transaction.
 type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // Draw `qty` out of an item's lots in FIFO/FEFO order. Never goes negative;
-// returns how much was actually consumed (may be less than requested).
+// returns how much was actually consumed (may be less than requested). The
+// ordering and never-negative math live in planDrawDown (pure, unit-tested);
+// this wrapper only adds the locking read and persists the planned updates.
 async function drawDown(exec: Executor, itemId: number, qty: number): Promise<number> {
   if (qty <= 0) return 0;
   // Lock the item's lot rows FOR UPDATE so concurrent consume/adjust transactions
@@ -97,18 +83,14 @@ async function drawDown(exec: Executor, itemId: number, qty: number): Promise<nu
       and(eq(inventoryLotsTable.itemId, itemId), gt(inventoryLotsTable.qtyRemaining, 0)),
     )
     .for("update");
-  const ordered = sortLotsForConsumption(lots);
-  let remaining = qty;
-  for (const lot of ordered) {
-    if (remaining <= 0) break;
-    const take = Math.min(lot.qtyRemaining, remaining);
+  const { consumed, updates } = planDrawDown(lots, qty);
+  for (const update of updates) {
     await exec
       .update(inventoryLotsTable)
-      .set({ qtyRemaining: lot.qtyRemaining - take })
-      .where(eq(inventoryLotsTable.id, lot.id));
-    remaining -= take;
+      .set({ qtyRemaining: update.qtyRemaining })
+      .where(eq(inventoryLotsTable.id, update.id));
   }
-  return qty - remaining;
+  return consumed;
 }
 
 // ── Routes ───────────────────────────────────────────────────────────────────
@@ -406,43 +388,48 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
   // of the same run can't double-deduct, and onConflictDoNothing makes the claim
   // race-safe. Because the claim is part of the transaction, any failure mid-loop
   // rolls the claim back too, so the run can be retried and applied exactly once.
-  let claimed = false;
-  let consumedItems = 0;
-  await db.transaction(async (tx) => {
-    const [claim] = await tx
-      .insert(inventoryConsumedRunsTable)
-      .values({ runId })
-      .onConflictDoNothing({ target: inventoryConsumedRunsTable.runId })
-      .returning();
-    if (!claim) return; // already consumed — leave claimed=false
-    claimed = true;
-    for (const line of lines) {
-      if (line.qty <= 0) continue;
-      const [item] = await tx
-        .select()
-        .from(inventoryItemsTable)
-        .where(eq(inventoryItemsTable.key, line.itemKey));
-      if (!item) continue; // no-op for materials with no inventory item
-      const consumed = await drawDown(tx, item.id, line.qty);
-      if (consumed > 0) {
-        await tx.insert(inventoryLedgerTable).values({
-          itemId: item.id,
-          lotId: null,
-          type: "consume",
-          qtyDelta: -consumed,
-          runId,
-          note: "Auto-deducted on run completion",
-        });
-        consumedItems += 1;
-      }
-    }
-  });
-  if (!claimed) {
+  // The run-once control flow lives in applyRunConsumption (pure, unit-tested);
+  // here we just bind it to transaction-scoped DB operations.
+  const result = await db.transaction((tx) =>
+    applyRunConsumption(
+      {
+        claimRun: async (rid) => {
+          const [claim] = await tx
+            .insert(inventoryConsumedRunsTable)
+            .values({ runId: rid })
+            .onConflictDoNothing({ target: inventoryConsumedRunsTable.runId })
+            .returning();
+          return Boolean(claim);
+        },
+        findItemByKey: async (itemKey) => {
+          const [item] = await tx
+            .select()
+            .from(inventoryItemsTable)
+            .where(eq(inventoryItemsTable.key, itemKey));
+          return item ?? null;
+        },
+        drawDown: (itemId, qty) => drawDown(tx, itemId, qty),
+        recordConsumption: async (itemId, consumed) => {
+          await tx.insert(inventoryLedgerTable).values({
+            itemId,
+            lotId: null,
+            type: "consume",
+            qtyDelta: -consumed,
+            runId,
+            note: "Auto-deducted on run completion",
+          });
+        },
+      },
+      runId,
+      lines,
+    ),
+  );
+  if (!result.applied) {
     res.json({ applied: false, consumed: 0 });
     return;
   }
   broadcast(headerSenderId(req));
-  res.json({ applied: true, consumed: consumedItems });
+  res.json({ applied: true, consumed: result.consumed });
 });
 
 router.get("/inventory/ledger", async (req, res): Promise<void> => {
