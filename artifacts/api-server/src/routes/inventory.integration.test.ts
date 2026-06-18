@@ -344,6 +344,69 @@ describe("inventory manual adjust against a real database", () => {
     // No adjust ledger row was written.
     expect(await adjustLedger(itemId)).toEqual([]);
   });
+
+  it("serializes concurrent downward adjustments so stock never goes negative (FOR UPDATE)", async () => {
+    const itemId = await makeItem("ingredient:Tomato:lbs");
+    await addLot(itemId, 10);
+
+    // Two staff correct the same item down by 7 at the same time. Without the
+    // FOR UPDATE lock in drawDown both would read 10 and each apply -7, drifting
+    // stock to -4; with it they serialize and the second is capped at what's left.
+    const [a, b] = await Promise.all([
+      adjustInventory(itemId, -7, "staff A recount"),
+      adjustInventory(itemId, -7, "staff B recount"),
+    ]);
+
+    // One applied the full -7, the other only the remaining -3 — total exactly -10.
+    const appliedTotal = a.appliedDelta + b.appliedDelta;
+    expect(appliedTotal).toBe(-10);
+    expect(await onHand(itemId)).toBe(0);
+
+    // The ledger records the actual applied deltas, summing to -10, never below 0.
+    const deltas = (await adjustLedger(itemId)).map((r) => r.qtyDelta);
+    expect(deltas.reduce((acc, d) => acc + d, 0)).toBe(-10);
+
+    // No lot is ever left negative.
+    const lots = await db.select().from(inventoryLotsTable);
+    expect(lots.filter((l) => l.itemId === itemId).every((l) => l.qtyRemaining >= 0)).toBe(
+      true,
+    );
+  });
+
+  it("serializes a concurrent run completion and manual downward adjustment without overselling", async () => {
+    const itemId = await makeItem("ingredient:Basil:lbs");
+    await addLot(itemId, 10);
+
+    // A run finalizes (consuming 7) at the same instant a staffer corrects the
+    // same item down by 7. Both paths draw through the same FOR UPDATE lock, so
+    // together they can take at most the 10 on hand — never overselling.
+    const [run, adjust] = await Promise.all([
+      consumeRun("run-mixed-adjust", [{ itemKey: "ingredient:Basil:lbs", qty: 7 }]),
+      adjustInventory(itemId, -7, "staff recount"),
+    ]);
+
+    expect(run.applied).toBe(true);
+
+    // Whatever the consume took plus whatever the adjust capped at must equal the
+    // 10 available, leaving stock at exactly zero.
+    const consumed = await db
+      .select()
+      .from(inventoryLedgerTable)
+      .then((rows) =>
+        rows
+          .filter((r) => r.itemId === itemId && r.type === "consume")
+          .reduce((acc, r) => acc - r.qtyDelta, 0),
+      );
+    const adjusted = -adjust.appliedDelta;
+    expect(consumed + adjusted).toBe(10);
+    expect(await onHand(itemId)).toBe(0);
+
+    // No lot is ever left negative.
+    const lots = await db.select().from(inventoryLotsTable);
+    expect(lots.filter((l) => l.itemId === itemId).every((l) => l.qtyRemaining >= 0)).toBe(
+      true,
+    );
+  });
 });
 
 describe("inventory merge against a real database", () => {
