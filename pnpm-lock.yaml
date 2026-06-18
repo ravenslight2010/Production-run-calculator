@@ -423,6 +423,9 @@ importers:
 
   artifacts/run-calculator:
     dependencies:
+      '@workspace/fill-missing':
+        specifier: workspace:*
+        version: link:../../lib/fill-missing
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -646,6 +649,9 @@ importers:
       '@expo-google-fonts/space-mono':
         specifier: ^0.4.2
         version: 0.4.2
+      '@workspace/fill-missing':
+        specifier: workspace:*
+        version: link:../../lib/fill-missing
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -849,6 +855,8 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+
+  lib/fill-missing: {}
 
   lib/integrations-openai-ai-server:
     dependencies:

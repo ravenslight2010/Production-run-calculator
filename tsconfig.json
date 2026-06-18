@@ -16,6 +16,9 @@
       "path": "./lib/onboarding"
     },
     {
+      "path": "./lib/fill-missing"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]

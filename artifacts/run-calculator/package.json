@@ -84,6 +84,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "@workspace/fill-missing": "workspace:*",
     "@workspace/onboarding": "workspace:*"
   }
 }
