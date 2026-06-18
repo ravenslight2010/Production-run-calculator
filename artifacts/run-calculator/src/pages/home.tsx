@@ -119,6 +119,7 @@ import {
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
+import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import {
   Factory,
   Layers,
@@ -1784,6 +1785,8 @@ export default function Home() {
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
   const [activeTab, setActiveTab] = useState("run");
+  // Manager-only nav badge: pending password reset requests awaiting approval.
+  const pendingResetCount = usePendingResetCount();
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -5993,10 +5996,22 @@ export default function Home() {
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  title="More"
-                  className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                  title={
+                    pendingResetCount > 0
+                      ? `${pendingResetCount} password reset request${pendingResetCount === 1 ? "" : "s"} waiting`
+                      : "More"
+                  }
+                  className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
+                  {pendingResetCount > 0 && (
+                    <span
+                      aria-label={`${pendingResetCount} password reset requests waiting`}
+                      className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
+                    >
+                      {pendingResetCount}
+                    </span>
+                  )}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -6008,6 +6023,11 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
                   <ClipboardList className="w-4 h-4 mr-2" /> Stock
+                  {pendingResetCount > 0 && (
+                    <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                      {pendingResetCount}
+                    </span>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant

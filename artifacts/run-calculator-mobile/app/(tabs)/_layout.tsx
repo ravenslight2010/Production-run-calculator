@@ -7,6 +7,7 @@ import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
+import { usePendingResetCount } from "@/hooks/usePendingResetCount";
 
 const MENU_ITEMS: {
   label: string;
@@ -31,6 +32,8 @@ export default function TabLayout() {
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const [menuOpen, setMenuOpen] = useState(false);
+  // Manager-only nav badge: pending password reset requests awaiting approval.
+  const pendingResetCount = usePendingResetCount();
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;
@@ -52,8 +55,26 @@ export default function TabLayout() {
               onPress={() => setMenuOpen(true)}
               hitSlop={10}
               style={({ pressed }) => [styles.menuBtn, { opacity: pressed ? 0.6 : 1 }]}
+              accessibilityLabel={
+                pendingResetCount > 0
+                  ? `Menu, ${pendingResetCount} password reset requests waiting`
+                  : "Menu"
+              }
             >
               <Feather name="menu" size={22} color={colors.foreground} />
+              {pendingResetCount > 0 && (
+                <View
+                  style={[
+                    styles.headerBadge,
+                    {
+                      backgroundColor: colors.warning ?? colors.primary,
+                      borderColor: colors.background,
+                    },
+                  ]}
+                >
+                  <Text style={styles.headerBadgeText}>{pendingResetCount}</Text>
+                </View>
+              )}
             </Pressable>
           ),
           tabBarStyle: {
@@ -181,6 +202,16 @@ export default function TabLayout() {
                     {item.desc}
                   </Text>
                 </View>
+                {item.route === "/inventory" && pendingResetCount > 0 && (
+                  <View
+                    style={[
+                      styles.menuBadge,
+                      { backgroundColor: colors.warning ?? colors.primary },
+                    ]}
+                  >
+                    <Text style={styles.menuBadgeText}>{pendingResetCount}</Text>
+                  </View>
+                )}
                 <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
               </Pressable>
             ))}
@@ -260,4 +291,36 @@ const styles = StyleSheet.create({
   },
   menuItemLabel: { fontSize: 16, fontFamily: FONTS.semibold },
   menuItemDesc: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
+  headerBadge: {
+    position: "absolute",
+    top: -2,
+    right: 8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    paddingHorizontal: 3,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerBadgeText: {
+    color: "#fff",
+    fontSize: 9,
+    fontFamily: FONTS.bold,
+    lineHeight: 12,
+  },
+  menuBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuBadgeText: {
+    color: "#fff",
+    fontSize: 11,
+    fontFamily: FONTS.bold,
+    lineHeight: 14,
+  },
 });
