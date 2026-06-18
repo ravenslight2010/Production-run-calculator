@@ -9,7 +9,9 @@
 // expire, fires the sweep via fake timers, and asserts expired buckets are
 // removed while still-active buckets are kept.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { MemoryRateLimitStore } from "./rateLimit";
+import type { Request, Response, NextFunction } from "express";
+import { MemoryRateLimitStore, rateLimit } from "./rateLimit";
+import type { RateLimitStore } from "./rateLimit";
 
 // The sweep deletes from the store's private bucket Map. Reading it directly is
 // the most faithful assertion that memory is actually freed (rather than just
@@ -60,5 +62,56 @@ describe("MemoryRateLimitStore — periodic sweep frees expired buckets", () => 
 
     expect(buckets.has("c")).toBe(false);
     expect(buckets.size).toBe(0);
+  });
+});
+
+// Middleware-level fail-open test.
+//
+// The limiter wraps `store.hit` in a try/catch and, on failure, deliberately
+// "fails open": it logs the error and calls next() so a transient store outage
+// (e.g. the shared Postgres store briefly unreachable) does not block all AI
+// traffic. Without coverage, a regression that turned that catch into a 500/429
+// — converting a counter hiccup into a full AI outage — would pass silently.
+// This test injects a store whose `hit` always rejects, drives one request
+// through the middleware, and asserts the request is allowed and the error is
+// logged via req.log.error.
+describe("rateLimit — fails open when the store errors", () => {
+  it("allows the request and logs when store.hit rejects", async () => {
+    const failing: RateLimitStore = {
+      hit: () => Promise.reject(new Error("store unreachable")),
+    };
+
+    const middleware = rateLimit({ windowMs: 1000, max: 5, store: failing });
+
+    const errorSpy = vi.fn();
+    const req = {
+      ip: "1.2.3.4",
+      log: { error: errorSpy, warn: vi.fn() },
+    } as unknown as Request;
+
+    const setHeader = vi.fn();
+    const status = vi.fn(() => res);
+    const json = vi.fn(() => res);
+    const res = { setHeader, status, json } as unknown as Response;
+
+    const next = vi.fn() as unknown as NextFunction;
+
+    middleware(req, res, next);
+
+    // The middleware runs its work in a fire-and-forget async IIFE, so let the
+    // rejected promise settle before asserting.
+    await vi.waitFor(() => {
+      expect(next).toHaveBeenCalledTimes(1);
+    });
+
+    // Allowed: next() was called, and no blocking/error response was sent.
+    expect(status).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
+
+    // The store outage is surfaced via req.log.error.
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [meta] = errorSpy.mock.calls[0];
+    expect(meta).toMatchObject({ key: "1.2.3.4" });
+    expect(meta.err).toBeInstanceOf(Error);
   });
 });
