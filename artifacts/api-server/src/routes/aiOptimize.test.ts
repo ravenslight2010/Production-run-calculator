@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildOptimizePrompt,
   sanitizeAction,
   sanitizeRecommendations,
   validateOptimizeBody,
@@ -10,6 +11,7 @@ import {
   MAX_TITLE_CHARS,
   MAX_DETAIL_CHARS,
   type OptimizeAction,
+  type OptimizeInput,
 } from "./aiOptimize";
 
 // The set of "real" run ids the model's actions are cross-checked against.
@@ -591,5 +593,160 @@ describe("sanitizeRecommendations — category/impact mapping", () => {
       });
       expect(out.recommendations[0]?.impact).toBe(expected);
     }
+  });
+});
+
+// Build a validated OptimizeInput from makeBody overrides (mirrors the real
+// request path: the route validates, then shapes the parsed data into a prompt).
+function buildInput(overrides: Record<string, unknown> = {}): OptimizeInput {
+  const result = validateOptimizeBody(makeBody(overrides));
+  if (!result.ok) throw new Error(`test body failed validation: ${result.error}`);
+  return result.data;
+}
+
+// Re-derive the HH:MM clock the builder prints, using the same local-time math,
+// so the assertion stays correct regardless of the runner's timezone.
+function expectedClock(nowMs: number): string {
+  const d = new Date(nowMs);
+  return `${d.getHours().toString().padStart(2, "0")}:${d
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+describe("buildOptimizePrompt — system prompt", () => {
+  it("always includes a non-empty system prompt describing the assistant", () => {
+    const { system } = buildOptimizePrompt(buildInput());
+    expect(system.length).toBeGreaterThan(0);
+    expect(system).toContain("optimization assistant");
+    expect(system).toContain("frozen-pizza factory");
+  });
+});
+
+describe("buildOptimizePrompt — header fields", () => {
+  it("includes date, current time, target finish time, today PPM, and benchmark", () => {
+    const input = buildInput({ runToTime: "16:00", todayPpm: 58, benchmarkPpm: 60 });
+    const { user } = buildOptimizePrompt(input);
+    expect(user).toContain("DATE: 2026-06-18");
+    expect(user).toContain(`CURRENT TIME: ${expectedClock(input.nowMs)}`);
+    expect(user).toContain("TARGET FINISH TIME: 16:00");
+    expect(user).toContain("TODAY PPM (aggregate): 58");
+    expect(user).toContain("HISTORICAL BENCHMARK PPM: 60");
+  });
+
+  it("omits the target finish line when runToTime is unset", () => {
+    const { user } = buildOptimizePrompt(buildInput());
+    expect(user).not.toContain("TARGET FINISH TIME:");
+  });
+
+  it("falls back to 0 today PPM and a 'no history' benchmark note", () => {
+    const { user } = buildOptimizePrompt(buildInput());
+    expect(user).toContain("TODAY PPM (aggregate): 0");
+    expect(user).toContain("HISTORICAL BENCHMARK PPM: none (no history yet)");
+  });
+});
+
+describe("buildOptimizePrompt — run lines", () => {
+  it("renders all expected fields for a run line", () => {
+    const run = {
+      ...makeRun("run-1"),
+      dieType: "12in",
+      casesNeeded: 100,
+      casesMade: 10,
+      casesLeft: 90,
+      plannedPpm: 60,
+      actualPpm: 55,
+      minutesRemaining: 30,
+      netElapsedSec: 600,
+      downtimeSec: 120,
+    };
+    const { user } = buildOptimizePrompt(buildInput({ runs: [run] }));
+    expect(user).toContain("TODAY'S RUNS:");
+    expect(user).toContain("id=run-1");
+    expect(user).toContain('label="Run run-1"');
+    expect(user).toContain("status=running");
+    expect(user).toContain("die=12in");
+    expect(user).toContain("casesNeeded=100");
+    expect(user).toContain("casesMade=10");
+    expect(user).toContain("casesLeft=90");
+    expect(user).toContain("plannedPPM=60");
+    expect(user).toContain("actualPPM=55");
+    expect(user).toContain("minRemaining=30");
+    expect(user).toContain("netRunMin=10");
+    expect(user).toContain("downtimeMin=2");
+  });
+
+  it("uses a '?' fallback for a blank die type", () => {
+    const { user } = buildOptimizePrompt(buildInput({ runs: [{ ...makeRun("run-1"), dieType: "" }] }));
+    expect(user).toContain("die=?");
+  });
+
+  it("formats stoppages, marking open ones", () => {
+    const run = {
+      ...makeRun("run-1"),
+      stoppages: [
+        { reason: "jam", durationSec: 300, open: false },
+        { reason: "changeover", durationSec: 90, open: true },
+      ],
+    };
+    const { user } = buildOptimizePrompt(buildInput({ runs: [run] }));
+    expect(user).toContain("stoppages=[jam(5m), changeover(2m,open)]");
+  });
+
+  it("omits the stoppages field when there are none", () => {
+    const { user } = buildOptimizePrompt(buildInput({ runs: [{ ...makeRun("run-1"), stoppages: [] }] }));
+    expect(user).not.toContain("stoppages=");
+  });
+
+  it("prints 'n/a' for null actualPpm and minutesRemaining", () => {
+    const run = { ...makeRun("run-1"), actualPpm: null, minutesRemaining: null };
+    const { user } = buildOptimizePrompt(buildInput({ runs: [run] }));
+    expect(user).toContain("actualPPM=n/a");
+    expect(user).toContain("minRemaining=n/a");
+  });
+
+  it("renders '(none)' when there are no runs", () => {
+    const { user } = buildOptimizePrompt(buildInput({ runs: [] }));
+    expect(user).toContain("TODAY'S RUNS:");
+    expect(user).toContain("(none)");
+  });
+});
+
+describe("buildOptimizePrompt — optional sections", () => {
+  it("omits SCHEDULED and RECENT FINISHED sections when their lists are empty", () => {
+    const { user } = buildOptimizePrompt(buildInput());
+    expect(user).not.toContain("SCHEDULED (FUTURE) RUNS:");
+    expect(user).not.toContain("RECENT FINISHED RUNS");
+  });
+
+  it("includes the SCHEDULED section when scheduledRuns is non-empty", () => {
+    const { user } = buildOptimizePrompt(
+      buildInput({ scheduledRuns: [makeScheduledRun("2026-06-19")] }),
+    );
+    expect(user).toContain("SCHEDULED (FUTURE) RUNS:");
+    expect(user).toContain('- date=2026-06-19 "Brand Pepperoni" die=12in casesNeeded=200');
+  });
+
+  it("includes the RECENT FINISHED section when historyRuns is non-empty", () => {
+    const { user } = buildOptimizePrompt(
+      buildInput({ historyRuns: [{ ...makeRun("hist-1"), status: "finished" }] }),
+    );
+    expect(user).toContain("RECENT FINISHED RUNS (history):");
+    expect(user).toContain("id=hist-1");
+  });
+});
+
+describe("buildOptimizePrompt — instruction block", () => {
+  it("states the recommendation cap and the JSON response shape", () => {
+    const { user } = buildOptimizePrompt(buildInput());
+    expect(user).toContain(`Provide at most ${MAX_RECOMMENDATIONS} recommendations`);
+    expect(user).toContain('"recommendations":[');
+  });
+
+  it("documents all three allowed action shapes", () => {
+    const { user } = buildOptimizePrompt(buildInput());
+    expect(user).toContain('"kind":"set_target_time"');
+    expect(user).toContain('"kind":"set_run_target"');
+    expect(user).toContain('"kind":"reorder_run"');
   });
 });
