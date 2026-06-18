@@ -101,6 +101,7 @@ import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
 import IncidentsTab from "../components/IncidentsTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
+import GetStartedDialog from "../components/GetStartedDialog";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   computeRunConsumptionLines,
@@ -1489,7 +1490,7 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
 }
 
 export default function Home() {
-  const { signOut, forceSignedOut, revalidate } = useAuth();
+  const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen } = useAuth();
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
@@ -1797,6 +1798,17 @@ export default function Home() {
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager } = useMe();
   const [showReportIssue, setShowReportIssue] = useState(false);
+  // First-login "Get Started" overview. Auto-opens once when the server says
+  // this user hasn't seen it yet; reopenable any time from the header menu.
+  const [showGetStarted, setShowGetStarted] = useState(false);
+  const autoOpenedGetStarted = useRef(false);
+  useEffect(() => {
+    if (autoOpenedGetStarted.current) return;
+    if (me && me.onboardingSeen === false) {
+      autoOpenedGetStarted.current = true;
+      setShowGetStarted(true);
+    }
+  }, [me]);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -6071,6 +6083,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowGetStarted(true)}>
+                  <Boxes className="w-4 h-4 mr-2" /> Get Started
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { void signOut(); }}>
                   <LogOut className="w-4 h-4 mr-2" /> Sign out
                 </DropdownMenuItem>
@@ -8723,6 +8738,15 @@ export default function Home() {
           open={showReportIssue}
           onOpenChange={setShowReportIssue}
           screen={activeTab}
+        />
+
+        <GetStartedDialog
+          open={showGetStarted}
+          onOpenChange={setShowGetStarted}
+          onDismiss={() => {
+            if (me && me.onboardingSeen === false) void markOnboardingSeen();
+          }}
+          isManager={isManager}
         />
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}

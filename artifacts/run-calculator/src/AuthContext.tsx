@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePasswordRequest,
   fetchMe,
+  markOnboardingSeenRequest,
   setUnauthorizedHandler,
   signInRequest,
   signOutRequest,
@@ -36,6 +37,9 @@ type AuthContextValue = {
     currentPassword: string,
     newPassword: string,
   ) => Promise<void>;
+  // Mark the first-login "Get Started" overview as seen, persisting it
+  // server-side and updating the cached identity so it won't auto-open again.
+  markOnboardingSeen: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -121,6 +125,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Persist the "Get Started" dismissal server-side, then write the updated
+  // identity straight into the cache so the dialog won't auto-open again.
+  const markOnboardingSeen = useCallback(async () => {
+    const updated = await markOnboardingSeenRequest();
+    qc.setQueryData(["me"], updated);
+  }, [qc]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -133,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         forceSignedOut,
         revalidate,
         changePassword,
+        markOnboardingSeen,
       }}
     >
       {children}

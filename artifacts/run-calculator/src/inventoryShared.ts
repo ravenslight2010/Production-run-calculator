@@ -357,8 +357,13 @@ export type StaffMember = {
   role: Role;
   email: string | null;
   name: string | null;
+  onboardingSeen: boolean;
 };
 export const fetchMe = () => api<StaffMember>("/me");
+// Mark the first-login "Get Started" overview as seen. Returns the updated
+// StaffMember so the caller can refresh its cached identity.
+export const markOnboardingSeenRequest = () =>
+  api<StaffMember>("/me/onboarding-seen", { method: "POST" });
 
 // Auth — username + password. On the web the server sets an httpOnly `rc_auth`
 // session cookie, which same-origin fetches send automatically, so we ignore the

@@ -2,7 +2,7 @@ import { useAuth } from "@/context/auth";
 import { BlurView } from "expo-blur";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -11,6 +11,7 @@ import { usePendingResetCount } from "@/hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "@/hooks/useUnreviewedIncidentCount";
 import { useMe } from "@/hooks/useRole";
 import ReportIssueModal from "@/components/ReportIssueModal";
+import GetStartedModal from "@/components/GetStartedModal";
 
 const MENU_ITEMS: {
   label: string;
@@ -30,12 +31,23 @@ const MENU_ITEMS: {
 export default function TabLayout() {
   const colors = useColors();
   const router = useRouter();
-  const { signOut, isLoading, isAuthenticated } = useAuth();
+  const { signOut, isLoading, isAuthenticated, me, markOnboardingSeen } = useAuth();
   const insets = useSafeAreaInsets();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  // First-login "Get Started" overview. Auto-opens once when the server says
+  // this user hasn't seen it yet; reopenable any time from the header menu.
+  const [getStartedOpen, setGetStartedOpen] = useState(false);
+  const autoOpenedGetStarted = useRef(false);
+  useEffect(() => {
+    if (autoOpenedGetStarted.current) return;
+    if (me && me.onboardingSeen === false) {
+      autoOpenedGetStarted.current = true;
+      setGetStartedOpen(true);
+    }
+  }, [me]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -251,6 +263,33 @@ export default function TabLayout() {
               </View>
               <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
             </Pressable>
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                setGetStartedOpen(true);
+              }}
+              style={({ pressed }) => [
+                styles.menuItem,
+                {
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <View style={[styles.menuIcon, { backgroundColor: colors.primary + "22" }]}>
+                <Feather name="box" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                  Get Started
+                </Text>
+                <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                  A quick overview of the app and its tabs
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
             {isManager && (
               <Pressable
                 onPress={() => {
@@ -325,6 +364,15 @@ export default function TabLayout() {
         visible={reportOpen}
         onClose={() => setReportOpen(false)}
         screen="mobile"
+      />
+
+      <GetStartedModal
+        visible={getStartedOpen}
+        isManager={isManager}
+        onDismiss={() => {
+          setGetStartedOpen(false);
+          if (me && me.onboardingSeen === false) void markOnboardingSeen();
+        }}
       />
     </>
   );

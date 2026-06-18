@@ -20,6 +20,7 @@ import React, {
 import {
   changePasswordRequest,
   fetchMe,
+  markOnboardingSeenRequest,
   signInRequest,
   signOutRequest,
   signUpRequest,
@@ -48,6 +49,9 @@ type AuthContextValue = {
     currentPassword: string,
     newPassword: string,
   ) => Promise<void>;
+  // Mark the first-login "Get Started" overview as seen, persisting it
+  // server-side and updating the cached identity so it won't auto-open again.
+  markOnboardingSeen: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -184,6 +188,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  // Persist the "Get Started" dismissal server-side, then update the in-memory
+  // identity so the overview won't auto-open again on this device.
+  const markOnboardingSeen = useCallback(async () => {
+    const updated = await markOnboardingSeenRequest();
+    if (!forcedOutRef.current) setMe(updated);
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -196,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         forceSignedOut,
         revalidate,
         changePassword,
+        markOnboardingSeen,
       }}
     >
       {children}

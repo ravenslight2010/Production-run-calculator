@@ -14,4 +14,6 @@ export interface StaffMember {
   email: string | null;
   /** @nullable */
   name: string | null;
+  /** Whether the user has dismissed the first-login "Get Started" overview. */
+  onboardingSeen: boolean;
 }

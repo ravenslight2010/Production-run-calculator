@@ -703,6 +703,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffMember"
 
+  /me/onboarding-seen:
+    post:
+      operationId: markOnboardingSeen
+      tags: [roles]
+      summary: Mark the first-login "Get Started" overview as seen
+      description: >-
+        Sets the current user's onboardingSeen flag so the "Get Started"
+        overview never auto-opens again on any of their devices. Idempotent.
+      responses:
+        "200":
+          description: Updated current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+
   /users:
     get:
       operationId: listStaff
@@ -1267,6 +1283,7 @@ components:
         - role
         - email
         - name
+        - onboardingSeen
       properties:
         userId:
           type: string
@@ -1277,6 +1294,11 @@ components:
           type: [string, "null"]
         name:
           type: [string, "null"]
+        onboardingSeen:
+          type: boolean
+          description: >-
+            Whether the user has dismissed the first-login "Get Started"
+            overview.
 
     StaffRoleUpdate:
       type: object

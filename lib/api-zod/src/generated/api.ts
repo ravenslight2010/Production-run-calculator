@@ -57,7 +57,8 @@ export const SignInResponse = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
-  "name": zod.string().nullable()
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
 })
 })
 
@@ -711,7 +712,21 @@ export const GetMeResponse = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
-  "name": zod.string().nullable()
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
+})
+
+
+/**
+ * Sets the current user's onboardingSeen flag so the "Get Started" overview never auto-opens again on any of their devices. Idempotent.
+ * @summary Mark the first-login "Get Started" overview as seen
+ */
+export const MarkOnboardingSeenResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.enum(['manager', 'operator']),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
 })
 
 
@@ -722,7 +737,8 @@ export const ListStaffResponseItem = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
-  "name": zod.string().nullable()
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
 })
 export const ListStaffResponse = zod.array(ListStaffResponseItem)
 
@@ -742,7 +758,8 @@ export const SetStaffRoleResponse = zod.object({
   "userId": zod.string(),
   "role": zod.enum(['manager', 'operator']),
   "email": zod.string().nullable(),
-  "name": zod.string().nullable()
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.')
 })
 
 

@@ -33,3 +33,4 @@
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
 - [AI incident diagnosis](incident-diagnosis.md) — report-issue + crash-capture → server incidents + AI diagnosis; report open to operators, review manager-only; AI can't edit code; web+mobile parity.
+- [Onboarding flag](onboarding-seen-flag.md) — first-login "Get Started" overview gated by server-side per-user users.onboardingSeen; auto-open once via ref guard, reopen from header menu; web+mobile parity.

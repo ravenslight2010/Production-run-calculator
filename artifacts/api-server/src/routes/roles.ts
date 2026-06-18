@@ -4,6 +4,7 @@ import {
   deleteUser,
   getStaffMember,
   listStaff,
+  markOnboardingSeen,
   resetUserPassword,
   setUserRole,
 } from "../lib/roles";
@@ -25,6 +26,14 @@ const router: IRouter = Router();
 router.get("/me", async (req, res): Promise<void> => {
   const userId = req.userId!;
   res.json(await getStaffMember(userId));
+});
+
+// Mark the first-login "Get Started" overview as seen for the current user.
+// Idempotent; returns the updated StaffMember so the client can refresh its
+// cached identity without a second round-trip.
+router.post("/me/onboarding-seen", async (req, res): Promise<void> => {
+  const userId = req.userId!;
+  res.json(await markOnboardingSeen(userId));
 });
 
 // Staff roster — manager only. Lists every account so a manager can

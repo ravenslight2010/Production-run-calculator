@@ -19,6 +19,8 @@ export type StaffMember = {
   role: Role;
   email: string | null;
   name: string | null;
+  // Whether the user has dismissed the first-login "Get Started" overview.
+  onboardingSeen: boolean;
 };
 
 async function managerCount(): Promise<number> {
@@ -69,10 +71,29 @@ export async function createRoleForNewUser(userId: string): Promise<Role> {
 export async function getStaffMember(userId: string): Promise<StaffMember> {
   const { role } = await getOrCreateUserRole(userId);
   const [user] = await db
-    .select({ username: usersTable.username })
+    .select({
+      username: usersTable.username,
+      onboardingSeen: usersTable.onboardingSeen,
+    })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
-  return { userId, role, email: null, name: user?.username ?? null };
+  return {
+    userId,
+    role,
+    email: null,
+    name: user?.username ?? null,
+    onboardingSeen: user?.onboardingSeen ?? false,
+  };
+}
+
+// Mark the first-login "Get Started" overview as seen for this user so it never
+// auto-opens again on any of their devices. Idempotent.
+export async function markOnboardingSeen(userId: string): Promise<StaffMember> {
+  await db
+    .update(usersTable)
+    .set({ onboardingSeen: true })
+    .where(eq(usersTable.id, userId));
+  return getStaffMember(userId);
 }
 
 export async function listStaff(): Promise<StaffMember[]> {
@@ -81,6 +102,7 @@ export async function listStaff(): Promise<StaffMember[]> {
       userId: userRolesTable.userId,
       role: userRolesTable.role,
       username: usersTable.username,
+      onboardingSeen: usersTable.onboardingSeen,
     })
     .from(userRolesTable)
     .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
@@ -90,6 +112,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     role: r.role as Role,
     email: null,
     name: r.username,
+    onboardingSeen: r.onboardingSeen,
   }));
 }
 
