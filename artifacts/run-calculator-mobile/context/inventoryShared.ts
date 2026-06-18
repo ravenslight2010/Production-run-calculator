@@ -373,6 +373,22 @@ export const mergeInventory = (merges: MergeInventoryLine[]) =>
 // cap leaves room for the rest of the JSON body (candidates, etc.).
 export const MAX_IMAGE_BASE64_CHARS = 7_000_000;
 
+// iPhones often hand a web file picker a HEIC/HEIF photo, which most desktop
+// browsers can't decode via <img>/canvas. Detect it (MIME type is often blank
+// for HEIC, so fall back to the filename extension) so the web app can show
+// actionable guidance instead of a cryptic "Failed to load image". Native
+// mobile decodes HEIC via expo-image-manipulator, so this never fires there;
+// it's mirrored here only to keep the shared message/behavior in parity.
+export function isHeicFile(file: { name?: string; type?: string }): boolean {
+  const type = (file.type ?? "").toLowerCase();
+  if (type.includes("heic") || type.includes("heif")) return true;
+  const name = (file.name ?? "").toLowerCase();
+  return name.endsWith(".heic") || name.endsWith(".heif");
+}
+
+export const HEIC_UNSUPPORTED_MESSAGE =
+  "This looks like an iPhone HEIC photo your browser can't open. Please choose a JPEG or PNG instead — or set your iPhone's Settings → Camera → Formats to \"Most Compatible.\"";
+
 export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
   api<{ items: PhotoGuess[] }>("/inventory/identify-photo", {
     method: "POST",

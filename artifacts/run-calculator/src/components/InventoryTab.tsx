@@ -35,6 +35,8 @@ import {
   updateInventorySettings,
   identifyInventoryPhoto,
   MAX_IMAGE_BASE64_CHARS,
+  isHeicFile,
+  HEIC_UNSUPPORTED_MESSAGE,
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
@@ -779,7 +781,10 @@ async function fileToBase64Jpeg(file: File, maxEdge = 1280): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
-    i.onerror = () => reject(new Error("Failed to load image"));
+    // HEIC/HEIF from iPhones can't be decoded by <img> in most desktop
+    // browsers; surface actionable guidance instead of a cryptic failure.
+    i.onerror = () =>
+      reject(new Error(isHeicFile(file) ? HEIC_UNSUPPORTED_MESSAGE : "Failed to load image"));
     i.src = dataUrl;
   });
 
