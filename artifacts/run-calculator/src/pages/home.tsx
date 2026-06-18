@@ -187,6 +187,7 @@ import {
   Boxes,
   Menu,
   LogOut,
+  Smartphone,
 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
 import * as XLSX from "xlsx";
@@ -6097,6 +6098,9 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowGetStarted(true)}>
                   <Boxes className="w-4 h-4 mr-2" /> Get Started
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => window.open(`${window.location.origin}/mobile/`, "_blank", "noopener,noreferrer")}>
+                  <Smartphone className="w-4 h-4 mr-2" /> Mobile App
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowTour(true)}>
                   <Compass className="w-4 h-4 mr-2" /> Guided Tour
