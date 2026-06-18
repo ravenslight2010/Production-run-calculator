@@ -21,6 +21,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/context/auth";
 import { RunContextProvider } from "@/context/RunContext";
+import { reportIncident } from "@/context/inventoryShared";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -77,7 +78,22 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <ErrorBoundary>
+      <ErrorBoundary
+        onError={(error, stackTrace) => {
+          // Auto-submit a crash incident so a manager sees it even if the user
+          // never files a report. Fire-and-forget: a failed report must not mask
+          // the original crash. The AI can't edit code — recovery is a safe
+          // restart, surfaced by the fallback screen.
+          void reportIncident({
+            source: "auto_crash",
+            screen: "mobile",
+            appPlatform: "mobile",
+            errorMessage: error.message,
+            errorStack: [error.stack, stackTrace].filter(Boolean).join("\n\n"),
+            userAgent: `${Platform.OS} ${Platform.Version}`,
+          }).catch(() => {});
+        }}
+      >
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView style={{ flex: 1 }}>
             <AuthProvider>

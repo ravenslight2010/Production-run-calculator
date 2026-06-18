@@ -465,6 +465,117 @@ export interface OptimizeResult {
   note?: string;
 }
 
+/**
+ * Captured details about a reported issue or a crash
+ */
+export interface IncidentContext {
+  /** The user's own words describing what went wrong (user reports) */
+  description?: string;
+  /** The uncaught error's message (crashes) */
+  errorMessage?: string;
+  /** The uncaught error's stack/component trace (crashes) */
+  errorStack?: string;
+  /** Client user-agent / device string, when available */
+  userAgent?: string;
+}
+
+export type ReportIncidentInputSource = typeof ReportIncidentInputSource[keyof typeof ReportIncidentInputSource];
+
+
+export const ReportIncidentInputSource = {
+  user_report: 'user_report',
+  auto_crash: 'auto_crash',
+} as const;
+
+export type ReportIncidentInputAppPlatform = typeof ReportIncidentInputAppPlatform[keyof typeof ReportIncidentInputAppPlatform];
+
+
+export const ReportIncidentInputAppPlatform = {
+  web: 'web',
+  mobile: 'mobile',
+} as const;
+
+export interface ReportIncidentInput {
+  source: ReportIncidentInputSource;
+  /**
+     * Screen/route the user was on
+     * @maxLength 200
+     */
+  screen: string;
+  appPlatform: ReportIncidentInputAppPlatform;
+  /** @maxLength 100 */
+  appVersion?: string;
+  /**
+     * The user's description of the problem (user reports)
+     * @maxLength 4000
+     */
+  description?: string;
+  /**
+     * Uncaught error message (crashes)
+     * @maxLength 4000
+     */
+  errorMessage?: string;
+  /**
+     * Uncaught error stack (crashes)
+     * @maxLength 8000
+     */
+  errorStack?: string;
+  /** @maxLength 500 */
+  userAgent?: string;
+}
+
+export interface IncidentDiagnosis {
+  incidentId: string;
+  /** Plain-language explanation of what likely went wrong */
+  diagnosis: string;
+  /** Suggested next step / workaround for the user */
+  workaround: string;
+}
+
+export type IncidentSource = typeof IncidentSource[keyof typeof IncidentSource];
+
+
+export const IncidentSource = {
+  user_report: 'user_report',
+  auto_crash: 'auto_crash',
+} as const;
+
+export type IncidentStatus = typeof IncidentStatus[keyof typeof IncidentStatus];
+
+
+export const IncidentStatus = {
+  new: 'new',
+  reviewed: 'reviewed',
+} as const;
+
+export interface Incident {
+  id: string;
+  source: IncidentSource;
+  /** @nullable */
+  reporterId: string | null;
+  /** @nullable */
+  reporterName: string | null;
+  /** @nullable */
+  reporterRole: string | null;
+  screen: string;
+  appPlatform: string;
+  /** @nullable */
+  appVersion: string | null;
+  context: IncidentContext;
+  /** @nullable */
+  diagnosis: string | null;
+  /** @nullable */
+  workaround: string | null;
+  status: IncidentStatus;
+  createdAt: string;
+  /** @nullable */
+  reviewedAt: string | null;
+}
+
+export interface UnreviewedIncidentCount {
+  count: number;
+}
+
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };

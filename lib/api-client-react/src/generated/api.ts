@@ -32,6 +32,8 @@ import type {
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
+  Incident,
+  IncidentDiagnosis,
   InventoryItem,
   InventoryLedgerEntry,
   InventorySettings,
@@ -44,11 +46,13 @@ import type {
   PasswordResetRequest,
   ProductionRun,
   ProductionRunInput,
+  ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
   RestockInput,
   StaffMember,
   StaffRoleUpdate,
+  UnreviewedIncidentCount,
   UpdateInventoryItemInput,
   UpdateInventorySettingsInput
 } from './api.schemas';
@@ -1957,6 +1961,381 @@ export const useAiOptimize = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiOptimizeMutationOptions(options));
+    }
+
+export const getReportIncidentUrl = () => {
+
+
+
+
+  return `/api/incidents`
+}
+
+/**
+ * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
+ * @summary Report an issue or a crash and get an AI diagnosis
+ */
+export const reportIncident = async (reportIncidentInput: ReportIncidentInput, options?: RequestInit): Promise<IncidentDiagnosis> => {
+
+  return customFetch<IncidentDiagnosis>(getReportIncidentUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      reportIncidentInput,)
+  }
+);}
+
+
+
+
+export const getReportIncidentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportIncident>>, TError,{data: BodyType<ReportIncidentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reportIncident>>, TError,{data: BodyType<ReportIncidentInput>}, TContext> => {
+
+const mutationKey = ['reportIncident'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reportIncident>>, {data: BodyType<ReportIncidentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  reportIncident(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReportIncidentMutationResult = NonNullable<Awaited<ReturnType<typeof reportIncident>>>
+    export type ReportIncidentMutationBody = BodyType<ReportIncidentInput>
+    export type ReportIncidentMutationError = ErrorType<void>
+
+    /**
+ * @summary Report an issue or a crash and get an AI diagnosis
+ */
+export const useReportIncident = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reportIncident>>, TError,{data: BodyType<ReportIncidentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reportIncident>>,
+        TError,
+        {data: BodyType<ReportIncidentInput>},
+        TContext
+      > => {
+      return useMutation(getReportIncidentMutationOptions(options));
+    }
+
+export const getListIncidentsUrl = () => {
+
+
+
+
+  return `/api/incidents`
+}
+
+/**
+ * Returns recorded incidents (newest first) for a manager to review, including the captured context and the AI diagnosis.
+ * @summary List incidents (manager only)
+ */
+export const listIncidents = async ( options?: RequestInit): Promise<Incident[]> => {
+
+  return customFetch<Incident[]>(getListIncidentsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListIncidentsQueryKey = () => {
+    return [
+    `/api/incidents`
+    ] as const;
+    }
+
+
+export const getListIncidentsQueryOptions = <TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListIncidentsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIncidents>>> = ({ signal }) => listIncidents({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListIncidentsQueryResult = NonNullable<Awaited<ReturnType<typeof listIncidents>>>
+export type ListIncidentsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List incidents (manager only)
+ */
+
+export function useListIncidents<TData = Awaited<ReturnType<typeof listIncidents>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIncidents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListIncidentsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetUnreviewedIncidentCountUrl = () => {
+
+
+
+
+  return `/api/incidents/unreviewed-count`
+}
+
+/**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
+ * @summary Count of unreviewed incidents (manager only)
+ */
+export const getUnreviewedIncidentCount = async ( options?: RequestInit): Promise<UnreviewedIncidentCount> => {
+
+  return customFetch<UnreviewedIncidentCount>(getGetUnreviewedIncidentCountUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetUnreviewedIncidentCountQueryKey = () => {
+    return [
+    `/api/incidents/unreviewed-count`
+    ] as const;
+    }
+
+
+export const getGetUnreviewedIncidentCountQueryOptions = <TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetUnreviewedIncidentCountQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>> = ({ signal }) => getUnreviewedIncidentCount({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetUnreviewedIncidentCountQueryResult = NonNullable<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>>
+export type GetUnreviewedIncidentCountQueryError = ErrorType<void>
+
+
+/**
+ * @summary Count of unreviewed incidents (manager only)
+ */
+
+export function useGetUnreviewedIncidentCount<TData = Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getUnreviewedIncidentCount>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetUnreviewedIncidentCountQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetIncidentUrl = (id: string,) => {
+
+
+
+
+  return `/api/incidents/${id}`
+}
+
+/**
+ * @summary Get one incident (manager only)
+ */
+export const getIncident = async (id: string, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getGetIncidentUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIncidentQueryKey = (id: string,) => {
+    return [
+    `/api/incidents/${id}`
+    ] as const;
+    }
+
+
+export const getGetIncidentQueryOptions = <TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIncidentQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIncident>>> = ({ signal }) => getIncident(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(id), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetIncidentQueryResult = NonNullable<Awaited<ReturnType<typeof getIncident>>>
+export type GetIncidentQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get one incident (manager only)
+ */
+
+export function useGetIncident<TData = Awaited<ReturnType<typeof getIncident>>, TError = ErrorType<void>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getIncident>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetIncidentQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getReviewIncidentUrl = (id: string,) => {
+
+
+
+
+  return `/api/incidents/${id}/review`
+}
+
+/**
+ * @summary Mark an incident reviewed (manager only)
+ */
+export const reviewIncident = async (id: string, options?: RequestInit): Promise<Incident> => {
+
+  return customFetch<Incident>(getReviewIncidentUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getReviewIncidentMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewIncident>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewIncident>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['reviewIncident'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewIncident>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  reviewIncident(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewIncidentMutationResult = NonNullable<Awaited<ReturnType<typeof reviewIncident>>>
+
+    export type ReviewIncidentMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark an incident reviewed (manager only)
+ */
+export const useReviewIncident = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewIncident>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reviewIncident>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getReviewIncidentMutationOptions(options));
     }
 
 export const getGetMeUrl = () => {

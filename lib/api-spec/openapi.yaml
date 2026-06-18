@@ -20,6 +20,8 @@ tags:
     description: Staff roles and access control
   - name: ai
     description: AI assistant (optimization recommendations)
+  - name: incidents
+    description: Issue reports, crash capture, and AI diagnosis
 paths:
   /healthz:
     get:
@@ -551,6 +553,116 @@ paths:
           description: Invalid input
         "502":
           description: AI provider error
+
+  /incidents:
+    post:
+      operationId: reportIncident
+      tags: [incidents]
+      summary: Report an issue or a crash and get an AI diagnosis
+      description: >-
+        Records an incident (a user-reported problem or an auto-captured crash)
+        and returns a plain-language AI diagnosis plus a suggested workaround.
+        Allowed for any signed-in user. The diagnosis is also stored on the
+        incident for managers to review later. Rate-limited per user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportIncidentInput"
+      responses:
+        "200":
+          description: Incident recorded; diagnosis returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentDiagnosis"
+        "400":
+          description: Invalid input
+        "429":
+          description: Too many requests
+    get:
+      operationId: listIncidents
+      tags: [incidents]
+      summary: List incidents (manager only)
+      description: >-
+        Returns recorded incidents (newest first) for a manager to review,
+        including the captured context and the AI diagnosis.
+      responses:
+        "200":
+          description: Incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Incident"
+        "403":
+          description: Manager role required
+
+  /incidents/unreviewed-count:
+    get:
+      operationId: getUnreviewedIncidentCount
+      tags: [incidents]
+      summary: Count of unreviewed incidents (manager only)
+      description: >-
+        Returns the number of incidents still marked new/unreviewed, used to
+        drive the manager nav badge.
+      responses:
+        "200":
+          description: Unreviewed incident count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreviewedIncidentCount"
+        "403":
+          description: Manager role required
+
+  /incidents/{id}:
+    get:
+      operationId: getIncident
+      tags: [incidents]
+      summary: Get one incident (manager only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "403":
+          description: Manager role required
+        "404":
+          description: No incident with that id
+
+  /incidents/{id}/review:
+    post:
+      operationId: reviewIncident
+      tags: [incidents]
+      summary: Mark an incident reviewed (manager only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "403":
+          description: Manager role required
+        "404":
+          description: No incident with that id
 
   /me:
     get:
@@ -1431,3 +1543,131 @@ components:
         note:
           type: string
           description: Optional message when data is insufficient for analysis
+
+    IncidentContext:
+      type: object
+      description: Captured details about a reported issue or a crash
+      properties:
+        description:
+          type: string
+          description: The user's own words describing what went wrong (user reports)
+        errorMessage:
+          type: string
+          description: The uncaught error's message (crashes)
+        errorStack:
+          type: string
+          description: The uncaught error's stack/component trace (crashes)
+        userAgent:
+          type: string
+          description: Client user-agent / device string, when available
+
+    ReportIncidentInput:
+      type: object
+      required:
+        - source
+        - screen
+        - appPlatform
+      properties:
+        source:
+          type: string
+          enum: [user_report, auto_crash]
+        screen:
+          type: string
+          description: Screen/route the user was on
+          maxLength: 200
+        appPlatform:
+          type: string
+          enum: [web, mobile]
+        appVersion:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+          description: The user's description of the problem (user reports)
+          maxLength: 4000
+        errorMessage:
+          type: string
+          description: Uncaught error message (crashes)
+          maxLength: 4000
+        errorStack:
+          type: string
+          description: Uncaught error stack (crashes)
+          maxLength: 8000
+        userAgent:
+          type: string
+          maxLength: 500
+
+    IncidentDiagnosis:
+      type: object
+      required:
+        - incidentId
+        - diagnosis
+        - workaround
+      properties:
+        incidentId:
+          type: string
+        diagnosis:
+          type: string
+          description: Plain-language explanation of what likely went wrong
+        workaround:
+          type: string
+          description: Suggested next step / workaround for the user
+
+    Incident:
+      type: object
+      required:
+        - id
+        - source
+        - reporterId
+        - reporterName
+        - reporterRole
+        - screen
+        - appPlatform
+        - appVersion
+        - context
+        - diagnosis
+        - workaround
+        - status
+        - createdAt
+        - reviewedAt
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          enum: [user_report, auto_crash]
+        reporterId:
+          type: [string, "null"]
+        reporterName:
+          type: [string, "null"]
+        reporterRole:
+          type: [string, "null"]
+        screen:
+          type: string
+        appPlatform:
+          type: string
+        appVersion:
+          type: [string, "null"]
+        context:
+          $ref: "#/components/schemas/IncidentContext"
+        diagnosis:
+          type: [string, "null"]
+        workaround:
+          type: [string, "null"]
+        status:
+          type: string
+          enum: [new, reviewed]
+        createdAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, "null"]
+          format: date-time
+
+    UnreviewedIncidentCount:
+      type: object
+      required:
+        - count
+      properties:
+        count:
+          type: integer

@@ -8,6 +8,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import { usePendingResetCount } from "@/hooks/usePendingResetCount";
+import { useUnreviewedIncidentCount } from "@/hooks/useUnreviewedIncidentCount";
+import { useMe } from "@/hooks/useRole";
+import ReportIssueModal from "@/components/ReportIssueModal";
 
 const MENU_ITEMS: {
   label: string;
@@ -32,8 +35,13 @@ export default function TabLayout() {
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
+  // Manager-only nav badge: reported issues / crashes not yet reviewed.
+  const unreviewedIncidentCount = useUnreviewedIncidentCount();
+  const { isManager } = useMe();
+  const attentionCount = pendingResetCount + unreviewedIncidentCount;
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;
@@ -56,13 +64,13 @@ export default function TabLayout() {
               hitSlop={10}
               style={({ pressed }) => [styles.menuBtn, { opacity: pressed ? 0.6 : 1 }]}
               accessibilityLabel={
-                pendingResetCount > 0
-                  ? `Menu, ${pendingResetCount} password reset requests waiting`
+                attentionCount > 0
+                  ? `Menu, ${attentionCount} items need attention`
                   : "Menu"
               }
             >
               <Feather name="menu" size={22} color={colors.foreground} />
-              {pendingResetCount > 0 && (
+              {attentionCount > 0 && (
                 <View
                   style={[
                     styles.headerBadge,
@@ -72,7 +80,7 @@ export default function TabLayout() {
                     },
                   ]}
                 >
-                  <Text style={styles.headerBadgeText}>{pendingResetCount}</Text>
+                  <Text style={styles.headerBadgeText}>{attentionCount}</Text>
                 </View>
               )}
             </Pressable>
@@ -150,6 +158,7 @@ export default function TabLayout() {
         {/* Menu-reachable screens (hidden from the bottom tab bar) */}
         <Tabs.Screen name="inventory" options={{ href: null, title: "Inventory" }} />
         <Tabs.Screen name="assistant" options={{ href: null, title: "AI Assistant" }} />
+        <Tabs.Screen name="incidents" options={{ href: null, title: "Reported issues" }} />
         <Tabs.Screen name="stoppages" options={{ href: null, title: "Stoppages" }} />
         <Tabs.Screen name="summary" options={{ href: null, title: "Summary" }} />
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />
@@ -218,6 +227,72 @@ export default function TabLayout() {
             <Pressable
               onPress={() => {
                 setMenuOpen(false);
+                setReportOpen(true);
+              }}
+              style={({ pressed }) => [
+                styles.menuItem,
+                {
+                  backgroundColor: colors.secondary,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <View style={[styles.menuIcon, { backgroundColor: colors.primary + "22" }]}>
+                <Feather name="life-buoy" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                  Report an issue
+                </Text>
+                <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                  Get instant help and alert your manager
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+            </Pressable>
+            {isManager && (
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
+                  router.push("/incidents" as never);
+                }}
+                style={({ pressed }) => [
+                  styles.menuItem,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: colors.primary + "22" }]}>
+                  <Feather name="alert-circle" size={18} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                    Reported issues
+                  </Text>
+                  <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                    Review reported problems and crashes
+                  </Text>
+                </View>
+                {unreviewedIncidentCount > 0 && (
+                  <View
+                    style={[
+                      styles.menuBadge,
+                      { backgroundColor: colors.warning ?? colors.primary },
+                    ]}
+                  >
+                    <Text style={styles.menuBadgeText}>{unreviewedIncidentCount}</Text>
+                  </View>
+                )}
+                <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
                 void signOut();
               }}
               style={({ pressed }) => [
@@ -245,6 +320,12 @@ export default function TabLayout() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ReportIssueModal
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        screen="mobile"
+      />
     </>
   );
 }

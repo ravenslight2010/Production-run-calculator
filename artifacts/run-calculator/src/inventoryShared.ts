@@ -508,3 +508,58 @@ export const mergeInventory = (merges: MergeInventoryLine[]) =>
     method: "POST",
     body: JSON.stringify({ merges }),
   });
+
+// ── Incidents: report an issue / crash + AI diagnosis ────────────────────────
+export type IncidentSource = "user_report" | "auto_crash";
+export type IncidentContext = {
+  description?: string;
+  errorMessage?: string;
+  errorStack?: string;
+  userAgent?: string;
+};
+export type ReportIncidentBody = {
+  source: IncidentSource;
+  screen: string;
+  appPlatform: "web" | "mobile";
+  appVersion?: string;
+  description?: string;
+  errorMessage?: string;
+  errorStack?: string;
+  userAgent?: string;
+};
+export type IncidentDiagnosis = {
+  incidentId: string;
+  diagnosis: string;
+  workaround: string;
+};
+export type Incident = {
+  id: string;
+  source: IncidentSource;
+  reporterId: string | null;
+  reporterName: string | null;
+  reporterRole: string | null;
+  screen: string;
+  appPlatform: string;
+  appVersion: string | null;
+  context: IncidentContext;
+  diagnosis: string | null;
+  workaround: string | null;
+  status: "new" | "reviewed";
+  createdAt: string;
+  reviewedAt: string | null;
+};
+
+// Report a problem (or auto-submit a crash) and get back a plain-language
+// diagnosis + workaround. Allowed for any signed-in user.
+export const reportIncident = (body: ReportIncidentBody) =>
+  api<IncidentDiagnosis>("/incidents", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// Manager-only review endpoints.
+export const fetchIncidents = () => api<Incident[]>("/incidents");
+export const fetchUnreviewedIncidentCount = () =>
+  api<{ count: number }>("/incidents/unreviewed-count");
+export const markIncidentReviewed = (id: string) =>
+  api<Incident>(`/incidents/${encodeURIComponent(id)}/review`, { method: "POST" });

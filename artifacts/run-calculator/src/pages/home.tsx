@@ -99,6 +99,8 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
+import IncidentsTab from "../components/IncidentsTab";
+import ReportIssueDialog from "../components/ReportIssueDialog";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   computeRunConsumptionLines,
@@ -120,12 +122,15 @@ import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
+import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
+import { useMe } from "../useRole";
 import {
   Factory,
   Layers,
   Clock,
   Droplets,
   ClipboardList,
+  LifeBuoy,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -1787,6 +1792,11 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState("run");
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
+  // Manager-only nav badge: reported issues / crashes not yet reviewed.
+  const unreviewedIncidentCount = useUnreviewedIncidentCount();
+  // Server-side role (distinct from the local supervisor PIN toggle below).
+  const { isManager } = useMe();
+  const [showReportIssue, setShowReportIssue] = useState(false);
   const [doughSubTab, setDoughSubTab] = useState<"dough" | "crusts">("dough");
   const [runToTime, setRunToTime] = useState(() => loadDayState().runToTime ?? "19:15");
 
@@ -5997,19 +6007,19 @@ export default function Home() {
                 <button
                   type="button"
                   title={
-                    pendingResetCount > 0
-                      ? `${pendingResetCount} password reset request${pendingResetCount === 1 ? "" : "s"} waiting`
+                    pendingResetCount + unreviewedIncidentCount > 0
+                      ? `${pendingResetCount + unreviewedIncidentCount} item${pendingResetCount + unreviewedIncidentCount === 1 ? "" : "s"} need attention`
                       : "More"
                   }
                   className="relative flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <Menu className="w-4 h-4" />
-                  {pendingResetCount > 0 && (
+                  {pendingResetCount + unreviewedIncidentCount > 0 && (
                     <span
-                      aria-label={`${pendingResetCount} password reset requests waiting`}
+                      aria-label={`${pendingResetCount + unreviewedIncidentCount} items need attention`}
                       className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none ring-2 ring-background"
                     >
-                      {pendingResetCount}
+                      {pendingResetCount + unreviewedIncidentCount}
                     </span>
                   )}
                 </button>
@@ -6032,6 +6042,19 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowReportIssue(true)}>
+                  <LifeBuoy className="w-4 h-4 mr-2" /> Report an issue
+                </DropdownMenuItem>
+                {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("incidents")}>
+                    <LifeBuoy className="w-4 h-4 mr-2" /> Reported issues
+                    {unreviewedIncidentCount > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                        {unreviewedIncidentCount}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -7028,6 +7051,10 @@ export default function Home() {
                   }
                   onApplyAction={applyOptimizeAction}
                 />
+              </TabsContent>
+
+              <TabsContent value="incidents">
+                <IncidentsTab />
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
@@ -8691,6 +8718,12 @@ export default function Home() {
             </Tabs>
           </form>
         </Form>
+
+        <ReportIssueDialog
+          open={showReportIssue}
+          onOpenChange={setShowReportIssue}
+          screen={activeTab}
+        />
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (

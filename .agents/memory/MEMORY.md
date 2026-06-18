@@ -32,3 +32,4 @@
 - [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
+- [AI incident diagnosis](incident-diagnosis.md) — report-issue + crash-capture → server incidents + AI diagnosis; report open to operators, review manager-only; AI can't edit code; web+mobile parity.

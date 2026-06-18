@@ -537,6 +537,139 @@ export const AiOptimizeResponse = zod.object({
 
 
 /**
+ * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
+ * @summary Report an issue or a crash and get an AI diagnosis
+ */
+export const reportIncidentBodyScreenMax = 200;
+
+export const reportIncidentBodyAppVersionMax = 100;
+
+export const reportIncidentBodyDescriptionMax = 4000;
+
+export const reportIncidentBodyErrorMessageMax = 4000;
+
+export const reportIncidentBodyErrorStackMax = 8000;
+
+export const reportIncidentBodyUserAgentMax = 500;
+
+
+
+export const ReportIncidentBody = zod.object({
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "screen": zod.string().max(reportIncidentBodyScreenMax).describe('Screen\/route the user was on'),
+  "appPlatform": zod.enum(['web', 'mobile']),
+  "appVersion": zod.string().max(reportIncidentBodyAppVersionMax).optional(),
+  "description": zod.string().max(reportIncidentBodyDescriptionMax).optional().describe('The user\'s description of the problem (user reports)'),
+  "errorMessage": zod.string().max(reportIncidentBodyErrorMessageMax).optional().describe('Uncaught error message (crashes)'),
+  "errorStack": zod.string().max(reportIncidentBodyErrorStackMax).optional().describe('Uncaught error stack (crashes)'),
+  "userAgent": zod.string().max(reportIncidentBodyUserAgentMax).optional()
+})
+
+export const ReportIncidentResponse = zod.object({
+  "incidentId": zod.string(),
+  "diagnosis": zod.string().describe('Plain-language explanation of what likely went wrong'),
+  "workaround": zod.string().describe('Suggested next step \/ workaround for the user')
+})
+
+
+/**
+ * Returns recorded incidents (newest first) for a manager to review, including the captured context and the AI diagnosis.
+ * @summary List incidents (manager only)
+ */
+export const ListIncidentsResponseItem = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "reporterId": zod.string().nullable(),
+  "reporterName": zod.string().nullable(),
+  "reporterRole": zod.string().nullable(),
+  "screen": zod.string(),
+  "appPlatform": zod.string(),
+  "appVersion": zod.string().nullable(),
+  "context": zod.object({
+  "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
+  "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
+  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+}).describe('Captured details about a reported issue or a crash'),
+  "diagnosis": zod.string().nullable(),
+  "workaround": zod.string().nullable(),
+  "status": zod.enum(['new', 'reviewed']),
+  "createdAt": zod.coerce.date(),
+  "reviewedAt": zod.coerce.date().nullable()
+})
+export const ListIncidentsResponse = zod.array(ListIncidentsResponseItem)
+
+
+/**
+ * Returns the number of incidents still marked new/unreviewed, used to drive the manager nav badge.
+ * @summary Count of unreviewed incidents (manager only)
+ */
+export const GetUnreviewedIncidentCountResponse = zod.object({
+  "count": zod.number()
+})
+
+
+/**
+ * @summary Get one incident (manager only)
+ */
+export const GetIncidentParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetIncidentResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "reporterId": zod.string().nullable(),
+  "reporterName": zod.string().nullable(),
+  "reporterRole": zod.string().nullable(),
+  "screen": zod.string(),
+  "appPlatform": zod.string(),
+  "appVersion": zod.string().nullable(),
+  "context": zod.object({
+  "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
+  "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
+  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+}).describe('Captured details about a reported issue or a crash'),
+  "diagnosis": zod.string().nullable(),
+  "workaround": zod.string().nullable(),
+  "status": zod.enum(['new', 'reviewed']),
+  "createdAt": zod.coerce.date(),
+  "reviewedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Mark an incident reviewed (manager only)
+ */
+export const ReviewIncidentParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ReviewIncidentResponse = zod.object({
+  "id": zod.string(),
+  "source": zod.enum(['user_report', 'auto_crash']),
+  "reporterId": zod.string().nullable(),
+  "reporterName": zod.string().nullable(),
+  "reporterRole": zod.string().nullable(),
+  "screen": zod.string(),
+  "appPlatform": zod.string(),
+  "appVersion": zod.string().nullable(),
+  "context": zod.object({
+  "description": zod.string().optional().describe('The user\'s own words describing what went wrong (user reports)'),
+  "errorMessage": zod.string().optional().describe('The uncaught error\'s message (crashes)'),
+  "errorStack": zod.string().optional().describe('The uncaught error\'s stack\/component trace (crashes)'),
+  "userAgent": zod.string().optional().describe('Client user-agent \/ device string, when available')
+}).describe('Captured details about a reported issue or a crash'),
+  "diagnosis": zod.string().nullable(),
+  "workaround": zod.string().nullable(),
+  "status": zod.enum(['new', 'reviewed']),
+  "createdAt": zod.coerce.date(),
+  "reviewedAt": zod.coerce.date().nullable()
+})
+
+
+/**
  * @summary Current signed-in user's identity and role
  */
 export const GetMeResponse = zod.object({
