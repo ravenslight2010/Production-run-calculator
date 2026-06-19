@@ -19,6 +19,8 @@ interface NotifParams {
   currentRun: RunMeta | undefined;
   calc: NotifCalc;
   v: NotifValues;
+  /** Crust runs open pre-made cases — no dough is mixed, so suppress batch alerts. */
+  isCrust: boolean;
 }
 
 interface NotifResult {
@@ -67,6 +69,7 @@ export function useNotifications({
   currentRun,
   calc,
   v,
+  isCrust,
 }: NotifParams): NotifResult {
   const notifiedRunRef = useRef<string | null>(null);
   const batchNotifRef = useRef<string>("");
@@ -101,6 +104,7 @@ export function useNotifications({
 
   // ── Batch cycle alert ──────────────────────────────────────────────────────
   useEffect(() => {
+    if (isCrust) { setShowBatchDue(false); return; } // crust runs mix no dough — no batch alerts; clear any stale banner
     if (runStatus !== "running" || !currentRun?.startedAt || calc.timePerBatchSec <= 0) return;
     const elapsed = (nowTime.getTime() - currentRun.startedAt) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
@@ -122,7 +126,7 @@ export function useNotifications({
       Notification.requestPermission();
     }
     return () => { if (batchDismissRef.current) clearTimeout(batchDismissRef.current); };
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime]);
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.timePerBatchSec, nowTime, isCrust]);
 
   // ── Run time complete alert ────────────────────────────────────────────────
   useEffect(() => {

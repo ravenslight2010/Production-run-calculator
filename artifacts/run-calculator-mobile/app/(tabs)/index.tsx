@@ -423,8 +423,8 @@ export default function CalculatorScreen() {
           </Pressable>
         </View>
 
-        {/* Batch-due banner */}
-        {showBatchDue ? (
+        {/* Batch-due banner — dough runs only */}
+        {showBatchDue && doughSubTab !== "crusts" ? (
           <Pressable
             onPress={() => setShowBatchDue(false)}
             style={[styles.batchDueBanner, { backgroundColor: colors.primary }]}

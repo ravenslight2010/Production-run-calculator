@@ -90,6 +90,9 @@ export function useNotifications({
 
   // ── Batch cycle alert ───────────────────────────────────────────────────────
   useEffect(() => {
+    // Crust runs open pre-made cases — no dough is mixed, so no batch alerts.
+    // Also clear any banner that was raised before switching into crust mode.
+    if (run.progress.subTab === "crusts") { setShowBatchDue(false); return; }
     if (!isRunning || !startedAt || calc.timePerBatchSec <= 0) return;
     const elapsed = (nowMs - startedAt) / 1000;
     const batchNum = Math.floor(elapsed / calc.timePerBatchSec);
@@ -105,7 +108,7 @@ export function useNotifications({
       "🍕 Start next dough batch",
       `${label} — batch ${batchNum + 1} is due now.`,
     );
-  }, [isRunning, run.id, startedAt, calc.timePerBatchSec, nowMs, label]);
+  }, [isRunning, run.id, startedAt, calc.timePerBatchSec, nowMs, label, run.progress.subTab]);
 
   // Clear any pending banner-dismiss timer only on unmount.
   useEffect(() => {

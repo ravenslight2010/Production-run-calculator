@@ -47,3 +47,4 @@
 - [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.
 - [Run-calc parity test](run-calc-parity-test.md) — web computeCalc is inline (not importable); parity guard uses web computeSummaryStats vs mobile computeCalc on a coinciding basis; mobile loaded via strip-imports harness.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
+- [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.

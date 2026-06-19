@@ -3845,6 +3845,7 @@ export default function Home() {
     currentRun,
     calc,
     v,
+    isCrust: doughSubTab === "crusts",
   });
 
   // ── Screen casting views (early returns) ──────────────────────────────────
@@ -3985,7 +3986,7 @@ export default function Home() {
         <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
 
         {/* Big countdown */}
-        {runStatus === "running" && calc.timePerBatchSec > 0 ? (
+        {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
           <div className={`flex-1 flex flex-col items-center justify-center gap-6 rounded-3xl border p-12 ${batchDue ? "bg-orange-950/40 border-orange-500/50" : batchUrgent ? "bg-amber-950/30 border-amber-600/40" : "bg-card border-border"}`}>
             <p className={`text-lg font-bold uppercase tracking-widest ${batchDue ? "text-orange-400" : batchUrgent ? "text-amber-400" : "text-muted-foreground"}`}>
               {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
@@ -4024,7 +4025,7 @@ export default function Home() {
         ) : (
           <div className="flex-1 flex items-center justify-center rounded-3xl border border-border bg-card">
             <p className="text-2xl text-muted-foreground">
-              {runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"}
+              {doughSubTab === "crusts" ? "Crust run — no dough batches to mix" : runStatus === "pending" ? "Run not started" : runStatus === "ended" ? "Run ended" : "Enter line speed to see batch timing"}
             </p>
           </div>
         )}
@@ -4032,16 +4033,18 @@ export default function Home() {
         {/* Dough stats row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="rounded-2xl bg-card border border-border p-4 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Trays on Line</p>
+            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{doughSubTab === "crusts" ? "Stacks Ready" : "Trays on Line"}</p>
             <p className="text-3xl font-black tabular-nums">{v.traysOnLine > 0 ? v.traysOnLine : "—"}</p>
             {calc.traysNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.traysNeeded, 0)} needed</p>}
           </div>
-          <div className="rounded-2xl bg-card border border-border p-4 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
-            <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
-            {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} needed</p>}
-          </div>
-          {v.doughBatchYield > 0 && (
+          {doughSubTab !== "crusts" && (
+            <div className="rounded-2xl bg-card border border-border p-4 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batches Ready</p>
+              <p className="text-3xl font-black tabular-nums">{v.batchesReady}</p>
+              {calc.batchesNeeded > 0 && <p className="text-sm text-muted-foreground">/ {fmtNum(calc.batchesNeeded, 1)} needed</p>}
+            </div>
+          )}
+          {v.doughBatchYield > 0 && doughSubTab !== "crusts" && (
             <div className="rounded-2xl bg-card border border-border p-4 text-center">
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Batch Yield</p>
               <p className="text-3xl font-black tabular-nums">{fmtComma(v.doughBatchYield)}</p>
@@ -4562,15 +4565,17 @@ export default function Home() {
                 </div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>SKIDS</div>
               </div>
-              <div className="flex flex-col items-center">
-                <div
-                  className="text-[96px] leading-none font-black tracking-tight tabular-nums"
-                  style={{ color: accentColor, ...(mm === 0 && ss < 120 && runStatus === "running" ? { animation: "pulse 1s ease-in-out infinite" } : {}) }}
-                >
-                  {batchStr}
+              {doughSubTab !== "crusts" && (
+                <div className="flex flex-col items-center">
+                  <div
+                    className="text-[96px] leading-none font-black tracking-tight tabular-nums"
+                    style={{ color: accentColor, ...(mm === 0 && ss < 120 && runStatus === "running" ? { animation: "pulse 1s ease-in-out infinite" } : {}) }}
+                  >
+                    {batchStr}
+                  </div>
+                  <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>NEXT BATCH</div>
                 </div>
-                <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>NEXT BATCH</div>
-              </div>
+              )}
             </main>
 
             {/* Bottom */}
