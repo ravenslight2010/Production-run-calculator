@@ -70,6 +70,10 @@ function AuthForm({ mode }: { mode: Mode }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (isSignUp && password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
     if (isSignUp && password !== confirm) {
       setError("Passwords don't match.");
       return;

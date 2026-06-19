@@ -20,6 +20,8 @@ import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/auth";
 import { InventoryApiError } from "@/context/inventoryShared";
 
+const MIN_PASSWORD_LENGTH = 6;
+
 export default function SignUpScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -37,6 +39,10 @@ export default function SignUpScreen() {
 
   const handleSubmit = async () => {
     setError(null);
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords don't match.");
       return;
