@@ -25,6 +25,7 @@ import type {
   AuthCredentials,
   AuthResponse,
   ChangePasswordCredentials,
+  CheckUsernameAvailableParams,
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
@@ -56,7 +57,8 @@ import type {
   StaffRoleUpdate,
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
-  UpdateInventorySettingsInput
+  UpdateInventorySettingsInput,
+  UsernameAvailability
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -220,6 +222,91 @@ export const useSignUp = <TError = ErrorType<void>,
       > => {
       return useMutation(getSignUpMutationOptions(options));
     }
+
+export const getCheckUsernameAvailableUrl = (params: CheckUsernameAvailableParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/auth/username-available?${stringifiedParams}` : `/api/auth/username-available`
+}
+
+/**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
+ * @summary Check whether a username is available for sign-up
+ */
+export const checkUsernameAvailable = async (params: CheckUsernameAvailableParams, options?: RequestInit): Promise<UsernameAvailability> => {
+
+  return customFetch<UsernameAvailability>(getCheckUsernameAvailableUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getCheckUsernameAvailableQueryKey = (params?: CheckUsernameAvailableParams,) => {
+    return [
+    `/api/auth/username-available`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getCheckUsernameAvailableQueryOptions = <TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(params: CheckUsernameAvailableParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getCheckUsernameAvailableQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof checkUsernameAvailable>>> = ({ signal }) => checkUsernameAvailable(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type CheckUsernameAvailableQueryResult = NonNullable<Awaited<ReturnType<typeof checkUsernameAvailable>>>
+export type CheckUsernameAvailableQueryError = ErrorType<void>
+
+
+/**
+ * @summary Check whether a username is available for sign-up
+ */
+
+export function useCheckUsernameAvailable<TData = Awaited<ReturnType<typeof checkUsernameAvailable>>, TError = ErrorType<void>>(
+ params: CheckUsernameAvailableParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof checkUsernameAvailable>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getCheckUsernameAvailableQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getSignInUrl = () => {
 

@@ -63,6 +63,33 @@ paths:
         "409":
           description: Username already taken
 
+  /auth/username-available:
+    get:
+      operationId: checkUsernameAvailable
+      tags: [auth]
+      summary: Check whether a username is available for sign-up
+      description: >-
+        Lightweight, read-only lookup used by the sign-up form to tell users in
+        real time whether a username is still free. Public — sign-up is itself
+        public. The check is case-insensitive, mirroring account creation.
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 64
+      responses:
+        "200":
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsernameAvailability"
+        "400":
+          description: Invalid input
+
   /auth/sign-in:
     post:
       operationId: signIn
@@ -1378,6 +1405,15 @@ components:
       properties:
         ok:
           type: boolean
+
+    UsernameAvailability:
+      type: object
+      required:
+        - available
+      properties:
+        available:
+          type: boolean
+          description: True when no account already uses this username.
 
     ForgotPasswordRequest:
       type: object

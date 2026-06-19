@@ -268,6 +268,12 @@ export const signInRequest = (username: string, password: string) =>
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+// Public (signed-out). Read-only lookup behind the live sign-up hint; resolves
+// to { available } so the form can warn before submit when a name is taken.
+export const checkUsernameAvailable = (username: string) =>
+  api<{ available: boolean }>(
+    `/auth/username-available?username=${encodeURIComponent(username)}`,
+  );
 export const signOutRequest = () =>
   api<null>("/auth/sign-out", { method: "POST" });
 export const changePasswordRequest = (

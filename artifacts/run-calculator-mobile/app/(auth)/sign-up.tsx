@@ -18,9 +18,55 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/context/auth";
-import { InventoryApiError } from "@/context/inventoryShared";
+import {
+  checkUsernameAvailable,
+  InventoryApiError,
+} from "@/context/inventoryShared";
 
 const MIN_PASSWORD_LENGTH = 6;
+const MIN_USERNAME_LENGTH = 3;
+const USERNAME_CHECK_DEBOUNCE_MS = 400;
+
+type UsernameStatus = "idle" | "short" | "checking" | "available" | "taken";
+
+// Debounced, read-only availability lookup for the sign-up username field.
+// Mirrors the live password hints: neutral while empty/too short or in flight,
+// green once known free, red once known taken. Network errors fall back to
+// neutral so a flaky check never blocks the form.
+function useUsernameAvailability(
+  username: string,
+  enabled: boolean,
+): UsernameStatus {
+  const [status, setStatus] = React.useState<UsernameStatus>("idle");
+  const handle = username.trim();
+
+  React.useEffect(() => {
+    if (!enabled || handle.length === 0) {
+      setStatus("idle");
+      return;
+    }
+    if (handle.length < MIN_USERNAME_LENGTH) {
+      setStatus("short");
+      return;
+    }
+    setStatus("checking");
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const { available } = await checkUsernameAvailable(handle);
+        if (!cancelled) setStatus(available ? "available" : "taken");
+      } catch {
+        if (!cancelled) setStatus("idle");
+      }
+    }, USERNAME_CHECK_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [handle, enabled]);
+
+  return status;
+}
 
 export default function SignUpScreen() {
   const colors = useColors();
@@ -37,8 +83,14 @@ export default function SignUpScreen() {
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
+  const usernameStatus = useUsernameAvailability(username, true);
+
   const handleSubmit = async () => {
     setError(null);
+    if (usernameStatus === "taken") {
+      setError("That username is already taken.");
+      return;
+    }
     if (password.length < MIN_PASSWORD_LENGTH) {
       setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
@@ -91,7 +143,7 @@ export default function SignUpScreen() {
 
           <Text style={styles.label}>Username</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { marginBottom: 0 }]}
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="username-new"
@@ -100,6 +152,55 @@ export default function SignUpScreen() {
             placeholderTextColor={colors.mutedForeground}
             onChangeText={setUsername}
           />
+
+          <View style={[styles.hintRow, { marginTop: 6 }]}>
+            <Feather
+              name={
+                usernameStatus === "available"
+                  ? "check"
+                  : usernameStatus === "taken"
+                    ? "x"
+                    : "check"
+              }
+              size={13}
+              color={
+                usernameStatus === "available"
+                  ? colors.success
+                  : usernameStatus === "taken"
+                    ? colors.destructive
+                    : colors.mutedForeground
+              }
+              style={{
+                opacity:
+                  usernameStatus === "available" ||
+                  usernameStatus === "taken" ||
+                  usernameStatus === "checking"
+                    ? 1
+                    : 0.4,
+              }}
+            />
+            <Text
+              style={[
+                styles.hint,
+                {
+                  color:
+                    usernameStatus === "available"
+                      ? colors.success
+                      : usernameStatus === "taken"
+                        ? colors.destructive
+                        : colors.mutedForeground,
+                },
+              ]}
+            >
+              {usernameStatus === "available"
+                ? "Username is available"
+                : usernameStatus === "taken"
+                  ? "That username is already taken"
+                  : usernameStatus === "checking"
+                    ? "Checking availability…"
+                    : `At least ${MIN_USERNAME_LENGTH} characters`}
+            </Text>
+          </View>
 
           <Text style={styles.label}>Password</Text>
           <View style={styles.pwWrap}>

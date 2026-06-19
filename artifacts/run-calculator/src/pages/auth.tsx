@@ -1,17 +1,98 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { Check, Eye, EyeOff, X } from "lucide-react";
+import { Check, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/AuthContext";
 import {
+  checkUsernameAvailable,
   forgotPasswordRequest,
   resetPasswordRequest,
   InventoryApiError,
 } from "@/inventoryShared";
 
 const MIN_PASSWORD_LENGTH = 6;
+const MIN_USERNAME_LENGTH = 3;
+const USERNAME_CHECK_DEBOUNCE_MS = 400;
+
+type UsernameStatus = "idle" | "short" | "checking" | "available" | "taken";
+
+// Debounced, read-only availability lookup for the sign-up username field. The
+// status mirrors the live password hints: neutral while empty/too short or in
+// flight, green once we know it's free, red once we know it's taken. Network
+// errors fall back to neutral so a flaky check never blocks the form.
+function useUsernameAvailability(
+  username: string,
+  enabled: boolean,
+): UsernameStatus {
+  const [status, setStatus] = useState<UsernameStatus>("idle");
+  const handle = username.trim();
+
+  useEffect(() => {
+    if (!enabled) {
+      setStatus("idle");
+      return;
+    }
+    if (handle.length === 0) {
+      setStatus("idle");
+      return;
+    }
+    if (handle.length < MIN_USERNAME_LENGTH) {
+      setStatus("short");
+      return;
+    }
+    setStatus("checking");
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const { available } = await checkUsernameAvailable(handle);
+        if (!cancelled) setStatus(available ? "available" : "taken");
+      } catch {
+        if (!cancelled) setStatus("idle");
+      }
+    }, USERNAME_CHECK_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [handle, enabled]);
+
+  return status;
+}
+
+function UsernameHint({ status }: { status: UsernameStatus }) {
+  if (status === "available") {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-500">
+        <Check className="h-3.5 w-3.5 opacity-100" />
+        Username is available
+      </p>
+    );
+  }
+  if (status === "taken") {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-destructive">
+        <X className="h-3.5 w-3.5 opacity-100" />
+        That username is already taken
+      </p>
+    );
+  }
+  if (status === "checking") {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin opacity-100" />
+        Checking availability…
+      </p>
+    );
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <Check className="h-3.5 w-3.5 opacity-40" />
+      At least {MIN_USERNAME_LENGTH} characters
+    </p>
+  );
+}
 
 type Mode = "sign-in" | "sign-up";
 
@@ -114,10 +195,15 @@ function AuthForm({ mode }: { mode: Mode }) {
 
   const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
   const isSignUp = mode === "sign-up";
+  const usernameStatus = useUsernameAvailability(username, isSignUp);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (isSignUp && usernameStatus === "taken") {
+      setError("That username is already taken.");
+      return;
+    }
     if (isSignUp && password.length < MIN_PASSWORD_LENGTH) {
       setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
@@ -180,6 +266,7 @@ function AuthForm({ mode }: { mode: Mode }) {
                 onChange={(e) => setUsername(e.target.value)}
                 className="text-foreground"
               />
+              {isSignUp && <UsernameHint status={usernameStatus} />}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password" className="text-foreground">

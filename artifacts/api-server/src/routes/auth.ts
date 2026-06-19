@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import {
   ChangePasswordBody,
+  CheckUsernameAvailableQueryParams,
   ForgotPasswordBody,
   ResetPasswordBody,
   SignInBody,
@@ -16,6 +17,7 @@ import {
   createUser,
   findUserByUsername,
   getUserById,
+  isUsernameAvailable,
   updateUserPassword,
 } from "../lib/users";
 import { createResetRequest, resetPasswordWithCode } from "../lib/passwordResets";
@@ -55,6 +57,25 @@ router.post("/auth/sign-up", async (req, res): Promise<void> => {
   const token = signToken(created.user.id);
   setSessionCookie(res, token);
   res.status(201).json({ token, user: await getStaffMember(created.user.id) });
+});
+
+// Read-only username availability check for the live sign-up hint. Public, the
+// same as sign-up. Case-insensitive, matching how accounts are actually created.
+router.get("/auth/username-available", async (req, res): Promise<void> => {
+  // The generated query schema coerces a missing param to the string
+  // "undefined", so guard presence explicitly before validating length.
+  const raw = req.query.username;
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    res.status(400).json({ error: "username query parameter is required" });
+    return;
+  }
+  const parsed = CheckUsernameAvailableQueryParams.safeParse({ username: raw });
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const available = await isUsernameAvailable(parsed.data.username);
+  res.json({ available });
 });
 
 // Sign in with username + password.

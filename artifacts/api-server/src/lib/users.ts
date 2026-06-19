@@ -17,6 +17,13 @@ export async function findUserByUsername(username: string): Promise<User | undef
   return row;
 }
 
+// Read-only availability check for the sign-up form. Mirrors createUser's
+// case-insensitive uniqueness so the live hint matches what creation will do.
+export async function isUsernameAvailable(username: string): Promise<boolean> {
+  const existing = await findUserByUsername(username);
+  return !existing;
+}
+
 export async function getUserById(id: string): Promise<User | undefined> {
   const [row] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   return row;

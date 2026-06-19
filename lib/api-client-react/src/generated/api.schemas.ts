@@ -293,6 +293,11 @@ export interface OkResponse {
   ok: boolean;
 }
 
+export interface UsernameAvailability {
+  /** True when no account already uses this username. */
+  available: boolean;
+}
+
 export interface ForgotPasswordRequest {
   /**
      * @minLength 1
@@ -654,6 +659,14 @@ export interface Incident {
 export interface UnreviewedIncidentCount {
   count: number;
 }
+
+export type CheckUsernameAvailableParams = {
+/**
+ * @minLength 1
+ * @maxLength 64
+ */
+username: string;
+};
 
 export type ListInventoryLedgerParams = {
 itemId?: number;

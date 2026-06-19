@@ -36,6 +36,23 @@ export const SignUpBody = zod.object({
 
 
 /**
+ * Lightweight, read-only lookup used by the sign-up form to tell users in real time whether a username is still free. Public — sign-up is itself public. The check is case-insensitive, mirroring account creation.
+ * @summary Check whether a username is available for sign-up
+ */
+export const checkUsernameAvailableQueryUsernameMax = 64;
+
+
+
+export const CheckUsernameAvailableQueryParams = zod.object({
+  "username": zod.coerce.string().min(1).max(checkUsernameAvailableQueryUsernameMax)
+})
+
+export const CheckUsernameAvailableResponse = zod.object({
+  "available": zod.boolean().describe('True when no account already uses this username.')
+})
+
+
+/**
  * @summary Sign in with username and password
  */
 export const signInBodyUsernameMin = 3;
