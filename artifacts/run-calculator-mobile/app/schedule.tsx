@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { Stack, useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
@@ -11,11 +13,18 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as XLSX from "xlsx";
+import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { CardSection, SectionHeader } from "@/components/UI";
-import { todayStr, useRun } from "@/context/RunContext";
+import { profileKey, todayStr, useRun } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
+import {
+  parseRunWorkbookBase64,
+  parseWorkbookObject,
+  type ImportParseResult,
+} from "@/utils/runExcel";
 
 function tap() {
   Haptics.selectionAsync();
@@ -52,11 +61,15 @@ export default function ScheduleScreen() {
   const {
     brands,
     brandFlavors,
+    brandProfiles,
     scheduled,
     addScheduledRun,
+    addFlavor,
+    addListItem,
     removeScheduledRun,
     clearScheduledDay,
     applyScheduledDay,
+    supervisorPin,
   } = useRun();
 
   const today = todayStr();
@@ -96,6 +109,55 @@ export default function ScheduleScreen() {
       router.back();
     }
   };
+
+  const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+
+  async function handleImportPick() {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      let result: ImportParseResult;
+      if (Platform.OS === "web") {
+        const resp = await fetch(asset.uri);
+        const ab = await resp.arrayBuffer();
+        result = parseWorkbookObject(XLSX.read(ab, { type: "array" }));
+      } else {
+        const b64 = await Promise.resolve(new File(asset.uri).base64());
+        result = parseRunWorkbookBase64(b64);
+      }
+      setImportResult(result);
+      setImportOpen(true);
+    } catch {
+      // ignore — user can retry
+    }
+  }
+
+  function commitImport(payload: ImportCommit) {
+    payload.createBrands.forEach((b) => addListItem("brands", b));
+    payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
+    payload.runs.forEach((r) => {
+      const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
+      addScheduledRun(payload.date, {
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesPlanned,
+        dieType,
+        notes: r.notes,
+      });
+    });
+    setImportOpen(false);
+    setImportResult(null);
+  }
 
   const webTop = Platform.OS === "web" ? 16 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -247,6 +309,22 @@ export default function ScheduleScreen() {
           </View>
         ) : null}
 
+        <Pressable
+          onPress={() => {
+            handleImportPick();
+            tap();
+          }}
+          style={({ pressed }) => [
+            styles.importBtn,
+            { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Feather name="upload" size={15} color={colors.primary} />
+          <Text style={[styles.importText, { color: colors.primary }]}>
+            Import schedule from Excel
+          </Text>
+        </Pressable>
+
         <SectionHeader title="Add a Planned Run" />
         <CardSection>
           <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>
@@ -393,6 +471,20 @@ export default function ScheduleScreen() {
           </Pressable>
         </CardSection>
       </KeyboardAwareScrollViewCompat>
+
+      <ExcelImportModal
+        visible={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          setImportResult(null);
+        }}
+        result={importResult}
+        brands={brands}
+        brandFlavors={brandFlavors}
+        supervisorPin={supervisorPin}
+        defaultDate={selectedDate}
+        onConfirm={commitImport}
+      />
     </>
   );
 }
@@ -485,4 +577,15 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   addText: { fontSize: 14, fontFamily: FONTS.bold },
+  importBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 11,
+    marginTop: 6,
+  },
+  importText: { fontSize: 14, fontFamily: FONTS.semibold },
 });

@@ -2103,6 +2103,9 @@ export default function Home() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [importIntoEditor, setImportIntoEditor] = useState(false);
+  const [importDefaultDate, setImportDefaultDate] = useState(tomorrowStr());
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
@@ -3395,6 +3398,27 @@ export default function Home() {
     try {
       const buf = await file.arrayBuffer();
       const result = parseRunWorkbook(buf);
+      setImportIntoEditor(false);
+      setImportDefaultDate(tomorrowStr());
+      setImportResult(result);
+      setShowImportDialog(true);
+    } catch {
+      // ignore malformed file — user can retry
+    }
+  }
+
+  // Excel upload triggered from within the Schedule editor: extracts rows into
+  // the in-memory editor (scoped to the day being planned) instead of writing
+  // to the server directly, so the user reviews then hits "Save Schedule".
+  async function handleScheduleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const result = parseRunWorkbook(buf);
+      setImportIntoEditor(true);
+      setImportDefaultDate(scheduleEditorDate || tomorrowStr());
       setImportResult(result);
       setShowImportDialog(true);
     } catch {
@@ -3447,6 +3471,27 @@ export default function Home() {
     } catch {}
     setShowImportDialog(false);
     setImportResult(null);
+  }
+
+  function importExcelIntoEditor(payload: ImportCommit) {
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    const newRuns: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
+    const newVals: Record<string, FormValues> = {};
+    for (const r of payload.runs) {
+      const id = genId();
+      const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+      newVals[id] = { ...(profile ?? DEFAULT_VALUES), casesNeeded: r.casesPlanned };
+      newRuns.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: r.casesPlanned });
+    }
+    setScheduleEditorRunValues(prev => ({ ...prev, ...newVals }));
+    // Drop any empty placeholder rows so the imported rows don't leave a blank
+    // run that blocks the Save Schedule validation.
+    setScheduleEditorRuns(prev => [...prev.filter(r => r.brand || r.casesNeeded), ...newRuns]);
+    if (payload.date) setScheduleEditorDate(payload.date);
+    setShowImportDialog(false);
+    setImportResult(null);
+    setImportIntoEditor(false);
   }
 
   function printSummary() {
@@ -9166,13 +9211,13 @@ export default function Home() {
         {/* ── Excel Import Dialog ──────────────────────────────────────────── */}
         <ExcelImportDialog
           open={showImportDialog}
-          onClose={() => { setShowImportDialog(false); setImportResult(null); }}
+          onClose={() => { setShowImportDialog(false); setImportResult(null); setImportIntoEditor(false); }}
           result={importResult}
           brands={brands}
           brandFlavors={brandFlavors}
           canCreate={isSupervisor}
-          defaultDate={tomorrowStr()}
-          onConfirm={commitExcelImport}
+          defaultDate={importDefaultDate}
+          onConfirm={importIntoEditor ? importExcelIntoEditor : commitExcelImport}
         />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
@@ -9301,17 +9346,33 @@ export default function Home() {
                     <div>
                       <div className="flex items-center justify-between mb-2.5">
                         <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Runs</label>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newId = genId();
-                            setScheduleEditorRuns(prev => [...prev, { id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
-                            setScheduleEditorRunValues(prev => ({ ...prev, [newId]: { ...DEFAULT_VALUES } }));
-                          }}
-                          className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> Add Run
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => scheduleImportInputRef.current?.click()}
+                            className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                          >
+                            <Upload className="w-3.5 h-3.5" /> Import Excel
+                          </button>
+                          <input
+                            ref={scheduleImportInputRef}
+                            type="file"
+                            accept=".xlsx,.xls"
+                            className="hidden"
+                            onChange={handleScheduleImportFile}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newId = genId();
+                              setScheduleEditorRuns(prev => [...prev, { id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
+                              setScheduleEditorRunValues(prev => ({ ...prev, [newId]: { ...DEFAULT_VALUES } }));
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Add Run
+                          </button>
+                        </div>
                       </div>
                       <div className="space-y-3">
                         {scheduleEditorRuns.map((run, idx) => (

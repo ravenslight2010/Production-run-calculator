@@ -160,7 +160,7 @@ export default function ExcelImportDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
