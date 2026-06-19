@@ -21,7 +21,11 @@ export function KeyboardAwareScrollViewCompat({
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      // Android handles keyboard avoidance natively via windowSoftInputMode
+      // adjustResize (Expo default). Using behavior="height" here double-handles
+      // it and makes the keyboard flicker/dismiss while typing in a scroll form,
+      // so only opt into KeyboardAvoidingView's own behavior on iOS.
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}
