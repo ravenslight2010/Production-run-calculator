@@ -238,6 +238,46 @@ export default function ForgotPasswordScreen() {
                 </Pressable>
               </View>
 
+              <View style={styles.hintRow}>
+                <Feather
+                  name={
+                    confirm.length === 0
+                      ? "check"
+                      : password === confirm
+                        ? "check"
+                        : "x"
+                  }
+                  size={13}
+                  color={
+                    confirm.length === 0
+                      ? colors.mutedForeground
+                      : password === confirm
+                        ? colors.success
+                        : colors.destructive
+                  }
+                  style={{ opacity: confirm.length === 0 ? 0.4 : 1 }}
+                />
+                <Text
+                  style={[
+                    styles.hint,
+                    {
+                      color:
+                        confirm.length === 0
+                          ? colors.mutedForeground
+                          : password === confirm
+                            ? colors.success
+                            : colors.destructive,
+                    },
+                  ]}
+                >
+                  {confirm.length === 0
+                    ? "Re-enter your password to confirm"
+                    : password === confirm
+                      ? "Passwords match"
+                      : "Passwords don't match"}
+                </Text>
+              </View>
+
               {error && <Text style={styles.error}>{error}</Text>}
 
               <Pressable

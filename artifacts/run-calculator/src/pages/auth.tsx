@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,6 +65,40 @@ function PasswordHint({ value }: { value: string }) {
     >
       <Check className={`h-3.5 w-3.5 ${ok ? "opacity-100" : "opacity-40"}`} />
       At least {MIN_PASSWORD_LENGTH} characters
+    </p>
+  );
+}
+
+function ConfirmPasswordHint({
+  password,
+  confirm,
+}: {
+  password: string;
+  confirm: string;
+}) {
+  if (confirm.length === 0) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Check className="h-3.5 w-3.5 opacity-40" />
+        Re-enter your password to confirm
+      </p>
+    );
+  }
+  const matches = password === confirm;
+  return (
+    <p
+      className={`flex items-center gap-1.5 text-xs ${
+        matches
+          ? "text-green-600 dark:text-green-500"
+          : "text-destructive"
+      }`}
+    >
+      {matches ? (
+        <Check className="h-3.5 w-3.5 opacity-100" />
+      ) : (
+        <X className="h-3.5 w-3.5 opacity-100" />
+      )}
+      {matches ? "Passwords match" : "Passwords don't match"}
     </p>
   );
 }
@@ -186,6 +220,7 @@ function AuthForm({ mode }: { mode: Mode }) {
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                 />
+                <ConfirmPasswordHint password={password} confirm={confirm} />
               </div>
             )}
 
@@ -403,6 +438,7 @@ function ForgotPasswordForm() {
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
                 />
+                <ConfirmPasswordHint password={password} confirm={confirm} />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button
