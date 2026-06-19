@@ -126,6 +126,34 @@ export default function SignUpScreen() {
             </Pressable>
           </View>
 
+          <View style={styles.hintRow}>
+            <Feather
+              name="check"
+              size={13}
+              color={
+                password.length >= MIN_PASSWORD_LENGTH
+                  ? colors.success
+                  : colors.mutedForeground
+              }
+              style={{
+                opacity: password.length >= MIN_PASSWORD_LENGTH ? 1 : 0.4,
+              }}
+            />
+            <Text
+              style={[
+                styles.hint,
+                {
+                  color:
+                    password.length >= MIN_PASSWORD_LENGTH
+                      ? colors.success
+                      : colors.mutedForeground,
+                },
+              ]}
+            >
+              At least {MIN_PASSWORD_LENGTH} characters
+            </Text>
+          </View>
+
           <Text style={styles.label}>Confirm password</Text>
           <View style={styles.pwWrap}>
             <TextInput
@@ -245,6 +273,14 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
     },
     pwWrap: { position: "relative", justifyContent: "center" },
     pwInput: { paddingRight: 48 },
+    hintRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: -8,
+      marginBottom: 14,
+    },
+    hint: { fontFamily: FONTS.regular, fontSize: 12 },
     eyeBtn: {
       position: "absolute",
       right: 0,

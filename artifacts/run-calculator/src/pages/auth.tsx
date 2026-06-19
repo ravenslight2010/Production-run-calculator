@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,6 +52,20 @@ function PasswordInput(props: React.ComponentProps<typeof Input>) {
         )}
       </button>
     </div>
+  );
+}
+
+function PasswordHint({ value }: { value: string }) {
+  const ok = value.length >= MIN_PASSWORD_LENGTH;
+  return (
+    <p
+      className={`flex items-center gap-1.5 text-xs ${
+        ok ? "text-green-600 dark:text-green-500" : "text-muted-foreground"
+      }`}
+    >
+      <Check className={`h-3.5 w-3.5 ${ok ? "opacity-100" : "opacity-40"}`} />
+      At least {MIN_PASSWORD_LENGTH} characters
+    </p>
   );
 }
 
@@ -145,6 +159,7 @@ function AuthForm({ mode }: { mode: Mode }) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
+              {isSignUp && <PasswordHint value={password} />}
               {!isSignUp && (
                 <div className="text-right">
                   <button
@@ -374,6 +389,7 @@ function ForgotPasswordForm() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
+                <PasswordHint value={password} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rp2" className="text-foreground">
