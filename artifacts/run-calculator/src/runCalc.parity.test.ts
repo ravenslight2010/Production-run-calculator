@@ -31,6 +31,16 @@
 //     a parity guard against a faithful transcription of the web inline formula
 //     (`webDoughSupply`), with the two crust-mode divergences (perBatch source and
 //     the casesOnLine ppm source) encoded as deliberate expectations.
+//  6. The run TIMING / PACE / CATCH-UP math — per-tray/-batch/-skid/-case seconds,
+//     total + freeze-tunnel-adjusted time, the pace gauge (ahead/behind/on-pace
+//     within a +/-2 case tolerance vs expected cases), and the catch-up PPM when
+//     behind — is web-only (it lives inline in the same pages/home.tsx `calc`
+//     useMemo; the mobile engine has no pace/catch-up and no "pause" stoppage
+//     type). It is locked via a faithful transcription (`webTiming`) with concrete
+//     unit expectations across pending/started/paused/ended runs, with and without
+//     stoppages, and the non-pause downtime-exclusion + freeze-tunnel rules
+//     encoded as expectations. Mobile's own timing outputs (timePerBatchSec is
+//     covered in section 1; downtime/elapsed are covered here in section 6b).
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "node:fs";
@@ -1013,5 +1023,431 @@ describe("intentional crust-mode supply divergences (web vs mobile)", () => {
     expect(web.casesOnLine).toBe(30); // floor(24 * 15 / 12)
     expect(m.casesOnLine).toBe(50); // floor(40 * 15 / 12)
     expect(m.casesOnLine).not.toBe(web.casesOnLine);
+  });
+});
+
+// ── 6. Run timing / pace / catch-up math (web-only) ──────────────────────────
+//
+// The run-screen timing, pace gauge, and catch-up PPM are computed inline in the
+// SAME pages/home.tsx `calc` useMemo as the supply math (section 5), and are
+// likewise NOT importable. The mobile engine has no pace/catch-up at all and no
+// "pause" stoppage type (its Stoppage.type is jam|changeover|break|other), so
+// this is a web-only contract. `webTiming` below is a faithful, line-for-line
+// transcription of those inline blocks (home.tsx, the `calc` useMemo):
+//   - liveFreezerMin (lines ~3449-3456): 0 unstarted, the freezerTime setting
+//     once ended, else min(elapsed-since-start, freezerTime), frozen at pausedAt.
+//   - ppm / perTray / effectiveDoughBatchYield / perBatch / casesOnLine /
+//     casesForTiming and the timePer{Tray,Batch,Skid,Case}Sec + totalTimeSec +
+//     adjustedTimeSec timing block.
+//   - the pace block: expectedCases = floor(ppm * (elapsed - downtime - freezer)
+//     / pizzasPerCase); paceDelta = casesCompleted - expectedCases; status is
+//     on-pace within |delta| <= 2, else ahead (>0) / behind (<0).
+//   - the catch-up block: when behind, catchUpPpm = round(remainingCases *
+//     pizzasPerCase * 60 / remainingSec), remainingSec floored at 60s.
+// Two subtleties are deliberately preserved and asserted:
+//   - downtime subtracted from elapsed EXCLUDES "pause" stoppages (only counts
+//     ended, non-pause stoppages); a pause does not give the line credit for time.
+//   - expectedCases nets out the full freezer-tunnel time (cases aren't "done"
+//     until they exit the tunnel).
+// If the web inline timing/pace/catch-up changes, update this transcription in
+// lockstep — these unit expectations exist to make a silent drift loud.
+
+interface TimingVals {
+  approxLineSpeed: number;
+  crustsPerCycle: number;
+  cycleSpeed: number;
+  speedAdjustment: number;
+  crustsPerStack: number;
+  doughballsPerTray: number;
+  doughRecipe?: { lbs?: number }[];
+  targetDoughballWeight: number;
+  doughBatchYield: number;
+  crustsPerCase: number;
+  casesNeeded: number;
+  casesPerSkid: number;
+  casesOnCurrentSkid: number;
+  skidsCompleted: number;
+  pizzasPerCase: number;
+  freezerTime: number;
+}
+
+interface TimingRun {
+  startedAt?: number;
+  pausedAt?: number;
+  endedAt?: number;
+  stoppages?: { type?: string; startedAt: number; endedAt?: number }[];
+}
+
+// Faithful transcription of the web liveFreezerMin IIFE in pages/home.tsx.
+function webLiveFreezerMin(v: TimingVals, run: TimingRun, nowMs: number): number {
+  if (!run.startedAt) return 0;
+  if (run.endedAt) return Number(v.freezerTime);
+  const refTime = run.pausedAt ?? nowMs;
+  const elapsed = (refTime - run.startedAt) / 60000;
+  return Math.min(elapsed, Number(v.freezerTime));
+}
+
+type PaceStatus = "on-pace" | "ahead" | "behind" | null;
+
+// Faithful transcription of the web pages/home.tsx inline timing/pace/catch-up.
+function webTiming(
+  v: TimingVals,
+  run: TimingRun,
+  nowMs: number,
+  doughSubTab: "dough" | "crusts",
+) {
+  const ppm =
+    doughSubTab === "crusts"
+      ? v.approxLineSpeed
+      : v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
+  const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
+  const doughRecipeLbs = (v.doughRecipe ?? []).reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  const effectiveDoughBatchYield =
+    doughRecipeLbs > 0 && v.targetDoughballWeight > 0
+      ? (doughRecipeLbs * 16) / v.targetDoughballWeight
+      : v.doughBatchYield;
+  const perBatch = doughSubTab === "crusts" ? v.crustsPerCase : effectiveDoughBatchYield;
+
+  const freezerTime = webLiveFreezerMin(v, run, nowMs);
+  const casesOnLine = ppm > 0 ? Math.floor((ppm * freezerTime) / v.pizzasPerCase) : 0;
+  const casesForTiming =
+    v.casesNeeded -
+    v.skidsCompleted * v.casesPerSkid -
+    v.casesOnCurrentSkid -
+    casesOnLine;
+
+  const timePerTraySec = ppm > 0 ? (perTray / ppm) * 60 : 0;
+  const timePerBatchSec = ppm > 0 ? (perBatch / ppm) * 60 : 0;
+  const timePerSkidSec = ppm > 0 ? ((v.casesPerSkid * v.pizzasPerCase) / ppm) * 60 : 0;
+  const timePerCaseSec = ppm > 0 ? (v.pizzasPerCase / ppm) * 60 : 0;
+  const totalTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : 0;
+
+  const casesCompleted = v.skidsCompleted * v.casesPerSkid + v.casesOnCurrentSkid;
+  const adjustedTimeSec =
+    ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : totalTimeSec;
+
+  let paceStatus: PaceStatus = null;
+  let paceDelta = 0;
+  if (run.startedAt && !run.endedAt && ppm > 0 && v.pizzasPerCase > 0) {
+    const refTime = run.pausedAt ?? nowMs;
+    const downtimeMs = (run.stoppages ?? [])
+      .filter((s) => s.endedAt && s.type !== "pause")
+      .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+    const elapsedMin = Math.max(0, refTime - run.startedAt - downtimeMs) / 60000;
+    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
+    const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
+    paceDelta = casesCompleted - expectedCases;
+    paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
+  }
+
+  let catchUpPpm: number | null = null;
+  if (
+    paceStatus === "behind" &&
+    run.startedAt &&
+    !run.endedAt &&
+    ppm > 0 &&
+    v.pizzasPerCase > 0 &&
+    v.casesNeeded > 0
+  ) {
+    const refTime = run.pausedAt ?? nowMs;
+    const downtimeMs = (run.stoppages ?? [])
+      .filter((s) => s.endedAt && s.type !== "pause")
+      .reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+    const elapsedSec = Math.max(0, refTime - run.startedAt - downtimeMs) / 1000;
+    const remainingCases = v.casesNeeded - casesCompleted;
+    const originalTotalSec = ppm > 0 ? (v.casesNeeded * v.pizzasPerCase * 60) / ppm : 0;
+    const remainingSec = Math.max(60, originalTotalSec - elapsedSec);
+    if (remainingSec > 0 && remainingCases > 0) {
+      catchUpPpm = Math.round((remainingCases * v.pizzasPerCase * 60) / remainingSec);
+    }
+  }
+
+  return {
+    ppm,
+    casesOnLine,
+    casesForTiming,
+    casesCompleted,
+    timePerTraySec,
+    timePerBatchSec,
+    timePerSkidSec,
+    timePerCaseSec,
+    totalTimeSec,
+    adjustedTimeSec,
+    paceStatus,
+    paceDelta,
+    catchUpPpm,
+  };
+}
+
+const MIN = 60 * 1000;
+
+// ppm 40 (4 * 10 * 1), 12 pizzas/case, 100 cases, 15-min freeze tunnel.
+const TIMING_SETTINGS: TimingVals = {
+  approxLineSpeed: 24,
+  crustsPerCycle: 4,
+  cycleSpeed: 10,
+  speedAdjustment: 1,
+  crustsPerStack: 40,
+  doughballsPerTray: 60,
+  doughRecipe: [],
+  targetDoughballWeight: 8,
+  doughBatchYield: 300,
+  crustsPerCase: 12,
+  casesNeeded: 100,
+  casesPerSkid: 48,
+  casesOnCurrentSkid: 0,
+  skidsCompleted: 0,
+  pizzasPerCase: 12,
+  freezerTime: 15,
+};
+
+describe("webTiming — per-tray/-batch/-skid/-case + total/adjusted time", () => {
+  it("dough mode: derives the timing seconds for a pending run (no cases on line)", () => {
+    const t = webTiming(TIMING_SETTINGS, {}, NOW, "dough");
+    expect(t.ppm).toBe(40);
+    expect(t.casesOnLine).toBe(0); // pending -> liveFreezerMin 0
+    expect(t.casesForTiming).toBe(100);
+    expect(t.timePerTraySec).toBeCloseTo(90, 9); // 60 / 40 * 60
+    expect(t.timePerBatchSec).toBeCloseTo(450, 9); // 300 / 40 * 60
+    expect(t.timePerSkidSec).toBeCloseTo(864, 9); // (48 * 12) / 40 * 60
+    expect(t.timePerCaseSec).toBeCloseTo(18, 9); // 12 / 40 * 60
+    expect(t.totalTimeSec).toBeCloseTo(1800, 9); // 100 * 12 * 60 / 40
+    expect(t.adjustedTimeSec).toBeCloseTo(1800, 9); // same basis as totalTime
+    expect(t.paceStatus).toBeNull(); // no start -> no pace
+    expect(t.catchUpPpm).toBeNull();
+  });
+
+  it("crusts mode: ppm/perTray/perBatch switch to the crust sources", () => {
+    const t = webTiming(TIMING_SETTINGS, {}, NOW, "crusts");
+    expect(t.ppm).toBe(24); // approxLineSpeed
+    expect(t.timePerTraySec).toBeCloseTo(100, 9); // crustsPerStack 40 / 24 * 60
+    expect(t.timePerBatchSec).toBeCloseTo(30, 9); // crustsPerCase 12 / 24 * 60
+    expect(t.timePerCaseSec).toBeCloseTo(30, 9); // 12 / 24 * 60
+    expect(t.timePerSkidSec).toBeCloseTo(1440, 9); // (48 * 12) / 24 * 60
+    expect(t.totalTimeSec).toBeCloseTo(3000, 9); // 100 * 12 * 60 / 24
+  });
+
+  it("ended run: casesOnLine uses the full freezerTime, shrinking casesForTiming", () => {
+    const t = webTiming(
+      TIMING_SETTINGS,
+      { startedAt: NOW - 60 * MIN, endedAt: NOW },
+      NOW,
+      "dough",
+    );
+    expect(t.casesOnLine).toBe(50); // floor(40 * 15 / 12)
+    expect(t.casesForTiming).toBe(50); // 100 - 0 - 0 - 50
+    expect(t.totalTimeSec).toBeCloseTo(900, 9); // 50 * 12 * 60 / 40
+    expect(t.paceStatus).toBeNull(); // ended -> no pace even though startedAt set
+    expect(t.catchUpPpm).toBeNull();
+  });
+});
+
+describe("webTiming — pace gauge (ahead / behind / on-pace within +/-2)", () => {
+  // 30 min elapsed, 15-min tunnel -> elapsedAfterTunnel 15 -> expected = 50.
+  const startedAt = NOW - 30 * MIN;
+  const run = (skids: number, onSkid: number): TimingRun => ({ startedAt });
+  const settings = (skids: number, onSkid: number): TimingVals => ({
+    ...TIMING_SETTINGS,
+    skidsCompleted: skids,
+    casesOnCurrentSkid: onSkid,
+  });
+
+  const pace = (skids: number, onSkid: number) =>
+    webTiming(settings(skids, onSkid), run(skids, onSkid), NOW, "dough");
+
+  it("expected cases nets out the freeze tunnel", () => {
+    // 1 skid (48) + 2 == 50 completed, expected 50 -> exactly on pace.
+    const t = pace(1, 2);
+    expect(t.casesCompleted).toBe(50);
+    expect(t.paceDelta).toBe(0);
+    expect(t.paceStatus).toBe("on-pace");
+  });
+
+  it("on-pace at the +2 and -2 tolerance boundaries", () => {
+    expect(pace(1, 4).paceDelta).toBe(2); // 52 - 50
+    expect(pace(1, 4).paceStatus).toBe("on-pace");
+    expect(pace(0, 48).paceDelta).toBe(-2); // 48 - 50
+    expect(pace(0, 48).paceStatus).toBe("on-pace");
+  });
+
+  it("ahead once delta exceeds +2; behind once it drops below -2", () => {
+    expect(pace(1, 5).paceDelta).toBe(3); // 53 - 50
+    expect(pace(1, 5).paceStatus).toBe("ahead");
+    expect(pace(0, 47).paceDelta).toBe(-3); // 47 - 50
+    expect(pace(0, 47).paceStatus).toBe("behind");
+  });
+
+  it("a paused run measures elapsed to pausedAt, not to now", () => {
+    // started 30 min ago but paused 10 min ago: elapsed-at-pause = 20 min,
+    // after tunnel 5 -> expected = floor(40 * 5 / 12) = 16. 16 completed -> on pace.
+    // (If it wrongly used `now`, elapsed would be 30 -> expected 50 -> behind.)
+    const t = webTiming(
+      { ...TIMING_SETTINGS, skidsCompleted: 0, casesOnCurrentSkid: 16 },
+      { startedAt: NOW - 30 * MIN, pausedAt: NOW - 10 * MIN },
+      NOW,
+      "dough",
+    );
+    expect(t.paceDelta).toBe(0);
+    expect(t.paceStatus).toBe("on-pace");
+  });
+});
+
+describe("webTiming — downtime exclusion (non-pause vs pause stoppages)", () => {
+  // 24 min elapsed, 15-min tunnel -> elapsedAfterTunnel 9 -> expected = 30.
+  // 10 cases completed -> 20 behind with no downtime.
+  const startedAt = NOW - 24 * MIN;
+  const settings: TimingVals = {
+    ...TIMING_SETTINGS,
+    skidsCompleted: 0,
+    casesOnCurrentSkid: 10,
+  };
+
+  it("a non-pause stoppage is subtracted from elapsed (shifts behind -> on-pace)", () => {
+    const noDowntime = webTiming(settings, { startedAt }, NOW, "dough");
+    expect(noDowntime.paceDelta).toBe(-20); // 10 - 30
+    expect(noDowntime.paceStatus).toBe("behind");
+
+    // A completed 6-min "stop" inside the run window. Elapsed becomes 18 min,
+    // after tunnel 3 -> expected = floor(40 * 3 / 12) = 10 -> on pace.
+    const withStop = webTiming(
+      settings,
+      {
+        startedAt,
+        stoppages: [{ type: "stop", startedAt: NOW - 20 * MIN, endedAt: NOW - 14 * MIN }],
+      },
+      NOW,
+      "dough",
+    );
+    expect(withStop.paceDelta).toBe(0);
+    expect(withStop.paceStatus).toBe("on-pace");
+  });
+
+  it("a pause stoppage is NOT subtracted (stays behind)", () => {
+    const withPause = webTiming(
+      settings,
+      {
+        startedAt,
+        stoppages: [{ type: "pause", startedAt: NOW - 20 * MIN, endedAt: NOW - 14 * MIN }],
+      },
+      NOW,
+      "dough",
+    );
+    expect(withPause.paceDelta).toBe(-20); // pause ignored -> same as no downtime
+    expect(withPause.paceStatus).toBe("behind");
+  });
+
+  it("an open (un-ended) stoppage is ignored until it ends", () => {
+    const withOpen = webTiming(
+      settings,
+      { startedAt, stoppages: [{ type: "stop", startedAt: NOW - 5 * MIN }] },
+      NOW,
+      "dough",
+    );
+    expect(withOpen.paceDelta).toBe(-20); // no endedAt -> not counted
+    expect(withOpen.paceStatus).toBe("behind");
+  });
+});
+
+describe("webTiming — catch-up PPM (only when behind)", () => {
+  it("computes the PPM needed to finish on time when behind", () => {
+    // 24 min elapsed, expected 30, 10 completed -> behind. remainingCases 90.
+    // originalTotalSec = 100 * 12 * 60 / 40 = 1800; elapsedSec = 1440;
+    // remainingSec = max(60, 360) = 360 -> catchUp = round(90*12*60/360) = 180.
+    const t = webTiming(
+      { ...TIMING_SETTINGS, skidsCompleted: 0, casesOnCurrentSkid: 10 },
+      { startedAt: NOW - 24 * MIN },
+      NOW,
+      "dough",
+    );
+    expect(t.paceStatus).toBe("behind");
+    expect(t.catchUpPpm).toBe(180);
+  });
+
+  it("floors the remaining time at 60s (catch-up spikes when out of time)", () => {
+    // 30 min elapsed (== originalTotalSec 1800s), 5 completed, expected 50 -> behind.
+    // remainingSec = max(60, 1800 - 1800) = 60; remainingCases 95.
+    // catchUp = round(95 * 12 * 60 / 60) = 1140.
+    const t = webTiming(
+      { ...TIMING_SETTINGS, skidsCompleted: 0, casesOnCurrentSkid: 5 },
+      { startedAt: NOW - 30 * MIN },
+      NOW,
+      "dough",
+    );
+    expect(t.paceStatus).toBe("behind");
+    expect(t.catchUpPpm).toBe(1140);
+  });
+
+  it("is null when on-pace or ahead", () => {
+    const onPace = webTiming(
+      { ...TIMING_SETTINGS, skidsCompleted: 1, casesOnCurrentSkid: 2 },
+      { startedAt: NOW - 30 * MIN },
+      NOW,
+      "dough",
+    );
+    expect(onPace.paceStatus).toBe("on-pace");
+    expect(onPace.catchUpPpm).toBeNull();
+
+    const ahead = webTiming(
+      { ...TIMING_SETTINGS, skidsCompleted: 1, casesOnCurrentSkid: 12 },
+      { startedAt: NOW - 30 * MIN },
+      NOW,
+      "dough",
+    );
+    expect(ahead.paceStatus).toBe("ahead");
+    expect(ahead.catchUpPpm).toBeNull();
+  });
+});
+
+// ── 6b. Mobile computeCalc — downtime / net-elapsed timing ────────────────────
+//
+// The mobile engine has no pace/catch-up, but computeCalc does return downtime
+// and net-elapsed timing used by the mobile run screen. Unlike the web pace math,
+// mobile has no "pause" stoppage type (Stoppage.type is jam|changeover|break|
+// other), so ALL ended stoppages count toward downtime, and an OPEN stoppage
+// accrues up to the run boundary (now, or endedAt once the run is finished).
+
+describe("computeCalc (mobile) — downtime + net elapsed", () => {
+  it("sums completed stoppages and accrues an open stoppage up to now", () => {
+    const c = mobile.computeCalc(
+      mobileState(
+        { casesNeeded: 100, pizzasPerCase: 12 },
+        {
+          startedAt: NOW - 30 * MIN,
+          stoppages: [
+            { id: "a", type: "jam", startedAt: NOW - 25 * MIN, endedAt: NOW - 19 * MIN }, // 6 min
+            { id: "b", type: "break", startedAt: NOW - 5 * MIN }, // open -> 5 min to now
+          ],
+        },
+      ),
+      NOW,
+    );
+    expect(c.totalDowntimeSec).toBeCloseTo(660, 9); // 360 completed + 300 open
+    expect(c.netElapsedSec).toBeCloseTo(1140, 9); // 1800 gross - 660 downtime
+  });
+
+  it("caps an open stoppage at endedAt once the run is finished", () => {
+    const c = mobile.computeCalc(
+      mobileState(
+        { casesNeeded: 100, pizzasPerCase: 12 },
+        {
+          startedAt: NOW - 30 * MIN,
+          endedAt: NOW - 10 * MIN, // boundary is endedAt, not now
+          stoppages: [
+            { id: "a", type: "jam", startedAt: NOW - 25 * MIN, endedAt: NOW - 19 * MIN }, // 6 min
+            { id: "b", type: "other", startedAt: NOW - 14 * MIN }, // open -> caps at endedAt = 4 min
+          ],
+        },
+      ),
+      NOW,
+    );
+    // gross = (endedAt - startedAt) = 20 min = 1200s; open accrues 14-10 = 4 min.
+    expect(c.totalDowntimeSec).toBeCloseTo(600, 9); // 360 + 240
+    expect(c.netElapsedSec).toBeCloseTo(600, 9); // 1200 - 600
+  });
+
+  it("reports zero downtime / zero elapsed for a pending run", () => {
+    const c = mobile.computeCalc(mobileState({ casesNeeded: 100, pizzasPerCase: 12 }), NOW);
+    expect(c.totalDowntimeSec).toBe(0);
+    expect(c.netElapsedSec).toBe(0);
   });
 });
