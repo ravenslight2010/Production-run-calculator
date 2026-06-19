@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,11 +28,39 @@ function messageForError(err: unknown, mode: Mode): string {
   return "Something went wrong. Please try again.";
 }
 
+function PasswordInput(props: React.ComponentProps<typeof Input>) {
+  const [show, setShow] = useState(false);
+  const { className, ...rest } = props;
+  return (
+    <div className="relative">
+      <Input
+        {...rest}
+        type={show ? "text" : "password"}
+        className={`text-foreground pr-10 ${className ?? ""}`}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        tabIndex={-1}
+        aria-label={show ? "Hide password" : "Show password"}
+        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+      >
+        {show ? (
+          <EyeOff className="h-4 w-4" />
+        ) : (
+          <Eye className="h-4 w-4" />
+        )}
+      </button>
+    </div>
+  );
+}
+
 function AuthForm({ mode }: { mode: Mode }) {
   const [, setLocation] = useLocation();
   const { signIn, signUp } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -41,6 +70,10 @@ function AuthForm({ mode }: { mode: Mode }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (isSignUp && password !== confirm) {
+      setError("Passwords don't match.");
+      return;
+    }
     setSubmitting(true);
     try {
       if (isSignUp) {
@@ -100,15 +133,13 @@ function AuthForm({ mode }: { mode: Mode }) {
               <Label htmlFor="password" className="text-foreground">
                 Password
               </Label>
-              <Input
+              <PasswordInput
                 id="password"
                 name="password"
-                type="password"
                 autoComplete={isSignUp ? "new-password" : "current-password"}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="text-foreground"
               />
               {!isSignUp && (
                 <div className="text-right">
@@ -122,6 +153,22 @@ function AuthForm({ mode }: { mode: Mode }) {
                 </div>
               )}
             </div>
+
+            {isSignUp && (
+              <div className="space-y-1.5">
+                <Label htmlFor="confirm" className="text-foreground">
+                  Confirm password
+                </Label>
+                <PasswordInput
+                  id="confirm"
+                  name="confirm-password"
+                  autoComplete="new-password"
+                  required
+                  value={confirm}
+                  onChange={(e) => setConfirm(e.target.value)}
+                />
+              </div>
+            )}
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -315,30 +362,26 @@ function ForgotPasswordForm() {
                 <Label htmlFor="rp" className="text-foreground">
                   New password
                 </Label>
-                <Input
+                <PasswordInput
                   id="rp"
                   name="new-password"
-                  type="password"
                   autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="text-foreground"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rp2" className="text-foreground">
                   Confirm new password
                 </Label>
-                <Input
+                <PasswordInput
                   id="rp2"
                   name="confirm-password"
-                  type="password"
                   autoComplete="new-password"
                   required
                   value={confirm}
                   onChange={(e) => setConfirm(e.target.value)}
-                  className="text-foreground"
                 />
               </div>
               {error && <p className="text-sm text-destructive">{error}</p>}

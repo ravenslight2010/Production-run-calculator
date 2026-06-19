@@ -54,6 +54,8 @@ export default function StaffRolesCard() {
   const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const [approvedCode, setApprovedCode] = useState<ApproveResetResult | null>(
@@ -339,33 +341,63 @@ export default function StaffRolesCard() {
             </Text>
             <View style={styles.fieldGroup}>
               <Text style={[styles.label, { color: colors.mutedForeground }]}>New password</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
-                ]}
-                value={newPassword}
-                onChangeText={setNewPassword}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholderTextColor={colors.mutedForeground}
-              />
+              <View style={styles.pwWrap}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.pwInput,
+                    { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
+                  ]}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  secureTextEntry={!showNewPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholderTextColor={colors.mutedForeground}
+                />
+                <Pressable
+                  style={styles.eyeBtn}
+                  onPress={() => setShowNewPassword((s) => !s)}
+                  hitSlop={8}
+                  accessibilityLabel={showNewPassword ? "Hide password" : "Show password"}
+                >
+                  <Feather
+                    name={showNewPassword ? "eye-off" : "eye"}
+                    size={18}
+                    color={colors.mutedForeground}
+                  />
+                </Pressable>
+              </View>
             </View>
             <View style={styles.fieldGroup}>
               <Text style={[styles.label, { color: colors.mutedForeground }]}>Confirm new password</Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
-                ]}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholderTextColor={colors.mutedForeground}
-              />
+              <View style={styles.pwWrap}>
+                <TextInput
+                  style={[
+                    styles.input,
+                    styles.pwInput,
+                    { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
+                  ]}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholderTextColor={colors.mutedForeground}
+                />
+                <Pressable
+                  style={styles.eyeBtn}
+                  onPress={() => setShowConfirmPassword((s) => !s)}
+                  hitSlop={8}
+                  accessibilityLabel={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  <Feather
+                    name={showConfirmPassword ? "eye-off" : "eye"}
+                    size={18}
+                    color={colors.mutedForeground}
+                  />
+                </Pressable>
+              </View>
             </View>
             {resetError ? (
               <Text style={[styles.msg, { color: colors.destructive }]}>{resetError}</Text>
@@ -488,6 +520,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     fontFamily: FONTS.regular,
+  },
+  pwWrap: { position: "relative", justifyContent: "center" },
+  pwInput: { paddingRight: 44 },
+  eyeBtn: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 42,
+    alignItems: "center",
+    justifyContent: "center",
   },
   msg: { fontSize: 12, fontFamily: FONTS.regular },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },

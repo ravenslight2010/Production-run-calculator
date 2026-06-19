@@ -7,6 +7,8 @@ import {
   KeyRound,
   Trash2,
   ShieldCheck,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -58,6 +60,29 @@ function serverMessage(error: unknown, fallback: string): string {
   return error instanceof InventoryApiError && error.serverMessage
     ? error.serverMessage
     : fallback;
+}
+
+function PasswordInput(props: React.ComponentProps<typeof Input>) {
+  const [show, setShow] = useState(false);
+  const { className, ...rest } = props;
+  return (
+    <div className="relative">
+      <Input
+        {...rest}
+        type={show ? "text" : "password"}
+        className={`pr-10 ${className ?? ""}`}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        tabIndex={-1}
+        aria-label={show ? "Hide password" : "Show password"}
+        className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
 }
 
 // Manager-only UI for viewing every signed-in staff member, changing their
@@ -358,9 +383,8 @@ export default function StaffRolesCard() {
                 <Label htmlFor="reset-new-password" className="text-xs">
                   New password
                 </Label>
-                <Input
+                <PasswordInput
                   id="reset-new-password"
-                  type="password"
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
@@ -370,9 +394,8 @@ export default function StaffRolesCard() {
                 <Label htmlFor="reset-confirm-password" className="text-xs">
                   Confirm new password
                 </Label>
-                <Input
+                <PasswordInput
                   id="reset-confirm-password"
-                  type="password"
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}

@@ -1,3 +1,4 @@
+import { Feather } from "@expo/vector-icons";
 import { Link, useRouter, type Href } from "expo-router";
 import React from "react";
 import {
@@ -37,6 +38,8 @@ export default function ForgotPasswordScreen() {
   const [code, setCode] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [showConfirm, setShowConfirm] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
@@ -158,26 +161,54 @@ export default function ForgotPasswordScreen() {
               />
 
               <Text style={styles.label}>New password</Text>
-              <TextInput
-                style={styles.input}
-                value={password}
-                placeholder="Enter new password"
-                placeholderTextColor={colors.mutedForeground}
-                secureTextEntry
-                autoComplete="new-password"
-                onChangeText={setPassword}
-              />
+              <View style={styles.pwWrap}>
+                <TextInput
+                  style={[styles.input, styles.pwInput]}
+                  value={password}
+                  placeholder="Enter new password"
+                  placeholderTextColor={colors.mutedForeground}
+                  secureTextEntry={!showPassword}
+                  autoComplete="new-password"
+                  onChangeText={setPassword}
+                />
+                <Pressable
+                  style={styles.eyeBtn}
+                  onPress={() => setShowPassword((s) => !s)}
+                  hitSlop={8}
+                  accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                >
+                  <Feather
+                    name={showPassword ? "eye-off" : "eye"}
+                    size={18}
+                    color={colors.mutedForeground}
+                  />
+                </Pressable>
+              </View>
 
               <Text style={styles.label}>Confirm new password</Text>
-              <TextInput
-                style={styles.input}
-                value={confirm}
-                placeholder="Re-enter new password"
-                placeholderTextColor={colors.mutedForeground}
-                secureTextEntry
-                autoComplete="new-password"
-                onChangeText={setConfirm}
-              />
+              <View style={styles.pwWrap}>
+                <TextInput
+                  style={[styles.input, styles.pwInput]}
+                  value={confirm}
+                  placeholder="Re-enter new password"
+                  placeholderTextColor={colors.mutedForeground}
+                  secureTextEntry={!showConfirm}
+                  autoComplete="new-password"
+                  onChangeText={setConfirm}
+                />
+                <Pressable
+                  style={styles.eyeBtn}
+                  onPress={() => setShowConfirm((s) => !s)}
+                  hitSlop={8}
+                  accessibilityLabel={showConfirm ? "Hide password" : "Show password"}
+                >
+                  <Feather
+                    name={showConfirm ? "eye-off" : "eye"}
+                    size={18}
+                    color={colors.mutedForeground}
+                  />
+                </Pressable>
+              </View>
 
               {error && <Text style={styles.error}>{error}</Text>}
 
@@ -283,6 +314,17 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
       fontSize: 15,
       color: colors.foreground,
       marginBottom: 14,
+    },
+    pwWrap: { position: "relative", justifyContent: "center" },
+    pwInput: { paddingRight: 48 },
+    eyeBtn: {
+      position: "absolute",
+      right: 0,
+      top: 0,
+      height: 48,
+      width: 44,
+      alignItems: "center",
+      justifyContent: "center",
     },
     primaryBtn: {
       height: 48,
