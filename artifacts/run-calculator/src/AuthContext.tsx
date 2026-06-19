@@ -71,33 +71,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const me = data ?? null;
 
-  // Clearing the cache on every identity change prevents one user's cached
-  // inventory/run/staff data from leaking into the next session.
-  const signIn = useCallback(
-    async (username: string, password: string) => {
-      await signInRequest(username, password);
-      qc.clear();
-      await qc.invalidateQueries({ queryKey: ["me"] });
+  // On every identity change we (a) write the new identity straight into ["me"]
+  // from the auth response (mirroring mobile's setMe), and (b) drop every OTHER
+  // cached query so one user's inventory/run/staff data can't leak into the next
+  // session. We deliberately never destroy the ["me"] query itself: clearing it
+  // makes its mounted observer fire a competing fetchMe() that races with — and
+  // can clobber — the value we just set, which would bounce the user back to the
+  // login screen (or, on sign-out, strand them in the authenticated shell).
+  const resetCacheTo = useCallback(
+    (identity: StaffMember | null) => {
+      qc.setQueryData(["me"], identity);
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
     [qc],
   );
 
+  const signIn = useCallback(
+    async (username: string, password: string) => {
+      const { user } = await signInRequest(username, password);
+      resetCacheTo(user);
+    },
+    [resetCacheTo],
+  );
+
   const signUp = useCallback(
     async (username: string, password: string) => {
-      await signUpRequest(username, password);
-      qc.clear();
-      await qc.invalidateQueries({ queryKey: ["me"] });
+      const { user } = await signUpRequest(username, password);
+      resetCacheTo(user);
     },
-    [qc],
+    [resetCacheTo],
   );
 
   const signOut = useCallback(async () => {
     try {
       await signOutRequest();
     } finally {
-      qc.clear();
+      resetCacheTo(null);
     }
-  }, [qc]);
+  }, [resetCacheTo]);
 
   // Flip the app to the signed-out UI immediately. We set ["me"] to null rather
   // than clearing the whole cache so we don't disturb any in-flight request
