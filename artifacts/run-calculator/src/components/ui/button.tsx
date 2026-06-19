@@ -55,6 +55,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        // Default native buttons to type="button" so a button inside a <form>
+        // never accidentally submits it (e.g. the Setup form's "Scan for
+        // missing data"). Real submit buttons pass an explicit type="submit",
+        // which overrides this via the {...props} spread below.
+        {...(asChild ? {} : { type: "button" })}
         {...props}
       />
     )
