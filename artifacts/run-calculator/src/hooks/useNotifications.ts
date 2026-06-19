@@ -27,6 +27,34 @@ interface NotifResult {
 }
 
 /**
+ * Fire a notification safely. Android Chrome (and other mobile browsers)
+ * forbid the `new Notification()` constructor — it throws "Illegal
+ * constructor" and must go through the service worker instead. Prefer
+ * `ServiceWorkerRegistration.showNotification()`, fall back to the
+ * constructor, and never let either path throw into the calling effect.
+ */
+function showAppNotification(title: string, options: NotificationOptions): void {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  void (async () => {
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if (reg?.showNotification) {
+        await reg.showNotification(title, options);
+        return;
+      }
+    } catch {
+      /* fall through to the constructor */
+    }
+    try {
+      new Notification(title, options);
+    } catch {
+      /* notifications unsupported in this context — ignore */
+    }
+  })();
+}
+
+/**
  * Fires browser Notifications and haptic vibrations at key run milestones:
  *  - 15 minutes remaining before end of run
  *  - Each dough-batch cycle boundary
@@ -56,7 +84,7 @@ export function useNotifications({
       if ("Notification" in window) {
         const fire = () => {
           notifiedRunRef.current = runId;
-          new Notification("⏰ 15 minutes left", {
+          showAppNotification("⏰ 15 minutes left", {
             body: `${runLabel(currentRun)} — wrap up and prepare for end of run.`,
             icon: "/icons/icon-192.png",
             tag: `run-end-${runId}`,
@@ -85,7 +113,7 @@ export function useNotifications({
     if (batchDismissRef.current) clearTimeout(batchDismissRef.current);
     batchDismissRef.current = setTimeout(() => setShowBatchDue(false), 10000);
     if (Notification.permission === "granted") {
-      new Notification("🍕 Start next dough batch", {
+      showAppNotification("🍕 Start next dough batch", {
         body: `${runLabel(currentRun)} — batch ${batchNum + 1} is due now.`,
         icon: "/icons/icon-192.png",
         tag: `batch-${currentRun.id}-${batchNum}`,
@@ -105,7 +133,7 @@ export function useNotifications({
     runCompleteNotifRef.current = runId;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
     if (Notification.permission === "granted") {
-      new Notification("✅ Run time complete", {
+      showAppNotification("✅ Run time complete", {
         body: `${runLabel(currentRun)} — time's up, end the run.`,
         icon: "/icons/icon-192.png",
         tag: `run-complete-${runId}`,
@@ -125,7 +153,7 @@ export function useNotifications({
     freezerDoneNotifRef.current = runId;
     navigator.vibrate?.([200, 100, 200]);
     if (Notification.permission === "granted") {
-      new Notification("❄️ Freezer empty", {
+      showAppNotification("❄️ Freezer empty", {
         body: `${runLabel(currentRun)} — freezer is clear, ready for next run.`,
         icon: "/icons/icon-192.png",
         tag: `freezer-done-${runId}`,
