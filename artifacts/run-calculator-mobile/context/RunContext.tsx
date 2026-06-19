@@ -1804,13 +1804,31 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
   const startRun = useCallback(
     () =>
-      updateCurrentRun((r) => ({
-        ...r,
-        isRunning: true,
-        startedAt: r.startedAt ?? Date.now(),
-        endedAt: undefined,
-      })),
-    [updateCurrentRun],
+      setAppState((prev) => {
+        const now = Date.now();
+        // Starting a run stops any other run that is currently running. Finalize
+        // each like an explicit endRun: deduct its own inventory (idempotent per
+        // runId, from its own settings) before clearing its running flag.
+        prev.runs.forEach((r, i) => {
+          if (i !== prev.currentIndex && r.startedAt != null && r.endedAt == null) {
+            void consumeRunInventory(
+              r.id,
+              computeRunConsumptionLines(r.settings),
+            ).catch(() => {});
+          }
+        });
+        const runs = prev.runs.map((r, i) =>
+          i === prev.currentIndex
+            ? { ...r, isRunning: true, startedAt: r.startedAt ?? now, endedAt: undefined }
+            : r.startedAt != null && r.endedAt == null
+              ? { ...r, isRunning: false, endedAt: now }
+              : r,
+        );
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      }),
+    [persist],
   );
 
   const endRun = useCallback(

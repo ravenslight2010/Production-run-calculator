@@ -2993,8 +2993,21 @@ export default function Home() {
 
   function startRun() {
     initialFinishTimestampRef.current = Date.now() + calc.totalTimeSec * 1000;
+    const now = Date.now();
+    // Starting a run stops any other run that is currently running. Finalize each
+    // like an explicit endRun: deduct its own inventory (idempotent per runId,
+    // from its stored values) before marking it ended.
+    for (const r of dayState.runs) {
+      if (r.id !== currentRunId && r.startedAt && !r.endedAt) {
+        void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => {});
+      }
+    }
     const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex ? { ...r, startedAt: Date.now(), endedAt: undefined } : r
+      i === dayState.currentIndex
+        ? { ...r, startedAt: now, endedAt: undefined }
+        : r.startedAt && !r.endedAt
+          ? { ...r, endedAt: now, pausedAt: undefined }
+          : r
     );
     const newDs = { ...dayState, runs: newRuns };
     setDayState(newDs);
