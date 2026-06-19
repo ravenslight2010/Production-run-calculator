@@ -23,6 +23,7 @@ import {
 import { FONTS } from "@/constants/fonts";
 import {
   useRun,
+  useRunClock,
   runLabel,
   profileKey,
   computeDoughSupply,
@@ -76,9 +77,9 @@ export default function CalculatorScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    run, calc,
+    run,
     runIndex, runCount, allRuns,
-    activeStoppage, startRun, endRun,
+    startRun, endRun,
     updateProgress, addStoppage, endActiveStoppage,
     addRun, switchRun, deleteRun,
     runToTime, setRunToTime,
@@ -87,6 +88,7 @@ export default function CalculatorScreen() {
     updateSettings, saveProfile, applyProfile, hasProfile,
     brands, brandFlavors, addListItem, addFlavor,
   } = useRun();
+  const { calc, activeStoppage } = useRunClock();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
   const doughSubTab: DoughSupplyMode = run.progress.subTab;

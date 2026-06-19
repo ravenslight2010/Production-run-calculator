@@ -24,6 +24,7 @@ import {
   runLabel,
   todayStr,
   useRun,
+  useRunClock,
   type RunState,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
@@ -322,7 +323,6 @@ export default function SummaryScreen() {
   const insets = useSafeAreaInsets();
   const {
     allRuns,
-    tick,
     shiftNotes,
     setShiftNotes,
     history,
@@ -334,6 +334,7 @@ export default function SummaryScreen() {
     addListItem,
     supervisorPin,
   } = useRun();
+  const { tick } = useRunClock();
 
   const [importResult, setImportResult] = React.useState<ImportParseResult | null>(null);
   const [importOpen, setImportOpen] = React.useState(false);

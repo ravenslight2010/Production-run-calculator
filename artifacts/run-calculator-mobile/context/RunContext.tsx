@@ -24,6 +24,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -1159,9 +1160,6 @@ interface RunContextValue {
   runIndex: number;
   runCount: number;
   allRuns: RunState[];
-  calc: RunCalc;
-  tick: number;
-  activeStoppage: Stoppage | null;
   updateSettings: (partial: Partial<RunSettings>) => void;
   updateProgress: (partial: Partial<RunProgress>) => void;
   startRun: () => void;
@@ -1257,6 +1255,19 @@ interface RunContextValue {
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
+
+// Per-second "clock" values are split into their own context so that the 1s
+// tick only re-renders screens that show live, time-based data (the Run
+// screen, Stoppages, and Summary). Screens whose numbers depend on settings/
+// progress (Sauce, Dough, Frontline, Packaging) read `run` from RunContext and
+// compute their own calc snapshot, so they no longer re-render every second.
+interface RunClockValue {
+  calc: RunCalc;
+  tick: number;
+  activeStoppage: Stoppage | null;
+}
+
+const RunClockContext = createContext<RunClockValue | null>(null);
 
 const INITIAL_STATE: AppState = {
   runs: [makeNewRun()],
@@ -2554,16 +2565,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const activeStoppage = currentRun?.stoppages.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
 
-  return (
-    <RunContext.Provider
-      value={{
+  // The main context value excludes the per-second clock fields and is memoized
+  // so its identity stays stable across ticks. Every callback below is
+  // useCallback-stable, so only appState / currentRun / syncStatus drive a
+  // rebuild — consumers reading useRun() no longer re-render once per second.
+  const value = useMemo<RunContextValue>(
+    () => ({
         run: currentRun,
         runIndex: appState.currentIndex,
         runCount: appState.runs.length,
         allRuns: appState.runs,
-        calc,
-        tick,
-        activeStoppage,
         updateSettings,
         updateProgress,
         startRun,
@@ -2628,9 +2639,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         clearScheduledDay,
         applyScheduledDay,
         syncStatus,
-      }}
-    >
-      {children}
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [appState, currentRun, syncStatus],
+  );
+
+  return (
+    <RunContext.Provider value={value}>
+      <RunClockContext.Provider value={{ calc, tick, activeStoppage }}>
+        {children}
+      </RunClockContext.Provider>
     </RunContext.Provider>
   );
 }
@@ -2638,5 +2656,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 export function useRun() {
   const ctx = useContext(RunContext);
   if (!ctx) throw new Error("useRun must be used within RunContextProvider");
+  return ctx;
+}
+
+// Subscribe to the per-second clock (live calc snapshot, tick, active stoppage).
+// Only use this in screens that must update once per second; everything else
+// should read useRun() so it does not re-render on every tick.
+export function useRunClock() {
+  const ctx = useContext(RunClockContext);
+  if (!ctx) throw new Error("useRunClock must be used within RunContextProvider");
   return ctx;
 }

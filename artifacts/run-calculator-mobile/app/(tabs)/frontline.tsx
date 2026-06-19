@@ -6,6 +6,7 @@ import { Card, ReadOnlyRecipe, StatRow } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
 import {
   useRun,
+  computeCalc,
   sauceBarrelBreakdown,
   DEFAULT_PEP_TYPES,
   type RecipeRow,
@@ -64,7 +65,8 @@ function RecipeCard({
 export default function FrontlineScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, calc } = useRun();
+  const { run } = useRun();
+  const calc = computeCalc(run, Date.now());
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;

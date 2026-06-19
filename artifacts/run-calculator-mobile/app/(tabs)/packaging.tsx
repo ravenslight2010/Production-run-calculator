@@ -5,7 +5,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stepper } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
-import { useRun, computeDoughSupply, liveFreezerMin, PACKAGING_FIELDS } from "@/context/RunContext";
+import { useRun, computeCalc, computeDoughSupply, liveFreezerMin, PACKAGING_FIELDS } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 function fmtTime(min: number): string {
@@ -20,7 +20,6 @@ export default function PackagingScreen() {
   const insets = useSafeAreaInsets();
   const {
     run,
-    calc,
     updateProgress,
     autoTrack,
     setAutoTrack,
@@ -28,6 +27,7 @@ export default function PackagingScreen() {
   } = useRun();
 
   const nowMs = Date.now();
+  const calc = computeCalc(run, nowMs);
   const freezerTime = run.settings.freezerTime;
   const freezerMin = liveFreezerMin(run, nowMs);
   const freezerRemaining = Math.max(0, freezerTime - freezerMin);

@@ -11,6 +11,7 @@ import {
 import { FONTS } from "@/constants/fonts";
 import {
   useRun,
+  computeCalc,
   computeDoughSupply,
   type DoughSupplyMode,
 } from "@/context/RunContext";
@@ -25,7 +26,8 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, calc, updateProgress } = useRun();
+  const { run, updateProgress } = useRun();
+  const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
   const setDoughSubTab = (m: DoughSupplyMode) => updateProgress({ subTab: m });

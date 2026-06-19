@@ -12,6 +12,7 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
+- [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.
 - [Web auth identity cache](auth-identity-cache.md) — set ["me"] directly on sign-in/up/out; never qc.clear() it (its observer refetch races and bounces the user).
 - [Post-merge setup](post-merge-setup.md) — post-merge.sh must use `db push-force` (plain push hangs on TTY rename prompt) + generous timeout (~70s real runtime).

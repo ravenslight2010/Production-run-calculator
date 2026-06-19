@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRun, runLabel, type Stoppage } from "@/context/RunContext";
+import { useRun, useRunClock, runLabel, type Stoppage } from "@/context/RunContext";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 
@@ -103,13 +103,12 @@ export default function StoppagesScreen() {
   const {
     run,
     runIndex,
-    tick,
-    activeStoppage,
     addStoppage,
     addPastStoppage,
     endActiveStoppage,
     updateActiveStoppage,
   } = useRun();
+  const { tick, activeStoppage } = useRunClock();
   const [showModal, setShowModal] = useState(false);
 
   const webTop = Platform.OS === "web" ? 67 : 0;

@@ -3,13 +3,14 @@ import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, ReadOnlyRecipe, StatRow } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
-import { useRun, sauceBarrelBreakdown } from "@/context/RunContext";
+import { useRun, computeCalc, sauceBarrelBreakdown } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 export default function SauceScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, calc } = useRun();
+  const { run } = useRun();
+  const calc = computeCalc(run, Date.now());
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
