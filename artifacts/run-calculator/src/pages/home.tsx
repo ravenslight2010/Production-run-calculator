@@ -1839,7 +1839,9 @@ export default function Home() {
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
-  const isSupervisor = role === "supervisor";
+  // Managers (server role) always have supervisor access without entering the
+  // PIN; the PIN remains for operators on shared, logged-in devices.
+  const isSupervisor = isManager || role === "supervisor";
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
@@ -6052,6 +6054,8 @@ export default function Home() {
             <button
               type="button"
               onClick={() => {
+                // Managers always have access via their account; no PIN toggle.
+                if (isManager) return;
                 if (isSupervisor) {
                   setRole("operator");
                 } else {
@@ -6060,7 +6064,7 @@ export default function Home() {
                   setShowPinDialog(true);
                 }
               }}
-              title={isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
+              title={isManager ? "Manager — full access" : isSupervisor ? "Click to exit supervisor mode" : "Click to enter supervisor mode"}
               className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
                 isSupervisor
                   ? "border-primary/40 text-primary bg-primary/10 hover:bg-primary/20"

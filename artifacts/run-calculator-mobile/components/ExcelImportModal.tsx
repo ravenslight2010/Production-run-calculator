@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useMe } from "@/hooks/useRole";
 import {
   exactMatch,
   fuzzyMatch,
@@ -48,13 +49,15 @@ export default function ExcelImportModal({
   onConfirm,
 }: Props) {
   const colors = useColors();
+  // Managers (server role) bypass the device PIN; operators still need it.
+  const { isManager } = useMe();
   const [date, setDate] = React.useState(defaultDate);
   const [brandChoice, setBrandChoice] = React.useState<Record<string, string>>({});
   const [flavorChoice, setFlavorChoice] = React.useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = React.useState(false);
   const [pinEntry, setPinEntry] = React.useState("");
 
-  const canCreate = !supervisorPin || unlocked;
+  const canCreate = !supervisorPin || unlocked || isManager;
   const rows = result?.rows ?? [];
   const errors = result?.errors ?? [];
 
@@ -221,7 +224,7 @@ export default function ExcelImportModal({
               style={[styles.input, { color: colors.foreground, borderColor: dateValid ? colors.border : colors.destructive }]}
             />
 
-            {supervisorPin && !unlocked ? (
+            {supervisorPin && !unlocked && !isManager ? (
               <View style={[styles.unlockBox, { borderColor: colors.border }]}>
                 <Text style={[styles.help, { color: colors.mutedForeground }]}>
                   Enter supervisor PIN to allow creating new brands/flavors.

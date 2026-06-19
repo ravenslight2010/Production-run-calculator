@@ -21,6 +21,7 @@ import {
 } from "@/context/RunContext";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
+import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
 
 function toNum(s: string | undefined | null): number {
@@ -157,6 +158,8 @@ export default function ConfigureScreen() {
     deleteRecipePreset,
     supervisorPin,
   } = useRun();
+  // Managers (server role) bypass the device PIN; operators still need it.
+  const { isManager } = useMe();
   const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
   const [tplName, setTplName] = useState("");
   const [unlocked, setUnlocked] = useState(false);
@@ -258,7 +261,7 @@ export default function ConfigureScreen() {
     }
   };
 
-  if (supervisorPin && !unlocked) {
+  if (supervisorPin && !unlocked && !isManager) {
     return (
       <View
         style={[
