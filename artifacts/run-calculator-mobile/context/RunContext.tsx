@@ -1,5 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Alert } from "react-native";
+import {
+  Alert,
+  AppState as RNAppState,
+  type AppStateStatus as RNAppStateStatus,
+} from "react-native";
 import { MIX_SEED } from "@/data/mixSeed";
 import {
   SPEC_BRANDS,
@@ -412,6 +416,45 @@ function closeOutRun(run: RunState, boundaryMs: number): RunState {
     endedAt: run.endedAt ?? (run.startedAt != null ? boundaryMs : undefined),
     stoppages: run.stoppages.map((s) =>
       s.endedAt == null ? { ...s, endedAt: boundaryMs } : s,
+    ),
+  };
+}
+
+// Auto-deduct inventory for every open run closed by a day rollover, matching
+// endRun. consume is idempotent per runId, so runs already deducted via endRun
+// won't double-count.
+function consumeOpenRunsForRollover(runs: RunState[]): void {
+  for (const r of runs) {
+    if (r.startedAt != null && r.endedAt == null) {
+      void consumeRunInventory(
+        r.id,
+        computeRunConsumptionLines(r.settings),
+      ).catch(() => {});
+    }
+  }
+}
+
+// Build the fresh next-day state from the current (already-normalized) state:
+// archive the prior day's runs frozen at local midnight, start a single empty
+// run, and stamp resetAt (the new server-side session boundary). Shared by the
+// cold-start mount path and the live (interval / foreground) rollover check so
+// both stay in lockstep.
+function buildNextDayState(cur: AppState, today: string): AppState {
+  const boundaryMs = new Date(`${today}T00:00:00`).getTime();
+  const archived: HistoryDay = {
+    date: cur.date,
+    runs: cur.runs.map((r) => closeOutRun(normalizeRun(r), boundaryMs)),
+  };
+  return {
+    ...cur,
+    runs: [makeNewRun()],
+    currentIndex: 0,
+    shiftNotes: "",
+    date: today,
+    resetAt: boundaryMs,
+    history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
+      0,
+      MAX_HISTORY_DAYS,
     ),
   };
 }
@@ -1428,34 +1471,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             if (parsed.date && parsed.date !== today) {
               // Calendar day rolled over: archive the prior day's runs,
               // frozen at the prior day's end so history is immutable.
-              // Auto-deduct inventory for every run being closed by the rollover,
-              // matching endRun. consume is idempotent per runId, so runs already
-              // deducted via endRun won't double-count.
-              for (const r of parsed.runs) {
-                if (r.startedAt != null && r.endedAt == null) {
-                  void consumeRunInventory(
-                    r.id,
-                    computeRunConsumptionLines(r.settings),
-                  ).catch(() => {});
-                }
-              }
-              const boundaryMs = new Date(`${today}T00:00:00`).getTime();
-              const archived: HistoryDay = {
-                date: parsed.date,
-                runs: parsed.runs.map((r) => closeOutRun(normalizeRun(r), boundaryMs)),
-              };
-              const next: AppState = {
+              const current: AppState = {
                 ...base,
-                runs: [makeNewRun()],
-                currentIndex: 0,
-                shiftNotes: "",
-                date: today,
-                resetAt: boundaryMs,
-                history: [
-                  archived,
-                  ...history.filter((h) => h.date !== parsed.date),
-                ].slice(0, MAX_HISTORY_DAYS),
+                runs: parsed.runs.map(normalizeRun),
+                history,
               };
+              consumeOpenRunsForRollover(current.runs);
+              const next = buildNextDayState(current, today);
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
               // The new day's resetAt (pushed to the server by the sync stream
@@ -1479,6 +1501,42 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     })
       .finally(() => setBootDone(true));
   }, []);
+
+  // Live day-rollover detection (web parity). The mount effect above only catches
+  // a rollover on a cold start; a tablet left open — or merely backgrounded —
+  // across midnight would otherwise never reset (prior day's run lingers and no
+  // new resetAt is pushed, so the server never fences the stale session). Mirror
+  // web's setInterval + visibilitychange by re-checking every minute and whenever
+  // the app returns to the foreground.
+  useEffect(() => {
+    if (!bootDone) return;
+    function checkDateRollover() {
+      const cur = appStateRef.current;
+      const today = todayStr();
+      if (!cur.date || cur.date === today) return;
+      consumeOpenRunsForRollover(cur.runs);
+      const next = buildNextDayState(cur, today);
+      setAppState(next);
+      void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      // The new resetAt is pushed by the change-watcher below, becoming the
+      // server-side session boundary, so the daily reset signs everyone out.
+      // Drop to the login screen now; forceSignedOut keeps the token so the
+      // rollover's own push can still authenticate and set the boundary.
+      forceSignedOutRef.current();
+    }
+    const interval = setInterval(checkDateRollover, 60_000);
+    const sub = RNAppState.addEventListener(
+      "change",
+      (status: RNAppStateStatus) => {
+        if (status === "active") checkDateRollover();
+      },
+    );
+    checkDateRollover();
+    return () => {
+      clearInterval(interval);
+      sub.remove();
+    };
+  }, [bootDone]);
 
   const persist = useCallback((state: AppState) => {
     if (saveRef.current) clearTimeout(saveRef.current);
