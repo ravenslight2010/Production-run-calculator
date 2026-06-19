@@ -2562,9 +2562,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     if (bucket === autoBucketRef.current) return;
     autoBucketRef.current = bucket;
 
-    const expectedCases = Math.floor(
+    // Clamp to the run's total need so skids/cases freeze at their final state
+    // once production is complete instead of cycling past it (modulo wrap).
+    const expectedCasesRaw = Math.floor(
       ((c.netElapsedSec / 60) * c.ppm) / r.settings.pizzasPerCase,
     );
+    const expectedCases =
+      r.settings.casesNeeded > 0
+        ? Math.min(r.settings.casesNeeded, expectedCasesRaw)
+        : expectedCasesRaw;
     const maxSkids =
       r.settings.casesNeeded > 0
         ? Math.floor(r.settings.casesNeeded / r.settings.casesPerSkid)

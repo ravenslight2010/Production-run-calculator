@@ -76,7 +76,10 @@ export function useAutoTrack({
     const maxSkids = Math.floor(v.casesNeeded / v.casesPerSkid);
     const elapsedMin = elapsedBatchSec / 60;
     const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
-    const expectedCases = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    // Clamp to the run's total need so skids/cases freeze at their final state
+    // once production is complete instead of cycling past it (modulo wrap).
+    const expectedCasesRaw = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    const expectedCases = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCasesRaw) : expectedCasesRaw;
 
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
@@ -122,13 +125,24 @@ export function useAutoTrack({
 
     // Trays / batches: incremental decrement for this bucket's duration.
     // Works after page reloads and naturally handles mid-run replenishments.
-    if (calc.perTray > 0 && calc.ppm > 0) {
+    // Stop once all the dough the run needs has been fed onto the line — dough
+    // enters at the front (no tunnel offset), so feeding finishes when the
+    // front-of-line case count reaches casesNeeded. Without this, auto-track
+    // keeps depleting (and re-suggesting) dough after the run already has
+    // everything it needs.
+    const elapsedMin = elapsedBatchSec / 60;
+    const doughFeedComplete =
+      v.casesNeeded > 0 &&
+      calc.ppm > 0 &&
+      v.pizzasPerCase > 0 &&
+      Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase) >= v.casesNeeded;
+    if (!doughFeedComplete && calc.perTray > 0 && calc.ppm > 0) {
       const traysConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perTray);
       if (traysConsumed > 0) {
         form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
       }
     }
-    if (calc.perBatch > 0 && calc.ppm > 0) {
+    if (!doughFeedComplete && calc.perBatch > 0 && calc.ppm > 0) {
       const batchesConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perBatch);
       if (batchesConsumed > 0) {
         form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
