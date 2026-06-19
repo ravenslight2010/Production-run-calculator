@@ -13,7 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setBaseUrl } from "@workspace/api-client-react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -68,13 +68,25 @@ export default function RootLayout() {
     SpaceMono_700Bold,
   });
 
+  // Custom fonts are fetched over the network in Expo Go. If that fetch stalls
+  // (e.g. a flaky dev tunnel), gating the whole UI on it would leave the app
+  // stuck on a blank/splash screen with no way to recover. After a short
+  // timeout we render anyway with system fonts so the app is never blocked.
+  const [fontTimedOut, setFontTimedOut] = useState(false);
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded, fontError]);
+    const t = setTimeout(() => setFontTimedOut(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
 
-  if (!fontsLoaded && !fontError) return null;
+  const ready = fontsLoaded || !!fontError || fontTimedOut;
+
+  useEffect(() => {
+    if (ready) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [ready]);
+
+  if (!ready) return null;
 
   return (
     <SafeAreaProvider>
