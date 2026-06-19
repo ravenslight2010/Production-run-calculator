@@ -106,7 +106,7 @@ export function runToMeta(run: RunState, rawMeta?: WebRunMeta): WebRunMeta {
     endedAt: run.endedAt,
     subTab: run.progress.subTab,
     notes: run.settings.notes,
-    stoppages: run.stoppages.map(mobileStoppageToWeb),
+    stoppages: (run.stoppages ?? []).map(mobileStoppageToWeb),
   };
 }
 
@@ -295,7 +295,9 @@ function metaToRun(
     id: meta.id,
     settings: formValuesToSettings(fv, meta, prev?.settings),
     progress: formValuesToProgress(fv, meta, prev?.progress),
-    stoppages: (meta.stoppages ?? []).map(webStoppageToMobile),
+    stoppages: (Array.isArray(meta.stoppages) ? meta.stoppages : [])
+      .filter((s): s is WebStoppage => !!s && typeof s === "object")
+      .map(webStoppageToMobile),
     startedAt: meta.startedAt,
     endedAt: meta.endedAt,
     isRunning: !!meta.startedAt && !meta.endedAt && !meta.pausedAt,
@@ -389,7 +391,13 @@ export function applyPayloadToState(
 
   if (acceptedDay && ds) {
     const prevById = new Map(prev.runs.map((r) => [r.id, r]));
-    const runs = ds.runs.map((meta) => metaToRun(meta, payload.runValues?.[meta.id], prevById.get(meta.id)));
+    const remoteRuns = (Array.isArray(ds.runs) ? ds.runs : []).filter(
+      (meta): meta is WebRunMeta =>
+        !!meta && typeof meta === "object" && typeof meta.id === "string",
+    );
+    const runs = remoteRuns.map((meta) =>
+      metaToRun(meta, payload.runValues?.[meta.id], prevById.get(meta.id)),
+    );
     patch.runs = runs.length > 0 ? runs : prev.runs;
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;

@@ -12,6 +12,7 @@
 - [Mobile RunContext v2](mobile-run-context-v2.md) — multi-run model, storage key v2, time-boundary capping, notification/timer effect pitfalls, web-parity feature set.
 - [Web+mobile live sync](live-sync-web-mobile.md) — both apps share /api/sync day-state; non-clobber merge rules, echo/lost-update guards, field reconciliation.
 - [Nav structure](nav-structure.md) — both apps use identical 6 bottom tabs + header menu; web is one Tabs/activeTab system in home.tsx; mirror nav changes across both.
+- [Sync async crash safety](sync-async-crash-safety.md) — mobile sync serialize/deserialize run in async paths the ErrorBoundary can't catch; must be fail-safe (blank-screen crash, no fallback = async throw).
 - [Render clock split](render-clock-split.md) — mobile per-second tick/calc/activeStoppage live in a separate useRunClock() context; non-live screens must snapshot computeCalc, not subscribe.
 - [Android keyboard avoidance](android-keyboard-avoidance.md) — never use KeyboardAvoidingView behavior="height" on Android (keyboard dismisses while typing); use behavior undefined, let adjustResize handle it.
 - [Daily reset trigger](daily-reset-trigger.md) — reset is client-driven at LOCAL midnight; both apps need a live timer+foreground check, not just on-load, or a device left open never resets.

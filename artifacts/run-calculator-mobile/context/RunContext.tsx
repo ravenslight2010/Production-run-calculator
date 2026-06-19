@@ -1390,6 +1390,10 @@ function normalizeRun(r: RunState): RunState {
     ...r,
     settings: normalizeSettings(r.settings),
     progress: { ...DEFAULT_PROGRESS, ...r.progress },
+    // A run that lost its stoppages array (older/partial persisted state or a
+    // malformed remote payload) would crash every `.stoppages.map/filter/find`
+    // call — including the un-catchable async sync serializer. Guarantee it here.
+    stoppages: Array.isArray(r.stoppages) ? r.stoppages : [],
   };
 }
 
@@ -1618,8 +1622,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const base = getApiBaseUrl();
     const clientId = clientIdRef.current;
     if (!base || !clientId) return;
-    const payload = appStateToPayload(appStateRef.current, lastRemoteRawRef.current);
-    const sig = stableStringify(payload);
+    let payload: SyncPayload;
+    let sig: string;
+    try {
+      payload = appStateToPayload(appStateRef.current, lastRemoteRawRef.current);
+      sig = stableStringify(payload);
+    } catch {
+      // Runs in a setTimeout, so a throw here is uncaught and would crash the
+      // whole app. Sync is best-effort — degrade to offline instead.
+      setSyncStatus("offline");
+      return;
+    }
     putToday(base, clientId, payload)
       .then(() => {
         lastSyncSigRef.current = sig;
@@ -1651,12 +1664,18 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
     const commitRemote = (payload: SyncPayload) => {
       setAppState((prev) => {
-        const { patch } = applyPayloadToState(payload, prev);
-        const next = { ...prev, ...patch };
-        lastRemoteRawRef.current = payload;
-        lastSyncSigRef.current = stableStringify(appStateToPayload(next, payload));
-        persistNow(next);
-        return next;
+        try {
+          const { patch } = applyPayloadToState(payload, prev);
+          const next = { ...prev, ...patch };
+          lastRemoteRawRef.current = payload;
+          lastSyncSigRef.current = stableStringify(appStateToPayload(next, payload));
+          persistNow(next);
+          return next;
+        } catch {
+          // A malformed remote payload (arriving via the SSE callback) must not
+          // crash the app — keep local state and stay usable.
+          return prev;
+        }
       });
     };
 
@@ -1730,7 +1749,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // and echoes of just-applied remote state (whose signature was pre-recorded).
   useEffect(() => {
     if (!syncStartedRef.current) return;
-    const sig = stableStringify(appStateToPayload(appState, lastRemoteRawRef.current));
+    let sig: string;
+    try {
+      sig = stableStringify(appStateToPayload(appState, lastRemoteRawRef.current));
+    } catch {
+      return;
+    }
     if (sig === lastSyncSigRef.current) return;
     lastLocalEditRef.current = Date.now();
     lastSyncSigRef.current = sig;
@@ -2562,7 +2586,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
 
-  const activeStoppage = currentRun?.stoppages.find((s) => s.endedAt == null) ?? null;
+  const activeStoppage = currentRun?.stoppages?.find((s) => s.endedAt == null) ?? null;
   const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
 
   // The main context value excludes the per-second clock fields and is memoized
