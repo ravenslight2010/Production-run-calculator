@@ -48,4 +48,4 @@
 - [Run-calc parity test](run-calc-parity-test.md) — web computeCalc is inline (not importable); parity guard uses web computeSummaryStats vs mobile computeCalc on a coinciding basis; mobile loaded via strip-imports harness.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
-- [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded (web+mobile) so skids/cases freeze; gate web dough trays/batches decrement on front-of-line feed completion.
+- [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).

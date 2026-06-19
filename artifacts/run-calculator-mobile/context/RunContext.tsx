@@ -1445,6 +1445,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoBucketRef = useRef<number>(-1);
+  // Wall-clock ms of the last auto-track bucket write — drives the incremental
+  // tray/batch decrement (duration since the last bucket).
+  const autoBucketTimeMsRef = useRef<number>(0);
   const autoSuppressRef = useRef<number>(0);
 
   // ── Live-sync state/refs ───────────────────────────────────────────────────
@@ -2539,28 +2542,37 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // blocked until the next wall-clock bucket boundary.
   useEffect(() => {
     autoBucketRef.current = -1;
+    autoBucketTimeMsRef.current = 0;
   }, [currentRun?.id, currentRun?.isRunning]);
 
   // Auto-track: once per 5-minute bucket while running, derive skids completed
-  // and cases on the current skid from expected output (net elapsed × ppm).
-  // Suppressed for 10 minutes after the user manually edits either stepper, so
-  // it never fights a supervisor who is taking over. Tray/batch are not auto-
-  // tracked because the mobile model has no per-tray/per-batch consumption rate.
+  // and cases on the current skid from expected output (net elapsed × ppm), and
+  // incrementally decrement dough trays / batches by what the line consumed in
+  // the bucket (web parity). Suppressed for 10 minutes after the user manually
+  // edits a stepper, so it never fights a supervisor who is taking over.
   useEffect(() => {
     if (!appState.autoTrack) return;
     const r = appState.runs[appState.currentIndex];
     if (!r?.isRunning) return;
-    if (Date.now() < autoSuppressRef.current) return;
-    const c = computeCalc(r, Date.now());
+    const nowMs = Date.now();
+    if (nowMs < autoSuppressRef.current) return;
+    const c = computeCalc(r, nowMs);
     if (
       c.ppm <= 0 ||
       r.settings.casesPerSkid <= 0 ||
       r.settings.pizzasPerCase <= 0
     )
       return;
-    const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+    const bucket = Math.floor(nowMs / (5 * 60 * 1000));
     if (bucket === autoBucketRef.current) return;
+
+    // Duration since the last bucket write (capped to 10 min to avoid huge
+    // jumps); assume a 5-min bucket on the first write of a run.
+    const prevMs = autoBucketTimeMsRef.current;
+    const bucketDurationMin =
+      prevMs > 0 ? Math.min(10, (nowMs - prevMs) / 60000) : 5;
     autoBucketRef.current = bucket;
+    autoBucketTimeMsRef.current = nowMs;
 
     // Clamp to the run's total need so skids/cases freeze at their final state
     // once production is complete instead of cycling past it (modulo wrap).
@@ -2583,11 +2595,49 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       r.settings.casesPerSkid,
       expectedCases % r.settings.casesPerSkid,
     );
-    if (
-      skids !== r.progress.skidsCompleted ||
-      casesOnSkid !== r.progress.casesOnCurrentSkid
-    ) {
-      updateProgress({ skidsCompleted: skids, casesOnCurrentSkid: casesOnSkid });
+
+    const next: Partial<RunProgress> = {};
+    if (skids !== r.progress.skidsCompleted) next.skidsCompleted = skids;
+    if (casesOnSkid !== r.progress.casesOnCurrentSkid)
+      next.casesOnCurrentSkid = casesOnSkid;
+
+    // Trays / batches: incremental decrement for this bucket's duration. Stop
+    // once all the dough the run needs has been fed onto the line — dough enters
+    // at the front (no tunnel offset), so feeding finishes when the front-of-line
+    // case count reaches casesNeeded. Mirrors web mode-aware per-unit sources.
+    const doughFeedComplete =
+      r.settings.casesNeeded > 0 && expectedCasesRaw >= r.settings.casesNeeded;
+    if (!doughFeedComplete) {
+      const supply = computeDoughSupply(r, nowMs, r.progress.subTab);
+      const perTray = supply.perTray;
+      const perBatch =
+        r.progress.subTab === "crusts"
+          ? r.settings.crustsPerCase
+          : supply.perBatch;
+      if (perTray > 0) {
+        const traysConsumed = Math.floor((bucketDurationMin * c.ppm) / perTray);
+        if (traysConsumed > 0) {
+          const nextTrays = Math.max(0, r.progress.traysOnLine - traysConsumed);
+          if (nextTrays !== r.progress.traysOnLine) next.traysOnLine = nextTrays;
+        }
+      }
+      if (perBatch > 0) {
+        const batchesConsumed = Math.floor(
+          (bucketDurationMin * c.ppm) / perBatch,
+        );
+        if (batchesConsumed > 0) {
+          const nextBatches = Math.max(
+            0,
+            r.progress.batchesReady - batchesConsumed,
+          );
+          if (nextBatches !== r.progress.batchesReady)
+            next.batchesReady = nextBatches;
+        }
+      }
+    }
+
+    if (Object.keys(next).length > 0) {
+      updateProgress(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
