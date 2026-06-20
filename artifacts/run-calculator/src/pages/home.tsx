@@ -2701,6 +2701,14 @@ export default function Home() {
         forceSignedOut();
       }
     }
+    // Run once on mount too. loadDayState() only resets the in-memory view when
+    // the stored date is stale; it does NOT archive, stamp resetAt, push the new
+    // boundary, or sign out. Without this immediate call, the rollover (and its
+    // forceSignedOut) only fires up to 60s later via the interval — by which
+    // time another device's pushed resetAt may have already 401-bounced us to
+    // login, so the user sees the logout but never the reset. Mobile already
+    // rolls over on its mount effect; this brings web to parity.
+    void checkDateRollover();
     const interval = setInterval(checkDateRollover, 60_000);
     document.addEventListener("visibilitychange", checkDateRollover);
     return () => {

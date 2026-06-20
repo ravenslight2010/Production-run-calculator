@@ -29,6 +29,25 @@ never rolls over (prior run lingers AND, since no resetAt is pushed, the session
 is never fenced so the user stays logged in). A cold-mount-only check is NOT
 enough.
 
+**The complementary trap (live-timer-only is also NOT enough on web):** the
+rollover routine that carries `forceSignedOut` must ALSO run on mount. Web's
+`loadDayState()` resets only the in-memory view on a stale date (no archive, no
+persist, no `resetAt`, no signout); the real `checkDateRollover` ran only via the
+60s interval / `visibilitychange`. So on a new-day cold start the archive +
+resetAt-push + signout was deferred up to 60s — and once ANY device pushed today's
+`resetAt`, the server 401 boundary bounced this device to login BEFORE its delayed
+rollover ran. Symptom: "auto-logout fires but the reset never happens." Fix:
+invoke `checkDateRollover()` once on mount inside its effect (mobile already rolls
+over on its mount effect — this was a web-only parity gap).
+
+**Do NOT stamp `freshDayState().resetAt` > 0.** The web sync guard is
+`acceptRemoteDay = remoteDateOk && remoteResetAt >= localResetAt`. A brand-new /
+empty web start has no rollover provenance, yet a non-zero local `resetAt` would
+reject legitimate same-day remote payloads carrying `resetAt: 0` (e.g. mobile's
+INITIAL_STATE) — blocking adopt-from-server and causing drift. Stale days are
+already rejected by the DATE guard, so `resetAt` 0/absent is correct for a fresh
+day; the on-mount rollover stamps its own `resetAt` when a real rollover occurs.
+
 **How to apply:** keep the rollover logic in shared helpers used by both the
 cold-start path and the live path so they can't drift. When importing RN's
 `AppState`, alias it (`AppState as RNAppState`) — the mobile RunContext has its
