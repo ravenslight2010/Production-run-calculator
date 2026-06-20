@@ -1,8 +1,11 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
 import {
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -301,6 +304,310 @@ export function TextField({
   );
 }
 
+/**
+ * Searchable picker that mirrors web's IngredientSelect: a trigger row that
+ * opens a bottom-sheet with a search box, tap-to-select list, optional per-item
+ * delete (with inline confirm), and an "Add X" row. Used everywhere the user
+ * selects from a known set (brand, flavor, die type, pepperoni type, allergen,
+ * recipe ingredient) to keep mobile at parity with web.
+ *
+ * - Pass `label` to render as a labeled field row (label left, trigger right),
+ *   a drop-in for TextField/NumericField. Omit it to render a full-width trigger.
+ * - `optionColor`/`optionLabel` support colored value dots and value→label maps
+ *   (used by the fixed allergen set).
+ */
+export function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  onAddOption,
+  onRemoveOption,
+  placeholder = "Select…",
+  allowAdd = true,
+  allowClear = false,
+  optionLabel,
+  optionColor,
+  triggerStyle,
+}: {
+  label?: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  onAddOption?: (v: string) => void;
+  onRemoveOption?: (v: string) => void;
+  placeholder?: string;
+  allowAdd?: boolean;
+  allowClear?: boolean;
+  optionLabel?: (v: string) => string;
+  optionColor?: (v: string) => string | undefined;
+  triggerStyle?: ViewStyle;
+}) {
+  const colors = useColors();
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+
+  const labelOf = (v: string) => (optionLabel ? optionLabel(v) : v);
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => labelOf(o).toLowerCase().includes(q))
+    : options;
+  const trimmed = search.trim();
+  const showAdd =
+    allowAdd &&
+    trimmed.length > 0 &&
+    !options.some((o) => labelOf(o).toLowerCase() === trimmed.toLowerCase());
+
+  const openSheet = () => {
+    setSearch("");
+    setConfirmDelete(null);
+    setOpen(true);
+  };
+  const close = () => {
+    setConfirmDelete(null);
+    setOpen(false);
+  };
+  const pick = (v: string) => {
+    onChange(v);
+    close();
+  };
+  const add = () => {
+    onAddOption?.(trimmed);
+    onChange(trimmed);
+    close();
+  };
+
+  const dotColor = optionColor?.(value);
+
+  const trigger = (
+    <Pressable
+      onPress={openSheet}
+      style={[
+        selectStyles.trigger,
+        { borderColor: colors.border, backgroundColor: colors.secondary },
+        triggerStyle,
+      ]}
+    >
+      {dotColor ? (
+        <View style={[selectStyles.dot, { backgroundColor: dotColor }]} />
+      ) : null}
+      <Text
+        numberOfLines={1}
+        style={[
+          selectStyles.triggerText,
+          { color: value ? colors.foreground : colors.mutedForeground },
+        ]}
+      >
+        {value ? labelOf(value) : placeholder}
+      </Text>
+      <Feather name="chevron-down" size={16} color={colors.mutedForeground} />
+    </Pressable>
+  );
+
+  const sheet = (
+    <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
+      <KeyboardAvoidingView
+        style={selectStyles.avoider}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <Pressable style={selectStyles.backdrop} onPress={close}>
+        <Pressable
+          style={[
+            selectStyles.sheet,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+          onPress={() => {}}
+        >
+          <View style={[selectStyles.handle, { backgroundColor: colors.border }]} />
+          <TextInput
+            autoFocus
+            value={search}
+            onChangeText={setSearch}
+            placeholder={allowAdd ? "Search or add…" : "Search…"}
+            placeholderTextColor={colors.mutedForeground}
+            style={[
+              selectStyles.search,
+              { color: colors.foreground, borderColor: colors.border },
+            ]}
+            autoCapitalize="words"
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (showAdd) add();
+            }}
+          />
+          <ScrollView style={selectStyles.list} keyboardShouldPersistTaps="handled">
+            {allowClear && value ? (
+              <Pressable onPress={() => pick("")} style={selectStyles.optionPress}>
+                <Text style={[selectStyles.noneText, { color: colors.mutedForeground }]}>
+                  — None
+                </Text>
+              </Pressable>
+            ) : null}
+            {filtered.map((opt) => {
+              const active = value === opt;
+              const c = optionColor?.(opt);
+              return confirmDelete === opt ? (
+                <View key={opt} style={selectStyles.confirmRow}>
+                  <Text numberOfLines={1} style={selectStyles.confirmText}>
+                    Remove “{labelOf(opt)}”?
+                  </Text>
+                  <View style={selectStyles.confirmBtns}>
+                    <Pressable
+                      onPress={() => {
+                        onRemoveOption?.(opt);
+                        setConfirmDelete(null);
+                      }}
+                      style={[selectStyles.confirmBtn, { backgroundColor: "#dc2626" }]}
+                    >
+                      <Text style={selectStyles.confirmBtnText}>Yes</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setConfirmDelete(null)}
+                      style={[selectStyles.confirmBtn, { backgroundColor: colors.secondary }]}
+                    >
+                      <Text style={[selectStyles.confirmBtnText, { color: colors.foreground }]}>
+                        No
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : (
+                <View key={opt} style={selectStyles.optionRow}>
+                  <Pressable onPress={() => pick(opt)} style={selectStyles.optionPress}>
+                    {c ? <View style={[selectStyles.dot, { backgroundColor: c }]} /> : null}
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        selectStyles.optionText,
+                        { color: active ? colors.primary : colors.foreground },
+                      ]}
+                    >
+                      {labelOf(opt)}
+                    </Text>
+                  </Pressable>
+                  {onRemoveOption ? (
+                    <Pressable
+                      onPress={() => setConfirmDelete(opt)}
+                      hitSlop={8}
+                      style={selectStyles.optionDelete}
+                    >
+                      <Feather name="x" size={15} color={colors.mutedForeground} />
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            })}
+            {filtered.length === 0 && !showAdd ? (
+              <Text style={[selectStyles.empty, { color: colors.mutedForeground }]}>
+                No matches
+              </Text>
+            ) : null}
+            {showAdd ? (
+              <Pressable onPress={add} style={selectStyles.addRow}>
+                <Feather name="plus" size={15} color={colors.primary} />
+                <Text numberOfLines={1} style={[selectStyles.addText, { color: colors.primary }]}>
+                  Add “{trimmed}”
+                </Text>
+              </Pressable>
+            ) : null}
+          </ScrollView>
+        </Pressable>
+        </Pressable>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
+  if (label) {
+    return (
+      <View style={[styles.fieldRow, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.fieldLabel, { color: colors.foreground }]}>{label}</Text>
+        <View style={selectStyles.inlineTrigger}>{trigger}</View>
+        {sheet}
+      </View>
+    );
+  }
+  return (
+    <>
+      {trigger}
+      {sheet}
+    </>
+  );
+}
+
+const selectStyles = StyleSheet.create({
+  trigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  triggerText: { flex: 1, fontSize: 15, fontFamily: FONTS.regular },
+  inlineTrigger: { flex: 1, marginLeft: 12 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  avoider: { flex: 1 },
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 28,
+    maxHeight: "70%",
+  },
+  handle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 10,
+    opacity: 0.6,
+  },
+  search: {
+    height: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontFamily: FONTS.regular,
+    marginBottom: 8,
+  },
+  list: { flexGrow: 0 },
+  optionRow: { flexDirection: "row", alignItems: "center" },
+  optionPress: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+  },
+  optionText: { flex: 1, fontSize: 15, fontFamily: FONTS.regular },
+  optionDelete: { padding: 8 },
+  noneText: { flex: 1, fontSize: 15, fontStyle: "italic", fontFamily: FONTS.regular },
+  empty: { textAlign: "center", paddingVertical: 18, fontSize: 14, fontFamily: FONTS.regular },
+  addRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12 },
+  addText: { fontSize: 15, fontFamily: FONTS.medium },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    gap: 8,
+  },
+  confirmText: { flex: 1, fontSize: 13, color: "#dc2626", fontFamily: FONTS.medium },
+  confirmBtns: { flexDirection: "row", gap: 6 },
+  confirmBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  confirmBtnText: { color: "#fff", fontSize: 13, fontFamily: FONTS.semibold },
+});
+
 export function CardSection({
   children,
   style,
@@ -450,6 +757,8 @@ export function RecipeEditor({
   onApplyFactory,
   factoryLabel = "Factory mixes for this brand + flavor",
   onSaveMix,
+  onAddIngredient,
+  onRemoveIngredient,
   batchScale = false,
 }: {
   rows: RecipeRow[];
@@ -466,6 +775,8 @@ export function RecipeEditor({
   onApplyFactory?: (preset: FactoryPreset) => void;
   factoryLabel?: string;
   onSaveMix?: () => void;
+  onAddIngredient?: (v: string) => void;
+  onRemoveIngredient?: (v: string) => void;
   batchScale?: boolean;
 }) {
   const colors = useColors();
@@ -638,18 +949,31 @@ export function RecipeEditor({
       {/* Ingredient rows */}
       {rows.map((row, i) => (
         <View key={i} style={recipeStyles.row}>
-          <TextInput
-            style={[
-              recipeStyles.ingInput,
-              { color: colors.foreground, borderColor: colors.border },
-            ]}
-            value={row.ingredient}
-            onChangeText={(t) => setRow(i, { ingredient: t })}
-            placeholder="Ingredient"
-            placeholderTextColor={colors.mutedForeground}
-            autoCapitalize="words"
-            editable={effScale === 1}
-          />
+          {effScale === 1 ? (
+            <SelectField
+              value={row.ingredient}
+              onChange={(v) => setRow(i, { ingredient: v })}
+              options={ingredientOptions}
+              onAddOption={onAddIngredient}
+              onRemoveOption={onRemoveIngredient}
+              placeholder="Ingredient"
+              triggerStyle={{ flex: 1 }}
+            />
+          ) : (
+            <View
+              style={[
+                recipeStyles.ingInput,
+                { borderColor: colors.border, justifyContent: "center" },
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={{ color: colors.foreground, fontSize: 14, fontFamily: FONTS.regular }}
+              >
+                {row.ingredient || "—"}
+              </Text>
+            </View>
+          )}
           {effScale === 1 ? (
             <TextInput
               style={[
@@ -692,30 +1016,6 @@ export function RecipeEditor({
           ) : null}
         </View>
       ))}
-
-      {/* Quick-add ingredient chips */}
-      {effScale === 1 && ingredientOptions.length > 0 ? (
-        <View style={recipeStyles.quickRow}>
-          {ingredientOptions.map((opt) => (
-            <Pressable
-              key={opt}
-              onPress={() => addRow(opt)}
-              style={({ pressed }) => [
-                recipeStyles.quickChip,
-                {
-                  borderColor: colors.border,
-                  opacity: pressed ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Feather name="plus" size={11} color={colors.primary} />
-              <Text style={[recipeStyles.quickChipText, { color: colors.foreground }]}>
-                {opt}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
 
       {effScale === 1 ? (
         <Pressable

@@ -56,4 +56,5 @@
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Import run merge](import-run-merge.md) — mergeImportRuns collapses same brand+flavor runs on a day (sum cases, join notes) post-resolution; verbatim web+mobile mirror.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
+- [Mobile SelectField parity](mobile-select-field.md) — one bottom-sheet picker mirrors web's two selects; allowClear for die/pep, add/remove for recipe rows, no clear elsewhere.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).

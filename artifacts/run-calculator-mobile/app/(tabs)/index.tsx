@@ -18,6 +18,7 @@ import {
   MetricCard,
   NumericField,
   SectionHeader,
+  SelectField,
   StatRow,
 } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
@@ -87,7 +88,7 @@ export default function CalculatorScreen() {
     applyCarryOver,
     syncStatus,
     updateSettings, saveProfile, applyProfile, hasProfile,
-    brands, brandFlavors, addListItem, addFlavor,
+    brands, brandFlavors, addListItem, removeListItem, addFlavor, removeFlavor,
   } = useRun();
   const { calc, activeStoppage } = useRunClock();
   const [showModal, setShowModal] = useState(false);
@@ -138,11 +139,8 @@ export default function CalculatorScreen() {
     });
   };
 
-  // Brand/flavor are picked from saved lists (like web), which drives the
-  // profile + die auto-load effect above. New entries can be typed/added.
-  const [newBrand, setNewBrand] = useState("");
-  const [newFlavor, setNewFlavor] = useState("");
-
+  // Brand/flavor are picked from saved lists (like web) via a searchable
+  // dropdown; new entries are typed into the picker's search and added.
   const selectBrand = (b: string) => {
     Haptics.selectionAsync();
     setIdForm((f) => ({ ...f, brand: b }));
@@ -153,20 +151,12 @@ export default function CalculatorScreen() {
     setIdForm((f) => ({ ...f, flavor: fl }));
     updateSettings({ flavor: fl });
   };
-  const addNewBrand = () => {
-    const v = newBrand.trim();
-    if (!v) return;
+  const addBrand = (v: string) => {
     if (!brands.includes(v)) addListItem("brands", v);
-    setNewBrand("");
-    selectBrand(v);
   };
-  const addNewFlavor = () => {
-    const v = newFlavor.trim();
+  const addFlavorOpt = (v: string) => {
     const b = idForm.brand.trim();
-    if (!v || !b) return;
-    if (!(brandFlavors[b] ?? []).includes(v)) addFlavor(b, v);
-    setNewFlavor("");
-    selectFlavor(v);
+    if (b && !(brandFlavors[b] ?? []).includes(v)) addFlavor(b, v);
   };
 
   const nowMs = Date.now();
@@ -218,101 +208,25 @@ export default function CalculatorScreen() {
         {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
         <Card title="Current Run" icon="package" style={styles.topCard}>
           <Text style={[styles.idLabel, { color: colors.mutedForeground }]}>Brand</Text>
-          {brands.length > 0 ? (
-            <View style={styles.chipWrap}>
-              {brands.map((b) => {
-                const active = idForm.brand === b;
-                return (
-                  <Pressable
-                    key={b}
-                    onPress={() => selectBrand(b)}
-                    style={[
-                      styles.chip,
-                      {
-                        borderColor: active ? colors.primary : colors.border,
-                        backgroundColor: active ? colors.primary + "22" : colors.secondary,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.chipText, { color: active ? colors.primary : colors.foreground }]}>
-                      {b}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-          <View style={styles.addRow}>
-            <TextInput
-              style={[styles.addInput, { color: colors.foreground, borderColor: colors.border }]}
-              value={newBrand}
-              onChangeText={setNewBrand}
-              onSubmitEditing={addNewBrand}
-              placeholder="Add a brand…"
-              placeholderTextColor={colors.mutedForeground}
-              autoCapitalize="words"
-              returnKeyType="done"
-            />
-            <Pressable
-              onPress={addNewBrand}
-              disabled={!newBrand.trim()}
-              style={[styles.addBtn, { borderColor: colors.border, opacity: newBrand.trim() ? 1 : 0.4 }]}
-            >
-              <Feather name="plus" size={16} color={colors.foreground} />
-            </Pressable>
-          </View>
+          <SelectField
+            value={idForm.brand}
+            onChange={selectBrand}
+            options={brands}
+            onAddOption={addBrand}
+            onRemoveOption={(v) => removeListItem("brands", v)}
+            placeholder="Select or add a brand…"
+          />
 
           <Text style={[styles.idLabel, { color: colors.mutedForeground, marginTop: 16 }]}>Flavor</Text>
           {idForm.brand.trim() ? (
-            <>
-              {(brandFlavors[idForm.brand.trim()] ?? []).length > 0 ? (
-                <View style={styles.chipWrap}>
-                  {(brandFlavors[idForm.brand.trim()] ?? []).map((fl) => {
-                    const active = idForm.flavor === fl;
-                    return (
-                      <Pressable
-                        key={fl}
-                        onPress={() => selectFlavor(fl)}
-                        style={[
-                          styles.chip,
-                          {
-                            borderColor: active ? colors.primary : colors.border,
-                            backgroundColor: active ? colors.primary + "22" : colors.secondary,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.chipText, { color: active ? colors.primary : colors.foreground }]}>
-                          {fl}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ) : (
-                <Text style={[styles.idEmpty, { color: colors.mutedForeground }]}>
-                  No saved flavors — add one below.
-                </Text>
-              )}
-              <View style={styles.addRow}>
-                <TextInput
-                  style={[styles.addInput, { color: colors.foreground, borderColor: colors.border }]}
-                  value={newFlavor}
-                  onChangeText={setNewFlavor}
-                  onSubmitEditing={addNewFlavor}
-                  placeholder="Add a flavor…"
-                  placeholderTextColor={colors.mutedForeground}
-                  autoCapitalize="words"
-                  returnKeyType="done"
-                />
-                <Pressable
-                  onPress={addNewFlavor}
-                  disabled={!newFlavor.trim()}
-                  style={[styles.addBtn, { borderColor: colors.border, opacity: newFlavor.trim() ? 1 : 0.4 }]}
-                >
-                  <Feather name="plus" size={16} color={colors.foreground} />
-                </Pressable>
-              </View>
-            </>
+            <SelectField
+              value={idForm.flavor}
+              onChange={selectFlavor}
+              options={brandFlavors[idForm.brand.trim()] ?? []}
+              onAddOption={addFlavorOpt}
+              onRemoveOption={(v) => removeFlavor(idForm.brand.trim(), v)}
+              placeholder="Select or add a flavor…"
+            />
           ) : (
             <Text style={[styles.idEmpty, { color: colors.mutedForeground }]}>Pick a brand first.</Text>
           )}

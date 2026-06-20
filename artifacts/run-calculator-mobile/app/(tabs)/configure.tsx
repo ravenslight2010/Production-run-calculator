@@ -9,6 +9,7 @@ import {
   NumericField,
   RecipeEditor,
   SectionHeader,
+  SelectField,
   TextField,
 } from "@/components/UI";
 import FillMissingPanel from "@/components/FillMissingPanel";
@@ -154,6 +155,9 @@ export default function ConfigureScreen() {
     applyTemplate,
     deleteTemplate,
     dieTypes,
+    pepTypes,
+    addListItem,
+    removeListItem,
     cheeseIngredients,
     doughIngredients,
     frontlineIngredients,
@@ -553,74 +557,35 @@ export default function ConfigureScreen() {
         {/* Die Type */}
         <SectionHeader title="Die Type" />
         <CardSection style={{ paddingVertical: 12 }}>
-          <View style={styles.chipRow}>
-            {dieTypes.map((d) => {
-              const active = form.dieType === d;
-              return (
-                <Pressable
-                  key={d}
-                  onPress={() => {
-                    const next = active ? "" : d;
-                    setForm((f) => ({ ...f, dieType: next }));
-                    updateSettings({ dieType: next });
-                    Haptics.selectionAsync();
-                  }}
-                  style={[
-                    styles.chip,
-                    {
-                      borderColor: active ? colors.primary : colors.border,
-                      backgroundColor: active ? colors.primary + "22" : "transparent",
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      { color: active ? colors.primary : colors.foreground },
-                    ]}
-                  >
-                    {d}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <SelectField
+            value={form.dieType}
+            onChange={(v) => {
+              setForm((f) => ({ ...f, dieType: v }));
+              updateSettings({ dieType: v });
+              Haptics.selectionAsync();
+            }}
+            options={dieTypes}
+            onAddOption={(v) => addListItem("dieTypes", v)}
+            onRemoveOption={(v) => removeListItem("dieTypes", v)}
+            allowClear
+            placeholder="Select or add a die type…"
+          />
         </CardSection>
 
         {/* Allergen */}
         <SectionHeader title="Allergen" />
         <CardSection style={{ paddingVertical: 12 }}>
-          <View style={styles.chipRow}>
-            {ALLERGENS.map((m) => {
-              const active = currentAllergen === m.value;
-              return (
-                <Pressable
-                  key={m.value}
-                  onPress={() => {
-                    updateSettings({ allergen: m.value });
-                    Haptics.selectionAsync();
-                  }}
-                  style={[
-                    styles.chip,
-                    {
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      borderColor: m.color,
-                      backgroundColor: active ? m.color : "transparent",
-                    },
-                  ]}
-                >
-                  <View
-                    style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: active ? m.textColor : m.color }}
-                  />
-                  <Text style={[styles.chipText, { color: active ? m.textColor : m.color }]}>
-                    {m.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <SelectField
+            value={currentAllergen}
+            onChange={(v) => {
+              updateSettings({ allergen: normalizeAllergen(v) });
+              Haptics.selectionAsync();
+            }}
+            options={ALLERGENS.map((m) => m.value)}
+            optionLabel={(v) => ALLERGENS.find((m) => m.value === v)?.label ?? v}
+            optionColor={(v) => ALLERGENS.find((m) => m.value === v)?.color}
+            allowAdd={false}
+          />
           {allergenWarnings.length > 0 && (
             <View style={{ marginTop: 10, gap: 8 }}>
               {allergenWarnings.map((w) => {
@@ -737,6 +702,8 @@ export default function ConfigureScreen() {
             rows={run.settings.frontlineRecipe}
             onChange={(rows) => updateSettings({ frontlineRecipe: rows })}
             ingredientOptions={frontlineIngredients}
+            onAddIngredient={(v) => addListItem("frontlineIngredients", v)}
+            onRemoveIngredient={(v) => removeListItem("frontlineIngredients", v)}
             name={run.settings.frontlineRecipeName}
             onNameChange={(n) => updateSettings({ frontlineRecipeName: n })}
             presetNames={frontlineNames}
@@ -807,6 +774,8 @@ export default function ConfigureScreen() {
                     updateSettings({ [recipeKey]: r } as Partial<RunSettings>)
                   }
                   ingredientOptions={cheeseIngredients}
+                  onAddIngredient={(v) => addListItem("cheeseIngredients", v)}
+                  onRemoveIngredient={(v) => removeListItem("cheeseIngredients", v)}
                   name={recipeName}
                   onNameChange={(nm) =>
                     updateSettings({ [recipeNameKey]: nm } as Partial<RunSettings>)
@@ -853,12 +822,18 @@ export default function ConfigureScreen() {
         {/* Pepperoni 1 */}
         <SectionHeader title="Pepperoni 1" />
         <CardSection>
-          <TextField
+          <SelectField
             label="Type"
             value={form.pep1Type}
-            onChangeText={set("pep1Type")}
-            onBlur={save}
-            placeholder="Pep - Cured / Pep - Natural"
+            onChange={(v) => {
+              setForm((f) => ({ ...f, pep1Type: v }));
+              updateSettings({ pep1Type: v });
+            }}
+            options={pepTypes}
+            onAddOption={(v) => addListItem("pepTypes", v)}
+            onRemoveOption={(v) => removeListItem("pepTypes", v)}
+            allowClear
+            placeholder="Select or add a type…"
           />
           <NumericField
             label="Oz per Pizza"
@@ -889,12 +864,18 @@ export default function ConfigureScreen() {
         {/* Pepperoni 2 */}
         <SectionHeader title="Pepperoni 2" />
         <CardSection>
-          <TextField
+          <SelectField
             label="Type"
             value={form.pep2Type}
-            onChangeText={set("pep2Type")}
-            onBlur={save}
-            placeholder="Pep - Cured / Pep - Natural"
+            onChange={(v) => {
+              setForm((f) => ({ ...f, pep2Type: v }));
+              updateSettings({ pep2Type: v });
+            }}
+            options={pepTypes}
+            onAddOption={(v) => addListItem("pepTypes", v)}
+            onRemoveOption={(v) => removeListItem("pepTypes", v)}
+            allowClear
+            placeholder="Select or add a type…"
           />
           <NumericField
             label="Oz per Pizza"
@@ -978,6 +959,8 @@ export default function ConfigureScreen() {
             rows={run.settings.doughRecipe}
             onChange={(rows) => updateSettings({ doughRecipe: rows })}
             ingredientOptions={doughIngredients}
+            onAddIngredient={(v) => addListItem("doughIngredients", v)}
+            onRemoveIngredient={(v) => removeListItem("doughIngredients", v)}
             name={run.settings.doughRecipeName}
             onNameChange={(n) => updateSettings({ doughRecipeName: n })}
             presetNames={doughNames}
