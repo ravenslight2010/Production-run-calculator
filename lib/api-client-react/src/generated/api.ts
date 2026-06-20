@@ -30,6 +30,7 @@ import type {
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
+  DeniedMergeList,
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
@@ -63,6 +64,7 @@ import type {
   ResetStaffPassword,
   RestockInput,
   SaveAiCorrectionsInput,
+  SaveDeniedMergesInput,
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
@@ -2506,6 +2508,228 @@ export const useSaveMergeAliases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveMergeAliasesMutationOptions(options));
+    }
+
+export const getListDeniedMergesUrl = () => {
+
+
+
+
+  return `/api/denied-merges`
+}
+
+/**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
+export const listDeniedMerges = async ( options?: RequestInit): Promise<DeniedMergeList> => {
+
+  return customFetch<DeniedMergeList>(getListDeniedMergesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDeniedMergesQueryKey = () => {
+    return [
+    `/api/denied-merges`
+    ] as const;
+    }
+
+
+export const getListDeniedMergesQueryOptions = <TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDeniedMergesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeniedMerges>>> = ({ signal }) => listDeniedMerges({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDeniedMergesQueryResult = NonNullable<Awaited<ReturnType<typeof listDeniedMerges>>>
+export type ListDeniedMergesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
+
+export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDeniedMergesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveDeniedMergesUrl = () => {
+
+
+
+
+  return `/api/denied-merges`
+}
+
+/**
+ * Persists a batch of unordered name pairs the user denied. Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
+ * @summary Save denied (ignored) ingredient-merge pairs
+ */
+export const saveDeniedMerges = async (saveDeniedMergesInput: SaveDeniedMergesInput, options?: RequestInit): Promise<DeniedMergeList> => {
+
+  return customFetch<DeniedMergeList>(getSaveDeniedMergesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveDeniedMergesInput,)
+  }
+);}
+
+
+
+
+export const getSaveDeniedMergesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext> => {
+
+const mutationKey = ['saveDeniedMerges'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDeniedMerges>>, {data: BodyType<SaveDeniedMergesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDeniedMerges(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDeniedMergesMutationResult = NonNullable<Awaited<ReturnType<typeof saveDeniedMerges>>>
+    export type SaveDeniedMergesMutationBody = BodyType<SaveDeniedMergesInput>
+    export type SaveDeniedMergesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save denied (ignored) ingredient-merge pairs
+ */
+export const useSaveDeniedMerges = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDeniedMerges>>,
+        TError,
+        {data: BodyType<SaveDeniedMergesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveDeniedMergesMutationOptions(options));
+    }
+
+export const getDeleteDeniedMergesUrl = () => {
+
+
+
+
+  return `/api/denied-merges`
+}
+
+/**
+ * Removes a batch of denied pairs so they may be suggested again. Pairs are matched case-insensitively regardless of order. Available to any signed-in user.
+ * @summary Un-deny (remove) ingredient-merge pairs
+ */
+export const deleteDeniedMerges = async (saveDeniedMergesInput: SaveDeniedMergesInput, options?: RequestInit): Promise<DeniedMergeList> => {
+
+  return customFetch<DeniedMergeList>(getDeleteDeniedMergesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveDeniedMergesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteDeniedMergesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext> => {
+
+const mutationKey = ['deleteDeniedMerges'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDeniedMerges>>, {data: BodyType<SaveDeniedMergesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteDeniedMerges(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDeniedMergesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDeniedMerges>>>
+    export type DeleteDeniedMergesMutationBody = BodyType<SaveDeniedMergesInput>
+    export type DeleteDeniedMergesMutationError = ErrorType<void>
+
+    /**
+ * @summary Un-deny (remove) ingredient-merge pairs
+ */
+export const useDeleteDeniedMerges = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDeniedMerges>>, TError,{data: BodyType<SaveDeniedMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDeniedMerges>>,
+        TError,
+        {data: BodyType<SaveDeniedMergesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteDeniedMergesMutationOptions(options));
     }
 
 export const getListAiCorrectionsUrl = () => {

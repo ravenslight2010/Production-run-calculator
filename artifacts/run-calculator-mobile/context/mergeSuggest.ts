@@ -17,13 +17,16 @@ import { getAuthToken } from "@workspace/api-client-react";
 import {
   mergeSuggestionLists,
   suggestionsFromAliases,
+  collectDeniedPairs,
+  filterDeniedSuggestions,
   type MergeAlias,
   type MergeSuggestion,
+  type DeniedMerge,
 } from "@workspace/merge-suggest";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 
-export type { MergeAlias, MergeSuggestion };
+export type { MergeAlias, MergeSuggestion, DeniedMerge };
 
 /** A merge suggestion plus its (optional) reviewer-AI verdict. */
 export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
@@ -60,6 +63,47 @@ export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
     body: JSON.stringify({ aliases }),
   });
   if (!res.ok) throw new Error(`Save merge aliases failed (${res.status})`);
+}
+
+/** Fetch the factory-wide set of denied (ignored) merge pairs. */
+export async function fetchDeniedMerges(): Promise<DeniedMerge[]> {
+  const base = getApiBaseUrl();
+  if (!base) throw new Error("No API base URL (sync disabled)");
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const res = await fetch(`${base}/api/denied-merges`, {
+    headers: {
+      "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
+  const data = (await res.json()) as { denied: DeniedMerge[] };
+  return data.denied ?? [];
+}
+
+/**
+ * Persist "never suggest merging these again" for a reviewed suggestion: build
+ * the unordered pairs that pair the kept target with each source and POST them.
+ * Idempotent server-side. No-op when the suggestion has no usable source.
+ */
+export async function denyMerge(target: string, sources: string[]): Promise<void> {
+  const pairs = collectDeniedPairs(target, sources);
+  if (pairs.length === 0) return;
+  const base = getApiBaseUrl();
+  if (!base) throw new Error("No API base URL (sync disabled)");
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const res = await fetch(`${base}/api/denied-merges`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ pairs }),
+  });
+  if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
 }
 
 async function requestAiSuggestMerges(
@@ -111,6 +155,14 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
   } catch {
     aliases = [];
   }
+  // Denied (ignored) pairs are dropped from whatever suggestions we end up
+  // showing — AI or remembered-only — so an ignored pair never comes back.
+  let denied: DeniedMerge[] = [];
+  try {
+    denied = await fetchDeniedMerges();
+  } catch {
+    denied = [];
+  }
   const remembered = suggestionsFromAliases(names, aliases);
   try {
     const ai = await requestAiSuggestMerges(names, aliases);
@@ -124,10 +176,10 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
       const review = reviewByTarget.get(s.target.trim().toLowerCase());
       return review ? { ...s, review } : s;
     });
-    return { suggestions: merged, usedAi: true };
+    return { suggestions: filterDeniedSuggestions(merged, denied), usedAi: true };
   } catch (e) {
     return {
-      suggestions: remembered,
+      suggestions: filterDeniedSuggestions(remembered, denied),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };

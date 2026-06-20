@@ -106,6 +106,77 @@ export function suggestionsFromAliases(
   return out;
 }
 
+// ── Denied (ignored) merge pairs ─────────────────────────────────────────────
+// When the user explicitly denies/ignores a merge suggestion, we remember the
+// unordered name pairs so the AI/learned suggester never re-proposes merging
+// those two names together (in either direction). Stored factory-wide, mirroring
+// the learned-alias pool but with the opposite intent.
+
+/** An unordered "never suggest merging these two together" pair. */
+export type DeniedMerge = {
+  nameA: string;
+  nameB: string;
+};
+
+/**
+ * Stable, order-independent, case-insensitive identity key for a denied pair.
+ * `deniedPairKey("Mozz","Mozzarella") === deniedPairKey("Mozzarella","Mozz")`.
+ */
+export function deniedPairKey(a: string, b: string): string {
+  const x = norm(a ?? "");
+  const y = norm(b ?? "");
+  return x <= y ? `${x}\u0000${y}` : `${y}\u0000${x}`;
+}
+
+/**
+ * Build the denied pairs implied by ignoring one suggestion: each source paired
+ * with the target. Self-references and case-insensitive duplicates are dropped.
+ * Returns [] when nothing meaningful remains.
+ */
+export function collectDeniedPairs(target: string, sources: string[]): DeniedMerge[] {
+  const t = (target ?? "").trim();
+  if (!t) return [];
+  const out: DeniedMerge[] = [];
+  const seen = new Set<string>();
+  for (const raw of sources ?? []) {
+    const s = (raw ?? "").trim();
+    if (!s || norm(s) === norm(t)) continue;
+    const k = deniedPairKey(t, s);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ nameA: t, nameB: s });
+  }
+  return out;
+}
+
+/**
+ * Strip denied pairs out of suggestions. For each suggestion, any source whose
+ * {target, source} pair is denied is removed; a suggestion left with no sources
+ * is dropped entirely. Pure; never throws.
+ */
+export function filterDeniedSuggestions<T extends MergeSuggestion>(
+  suggestions: T[],
+  denied: DeniedMerge[],
+): T[] {
+  if (!denied || denied.length === 0) return suggestions;
+  const deniedKeys = new Set<string>();
+  for (const d of denied) {
+    const a = (d?.nameA ?? "").trim();
+    const b = (d?.nameB ?? "").trim();
+    if (!a || !b) continue;
+    deniedKeys.add(deniedPairKey(a, b));
+  }
+  if (deniedKeys.size === 0) return suggestions;
+  const out: T[] = [];
+  for (const s of suggestions) {
+    const sources = (s.sources ?? []).filter(
+      (src) => !deniedKeys.has(deniedPairKey(s.target, src)),
+    );
+    if (sources.length > 0) out.push({ ...s, sources });
+  }
+  return out;
+}
+
 /**
  * Coerce the model's raw JSON into safe suggestions. The model is untrusted:
  *   - both `target` and every `source` must resolve (case-insensitively) to a

@@ -12,6 +12,7 @@ import fillMissingValuesRouter from "./fillMissingValues";
 import photoAliasesRouter from "./photoAliases";
 import specImportAliasesRouter from "./specImportAliases";
 import mergeAliasesRouter from "./mergeAliases";
+import deniedMergesRouter from "./deniedMerges";
 import aiCorrectionsRouter from "./aiCorrections";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -38,6 +39,7 @@ router.use(fillMissingValuesRouter);
 router.use(photoAliasesRouter);
 router.use(specImportAliasesRouter);
 router.use(mergeAliasesRouter);
+router.use(deniedMergesRouter);
 router.use(aiCorrectionsRouter);
 
 export default router;

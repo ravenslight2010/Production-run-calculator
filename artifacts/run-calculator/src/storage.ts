@@ -39,6 +39,10 @@ import {
   DIE_TYPES_KEY,
   DEFAULT_DIE_TYPES,
   MAX_HISTORY_DAYS,
+  CHANGE_HISTORY_KEY,
+  MAX_CHANGE_HISTORY,
+  type MasterDataChange,
+  type MasterDataChangeType,
   type FormValues,
   type DayState,
   type RunMeta,
@@ -545,6 +549,110 @@ export function applyIngredientMerge(map: MergeMap): void {
       }
     } catch {}
   }
+}
+
+// ── Master-data change history (local-only undo trail) ──────────────────────
+// A snapshot is every "run-calc-*" localStorage key EXCEPT the change-history
+// key itself (which would nest snapshots and blow up exponentially). This is the
+// maximal blast radius of any master-data edit — a merge rewrites lists, recipe
+// presets, profiles, runs, templates and history; a brand/flavor rename rewrites
+// profiles + day-state; an ingredient rename rewrites per-run values. Snapshot-
+// everything is the only universally-correct undo, so we accept the size cost
+// (bounded by MAX_CHANGE_HISTORY + quota-safe trimming on write).
+const APP_KEY_PREFIX = "run-calc-";
+
+export function captureMasterDataSnapshot(): Record<string, string> {
+  const snap: Record<string, string> = {};
+  if (typeof localStorage === "undefined") return snap;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || k === CHANGE_HISTORY_KEY) continue;
+    if (!k.startsWith(APP_KEY_PREFIX)) continue;
+    const v = localStorage.getItem(k);
+    if (v !== null) snap[k] = v;
+  }
+  return snap;
+}
+
+// Restore a snapshot: rewrite every captured key, and delete any current
+// "run-calc-*" key (except the change-history key) that wasn't in the snapshot —
+// so additions made after the snapshot are truly reverted, not just overwritten.
+export function restoreMasterDataSnapshot(snap: Record<string, string>): void {
+  if (typeof localStorage === "undefined") return;
+  const present = new Set<string>();
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(APP_KEY_PREFIX) && k !== CHANGE_HISTORY_KEY) present.add(k);
+  }
+  for (const k of present) {
+    if (!(k in snap)) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+  }
+  for (const [k, v] of Object.entries(snap)) {
+    try { localStorage.setItem(k, v); } catch {}
+  }
+}
+
+export function loadChangeHistory(): MasterDataChange[] {
+  try {
+    const raw = localStorage.getItem(CHANGE_HISTORY_KEY);
+    if (raw) return JSON.parse(raw) as MasterDataChange[];
+  } catch {}
+  return [];
+}
+
+// Persist the change-history list, trimming oldest entries until it fits the
+// localStorage quota. A snapshot can be large, so a write may overflow; rather
+// than throw (and break the edit that triggered it) we drop the oldest entries
+// and retry, keeping whatever recent history fits.
+export function saveChangeHistory(list: MasterDataChange[]): void {
+  if (typeof localStorage === "undefined") return;
+  let trimmed = list.slice(0, MAX_CHANGE_HISTORY);
+  while (trimmed.length > 0) {
+    try {
+      localStorage.setItem(CHANGE_HISTORY_KEY, JSON.stringify(trimmed));
+      return;
+    } catch {
+      trimmed = trimmed.slice(0, -1); // drop the oldest and retry
+    }
+  }
+  try { localStorage.removeItem(CHANGE_HISTORY_KEY); } catch {}
+}
+
+// Record a change. `before` must be a snapshot captured BEFORE the edit. If the
+// edit turned out to be a no-op (the post-edit state equals `before`), nothing
+// is recorded — list mutations bail silently on duplicates/invalid input, and a
+// useless undo entry would just clutter the history.
+export function recordMasterDataChange(
+  type: MasterDataChangeType,
+  description: string,
+  before: Record<string, string>,
+): void {
+  const after = captureMasterDataSnapshot();
+  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  const entry: MasterDataChange = {
+    id: genId(),
+    ts: Date.now(),
+    type,
+    description,
+    before,
+  };
+  saveChangeHistory([entry, ...loadChangeHistory()]);
+}
+
+// Roll back to the point just before the given entry: restore that entry's
+// before-snapshot and discard it plus every newer entry (the list is newest-
+// first, so we keep only entries older than the undone one). Returns false when
+// the entry no longer exists. Callers reload/refresh React state and re-push to
+// the server after a successful undo.
+export function undoChange(id: string): boolean {
+  const list = loadChangeHistory();
+  const idx = list.findIndex((e) => e.id === id);
+  if (idx === -1) return false;
+  restoreMasterDataSnapshot(list[idx].before);
+  saveChangeHistory(list.slice(idx + 1));
+  return true;
 }
 
 export function applyMixSeedIfNeeded(): void {

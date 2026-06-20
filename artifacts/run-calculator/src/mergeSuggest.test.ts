@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  collectDeniedPairs,
   collectMergeAliases,
+  deniedPairKey,
+  filterDeniedSuggestions,
   mergeAliasKey,
   mergeSuggestionLists,
   sanitizeMergeSuggestions,
   suggestionsFromAliases,
+  type DeniedMerge,
   type MergeAlias,
   type MergeSuggestion,
 } from "@workspace/merge-suggest";
@@ -154,5 +158,66 @@ describe("mergeSuggestionLists", () => {
       [{ target: "Mozzarella", sources: ["Mozz"] }],
     );
     expect(out).toEqual([{ target: "Mozzarella", sources: ["Mozz"] }]);
+  });
+});
+
+describe("deniedPairKey", () => {
+  it("is order-independent and case-insensitive", () => {
+    expect(deniedPairKey("Mozz", "Mozzarella")).toBe(deniedPairKey("Mozzarella", "Mozz"));
+    expect(deniedPairKey("  MOZZ ", "mozzarella")).toBe(deniedPairKey("mozz", "Mozzarella"));
+  });
+
+  it("distinguishes different pairs", () => {
+    expect(deniedPairKey("a", "b")).not.toBe(deniedPairKey("a", "c"));
+  });
+});
+
+describe("collectDeniedPairs", () => {
+  it("pairs each source with the target", () => {
+    expect(collectDeniedPairs("Mozzarella", ["Mozz", "Moz"])).toEqual([
+      { nameA: "Mozzarella", nameB: "Mozz" },
+      { nameA: "Mozzarella", nameB: "Moz" },
+    ]);
+  });
+
+  it("drops self-references and duplicates", () => {
+    expect(collectDeniedPairs("Cheese", ["cheese", "Mozz", "MOZZ", ""])).toEqual([
+      { nameA: "Cheese", nameB: "Mozz" },
+    ]);
+  });
+
+  it("returns [] for a blank target", () => {
+    expect(collectDeniedPairs("  ", ["x"])).toEqual([]);
+  });
+});
+
+describe("filterDeniedSuggestions", () => {
+  const suggestions: MergeSuggestion[] = [
+    { target: "Mozzarella", sources: ["Mozz", "Moz"], reason: "dup" },
+    { target: "Pepperoni", sources: ["Peperoni"] },
+  ];
+
+  it("removes a denied source, keeping the rest", () => {
+    const denied: DeniedMerge[] = [{ nameA: "mozzarella", nameB: "mozz" }];
+    const out = filterDeniedSuggestions(suggestions, denied);
+    expect(out[0]).toEqual({ target: "Mozzarella", sources: ["Moz"], reason: "dup" });
+    expect(out[1]).toEqual({ target: "Pepperoni", sources: ["Peperoni"] });
+  });
+
+  it("drops a suggestion left with no sources", () => {
+    const denied: DeniedMerge[] = [{ nameA: "Pepperoni", nameB: "Peperoni" }];
+    const out = filterDeniedSuggestions(suggestions, denied);
+    expect(out).toHaveLength(1);
+    expect(out[0].target).toBe("Mozzarella");
+  });
+
+  it("is order-independent (denial direction does not matter)", () => {
+    const denied: DeniedMerge[] = [{ nameA: "Moz", nameB: "Mozzarella" }];
+    const out = filterDeniedSuggestions(suggestions, denied);
+    expect(out[0].sources).toEqual(["Mozz"]);
+  });
+
+  it("returns the input unchanged when there are no denials", () => {
+    expect(filterDeniedSuggestions(suggestions, [])).toBe(suggestions);
   });
 });

@@ -15,13 +15,16 @@
 import {
   mergeSuggestionLists,
   suggestionsFromAliases,
+  collectDeniedPairs,
+  filterDeniedSuggestions,
   type MergeAlias,
   type MergeSuggestion,
+  type DeniedMerge,
 } from "@workspace/merge-suggest";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 
-export type { MergeAlias, MergeSuggestion };
+export type { MergeAlias, MergeSuggestion, DeniedMerge };
 
 /** A merge suggestion plus its (optional) reviewer-AI verdict. */
 export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
@@ -46,6 +49,39 @@ export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
     body: JSON.stringify({ aliases }),
   });
   if (!res.ok) throw new Error(`Save merge aliases failed (${res.status})`);
+}
+
+/**
+ * Fetch the factory-wide set of denied (ignored) merge pairs. A denied pair is
+ * an unordered {nameA, nameB} the user said should never be suggested together.
+ * Server-persisted and shared like merge aliases.
+ */
+export async function fetchDeniedMerges(): Promise<DeniedMerge[]> {
+  const res = await fetch("/api/denied-merges", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
+  const data = (await res.json()) as { denied: DeniedMerge[] };
+  return data.denied ?? [];
+}
+
+/**
+ * Persist "never suggest merging these again" for a reviewed suggestion: build
+ * the unordered pairs that pair the kept target with each source and POST them.
+ * Idempotent server-side. No-op when the suggestion has no usable source.
+ */
+export async function denyMerge(target: string, sources: string[]): Promise<void> {
+  const pairs = collectDeniedPairs(target, sources);
+  if (pairs.length === 0) return;
+  const res = await fetch("/api/denied-merges", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ pairs }),
+  });
+  if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
 }
 
 async function requestAiSuggestMerges(
@@ -92,6 +128,14 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
   } catch {
     aliases = [];
   }
+  // Denied (ignored) pairs are dropped from whatever suggestions we end up
+  // showing — AI or remembered-only — so an ignored pair never comes back.
+  let denied: DeniedMerge[] = [];
+  try {
+    denied = await fetchDeniedMerges();
+  } catch {
+    denied = [];
+  }
   const remembered = suggestionsFromAliases(names, aliases);
   try {
     const ai = await requestAiSuggestMerges(names, aliases);
@@ -105,10 +149,10 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
       const review = reviewByTarget.get(s.target.trim().toLowerCase());
       return review ? { ...s, review } : s;
     });
-    return { suggestions: merged, usedAi: true };
+    return { suggestions: filterDeniedSuggestions(merged, denied), usedAi: true };
   } catch (e) {
     return {
-      suggestions: remembered,
+      suggestions: filterDeniedSuggestions(remembered, denied),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };

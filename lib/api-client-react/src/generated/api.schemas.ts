@@ -730,6 +730,25 @@ export interface SaveMergeAliasesInput {
   aliases: MergeAlias[];
 }
 
+/**
+ * An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).
+ */
+export interface DeniedMerge {
+  /** One name of the denied pair */
+  nameA: string;
+  /** The other name of the denied pair */
+  nameB: string;
+}
+
+export interface DeniedMergeList {
+  denied: DeniedMerge[];
+}
+
+export interface SaveDeniedMergesInput {
+  /** The batch of denied pairs to add or remove */
+  pairs: DeniedMerge[];
+}
+
 export interface SuggestMergesInput {
   /** The full pool of mergeable ingredient/die names to cluster */
   names: string[];

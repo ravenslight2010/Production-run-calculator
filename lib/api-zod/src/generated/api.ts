@@ -757,6 +757,56 @@ export const SaveMergeAliasesResponse = zod.object({
 
 
 /**
+ * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
+ * @summary List denied (ignored) ingredient-merge pairs
+ */
+export const ListDeniedMergesResponse = zod.object({
+  "denied": zod.array(zod.object({
+  "nameA": zod.string().describe('One name of the denied pair'),
+  "nameB": zod.string().describe('The other name of the denied pair')
+}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+})
+
+
+/**
+ * Persists a batch of unordered name pairs the user denied. Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
+ * @summary Save denied (ignored) ingredient-merge pairs
+ */
+export const SaveDeniedMergesBody = zod.object({
+  "pairs": zod.array(zod.object({
+  "nameA": zod.string().describe('One name of the denied pair'),
+  "nameB": zod.string().describe('The other name of the denied pair')
+}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove')
+})
+
+export const SaveDeniedMergesResponse = zod.object({
+  "denied": zod.array(zod.object({
+  "nameA": zod.string().describe('One name of the denied pair'),
+  "nameB": zod.string().describe('The other name of the denied pair')
+}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+})
+
+
+/**
+ * Removes a batch of denied pairs so they may be suggested again. Pairs are matched case-insensitively regardless of order. Available to any signed-in user.
+ * @summary Un-deny (remove) ingredient-merge pairs
+ */
+export const DeleteDeniedMergesBody = zod.object({
+  "pairs": zod.array(zod.object({
+  "nameA": zod.string().describe('One name of the denied pair'),
+  "nameB": zod.string().describe('The other name of the denied pair')
+}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove')
+})
+
+export const DeleteDeniedMergesResponse = zod.object({
+  "denied": zod.array(zod.object({
+  "nameA": zod.string().describe('One name of the denied pair'),
+  "nameB": zod.string().describe('The other name of the denied pair')
+}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+})
+
+
+/**
  * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
  * @summary List the shared factory-wide AI name corrections
  */

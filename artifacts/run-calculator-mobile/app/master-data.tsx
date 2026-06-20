@@ -6,6 +6,7 @@ import { Stack } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -21,6 +22,7 @@ import {
   profileKey,
   useRun,
   type MasterListKey,
+  type MasterDataChange,
   type RunSettings,
 } from "@/context/RunContext";
 import {
@@ -29,7 +31,7 @@ import {
   type MergeMap,
 } from "@/context/mergeIngredients";
 import { scoreNameMatch } from "@/context/inventoryShared";
-import { suggestMerges, type ReviewedMergeSuggestion } from "@/context/mergeSuggest";
+import { suggestMerges, denyMerge, type ReviewedMergeSuggestion } from "@/context/mergeSuggest";
 import ReviewBadge from "@/components/ReviewBadge";
 import {
   prepareSpecImport,
@@ -374,6 +376,20 @@ function MergeManager() {
     }
   };
 
+  // Ignore a suggested group: persist {target, source} pairs as denied so the
+  // suggester never proposes them again (factory-wide), then drop it locally.
+  // Best-effort persistence — the suggestion is hidden either way (web parity).
+  const ignoreSuggestion = async (s: ReviewedMergeSuggestion) => {
+    const srcs = s.sources.filter((n) => n !== s.target);
+    if (srcs.length === 0) return;
+    setSuggestions((prev) => prev.filter((x) => x !== s));
+    try {
+      await denyMerge(s.target, srcs);
+    } catch {
+      // Non-fatal: hidden for this session; may reappear later if it didn't persist.
+    }
+  };
+
   const apply = async () => {
     if (!hasMerge) {
       setError("Pick at least one source and a different target.");
@@ -514,6 +530,18 @@ function MergeManager() {
                     style={[styles.suggestActionText, { color: colors.primaryForeground }]}
                   >
                     Apply
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => ignoreSuggestion(s)}
+                  disabled={busy || suggestBusy}
+                  style={({ pressed }) => [
+                    styles.suggestActionBtn,
+                    { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.suggestActionText, { color: colors.mutedForeground }]}>
+                    Ignore
                   </Text>
                 </Pressable>
               </View>
@@ -720,11 +748,43 @@ export default function MasterDataScreen() {
     cheeseRecipePresets,
     frontlineRecipePresets,
     applySpecImport,
+    changeHistory,
+    undoMasterDataChange,
   } = useRun();
   const { isManager } = useMe();
 
   const [pinDraft, setPinDraft] = useState("");
   const mixNames = Object.keys(mixRecipePresets);
+
+  // Confirm + roll back to just before this entry (it plus every newer change).
+  // Warns when a merge is in the rolled-back range: undo reverses names/lists but
+  // does NOT un-fold inventory stock that a merge combined (web parity).
+  const confirmUndoChange = (entry: MasterDataChange) => {
+    const idx = changeHistory.findIndex((e) => e.id === entry.id);
+    const discarded = idx === -1 ? [] : changeHistory.slice(0, idx + 1);
+    const hasMerge = discarded.some((e) => e.type === "merge");
+    const extra = discarded.length - 1;
+    const tail =
+      extra > 0 ? ` and ${extra} later change${extra === 1 ? "" : "s"}` : "";
+    const warn = hasMerge
+      ? "\n\nNote: this reverses the ingredient names and lists, but does NOT un-fold any inventory stock that was combined by a merge. Re-check stock in Inventory."
+      : "";
+    Alert.alert(
+      "Undo change",
+      `Undo "${entry.description}"${tail}?${warn}`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Undo",
+          style: "destructive",
+          onPress: () => {
+            undoMasterDataChange(entry.id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+        },
+      ],
+    );
+  };
 
   // ── Excel spec-sheet import (manager only; mirrors the web header action) ──
   const [specOpen, setSpecOpen] = useState(false);
@@ -1093,6 +1153,51 @@ export default function MasterDataScreen() {
             </Pressable>
           ) : null}
         </CardSection>
+
+        {/* Recent changes — local-only undo trail of master-data edits */}
+        <SectionHeader title="Recent Changes" />
+        <CardSection>
+          <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+            Edits to lists, recipes, and merges on this device. Undo rolls back
+            that change and any made after it. Stored locally — not synced.
+          </Text>
+          {changeHistory.length === 0 ? (
+            <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+              No changes yet.
+            </Text>
+          ) : (
+            changeHistory.map((entry) => (
+              <View
+                key={entry.id}
+                style={[styles.historyRow, { borderColor: colors.border }]}
+              >
+                <View style={{ flex: 1, paddingRight: 8 }}>
+                  <Text style={[styles.historyDesc, { color: colors.foreground }]}>
+                    {entry.description}
+                  </Text>
+                  <Text
+                    style={[styles.previewSub, { color: colors.mutedForeground }]}
+                  >
+                    {new Date(entry.ts).toLocaleString()}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => confirmUndoChange(entry)}
+                  style={({ pressed }) => [
+                    styles.suggestActionBtn,
+                    { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                  ]}
+                >
+                  <Text
+                    style={[styles.suggestActionText, { color: colors.foreground }]}
+                  >
+                    Undo
+                  </Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+        </CardSection>
       </KeyboardAwareScrollViewCompat>
 
       <SpecImportModal
@@ -1266,4 +1371,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   suggestActionText: { fontSize: 12, fontFamily: FONTS.medium },
+  historyRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  historyDesc: { fontSize: 13, fontFamily: FONTS.medium, marginBottom: 2 },
 });

@@ -887,6 +887,70 @@ interface AppState {
   // >= this. Bumped on day-rollover so a fresh day isn't overwritten by stale
   // remote state. 0 for first-ever installs so they accept any remote day.
   resetAt: number;
+  // Local-only undo trail of master-data edits (merges, adds, removes, renames).
+  // Each entry holds a full pre-edit snapshot so the change can be rolled back.
+  // Deliberately EXCLUDED from the sync payload (mapping.ts never reads it) — it's
+  // a per-device trail, and snapshots would blow the sync size limit (web parity).
+  changeHistory: MasterDataChange[];
+}
+
+export type MasterDataChangeType = "merge" | "add" | "remove" | "rename";
+
+export type MasterDataChange = {
+  id: string;
+  ts: number;
+  type: MasterDataChangeType;
+  description: string;
+  /** Full pre-edit AppState snapshot (minus changeHistory itself). */
+  before: Omit<AppState, "changeHistory">;
+};
+
+const MAX_CHANGE_HISTORY = 20;
+
+const LIST_LABELS: Record<MasterListKey, string> = {
+  brands: "Brands",
+  dieTypes: "Die Types",
+  pepTypes: "Pep Types",
+  cheeseIngredients: "Cheese Ingredients",
+  doughIngredients: "Dough Ingredients",
+  frontlineIngredients: "Sauce Ingredients",
+  stopReasons: "Stop Reasons",
+};
+
+// The pre-edit snapshot is the whole AppState minus the change-history itself
+// (so snapshots never nest). Restoring it reverts master-data lists, profiles,
+// recipe presets, runs, templates and history together — the only universally-
+// correct undo, since a merge/rename rewrites per-run values too (web parity).
+function snapshotForHistory(state: AppState): Omit<AppState, "changeHistory"> {
+  const { changeHistory: _omit, ...rest } = state;
+  return rest;
+}
+
+// Append a change-history entry to `next`, snapshotting `prev` BEFORE the edit.
+// If the edit was a no-op (master-data is unchanged ignoring changeHistory),
+// nothing is recorded — list mutations bail on duplicates/invalid input, and a
+// useless undo entry would just clutter the trail. Pure + fail-safe.
+function withChangeRecord(
+  prev: AppState,
+  next: AppState,
+  type: MasterDataChangeType,
+  description: string,
+): AppState {
+  const before = snapshotForHistory(prev);
+  const after = snapshotForHistory(next);
+  if (JSON.stringify(before) === JSON.stringify(after)) return next;
+  const entry: MasterDataChange = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+    ts: Date.now(),
+    type,
+    description,
+    before,
+  };
+  const changeHistory = [entry, ...(next.changeHistory ?? [])].slice(
+    0,
+    MAX_CHANGE_HISTORY,
+  );
+  return { ...next, changeHistory };
 }
 
 export function profileKey(brand: string, flavor: string): string {
@@ -1252,6 +1316,9 @@ interface RunContextValue {
   renameFlavor: (brand: string, oldFlavor: string, newFlavor: string) => void;
   // Merge ingredient names into one canonical target across all surfaces.
   mergeIngredients: (sources: string[], target: string) => Promise<void>;
+  // Local-only master-data edit history + per-entry undo (rolls back to point).
+  changeHistory: MasterDataChange[];
+  undoMasterDataChange: (id: string) => void;
   // Scheduling
   scheduled: Record<string, ScheduledRun[]>;
   addScheduledRun: (date: string, run: Omit<ScheduledRun, "id">) => void;
@@ -1313,6 +1380,7 @@ const INITIAL_STATE: AppState = {
   mixRecipePresets: {},
   scheduled: {},
   resetAt: 0,
+  changeHistory: [],
 };
 
 // Fill any missing fields (from older persisted blobs) with defaults so the
@@ -1452,6 +1520,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     mixRecipePresets: parsed.mixRecipePresets ?? {},
     scheduled: parsed.scheduled ?? {},
     resetAt: parsed.resetAt ?? 0,
+    changeHistory: Array.isArray(parsed.changeHistory) ? parsed.changeHistory : [],
   };
 }
 
@@ -2162,7 +2231,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const mergedAway = (prev.mergedAway ?? []).filter(
           (n) => n.trim().toLowerCase() !== lower,
         );
-        const next = { ...prev, mergedAway, [list]: [...prev[list], v] };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, mergedAway, [list]: [...prev[list], v] },
+          "add",
+          `Added "${v}" to ${LIST_LABELS[list]}`,
+        );
         persist(next);
         return next;
       });
@@ -2173,7 +2247,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const removeListItem = useCallback(
     (list: MasterListKey, value: string) => {
       setAppState((prev) => {
-        const next = { ...prev, [list]: prev[list].filter((x) => x !== value) };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, [list]: prev[list].filter((x) => x !== value) },
+          "remove",
+          `Removed "${value}" from ${LIST_LABELS[list]}`,
+        );
         persist(next);
         return next;
       });
@@ -2190,11 +2269,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const cur = prev.brandFlavors[b] ?? [];
         if (cur.includes(f)) return prev;
         const brands = prev.brands.includes(b) ? prev.brands : [...prev.brands, b];
-        const next = {
-          ...prev,
-          brands,
-          brandFlavors: { ...prev.brandFlavors, [b]: [...cur, f] },
-        };
+        const next = withChangeRecord(
+          prev,
+          {
+            ...prev,
+            brands,
+            brandFlavors: { ...prev.brandFlavors, [b]: [...cur, f] },
+          },
+          "add",
+          `Added flavor "${f}" to ${b}`,
+        );
         persist(next);
         return next;
       });
@@ -2206,13 +2290,18 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (brand: string, flavor: string) => {
       setAppState((prev) => {
         const cur = prev.brandFlavors[brand] ?? [];
-        const next = {
-          ...prev,
-          brandFlavors: {
-            ...prev.brandFlavors,
-            [brand]: cur.filter((x) => x !== flavor),
+        const next = withChangeRecord(
+          prev,
+          {
+            ...prev,
+            brandFlavors: {
+              ...prev.brandFlavors,
+              [brand]: cur.filter((x) => x !== flavor),
+            },
           },
-        };
+          "remove",
+          `Removed flavor "${flavor}" from ${brand}`,
+        );
         persist(next);
         return next;
       });
@@ -2292,7 +2381,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const mapKey = PRESET_MAP_KEY[kind];
         const copy = { ...prev[mapKey] };
         delete copy[name];
-        const next = { ...prev, [mapKey]: copy };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, [mapKey]: copy },
+          "remove",
+          `Deleted ${kind} recipe "${name}"`,
+        );
         persist(next);
         return next;
       });
@@ -2311,7 +2405,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         for (const [k, v] of Object.entries(map)) {
           copy[k === oldName ? n : k] = v;
         }
-        const next = { ...prev, [mapKey]: copy };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, [mapKey]: copy },
+          "rename",
+          `Renamed ${kind} recipe "${oldName}" to "${n}"`,
+        );
         persist(next);
         return next;
       });
@@ -2452,10 +2551,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         if (!n || n === oldName) return prev;
         const arr = prev[list];
         if (!arr.includes(oldName) || arr.includes(n)) return prev;
-        const next = {
-          ...prev,
-          [list]: arr.map((x) => (x === oldName ? n : x)),
-        };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, [list]: arr.map((x) => (x === oldName ? n : x)) },
+          "rename",
+          `Renamed "${oldName}" to "${n}" in ${LIST_LABELS[list]}`,
+        );
         persist(next);
         return next;
       });
@@ -2485,7 +2586,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             delete brandProfiles[oldKey];
           }
         }
-        const next = { ...prev, brands, brandFlavors, brandProfiles };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, brands, brandFlavors, brandProfiles },
+          "rename",
+          `Renamed brand "${oldName}" to "${n}"`,
+        );
         persist(next);
         return next;
       });
@@ -2511,7 +2617,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           brandProfiles[newKey] = brandProfiles[oldKey];
           delete brandProfiles[oldKey];
         }
-        const next = { ...prev, brandFlavors, brandProfiles };
+        const next = withChangeRecord(
+          prev,
+          { ...prev, brandFlavors, brandProfiles },
+          "rename",
+          `Renamed flavor "${oldFlavor}" to "${f}" in ${brand}`,
+        );
         persist(next);
         return next;
       });
@@ -2612,8 +2723,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           frontlineRecipePresets: mergeRecipePresetMap(prev.frontlineRecipePresets, map),
           mixRecipePresets: mergeRecipePresetMap(prev.mixRecipePresets, map),
         };
-        persistNow(next);
-        return next;
+        const recorded = withChangeRecord(
+          prev,
+          next,
+          "merge",
+          `Merged ${sources.join(", ")} into ${target}`,
+        );
+        persistNow(recorded);
+        return recorded;
       });
 
       // Persist the confirmed merge as factory-wide learned aliases (best
@@ -2631,6 +2748,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           .filter((src) => src.trim() && src.trim().toLowerCase() !== target.trim().toLowerCase())
           .map((src) => ({ domain: "ingredient", fromText: src, toText: target })),
       );
+    },
+    [persistNow],
+  );
+
+  // Roll back to the point just before the given entry: restore that entry's
+  // pre-edit snapshot and discard it plus every newer entry (the list is newest-
+  // first, so we keep only entries older than the undone one). No-op when the
+  // entry is gone. The persisted restore re-triggers the sync push effect, so a
+  // merge undo propagates and un-resurrects merged-away names (web parity).
+  // Inventory stock that a merge folded server-side is NOT un-folded — callers
+  // warn about this. Fail-safe: never throws on the React/async path.
+  const undoMasterDataChange = useCallback(
+    (id: string) => {
+      setAppState((prev) => {
+        const list = prev.changeHistory ?? [];
+        const idx = list.findIndex((e) => e.id === id);
+        if (idx === -1) return prev;
+        const restored: AppState = {
+          ...list[idx].before,
+          changeHistory: list.slice(idx + 1),
+        };
+        persistNow(restored);
+        return restored;
+      });
     },
     [persistNow],
   );
@@ -2903,6 +3044,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         renameBrand,
         renameFlavor,
         mergeIngredients,
+        changeHistory: appState.changeHistory,
+        undoMasterDataChange,
         scheduled: appState.scheduled,
         addScheduledRun,
         updateScheduledRun,

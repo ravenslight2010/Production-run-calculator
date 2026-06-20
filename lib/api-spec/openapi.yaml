@@ -743,6 +743,70 @@ paths:
         "400":
           description: Invalid input
 
+  /denied-merges:
+    get:
+      operationId: listDeniedMerges
+      tags: [deniedMerges]
+      summary: List denied (ignored) ingredient-merge pairs
+      description: >-
+        Returns every denied merge pair — an unordered pair of ingredient names
+        the user explicitly told the app to never propose merging together. The
+        merge suggester filters these out of both AI and remembered suggestions.
+        Available to any signed-in user.
+      responses:
+        "200":
+          description: All denied merge pairs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeniedMergeList"
+    post:
+      operationId: saveDeniedMerges
+      tags: [deniedMerges]
+      summary: Save denied (ignored) ingredient-merge pairs
+      description: >-
+        Persists a batch of unordered name pairs the user denied. Pairs are
+        normalized (trimmed, lowercased, sorted) and deduped; a pair that already
+        exists is left as-is. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDeniedMergesInput"
+      responses:
+        "200":
+          description: The full updated denied-pair list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeniedMergeList"
+        "400":
+          description: Invalid input
+    delete:
+      operationId: deleteDeniedMerges
+      tags: [deniedMerges]
+      summary: Un-deny (remove) ingredient-merge pairs
+      description: >-
+        Removes a batch of denied pairs so they may be suggested again. Pairs are
+        matched case-insensitively regardless of order. Available to any
+        signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveDeniedMergesInput"
+      responses:
+        "200":
+          description: The full updated denied-pair list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeniedMergeList"
+        "400":
+          description: Invalid input
+
   /ai-corrections:
     get:
       operationId: listAiCorrections
@@ -2427,6 +2491,43 @@ components:
           description: The batch of merge aliases to upsert
           items:
             $ref: "#/components/schemas/MergeAlias"
+
+    DeniedMerge:
+      type: object
+      description: >-
+        An unordered pair of ingredient names the user told the app to never
+        propose merging together (matched case-insensitively, either direction).
+      required:
+        - nameA
+        - nameB
+      properties:
+        nameA:
+          type: string
+          description: One name of the denied pair
+        nameB:
+          type: string
+          description: The other name of the denied pair
+
+    DeniedMergeList:
+      type: object
+      required:
+        - denied
+      properties:
+        denied:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeniedMerge"
+
+    SaveDeniedMergesInput:
+      type: object
+      required:
+        - pairs
+      properties:
+        pairs:
+          type: array
+          description: The batch of denied pairs to add or remove
+          items:
+            $ref: "#/components/schemas/DeniedMerge"
 
     SuggestMergesInput:
       type: object

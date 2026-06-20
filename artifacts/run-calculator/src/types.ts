@@ -239,6 +239,25 @@ export const DAY_KEY = "run-calc-day";
 export const HISTORY_KEY = "run-calc-history";
 export const TEMPLATES_KEY = "run-calc-templates";
 export const MAX_HISTORY_DAYS = 14;
+
+// ── Master-data change history (local-only, NOT synced) ─────────────────────
+// A capped log of recent edits to the manageable lists (merges, adds, removes,
+// renames). Each entry snapshots the full local master-data state BEFORE the
+// edit so it can be rolled back. Deliberately excluded from the sync payload —
+// it's a per-device undo trail, and snapshots would blow the sync size limit.
+export const CHANGE_HISTORY_KEY = "run-calc-change-history";
+export const MAX_CHANGE_HISTORY = 20;
+
+export type MasterDataChangeType = "merge" | "add" | "remove" | "rename";
+
+export type MasterDataChange = {
+  id: string;
+  ts: number;
+  type: MasterDataChangeType;
+  description: string;
+  /** Full local master-data snapshot taken BEFORE the edit (key → JSON value). */
+  before: Record<string, string>;
+};
 export const MAX_TEMPLATES = 20;
 export const MAX_RUNS = 30;
 

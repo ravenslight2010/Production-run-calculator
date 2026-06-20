@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -46,6 +46,8 @@ import {
   BRANDS_KEY,
   HISTORY_KEY,
   MAX_HISTORY_DAYS,
+  type MasterDataChange,
+  type MasterDataChangeType,
 } from "../types";
 import {
   fmtElapsed,
@@ -96,6 +98,10 @@ import {
   saveMergedAway,
   dropMergedAway,
   clearMergedAway,
+  captureMasterDataSnapshot,
+  recordMasterDataChange,
+  loadChangeHistory,
+  undoChange,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -136,7 +142,7 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, type ReviewedMergeSuggestion } from "../mergeSuggest";
+import { suggestMerges, saveMergeAliases, denyMerge, type ReviewedMergeSuggestion } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 
@@ -2033,6 +2039,18 @@ export default function Home() {
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
 
+  // Local (per-device) master-data change history for the undo trail.
+  const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
+  const [undoBusy, setUndoBusy] = useState(false);
+  // Record a change (snapshot already taken before the edit) and refresh the list.
+  const noteChange = useCallback(
+    (type: MasterDataChangeType, description: string, before: Record<string, string>) => {
+      recordMasterDataChange(type, description, before);
+      setChangeHistory(loadChangeHistory());
+    },
+    [],
+  );
+
   // The mergeable universe: every master-data list whose values get rewritten by
   // a merge — ingredient names plus die types (the `dieType` selection field is
   // rewritten too). Brands/flavors are excluded (they have their own rename path).
@@ -2202,6 +2220,22 @@ export default function Home() {
     if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
   }
 
+  // Ignore a suggested group: persist the {target, source} pairs as denied so
+  // the suggester never proposes them again (factory-wide), then drop it from
+  // the open list. Persisting is best-effort — even if the POST fails the user
+  // still gets the suggestion out of their way for this session.
+  async function ignoreMergeSuggestion(s: ReviewedMergeSuggestion) {
+    const sources = s.sources.filter((n) => n !== s.target);
+    if (sources.length === 0) return;
+    setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    try {
+      await denyMerge(s.target, sources);
+    } catch {
+      // Non-fatal: the suggestion is already hidden for this session; it may
+      // reappear on a later scan if the deny didn't persist.
+    }
+  }
+
   async function handleApplyMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
     const srcs = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
@@ -2212,6 +2246,11 @@ export default function Home() {
     }
     setMergeBusy(true);
     setMergeError("");
+    // Snapshot master-data BEFORE the merge rewrites localStorage, so the change
+    // can be recorded for undo on success. (Undo restores names/lists but does
+    // NOT reverse the server-side inventory fold — the undo confirm warns about
+    // this.)
+    const mergeBefore = captureMasterDataSnapshot();
     try {
       // Fold inventory stock first (server). If we can't read or fold inventory,
       // abort BEFORE touching localStorage so the two stores can't drift apart.
@@ -2293,12 +2332,60 @@ export default function Home() {
       // Clear the merge form. The panel stays open so the user can apply more
       // suggestions.
       resetMergeForm();
+      // Record the merge in the local undo trail (no-op-safe: skipped if nothing
+      // actually changed). Recorded last so a failed merge above never logs.
+      noteChange(
+        "merge",
+        `Merged ${srcs.filter((s) => s.trim()).map((s) => `"${s}"`).join(", ")} into "${tgt}"`,
+        mergeBefore,
+      );
       setMergeBusy(false);
       return true;
     } catch (e) {
       setMergeBusy(false);
       setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
       return false;
+    }
+  }
+
+  // Undo a master-data change (and every change made after it). Restores the
+  // entry's before-snapshot, refreshes every React surface, and re-pushes the
+  // restored master data to the server so the rollback propagates (and merged-
+  // away names don't get resurrected by the additive sync union).
+  async function handleUndoChange(entry: MasterDataChange) {
+    const list = loadChangeHistory();
+    const idx = list.findIndex((e) => e.id === entry.id);
+    const discarded = idx === -1 ? [] : list.slice(0, idx + 1);
+    const hasMerge = discarded.some((e) => e.type === "merge");
+    const warn = hasMerge
+      ? "\n\nNote: this reverses the ingredient names and lists, but does NOT un-fold any inventory stock that was combined by a merge. Re-check stock in Inventory."
+      : "";
+    const extra = discarded.length - 1;
+    const tail = extra > 0 ? ` and ${extra} later change${extra === 1 ? "" : "s"}` : "";
+    if (!window.confirm(`Undo "${entry.description}"${tail}?${warn}`)) return;
+    setUndoBusy(true);
+    try {
+      const ok = undoChange(entry.id);
+      if (!ok) {
+        setChangeHistory(loadChangeHistory());
+        return;
+      }
+      refreshAfterMerge();
+      setChangeHistory(loadChangeHistory());
+      try {
+        await fetch("/api/sync/today", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {
+        // Non-fatal: the local restore already happened; tombstones back it up.
+      }
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -5422,21 +5509,41 @@ export default function Home() {
         );
 
         // Standalone tabs: still use a single input
+        // History instrumentation wrappers: snapshot before the edit, run it, then
+        // record (recordMasterDataChange skips no-ops). This is the single point
+        // where every manageable list add/remove/rename gets an undo entry — the
+        // merge and PIN tabs are intentionally not wrapped (merge records itself;
+        // PIN isn't master data).
+        const histAdd = (label: string, fn: (v: string) => void) => (v: string) => {
+          const before = captureMasterDataSnapshot();
+          fn(v);
+          noteChange("add", `Added "${v}" to ${label}`, before);
+        };
+        const histRemove = (label: string, fn: (v: string) => void) => (v: string) => {
+          const before = captureMasterDataSnapshot();
+          fn(v);
+          noteChange("remove", `Removed "${v}" from ${label}`, before);
+        };
+        const histRename = (label: string, fn: (o: string, n: string) => void) => (o: string, n: string) => {
+          const before = captureMasterDataSnapshot();
+          fn(o, n);
+          noteChange("rename", `Renamed "${o}" to "${n}" in ${label}`, before);
+        };
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
-          { key: "brands", label: "Brands", items: brands, onAdd: addBrand, onRemove: (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }, onRename: renameBrand },
-          { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: (v) => addFlavor(v, manageBrandFilter), onRemove: (v) => removeFlavor(v, manageBrandFilter), onRename: (o, n) => renameFlavor(o, n, manageBrandFilter) },
-          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: addIngredientType, onRemove: removeIngredientType, onRename: renameIngredientType },
-          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: addPepType, onRemove: removePepType, onRename: renamePepType },
-          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: addDieType, onRemove: removeDieType, onRename: renameDieType },
+          { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }), onRename: histRename("Brands", renameBrand) },
+          { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: histAdd("Flavors", (v) => addFlavor(v, manageBrandFilter)), onRemove: histRemove("Flavors", (v) => removeFlavor(v, manageBrandFilter)), onRename: histRename("Flavors", (o, n) => renameFlavor(o, n, manageBrandFilter)) },
+          { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: histAdd("Applicator Types", addIngredientType), onRemove: histRemove("Applicator Types", removeIngredientType), onRename: histRename("Applicator Types", renameIngredientType) },
+          { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: histAdd("Pep Types", addPepType), onRemove: histRemove("Pep Types", removePepType), onRename: histRename("Pep Types", renamePepType) },
+          { key: "dieTypes", label: "Die Types", items: dieTypes, protected: [...DEFAULT_DIE_TYPES], onAdd: histAdd("Die Types", addDieType), onRemove: histRemove("Die Types", removeDieType), onRename: histRename("Die Types", renameDieType) },
           { key: "merge", label: "Merge", items: [], onAdd: () => {}, onRemove: () => {} },
           { key: "pin", label: "Change PIN", items: [], onAdd: () => {}, onRemove: () => {} },
         ];
         const groupedTabs = [
-          { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: addDoughRecipeName,     onRemoveName: removeDoughRecipeName,     onRenameName: renameDoughRecipeName,     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: addDoughIngredient,     onRemoveIng: removeDoughIngredient,     onRenameIng: renameDoughIngredient },
-          { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: addFrontlineRecipeName, onRemoveName: removeFrontlineRecipeName, onRenameName: renameFrontlineRecipeName, ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: addFrontlineIngredient, onRemoveIng: removeFrontlineIngredient, onRenameIng: renameFrontlineIngredient },
-          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: addCheeseRecipeName,    onRemoveName: removeCheeseRecipeName,    onRenameName: renameCheeseRecipeName,    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: addCheeseIngredient,   onRemoveIng: removeCheeseIngredient,   onRenameIng: renameCheeseIngredient },
-          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: addMixRecipeName,       onRemoveName: removeMixRecipeName,       onRenameName: renameMixRecipeName,       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: addMixIngredient,      onRemoveIng: removeMixIngredient,      onRenameIng: renameMixIngredient },
+          { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: histAdd("Dough Recipe Names", addDoughRecipeName),     onRemoveName: histRemove("Dough Recipe Names", removeDoughRecipeName),     onRenameName: histRename("Dough Recipe Names", renameDoughRecipeName),     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: histAdd("Dough Ingredients", addDoughIngredient),     onRemoveIng: histRemove("Dough Ingredients", removeDoughIngredient),     onRenameIng: histRename("Dough Ingredients", renameDoughIngredient) },
+          { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: histAdd("Sauce Recipe Names", addFrontlineRecipeName), onRemoveName: histRemove("Sauce Recipe Names", removeFrontlineRecipeName), onRenameName: histRename("Sauce Recipe Names", renameFrontlineRecipeName), ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: histAdd("Sauce Ingredients", addFrontlineIngredient), onRemoveIng: histRemove("Sauce Ingredients", removeFrontlineIngredient), onRenameIng: histRename("Sauce Ingredients", renameFrontlineIngredient) },
+          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: histAdd("Cheese Recipe Names", addCheeseRecipeName),    onRemoveName: histRemove("Cheese Recipe Names", removeCheeseRecipeName),    onRenameName: histRename("Cheese Recipe Names", renameCheeseRecipeName),    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: histAdd("Cheese Ingredients", addCheeseIngredient),   onRemoveIng: histRemove("Cheese Ingredients", removeCheeseIngredient),   onRenameIng: histRename("Cheese Ingredients", renameCheeseIngredient) },
+          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: histAdd("Mix Recipe Names", addMixRecipeName),       onRemoveName: histRemove("Mix Recipe Names", removeMixRecipeName),       onRenameName: histRename("Mix Recipe Names", renameMixRecipeName),       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: histAdd("Mix Ingredients", addMixIngredient),      onRemoveIng: histRemove("Mix Ingredients", removeMixIngredient),      onRenameIng: histRename("Mix Ingredients", renameMixIngredient) },
         ];
 
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -5693,6 +5800,13 @@ export default function Home() {
                                       onClick={() => applyMergeSuggestion(s)}
                                       className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
                                     >Apply</button>
+                                    <button
+                                      type="button"
+                                      disabled={mergeBusy || mergeSuggestBusy}
+                                      onClick={() => ignoreMergeSuggestion(s)}
+                                      title="Never suggest merging these again"
+                                      className="px-2.5 py-1 rounded border border-border text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 ml-auto"
+                                    >Ignore</button>
                                   </div>
                                 </div>
                               );
@@ -5833,6 +5947,42 @@ export default function Home() {
                     inputVal={mgStandaloneInput}
                     setInputVal={setMgStandaloneInput}
                   />
+                )}
+
+                {/* Recent changes: local per-device undo trail for master-data edits */}
+                {manageCategory !== "pin" && (
+                  <div className="mt-6 pt-4 border-t border-border">
+                    <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
+                    <p className="text-[11px] text-muted-foreground mb-3">
+                      Edits to lists, recipes, and merges on this device. Undo also reverts any changes made after it. (Stored locally, not synced.)
+                    </p>
+                    {changeHistory.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No recent changes.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                        {changeHistory.map((entry) => (
+                          <div key={entry.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded border border-border bg-background/40">
+                            <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wide ${
+                              entry.type === "merge" ? "bg-amber-500/20 text-amber-300"
+                              : entry.type === "remove" ? "bg-destructive/20 text-destructive"
+                              : entry.type === "rename" ? "bg-sky-500/20 text-sky-300"
+                              : "bg-emerald-500/20 text-emerald-300"
+                            }`}>{entry.type}</span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs truncate" title={entry.description}>{entry.description}</p>
+                              <p className="text-[10px] text-muted-foreground">{new Date(entry.ts).toLocaleString()}</p>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={undoBusy}
+                              onClick={() => handleUndoChange(entry)}
+                              className="shrink-0 px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                            >Undo</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
