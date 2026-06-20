@@ -749,6 +749,62 @@ export interface SaveDeniedMergesInput {
   pairs: DeniedMerge[];
 }
 
+export type ProductionRuleType = typeof ProductionRuleType[keyof typeof ProductionRuleType];
+
+
+export const ProductionRuleType = {
+  'required-field': 'required-field',
+  'numeric-range': 'numeric-range',
+  sequence: 'sequence',
+} as const;
+
+export type ProductionRuleEnforcement = typeof ProductionRuleEnforcement[keyof typeof ProductionRuleEnforcement];
+
+
+export const ProductionRuleEnforcement = {
+  flexible: 'flexible',
+  strict: 'strict',
+} as const;
+
+/**
+ * A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.
+ */
+export interface ProductionRule {
+  /** Stable client-generated id */
+  id: string;
+  /** Human-readable rule name */
+  name: string;
+  type: ProductionRuleType;
+  enforcement: ProductionRuleEnforcement;
+  enabled: boolean;
+  /** Run field key (required-field, numeric-range) */
+  field?: string | null;
+  /** Inclusive lower bound (numeric-range) */
+  min?: number | null;
+  /** Inclusive upper bound (numeric-range) */
+  max?: number | null;
+  /** Run attribute key for the transition (sequence) */
+  attribute?: string | null;
+  /** Disallowed preceding attribute value (sequence) */
+  before?: string | null;
+  /** Disallowed following attribute value (sequence) */
+  after?: string | null;
+}
+
+export interface ProductionRuleList {
+  rules: ProductionRule[];
+}
+
+export interface SaveProductionRulesInput {
+  /** The batch of rules to create or update (by id) */
+  rules: ProductionRule[];
+}
+
+export interface DeleteProductionRulesInput {
+  /** The ids of the rules to delete */
+  ids: string[];
+}
+
 export interface SuggestMergesInput {
   /** The full pool of mergeable ingredient/die names to cluster */
   names: string[];

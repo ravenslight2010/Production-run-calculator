@@ -188,6 +188,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/production-rules':
+        specifier: workspace:*
+        version: link:../../lib/production-rules
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
@@ -456,6 +459,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/production-rules':
+        specifier: workspace:*
+        version: link:../../lib/production-rules
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
@@ -694,6 +700,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/production-rules':
+        specifier: workspace:*
+        version: link:../../lib/production-rules
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
@@ -943,6 +952,12 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.1.0
+
+  lib/production-rules:
+    dependencies:
+      '@workspace/allergen':
+        specifier: workspace:*
+        version: link:../allergen
 
   lib/spec-import: {}
 

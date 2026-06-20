@@ -18,6 +18,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
 import SpecImportModal from "@/components/SpecImportModal";
+import ProductionRulesManager from "@/components/ProductionRulesManager";
 import {
   profileKey,
   useRun,
@@ -1082,6 +1083,16 @@ export default function MasterDataScreen() {
             />
           )}
         </CardSection>
+
+        {/* Production rules (manager only) */}
+        {isManager ? (
+          <>
+            <SectionHeader title="Production Rules" />
+            <CardSection>
+              <ProductionRulesManager />
+            </CardSection>
+          </>
+        ) : null}
 
         {/* Merge ingredients */}
         <SectionHeader title="Merge Ingredients" />

@@ -92,6 +92,7 @@
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",
+    "@workspace/production-rules": "workspace:*",
     "@workspace/spec-import": "workspace:*"
   }
 }

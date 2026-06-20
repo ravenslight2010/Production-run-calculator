@@ -14,6 +14,7 @@ import specImportAliasesRouter from "./specImportAliases";
 import mergeAliasesRouter from "./mergeAliases";
 import deniedMergesRouter from "./deniedMerges";
 import aiCorrectionsRouter from "./aiCorrections";
+import productionRulesRouter from "./productionRules";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -41,5 +42,6 @@ router.use(specImportAliasesRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);
 router.use(aiCorrectionsRouter);
+router.use(productionRulesRouter);
 
 export default router;

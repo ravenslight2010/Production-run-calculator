@@ -24,6 +24,8 @@ tags:
     description: Issue reports, crash capture, and AI diagnosis
   - name: specImport
     description: Learned spec-sheet / recipe import aliases
+  - name: productionRules
+    description: Manager-defined factory-wide production rules
 paths:
   /healthz:
     get:
@@ -806,6 +808,70 @@ paths:
                 $ref: "#/components/schemas/DeniedMergeList"
         "400":
           description: Invalid input
+
+  /production-rules:
+    get:
+      operationId: listProductionRules
+      tags: [productionRules]
+      summary: List manager-defined production rules
+      description: >-
+        Returns every factory-wide production rule. Rules are global policy (not
+        part of the per-day sync payload). Reading is available to any signed-in
+        user so both apps can evaluate them; editing is manager-only.
+      responses:
+        "200":
+          description: All production rules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionRuleList"
+    post:
+      operationId: saveProductionRules
+      tags: [productionRules]
+      summary: Create or update production rules (manager only)
+      description: >-
+        Upserts a batch of production rules by id. Each rule is normalized and
+        validated server-side; malformed rules are dropped. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveProductionRulesInput"
+      responses:
+        "200":
+          description: The full updated rule list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionRuleList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteProductionRules
+      tags: [productionRules]
+      summary: Delete production rules by id (manager only)
+      description: >-
+        Removes a batch of production rules by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteProductionRulesInput"
+      responses:
+        "200":
+          description: The full updated rule list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductionRuleList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
 
   /ai-corrections:
     get:
@@ -2528,6 +2594,90 @@ components:
           description: The batch of denied pairs to add or remove
           items:
             $ref: "#/components/schemas/DeniedMerge"
+
+    ProductionRule:
+      type: object
+      description: >-
+        A manager-defined factory-wide production rule. Flat shape: only the
+        fields relevant to `type` are used. "flexible" rules warn; "strict" rules
+        block starting a run.
+      required:
+        - id
+        - name
+        - type
+        - enforcement
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Human-readable rule name
+        type:
+          type: string
+          enum: [required-field, numeric-range, sequence]
+        enforcement:
+          type: string
+          enum: [flexible, strict]
+        enabled:
+          type: boolean
+        field:
+          type: string
+          nullable: true
+          description: Run field key (required-field, numeric-range)
+        min:
+          type: number
+          nullable: true
+          description: Inclusive lower bound (numeric-range)
+        max:
+          type: number
+          nullable: true
+          description: Inclusive upper bound (numeric-range)
+        attribute:
+          type: string
+          nullable: true
+          description: Run attribute key for the transition (sequence)
+        before:
+          type: string
+          nullable: true
+          description: Disallowed preceding attribute value (sequence)
+        after:
+          type: string
+          nullable: true
+          description: Disallowed following attribute value (sequence)
+
+    ProductionRuleList:
+      type: object
+      required:
+        - rules
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductionRule"
+
+    SaveProductionRulesInput:
+      type: object
+      required:
+        - rules
+      properties:
+        rules:
+          type: array
+          description: The batch of rules to create or update (by id)
+          items:
+            $ref: "#/components/schemas/ProductionRule"
+
+    DeleteProductionRulesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the rules to delete
+          items:
+            type: string
 
     SuggestMergesInput:
       type: object

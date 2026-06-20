@@ -30,6 +30,7 @@ import type {
   ConsumeInput,
   ConsumeResult,
   CreateInventoryItemInput,
+  DeleteProductionRulesInput,
   DeniedMergeList,
   FillMissingInput,
   FillMissingResult,
@@ -57,6 +58,7 @@ import type {
   ParseSpecSheetResult,
   PasswordResetRequest,
   PhotoAliasList,
+  ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
   ReportIncidentInput,
@@ -69,6 +71,7 @@ import type {
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
   SavePhotoAliasesInput,
+  SaveProductionRulesInput,
   SaveSpecImportAliasesInput,
   SpecImportAliasList,
   StaffMember,
@@ -2730,6 +2733,228 @@ export const useDeleteDeniedMerges = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteDeniedMergesMutationOptions(options));
+    }
+
+export const getListProductionRulesUrl = () => {
+
+
+
+
+  return `/api/production-rules`
+}
+
+/**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
+ * @summary List manager-defined production rules
+ */
+export const listProductionRules = async ( options?: RequestInit): Promise<ProductionRuleList> => {
+
+  return customFetch<ProductionRuleList>(getListProductionRulesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListProductionRulesQueryKey = () => {
+    return [
+    `/api/production-rules`
+    ] as const;
+    }
+
+
+export const getListProductionRulesQueryOptions = <TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListProductionRulesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listProductionRules>>> = ({ signal }) => listProductionRules({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListProductionRulesQueryResult = NonNullable<Awaited<ReturnType<typeof listProductionRules>>>
+export type ListProductionRulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined production rules
+ */
+
+export function useListProductionRules<TData = Awaited<ReturnType<typeof listProductionRules>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listProductionRules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListProductionRulesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveProductionRulesUrl = () => {
+
+
+
+
+  return `/api/production-rules`
+}
+
+/**
+ * Upserts a batch of production rules by id. Each rule is normalized and validated server-side; malformed rules are dropped. Manager role required.
+ * @summary Create or update production rules (manager only)
+ */
+export const saveProductionRules = async (saveProductionRulesInput: SaveProductionRulesInput, options?: RequestInit): Promise<ProductionRuleList> => {
+
+  return customFetch<ProductionRuleList>(getSaveProductionRulesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveProductionRulesInput,)
+  }
+);}
+
+
+
+
+export const getSaveProductionRulesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveProductionRules>>, TError,{data: BodyType<SaveProductionRulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveProductionRules>>, TError,{data: BodyType<SaveProductionRulesInput>}, TContext> => {
+
+const mutationKey = ['saveProductionRules'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveProductionRules>>, {data: BodyType<SaveProductionRulesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveProductionRules(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveProductionRulesMutationResult = NonNullable<Awaited<ReturnType<typeof saveProductionRules>>>
+    export type SaveProductionRulesMutationBody = BodyType<SaveProductionRulesInput>
+    export type SaveProductionRulesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update production rules (manager only)
+ */
+export const useSaveProductionRules = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveProductionRules>>, TError,{data: BodyType<SaveProductionRulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveProductionRules>>,
+        TError,
+        {data: BodyType<SaveProductionRulesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveProductionRulesMutationOptions(options));
+    }
+
+export const getDeleteProductionRulesUrl = () => {
+
+
+
+
+  return `/api/production-rules`
+}
+
+/**
+ * Removes a batch of production rules by id. Manager role required.
+ * @summary Delete production rules by id (manager only)
+ */
+export const deleteProductionRules = async (deleteProductionRulesInput: DeleteProductionRulesInput, options?: RequestInit): Promise<ProductionRuleList> => {
+
+  return customFetch<ProductionRuleList>(getDeleteProductionRulesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteProductionRulesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteProductionRulesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProductionRules>>, TError,{data: BodyType<DeleteProductionRulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProductionRules>>, TError,{data: BodyType<DeleteProductionRulesInput>}, TContext> => {
+
+const mutationKey = ['deleteProductionRules'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProductionRules>>, {data: BodyType<DeleteProductionRulesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteProductionRules(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProductionRulesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProductionRules>>>
+    export type DeleteProductionRulesMutationBody = BodyType<DeleteProductionRulesInput>
+    export type DeleteProductionRulesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete production rules by id (manager only)
+ */
+export const useDeleteProductionRules = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProductionRules>>, TError,{data: BodyType<DeleteProductionRulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProductionRules>>,
+        TError,
+        {data: BodyType<DeleteProductionRulesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteProductionRulesMutationOptions(options));
     }
 
 export const getListAiCorrectionsUrl = () => {

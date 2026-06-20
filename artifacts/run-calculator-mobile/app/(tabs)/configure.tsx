@@ -30,6 +30,11 @@ import {
   normalizeAllergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
+import {
+  evaluateRules,
+  type RuleSequenceItem,
+} from "@workspace/production-rules";
+import { useProductionRules } from "@/hooks/useProductionRules";
 
 function toNum(s: string | undefined | null): number {
   if (s == null || s === "") return 0;
@@ -204,6 +209,38 @@ export default function ConfigureScreen() {
     }));
     return allergenSequenceWarnings(seq);
   }, [allRuns]);
+
+  // Manager-defined production rules (factory-wide, server-persisted). Evaluated
+  // against the current run + the day's sequence. "flexible" rules warn inline
+  // (alongside the allergen advisory); "strict" rules block starting the run.
+  const { rules: productionRules } = useProductionRules();
+  const ruleViolations = React.useMemo(() => {
+    const s = run.settings;
+    const effectiveLineSpeed =
+      s.crustsPerCycle > 0
+        ? s.crustsPerCycle * s.cycleSpeed * (s.speedAdjustment || 1)
+        : s.lineSpeedPPM;
+    const fields = {
+      brand: s.brand,
+      flavor: s.flavor,
+      casesNeeded: s.casesNeeded,
+      lineSpeed: effectiveLineSpeed,
+      targetDoughballWeight: s.doughballWeightOz,
+      sauceOzPerPizza: s.sauceOzPerPizza,
+      dieType: s.dieType,
+    };
+    const seq: RuleSequenceItem[] = allRuns.map((r, i) => ({
+      id: r.id,
+      label: `Run ${i + 1} · ${runLabel(r, i)}`,
+      attributes: { allergen: normalizeAllergen(r.settings.allergen) },
+    }));
+    return evaluateRules(productionRules, {
+      fields,
+      runLabel: runLabel(run, allRuns.findIndex((r) => r.id === run.id)),
+      sequence: seq,
+      currentRunId: run.id,
+    });
+  }, [productionRules, allRuns, run]);
 
   const save = () => {
     updateSettings({
@@ -621,6 +658,48 @@ export default function ConfigureScreen() {
                         {w.fromLabel} → {w.toLabel}:{" "}
                       </Text>
                       {w.message}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+          {ruleViolations.length > 0 && (
+            <View style={{ marginTop: 10, gap: 8 }}>
+              {ruleViolations.map((rv) => {
+                const danger = rv.enforcement === "strict";
+                return (
+                  <View
+                    key={rv.ruleId}
+                    style={{
+                      flexDirection: "row",
+                      gap: 8,
+                      padding: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: danger ? "#dc2626" : "#d97706",
+                      backgroundColor: danger ? "#dc262622" : "#d9770622",
+                    }}
+                  >
+                    <Feather
+                      name="alert-triangle"
+                      size={14}
+                      color={danger ? "#fca5a5" : "#fcd34d"}
+                      style={{ marginTop: 2 }}
+                    />
+                    <Text
+                      style={{
+                        flex: 1,
+                        fontFamily: FONTS.regular,
+                        fontSize: 12,
+                        color: danger ? "#fca5a5" : "#fcd34d",
+                      }}
+                    >
+                      <Text style={{ fontFamily: FONTS.bold }}>
+                        {rv.name}
+                        {danger ? " (blocks start)" : ""}:{" "}
+                      </Text>
+                      {rv.message}
                     </Text>
                   </View>
                 );

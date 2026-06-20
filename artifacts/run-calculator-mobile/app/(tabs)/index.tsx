@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -23,6 +23,11 @@ import {
 } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
 import { allergenMeta, normalizeAllergen } from "@workspace/allergen";
+import {
+  evaluateRules,
+  type RuleSequenceItem,
+} from "@workspace/production-rules";
+import { useProductionRules } from "@/hooks/useProductionRules";
 import {
   useRun,
   useRunClock,
@@ -189,6 +194,38 @@ export default function CalculatorScreen() {
 
   const label = runLabel(run, runIndex);
   const currentAllergenMeta = allergenMeta(normalizeAllergen(run.settings.allergen));
+
+  // Manager-defined production rules (factory-wide). "strict" violations block
+  // starting the run; the Configure tab shows the full warning text.
+  const { rules: productionRules } = useProductionRules();
+  const ruleViolations = useMemo(() => {
+    const s = run.settings;
+    const effectiveLineSpeed =
+      s.crustsPerCycle > 0
+        ? s.crustsPerCycle * s.cycleSpeed * (s.speedAdjustment || 1)
+        : s.lineSpeedPPM;
+    const fields = {
+      brand: s.brand,
+      flavor: s.flavor,
+      casesNeeded: s.casesNeeded,
+      lineSpeed: effectiveLineSpeed,
+      targetDoughballWeight: s.doughballWeightOz,
+      sauceOzPerPizza: s.sauceOzPerPizza,
+      dieType: s.dieType,
+    };
+    const seq: RuleSequenceItem[] = allRuns.map((r, i) => ({
+      id: r.id,
+      label: `Run ${i + 1} · ${runLabel(r, i)}`,
+      attributes: { allergen: normalizeAllergen(r.settings.allergen) },
+    }));
+    return evaluateRules(productionRules, {
+      fields,
+      runLabel: runLabel(run, runIndex),
+      sequence: seq,
+      currentRunId: run.id,
+    });
+  }, [productionRules, allRuns, run, runIndex]);
+  const strictViolations = ruleViolations.filter((x) => x.enforcement === "strict");
 
   // Other runs in today's lineup that haven't been finished yet.
   const upcomingRuns = allRuns
@@ -843,17 +880,45 @@ export default function CalculatorScreen() {
               ) : (
                 <Pressable
                   onPress={() => {
+                    if (strictViolations.length > 0) {
+                      Haptics.notificationAsync(
+                        Haptics.NotificationFeedbackType.Error,
+                      );
+                      Alert.alert(
+                        "Can't start run",
+                        `Blocked by production rule${strictViolations.length > 1 ? "s" : ""}:\n\n` +
+                          strictViolations.map((x) => `• ${x.message}`).join("\n") +
+                          "\n\nFix these on the Configure tab, or ask a manager to adjust the rule.",
+                      );
+                      return;
+                    }
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                     startRun();
                   }}
                   style={({ pressed }) => [
                     styles.ctrlBtn,
                     styles.ctrlBtnWide,
-                    { backgroundColor: colors.success, opacity: pressed ? 0.8 : 1 },
+                    {
+                      backgroundColor:
+                        strictViolations.length > 0 ? colors.muted : colors.success,
+                      opacity: pressed ? 0.8 : 1,
+                    },
                   ]}
                 >
-                  <Feather name="play" size={16} color="#000" />
-                  <Text style={[styles.ctrlBtnText, { color: "#000" }]}>
+                  <Feather
+                    name={strictViolations.length > 0 ? "lock" : "play"}
+                    size={16}
+                    color={strictViolations.length > 0 ? colors.mutedForeground : "#000"}
+                  />
+                  <Text
+                    style={[
+                      styles.ctrlBtnText,
+                      {
+                        color:
+                          strictViolations.length > 0 ? colors.mutedForeground : "#000",
+                      },
+                    ]}
+                  >
                     Start Run
                   </Text>
                 </Pressable>

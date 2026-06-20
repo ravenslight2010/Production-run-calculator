@@ -58,5 +58,6 @@
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Mobile SelectField parity](mobile-select-field.md) — one bottom-sheet picker mirrors web's two selects; allowClear for die/pep, add/remove for recipe rows, no clear elsewhere.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).
+- [Production Rules](production-rules.md) — manager-editable factory-wide run rules (required-field/numeric-range/sequence), flexible=warn/strict=block-Start; server-persisted (NOT in sync), POST/DELETE manager-only; web+mobile field-map + numeric-range seed gotcha.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
 - [Merge tombstones](merge-tombstones.md) — merges need a synced `mergedAway` tombstone to survive additive live-sync union (filter EVERY list incl. one-off ingredientTypes; push-before-reload on web); union semantics = cross-peer re-add tradeoff.

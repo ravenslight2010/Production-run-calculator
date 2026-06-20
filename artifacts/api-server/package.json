@@ -17,6 +17,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
+    "@workspace/production-rules": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",

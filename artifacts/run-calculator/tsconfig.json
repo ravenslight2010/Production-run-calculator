@@ -26,6 +26,9 @@
     },
     {
       "path": "../../lib/inventory-math"
+    },
+    {
+      "path": "../../lib/production-rules"
     }
   ]
 }

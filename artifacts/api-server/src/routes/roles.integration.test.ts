@@ -277,6 +277,20 @@ const GATED_ROUTES: GatedRoute[] = [
     path: () => `/api/users/${OPERATOR}`,
     okStatus: 204,
   },
+  {
+    name: "POST /production-rules",
+    method: "POST",
+    path: () => "/api/production-rules",
+    body: { rules: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /production-rules",
+    method: "DELETE",
+    path: () => "/api/production-rules",
+    body: { ids: [] },
+    okStatus: 200,
+  },
 ];
 
 describe("role-based access control", () => {

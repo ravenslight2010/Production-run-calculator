@@ -31,6 +31,9 @@
       "path": "./lib/merge-suggest"
     },
     {
+      "path": "./lib/production-rules"
+    },
+    {
       "path": "./lib/ai-memory"
     },
     {

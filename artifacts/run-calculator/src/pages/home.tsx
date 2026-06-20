@@ -151,6 +151,20 @@ import { useAutoTrack } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
+import { useProductionRules } from "../hooks/useProductionRules";
+import {
+  evaluateRules,
+  newRule,
+  defaultRuleName,
+  ruleFieldDef,
+  RULE_FIELDS,
+  RULE_ATTRIBUTES,
+  ruleAttributeDef,
+  type ProductionRule,
+  type RuleType,
+  type RuleSequenceItem,
+} from "@workspace/production-rules";
+import { saveProductionRules, deleteProductionRules } from "../productionRules";
 import { useMe } from "../useRole";
 import {
   Factory,
@@ -1881,6 +1895,53 @@ export default function Home() {
     return allergenSequenceWarnings(seq);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayState.runs, currentRunId, v.allergen]);
+
+  // Manager-defined production rules (factory-wide, server-persisted). Evaluated
+  // against the current run + the day's sequence. "flexible" rules warn inline
+  // (alongside the allergen advisory); "strict" rules block starting the run.
+  const { rules: productionRules } = useProductionRules();
+  const ruleViolations = useMemo(() => {
+    const fields = {
+      brand: currentRun?.brand,
+      flavor: currentRun?.flavor,
+      casesNeeded: v.casesNeeded,
+      lineSpeed: v.approxLineSpeed,
+      targetDoughballWeight: v.targetDoughballWeight,
+      sauceOzPerPizza: v.sauceOzPerPizza,
+      dieType: v.dieType,
+    };
+    const seq: RuleSequenceItem[] = dayState.runs.map((run, i) => ({
+      id: run.id,
+      label: `Run ${i + 1} · ${runLabel(run)}`,
+      attributes: {
+        allergen: normalizeAllergen(
+          run.id === currentRunId ? (v.allergen as Allergen) : loadRunValues(run.id).allergen,
+        ),
+      },
+    }));
+    const current = dayState.runs.find(r => r.id === currentRunId);
+    return evaluateRules(productionRules, {
+      fields,
+      runLabel: current ? runLabel(current) : undefined,
+      sequence: seq,
+      currentRunId,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    productionRules,
+    dayState.runs,
+    currentRunId,
+    currentRun?.brand,
+    currentRun?.flavor,
+    v.casesNeeded,
+    v.approxLineSpeed,
+    v.targetDoughballWeight,
+    v.sauceOzPerPizza,
+    v.dieType,
+    v.allergen,
+  ]);
+  const flexibleViolations = ruleViolations.filter(x => x.enforcement === "flexible");
+  const strictViolations = ruleViolations.filter(x => x.enforcement === "strict");
 
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
   const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
@@ -6237,7 +6298,13 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={startRun}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
+                  disabled={strictViolations.length > 0}
+                  title={
+                    strictViolations.length > 0
+                      ? `Blocked by production rule${strictViolations.length > 1 ? "s" : ""}: ${strictViolations.map(x => x.name).join(", ")}`
+                      : undefined
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
                 >
                   <Play className="w-3 h-3 fill-current" /> Start Run
                 </button>
@@ -7178,6 +7245,29 @@ export default function Home() {
                                 <span>
                                   <span className="font-bold">{w.fromLabel} → {w.toLabel}:</span>{" "}
                                   {w.message}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {ruleViolations.length > 0 && (
+                          <div className="mt-2 flex flex-col gap-1.5">
+                            {ruleViolations.map(rv => (
+                              <div
+                                key={rv.ruleId}
+                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border ${
+                                  rv.enforcement === "strict"
+                                    ? "bg-red-950/40 border-red-700/40 text-red-300"
+                                    : "bg-amber-950/30 border-amber-700/40 text-amber-300"
+                                }`}
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                <span>
+                                  <span className="font-bold">
+                                    {rv.name}
+                                    {rv.enforcement === "strict" ? " (blocks start)" : ""}:
+                                  </span>{" "}
+                                  {rv.message}
                                 </span>
                               </div>
                             ))}

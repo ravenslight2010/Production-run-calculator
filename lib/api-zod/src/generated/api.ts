@@ -807,6 +807,89 @@ export const DeleteDeniedMergesResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
+ * @summary List manager-defined production rules
+ */
+export const ListProductionRulesResponse = zod.object({
+  "rules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable rule name'),
+  "type": zod.enum(['required-field', 'numeric-range', 'sequence']),
+  "enforcement": zod.enum(['flexible', 'strict']),
+  "enabled": zod.boolean(),
+  "field": zod.string().nullish().describe('Run field key (required-field, numeric-range)'),
+  "min": zod.number().nullish().describe('Inclusive lower bound (numeric-range)'),
+  "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
+  "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
+  "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
+})
+
+
+/**
+ * Upserts a batch of production rules by id. Each rule is normalized and validated server-side; malformed rules are dropped. Manager role required.
+ * @summary Create or update production rules (manager only)
+ */
+export const SaveProductionRulesBody = zod.object({
+  "rules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable rule name'),
+  "type": zod.enum(['required-field', 'numeric-range', 'sequence']),
+  "enforcement": zod.enum(['flexible', 'strict']),
+  "enabled": zod.boolean(),
+  "field": zod.string().nullish().describe('Run field key (required-field, numeric-range)'),
+  "min": zod.number().nullish().describe('Inclusive lower bound (numeric-range)'),
+  "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
+  "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
+  "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.')).describe('The batch of rules to create or update (by id)')
+})
+
+export const SaveProductionRulesResponse = zod.object({
+  "rules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable rule name'),
+  "type": zod.enum(['required-field', 'numeric-range', 'sequence']),
+  "enforcement": zod.enum(['flexible', 'strict']),
+  "enabled": zod.boolean(),
+  "field": zod.string().nullish().describe('Run field key (required-field, numeric-range)'),
+  "min": zod.number().nullish().describe('Inclusive lower bound (numeric-range)'),
+  "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
+  "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
+  "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
+})
+
+
+/**
+ * Removes a batch of production rules by id. Manager role required.
+ * @summary Delete production rules by id (manager only)
+ */
+export const DeleteProductionRulesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the rules to delete')
+})
+
+export const DeleteProductionRulesResponse = zod.object({
+  "rules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable rule name'),
+  "type": zod.enum(['required-field', 'numeric-range', 'sequence']),
+  "enforcement": zod.enum(['flexible', 'strict']),
+  "enabled": zod.boolean(),
+  "field": zod.string().nullish().describe('Run field key (required-field, numeric-range)'),
+  "min": zod.number().nullish().describe('Inclusive lower bound (numeric-range)'),
+  "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
+  "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
+  "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+}).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
+})
+
+
+/**
  * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
  * @summary List the shared factory-wide AI name corrections
  */
