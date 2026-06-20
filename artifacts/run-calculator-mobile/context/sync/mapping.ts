@@ -53,6 +53,7 @@ export interface SyncableState {
   cheeseIngredients: string[];
   doughIngredients: string[];
   frontlineIngredients: string[];
+  mergedAway: string[];
 }
 
 export type SyncableStatePatch = Partial<SyncableState>;
@@ -339,6 +340,7 @@ export function appStateToPayload(
     cheeseIngredients: state.cheeseIngredients,
     doughIngredients: state.doughIngredients,
     frontlineIngredients: state.frontlineIngredients,
+    mergedAway: state.mergedAway ?? [],
   };
 }
 
@@ -347,6 +349,13 @@ function unionList(local: string[], remote: unknown): string[] {
   const set = new Set(local);
   for (const v of remote) if (typeof v === "string") set.add(v);
   return [...set];
+}
+
+// Drop names in the tombstone set (case-insensitive). Mirrors web's
+// dropMergedAway so a merged-away name can't be resurrected by the union above.
+function dropTomb(list: string[], tomb: Set<string>): string[] {
+  if (tomb.size === 0) return list;
+  return list.filter((n) => !tomb.has(String(n).trim().toLowerCase()));
 }
 
 function unionBrandFlavors(
@@ -375,16 +384,24 @@ export function applyPayloadToState(
 ): { patch: SyncableStatePatch; acceptedDay: boolean } {
   const patch: SyncableStatePatch = {};
 
+  // Merge tombstones (union remote+local). A merge removes source names locally,
+  // but the additive list unions below would resurrect them from a stale peer.
+  // Union the tombstone set and strip those names from every list so a merge
+  // sticks (web parity).
+  const mergedAway = unionList(prev.mergedAway ?? [], payload.mergedAway);
+  patch.mergedAway = mergedAway;
+  const tomb = new Set(mergedAway.map((n) => String(n).trim().toLowerCase()));
+
   // Master-data (union, always)
   if (payload.brands) patch.brands = unionList(prev.brands, payload.brands);
   if (payload.brandFlavors) patch.brandFlavors = unionBrandFlavors(prev.brandFlavors, payload.brandFlavors);
   // Clean incoming pep types (rename legacy + drop retired) so a legacy peer can't
   // reintroduce "Pep - Cured"/"Pep - Natural"/"Diced Pepperoni" via sync.
-  if (payload.pepTypes) patch.pepTypes = renamePepList(unionList(prev.pepTypes, payload.pepTypes));
-  if (payload.dieTypes) patch.dieTypes = unionList(prev.dieTypes, payload.dieTypes);
-  if (payload.cheeseIngredients) patch.cheeseIngredients = renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients));
-  if (payload.doughIngredients) patch.doughIngredients = unionList(prev.doughIngredients, payload.doughIngredients);
-  if (payload.frontlineIngredients) patch.frontlineIngredients = unionList(prev.frontlineIngredients, payload.frontlineIngredients);
+  if (payload.pepTypes) patch.pepTypes = dropTomb(renamePepList(unionList(prev.pepTypes, payload.pepTypes)), tomb);
+  if (payload.dieTypes) patch.dieTypes = dropTomb(unionList(prev.dieTypes, payload.dieTypes), tomb);
+  if (payload.cheeseIngredients) patch.cheeseIngredients = dropTomb(renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients)), tomb);
+  if (payload.doughIngredients) patch.doughIngredients = dropTomb(unionList(prev.doughIngredients, payload.doughIngredients), tomb);
+  if (payload.frontlineIngredients) patch.frontlineIngredients = dropTomb(unionList(prev.frontlineIngredients, payload.frontlineIngredients), tomb);
 
   const ds = payload.dayState;
   const remoteResetAt = ds?.resetAt ?? 0;

@@ -28,6 +28,7 @@ import {
   MIX_RECIPE_NAMES_KEY,
   INGREDIENT_TYPES_KEY,
   DEFAULT_INGREDIENT_TYPES,
+  MERGED_AWAY_KEY,
   PEP_TYPES_KEY,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
@@ -86,6 +87,28 @@ export function loadList(key: string, fallback: string[]): string[] {
 
 export function saveList(key: string, list: string[]): void {
   try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+}
+
+// ── Merge tombstones ────────────────────────────────────────────────────────
+// Names that an ingredient merge removed. Persisted + synced so the additive
+// list-union in live-sync can't resurrect a merged-away name from a stale peer.
+export function loadMergedAway(): string[] {
+  return loadList(MERGED_AWAY_KEY, []);
+}
+export function saveMergedAway(list: string[]): void {
+  saveList(MERGED_AWAY_KEY, [...new Set(list)]);
+}
+/** Drop names in the tombstone set (case-insensitive) from a list. */
+export function dropMergedAway(list: string[], tomb: Set<string>): string[] {
+  if (tomb.size === 0) return list;
+  return list.filter((n) => !tomb.has(n.trim().toLowerCase()));
+}
+/** Remove a name from the tombstone so it can be re-added/resurrected later. */
+export function clearMergedAway(name: string): void {
+  const v = name.trim().toLowerCase();
+  if (!v) return;
+  const next = loadMergedAway().filter((n) => n.trim().toLowerCase() !== v);
+  saveMergedAway(next);
 }
 
 export function loadBrandFlavors(): Record<string, string[]> {
@@ -446,6 +469,12 @@ export function applyIngredientDedupeMigrationIfNeeded(): void {
 export function applyIngredientMerge(map: MergeMap): void {
   if (typeof localStorage === "undefined") return;
   if (Object.keys(map).length === 0) return;
+  // Record the merged-away source names as tombstones so live-sync's additive
+  // list-union can't bring them back from a stale peer/server. Never tombstone a
+  // target (a source that maps to itself isn't a real source).
+  const targets = new Set(Object.values(map).map((t) => t.trim().toLowerCase()));
+  const sources = Object.keys(map).filter((s) => !targets.has(s.trim().toLowerCase()));
+  if (sources.length > 0) saveMergedAway([...loadMergedAway(), ...sources]);
   // ── Flat master-data option lists. dieTypes is included so a merged die-type
   // name is removed from the selectable list (the dieType field is rewritten via
   // MERGE_NAME_FIELDS in mergeSettingsObject). ──

@@ -141,5 +141,8 @@ export interface SyncPayload {
   mixRecipeNames?: string[];
   brandProfiles?: Record<string, unknown>;
   crustProfiles?: Record<string, unknown>;
+  // Tombstones: ingredient/die names merged away. Synced so the additive list
+  // union can't resurrect a merged-away name from a stale peer/server.
+  mergedAway?: string[];
   [key: string]: unknown;
 }

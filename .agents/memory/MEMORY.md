@@ -58,3 +58,4 @@
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.
 - [Mobile SelectField parity](mobile-select-field.md) — one bottom-sheet picker mirrors web's two selects; allowClear for die/pep, add/remove for recipe rows, no clear elsewhere.
 - [Auto-track stops at run need](autotrack-over-provisioning.md) — clamp expectedCases to casesNeeded so skids/cases freeze; gate dough trays/batches decrement on front-of-line feed completion; full web+mobile parity (decrement on both).
+- [Merge tombstones](merge-tombstones.md) — merges need a synced `mergedAway` tombstone to survive additive live-sync union (filter EVERY list incl. one-off ingredientTypes; push-before-reload on web); union semantics = cross-peer re-add tradeoff.

@@ -870,6 +870,9 @@ interface AppState {
   cheeseIngredients: string[];
   doughIngredients: string[];
   frontlineIngredients: string[];
+  // Tombstones: ingredient/die names merged away. Synced so the additive list
+  // union in live-sync can't resurrect a merged-away name from a stale peer.
+  mergedAway: string[];
   stopReasons: string[];
   // Per-product profiles, keyed by `${brand}__${flavor}` (lowercased/trimmed)
   brandProfiles: Record<string, RunProfile>;
@@ -1301,6 +1304,7 @@ const INITIAL_STATE: AppState = {
       ...MIX_SEED.frontlineIngredients,
     ]),
   ],
+  mergedAway: [],
   stopReasons: [...DEFAULT_STOP_REASONS],
   brandProfiles: {},
   doughRecipePresets: {},
@@ -1434,6 +1438,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
           ...MIX_SEED.frontlineIngredients,
         ]),
       ],
+    mergedAway: parsed.mergedAway ?? [],
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
     brandProfiles: Object.fromEntries(
       Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [
@@ -2151,7 +2156,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       if (!v) return;
       setAppState((prev) => {
         if (prev[list].includes(v)) return prev;
-        const next = { ...prev, [list]: [...prev[list], v] };
+        // Re-adding a name resurrects it: drop it from the tombstone so the sync
+        // union won't strip it back out (web parity).
+        const lower = v.trim().toLowerCase();
+        const mergedAway = (prev.mergedAway ?? []).filter(
+          (n) => n.trim().toLowerCase() !== lower,
+        );
+        const next = { ...prev, mergedAway, [list]: [...prev[list], v] };
         persist(next);
         return next;
       });
@@ -2567,9 +2578,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         mergeSettingsObject(s as unknown as Record<string, unknown>, map) as unknown as RunSettings;
       const mergeProfile = (p: RunProfile): RunProfile =>
         mergeSettingsObject(p as unknown as Record<string, unknown>, map) as unknown as RunProfile;
+      // Record the merged-away source names as tombstones so live-sync's additive
+      // list-union can't bring them back from a stale peer/server. Never tombstone
+      // a target (a source that maps to itself isn't a real source). Web parity.
+      const tombTargets = new Set(Object.values(map).map((t) => t.trim().toLowerCase()));
+      const tombSources = Object.keys(map).filter(
+        (s) => !tombTargets.has(s.trim().toLowerCase()),
+      );
       setAppState((prev) => {
         const next: AppState = {
           ...prev,
+          mergedAway: [...new Set([...(prev.mergedAway ?? []), ...tombSources])],
           runs: prev.runs.map((r) => ({ ...r, settings: mergeSettings(r.settings) })),
           templates: prev.templates.map((t) =>
             t.settings ? { ...t, settings: mergeSettings(t.settings) } : t,

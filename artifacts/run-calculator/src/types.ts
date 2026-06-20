@@ -227,6 +227,9 @@ export type SyncPayload = {
   mixRecipeNames?: string[];
   brandProfiles?: Record<string, Partial<FormValues>>;
   crustProfiles?: Record<string, Partial<FormValues>>;
+  // Tombstones: ingredient/die names that were merged away. Synced so the
+  // additive list-union below can't resurrect a merged-away name on any client.
+  mergedAway?: string[];
 };
 
 export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
@@ -252,6 +255,9 @@ export const DEFAULT_STOP_REASONS = [
 export const DEFAULT_SUPERVISOR_PIN = "1234";
 
 export const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
+// Merge tombstones: names removed by an ingredient merge. Kept so live-sync's
+// additive union can't bring a merged-away name back from a stale peer/server.
+export const MERGED_AWAY_KEY = "run-calc-merged-away";
 export const DEFAULT_INGREDIENT_TYPES = [
   "Cheese", "Pepperoni", "Sausage",
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",

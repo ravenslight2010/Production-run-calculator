@@ -92,6 +92,10 @@ import {
   applySauceSpecsSeedIfNeeded,
   applyCheeseSpecsSeedIfNeeded,
   applyIngredientMerge,
+  loadMergedAway,
+  saveMergedAway,
+  dropMergedAway,
+  clearMergedAway,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
@@ -1570,6 +1574,7 @@ export default function Home() {
     const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1605,6 +1610,7 @@ export default function Home() {
     const updated = [...pepTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1626,6 +1632,7 @@ export default function Home() {
     const updated = [...dieTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1647,6 +1654,7 @@ export default function Home() {
     const updated = [...cheeseIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1667,6 +1675,7 @@ export default function Home() {
     const updated = [...mixIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1687,6 +1696,7 @@ export default function Home() {
     const updated = [...doughIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1726,6 +1736,7 @@ export default function Home() {
     const updated = [...frontlineIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    clearMergedAway(trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeFrontlineIngredient(name: string) {
@@ -2213,6 +2224,23 @@ export default function Home() {
           .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
           .map((src) => ({ domain: "ingredient", fromText: src, toText: tgt })),
       );
+      // Push the merged payload (with its mergedAway tombstones) to the server
+      // BEFORE reloading. Otherwise the reload's sync-pull races ahead of any
+      // debounced push and the additive list-union re-adds the merged-away names
+      // from the still-stale server copy. Best-effort: the reboot's tombstone
+      // filter is the backstop if this push fails.
+      try {
+        await fetch("/api/sync/today", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(dayStateRef.current),
+          }),
+        });
+      } catch {
+        // Non-fatal: tombstones are persisted locally and applied on reboot.
+      }
       window.location.reload();
     } catch (e) {
       setMergeBusy(false);
@@ -2436,14 +2464,25 @@ export default function Home() {
         );
       }
 
+      // ── Merge tombstones (union remote+local) ──
+      // A merge removes source names locally, but the additive list-union below
+      // would resurrect them from a stale peer/server. Union the synced tombstone
+      // set and strip those names from every list merge so a merge sticks.
+      const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
+      saveMergedAway(mergedTomb);
+      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+
       // ── Ingredient types ──
       // Rename legacy/near-duplicate names from incoming sync so an un-migrated
       // peer can't re-add old spellings to the list.
       if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
-        const local = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+        const local = dropMergedAway(loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES), tombSet);
         const cleanedRemote = payload.ingredientTypes.map(t => INGREDIENT_RENAMES[t] ?? t);
-        const merged = [...new Set([...local, ...cleanedRemote])].sort((a, b) => a.localeCompare(b));
-        if (!arraysEqual(merged, local)) {
+        const merged = dropMergedAway(
+          [...new Set([...local, ...cleanedRemote])],
+          tombSet,
+        ).sort((a, b) => a.localeCompare(b));
+        if (!arraysEqual(merged, loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES))) {
           saveList(INGREDIENT_TYPES_KEY, merged);
           setIngredientTypes(merged);
         }
@@ -2466,9 +2505,12 @@ export default function Home() {
       // so unconditional setState caused a re-render storm that reset menu scroll.
       function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void) {
         if (!remote || remote.length === 0) return;
-        const local = loadList(key, defaults);
-        const merged = [...new Set([...local, ...remote])].sort((a, b) => a.localeCompare(b));
-        if (arraysEqual(merged, local)) return;
+        const local = dropMergedAway(loadList(key, defaults), tombSet);
+        const merged = dropMergedAway(
+          [...new Set([...local, ...remote])],
+          tombSet,
+        ).sort((a, b) => a.localeCompare(b));
+        if (arraysEqual(merged, loadList(key, defaults))) return;
         saveList(key, merged);
         setter(merged);
       }
@@ -2737,52 +2779,60 @@ export default function Home() {
     });
   }
 
+  // Build the full sync payload from current form + localStorage. Extracted so
+  // both the debounced schedulePush and the merge flow (which must push the
+  // merged payload synchronously before reloading) share one source of truth.
+  function buildSyncPayload(ds: DayState): SyncPayload {
+    const curId = ds.runs[ds.currentIndex]?.id;
+    const runValues: Record<string, FormValues> = {};
+    for (const run of ds.runs) {
+      runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
+    }
+    // Collect brand+flavor profiles from localStorage
+    const brandProfiles: Record<string, Partial<FormValues>> = {};
+    const crustProfiles: Record<string, Partial<FormValues>> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key.startsWith("run-calc-profile-")) {
+        try { brandProfiles[key.slice("run-calc-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
+      } else if (key.startsWith("run-calc-crust-profile-")) {
+        try { crustProfiles[key.slice("run-calc-crust-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
+      }
+    }
+    return {
+      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr() },
+      runValues,
+      brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
+      brandFlavors: loadBrandFlavors(),
+      ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
+      templates: loadTemplates(),
+      history: loadHistory(),
+      pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+      dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
+      cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
+      doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
+      frontlineIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+      mixIngredients: loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS),
+      doughRecipeNames: loadList(DOUGH_RECIPE_NAMES_KEY, []),
+      doughRecipePresets: loadDoughRecipePresets(),
+      frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !SEED_MIX_RECIPE_NAMES.has(n)),
+      frontlineRecipePresets: loadFrontlineRecipePresets(),
+      cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
+      mixRecipeNames: loadList(MIX_RECIPE_NAMES_KEY, []),
+      cheeseRecipePresets: loadCheeseRecipePresets(),
+      brandProfiles,
+      crustProfiles,
+      mergedAway: loadMergedAway(),
+    };
+  }
+
   function schedulePush(ds: DayState, delay = 600) {
     if (isSyncApplyingRef.current) return;
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    const curId = ds.runs[ds.currentIndex]?.id;
     pushAcknowledgedRef.current = false;
     pushTimerRef.current = setTimeout(() => {
-      const runValues: Record<string, FormValues> = {};
-      for (const run of ds.runs) {
-        runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
-      }
-      // Collect brand+flavor profiles from localStorage
-      const brandProfiles: Record<string, Partial<FormValues>> = {};
-      const crustProfiles: Record<string, Partial<FormValues>> = {};
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (!key) continue;
-        if (key.startsWith("run-calc-profile-")) {
-          try { brandProfiles[key.slice("run-calc-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
-        } else if (key.startsWith("run-calc-crust-profile-")) {
-          try { crustProfiles[key.slice("run-calc-crust-profile-".length)] = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch {}
-        }
-      }
-      const payload: SyncPayload = {
-        dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr() },
-        runValues,
-        brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
-        brandFlavors: loadBrandFlavors(),
-        ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
-        templates: loadTemplates(),
-        history: loadHistory(),
-        pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
-        dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
-        cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
-        doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
-        frontlineIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
-        mixIngredients: loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS),
-        doughRecipeNames: loadList(DOUGH_RECIPE_NAMES_KEY, []),
-        doughRecipePresets: loadDoughRecipePresets(),
-        frontlineRecipeNames: loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter(n => !SEED_MIX_RECIPE_NAMES.has(n)),
-        frontlineRecipePresets: loadFrontlineRecipePresets(),
-        cheeseRecipeNames: loadList(CHEESE_RECIPE_NAMES_KEY, []),
-        mixRecipeNames: loadList(MIX_RECIPE_NAMES_KEY, []),
-        cheeseRecipePresets: loadCheeseRecipePresets(),
-        brandProfiles,
-        crustProfiles,
-      };
+      const payload = buildSyncPayload(ds);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and
       // clobbers the other tab's edits ("keeps resetting / loses changes").
