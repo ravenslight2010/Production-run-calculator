@@ -441,6 +441,9 @@ importers:
       '@workspace/ai-review':
         specifier: workspace:*
         version: link:../../lib/ai-review
+      '@workspace/allergen':
+        specifier: workspace:*
+        version: link:../../lib/allergen
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -752,6 +755,9 @@ importers:
       '@workspace/ai-review':
         specifier: workspace:*
         version: link:../../lib/ai-review
+      '@workspace/allergen':
+        specifier: workspace:*
+        version: link:../../lib/allergen
       '@workspace/api-client-react':
         specifier: workspace:*
         version: link:../../lib/api-client-react
@@ -861,6 +867,8 @@ importers:
   lib/ai-memory: {}
 
   lib/ai-review: {}
+
+  lib/allergen: {}
 
   lib/api-client-react:
     dependencies:

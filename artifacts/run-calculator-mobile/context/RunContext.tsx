@@ -20,6 +20,7 @@ import {
   CHEESE_BRAND_SPECS,
 } from "@/data/specSeed";
 import type { ParsedSpecImport } from "@workspace/spec-import";
+import { normalizeAllergen, type Allergen } from "@workspace/allergen";
 import React, {
   createContext,
   useCallback,
@@ -174,6 +175,8 @@ export interface RunSettings {
   skidStacking: string;
   gripSheets: string;
   slipSheets: string;
+  // Allergen designation for the run's line (food-safety advisory)
+  allergen: Allergen;
   // Notes
   notes: string;
 }
@@ -298,6 +301,7 @@ export const DEFAULT_SETTINGS: RunSettings = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
+  allergen: "none",
   notes: "",
 };
 
@@ -1381,6 +1385,7 @@ function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
     renamePepSettings({
       ...DEFAULT_SETTINGS,
       ...(s ?? {}),
+      allergen: normalizeAllergen(s?.allergen),
       doughRecipe: s?.doughRecipe ?? [],
       app1CheeseRecipe: s?.app1CheeseRecipe ?? [],
       app2CheeseRecipe: s?.app2CheeseRecipe ?? [],

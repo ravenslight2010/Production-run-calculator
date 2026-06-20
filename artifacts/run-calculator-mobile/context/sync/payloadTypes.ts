@@ -104,6 +104,7 @@ export interface WebFormValues {
   skidStacking: string;
   gripSheets: string;
   slipSheets: string;
+  allergen: string;
 }
 
 export interface SyncDayState {

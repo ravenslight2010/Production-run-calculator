@@ -21,6 +21,7 @@ import {
   StatRow,
 } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
+import { allergenMeta, normalizeAllergen } from "@workspace/allergen";
 import {
   useRun,
   useRunClock,
@@ -197,6 +198,7 @@ export default function CalculatorScreen() {
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const label = runLabel(run, runIndex);
+  const currentAllergenMeta = allergenMeta(normalizeAllergen(run.settings.allergen));
 
   // Other runs in today's lineup that haven't been finished yet.
   const upcomingRuns = allRuns
@@ -376,9 +378,18 @@ export default function CalculatorScreen() {
           </Pressable>
 
           <Pressable onPress={() => setShowRunPicker(true)} style={styles.navCenter}>
-            <Text style={[styles.navLabel, { color: colors.foreground }]} numberOfLines={1}>
-              {label}
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <Text style={[styles.navLabel, { color: colors.foreground }]} numberOfLines={1}>
+                {label}
+              </Text>
+              {currentAllergenMeta.isAllergen ? (
+                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: currentAllergenMeta.color }}>
+                  <Text style={{ fontSize: 10, fontFamily: FONTS.bold, color: currentAllergenMeta.textColor, textTransform: "uppercase" }}>
+                    {currentAllergenMeta.label}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
             <View style={styles.navSubRow}>
               <View
                 style={[

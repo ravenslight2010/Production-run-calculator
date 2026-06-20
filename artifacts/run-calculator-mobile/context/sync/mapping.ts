@@ -36,6 +36,7 @@ import type {
   WebRunMeta,
   WebStoppage,
 } from "./payloadTypes";
+import { normalizeAllergen } from "@workspace/allergen";
 
 // The slice of AppState that participates in sync.
 export interface SyncableState {
@@ -175,6 +176,7 @@ export function runToFormValues(run: RunState): WebFormValues {
     skidStacking: s.skidStacking,
     gripSheets: s.gripSheets,
     slipSheets: s.slipSheets,
+    allergen: s.allergen,
   };
 }
 
@@ -266,6 +268,7 @@ function formValuesToSettings(
     skidStacking: str(v.skidStacking, base.skidStacking),
     gripSheets: str(v.gripSheets, base.gripSheets),
     slipSheets: str(v.slipSheets, base.slipSheets),
+    allergen: normalizeAllergen(v.allergen),
   }));
 }
 

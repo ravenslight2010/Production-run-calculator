@@ -42,6 +42,7 @@ export const formSchema = z.object({
   pep1Type: z.string().default(""),
   pep2Type: z.string().default(""),
   dieType: z.string().default(""),
+  allergen: z.string().default("none"),
   doughRecipeName: z.string().default(""),
   targetDoughballWeight: z.coerce.number().min(0).default(0),
   doughRecipe: z.array(
@@ -123,6 +124,7 @@ export const DEFAULT_VALUES: FormValues = {
   pep1Type: "",
   pep2Type: "",
   dieType: "",
+  allergen: "none",
   doughRecipeName: "",
   targetDoughballWeight: 0,
   doughRecipe: [],

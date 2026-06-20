@@ -19,6 +19,9 @@
       "path": "../../lib/api-client-react"
     },
     {
+      "path": "../../lib/allergen"
+    },
+    {
       "path": "../../lib/fill-missing"
     },
     {

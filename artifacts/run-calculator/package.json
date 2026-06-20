@@ -87,6 +87,7 @@
   "dependencies": {
     "@workspace/ai-memory": "workspace:*",
     "@workspace/ai-review": "workspace:*",
+    "@workspace/allergen": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",

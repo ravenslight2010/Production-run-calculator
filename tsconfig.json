@@ -16,6 +16,9 @@
       "path": "./lib/onboarding"
     },
     {
+      "path": "./lib/allergen"
+    },
+    {
       "path": "./lib/fill-missing"
     },
     {

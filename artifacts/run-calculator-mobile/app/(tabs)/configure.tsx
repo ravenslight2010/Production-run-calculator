@@ -23,6 +23,12 @@ import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
+import {
+  ALLERGENS,
+  allergenSequenceWarnings,
+  normalizeAllergen,
+  type AllergenSequenceItem,
+} from "@workspace/allergen";
 
 function toNum(s: string | undefined | null): number {
   if (s == null || s === "") return 0;
@@ -141,6 +147,7 @@ export default function ConfigureScreen() {
   const {
     run,
     runIndex,
+    allRuns,
     updateSettings,
     templates,
     saveTemplate,
@@ -181,6 +188,18 @@ export default function ConfigureScreen() {
     toNum(form.crustsPerCycle) > 0 && toNum(form.cycleSpeed) > 0
       ? toNum(form.crustsPerCycle) * toNum(form.cycleSpeed) * (toNum(form.speedAdjustment) || 1)
       : null;
+
+  const currentAllergen = normalizeAllergen(run.settings.allergen);
+
+  // Food-safety advisory: allergen transitions across the day's run sequence.
+  const allergenWarnings = React.useMemo(() => {
+    const seq: AllergenSequenceItem[] = allRuns.map((r, i) => ({
+      id: r.id,
+      label: `Run ${i + 1} · ${runLabel(r, i)}`,
+      allergen: normalizeAllergen(r.settings.allergen),
+    }));
+    return allergenSequenceWarnings(seq);
+  }, [allRuns]);
 
   const save = () => {
     updateSettings({
@@ -566,6 +585,83 @@ export default function ConfigureScreen() {
               );
             })}
           </View>
+        </CardSection>
+
+        {/* Allergen */}
+        <SectionHeader title="Allergen" />
+        <CardSection style={{ paddingVertical: 12 }}>
+          <View style={styles.chipRow}>
+            {ALLERGENS.map((m) => {
+              const active = currentAllergen === m.value;
+              return (
+                <Pressable
+                  key={m.value}
+                  onPress={() => {
+                    updateSettings({ allergen: m.value });
+                    Haptics.selectionAsync();
+                  }}
+                  style={[
+                    styles.chip,
+                    {
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      borderColor: m.color,
+                      backgroundColor: active ? m.color : "transparent",
+                    },
+                  ]}
+                >
+                  <View
+                    style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: active ? m.textColor : m.color }}
+                  />
+                  <Text style={[styles.chipText, { color: active ? m.textColor : m.color }]}>
+                    {m.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {allergenWarnings.length > 0 && (
+            <View style={{ marginTop: 10, gap: 8 }}>
+              {allergenWarnings.map((w) => {
+                const danger = w.kind === "clean-not-advisable";
+                return (
+                  <View
+                    key={`${w.fromId}-${w.toId}`}
+                    style={{
+                      flexDirection: "row",
+                      gap: 8,
+                      padding: 10,
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: danger ? "#dc2626" : "#d97706",
+                      backgroundColor: danger ? "#dc262622" : "#d9770622",
+                    }}
+                  >
+                    <Feather
+                      name="alert-triangle"
+                      size={14}
+                      color={danger ? "#fca5a5" : "#fcd34d"}
+                      style={{ marginTop: 2 }}
+                    />
+                    <Text
+                      style={{
+                        flex: 1,
+                        fontFamily: FONTS.regular,
+                        fontSize: 12,
+                        color: danger ? "#fca5a5" : "#fcd34d",
+                      }}
+                    >
+                      <Text style={{ fontFamily: FONTS.bold }}>
+                        {w.fromLabel} → {w.toLabel}:{" "}
+                      </Text>
+                      {w.message}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </CardSection>
 
         {/* Line Speed */}

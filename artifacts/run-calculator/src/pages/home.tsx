@@ -123,6 +123,15 @@ import {
   type MergeMap,
 } from "../mergeIngredients";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
+import {
+  ALLERGENS,
+  allergenMeta,
+  allergenSequenceWarnings,
+  isAllergen,
+  normalizeAllergen,
+  type Allergen,
+  type AllergenSequenceItem,
+} from "@workspace/allergen";
 import { suggestMerges, saveMergeAliases, type ReviewedMergeSuggestion } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
@@ -1820,6 +1829,20 @@ export default function Home() {
   });
 
   const v = form.watch();
+
+  // Food-safety advisory: allergen transitions across the day's run sequence.
+  // The current run uses the live form value; others read persisted run values.
+  const allergenWarnings = useMemo(() => {
+    const seq: AllergenSequenceItem[] = dayState.runs.map((run, i) => ({
+      id: run.id,
+      label: `Run ${i + 1} · ${runLabel(run)}`,
+      allergen: normalizeAllergen(
+        run.id === currentRunId ? (v.allergen as Allergen) : loadRunValues(run.id).allergen,
+      ),
+    }));
+    return allergenSequenceWarnings(seq);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayState.runs, currentRunId, v.allergen]);
 
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
   const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
@@ -6058,6 +6081,18 @@ export default function Home() {
                   {v.dieType}
                 </span>
               )}
+              {/* Allergen badge in run header */}
+              {isAllergen(normalizeAllergen(v.allergen)) && (() => {
+                const m = allergenMeta(normalizeAllergen(v.allergen));
+                return (
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
+                    style={{ backgroundColor: m.color, color: m.textColor }}
+                  >
+                    {m.label}
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Glanceable case progress — persistent across tabs, mirrors mobile control-bar KPI */}
@@ -6843,6 +6878,49 @@ export default function Home() {
                             </button>
                           )}
                         </div>
+                      </div>
+                      {/* Allergen selector — color-coded, food-safety advisory */}
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Allergen</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ALLERGENS.map(m => {
+                            const active = normalizeAllergen(v.allergen) === m.value;
+                            return (
+                              <button
+                                key={m.value}
+                                type="button"
+                                onClick={() => form.setValue("allergen", m.value, { shouldDirty: true })}
+                                className="px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors flex items-center gap-1.5"
+                                style={active
+                                  ? { backgroundColor: m.color, color: m.textColor, borderColor: m.color }
+                                  : { borderColor: m.color, color: m.color, backgroundColor: "transparent" }}
+                              >
+                                <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: m.color }} />
+                                {m.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {allergenWarnings.length > 0 && (
+                          <div className="mt-2 flex flex-col gap-1.5">
+                            {allergenWarnings.map(w => (
+                              <div
+                                key={`${w.fromId}-${w.toId}`}
+                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border ${
+                                  w.kind === "clean-not-advisable"
+                                    ? "bg-red-950/40 border-red-700/40 text-red-300"
+                                    : "bg-amber-950/30 border-amber-700/40 text-amber-300"
+                                }`}
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                <span>
+                                  <span className="font-bold">{w.fromLabel} → {w.toLabel}:</span>{" "}
+                                  {w.message}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       {doughSubTab === "crusts" ? (
                         <NumField
