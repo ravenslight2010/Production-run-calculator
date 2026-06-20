@@ -59,6 +59,13 @@ async function listAll(): Promise<ProductionRule[]> {
 
 router.get("/production-rules", async (req: Request, res: Response) => {
   try {
+    // Rules are edited by managers and must be reflected on every client within
+    // seconds. Without this, browsers cache the response (no validators/headers)
+    // and serve a stale rules list — even the periodic refetch gets the cached
+    // copy — so an operator keeps seeing an old/deleted rule until a full reload.
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
     const rules = await listAll();
     res.json({ rules });
   } catch (err) {
