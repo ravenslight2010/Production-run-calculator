@@ -547,6 +547,56 @@ export interface FillMissingResult {
 }
 
 /**
+ * An imported flavor (under a resolved saved brand) needing a match.
+ */
+export interface MatchImportCandidateFlavor {
+  /** The saved brand this flavor belongs to (already resolved) */
+  brand: string;
+  /** The imported flavor name that did not exactly match */
+  flavor: string;
+}
+
+/**
+ * Saved flavors keyed by brand name (allowed flavor targets)
+ */
+export type MatchImportInputBrandFlavors = {[key: string]: string[]};
+
+export interface MatchImportInput {
+  /** All saved brand names (the allowed match targets for brands) */
+  brands: string[];
+  /** Saved flavors keyed by brand name (allowed flavor targets) */
+  brandFlavors: MatchImportInputBrandFlavors;
+  /** Imported brand names with no exact saved match */
+  unmatchedBrands: string[];
+  /** Imported flavors (under a resolved brand) with no exact match */
+  unmatchedFlavors: MatchImportCandidateFlavor[];
+}
+
+export interface MatchImportBrandMatch {
+  /** The imported brand name (echoes an unmatchedBrands entry) */
+  candidate: string;
+  /** The saved brand it best matches (always one of brands) */
+  match: string;
+}
+
+export interface MatchImportFlavorMatch {
+  /** The saved brand the flavor belongs to */
+  brand: string;
+  /** The imported flavor name (echoes an unmatchedFlavors entry) */
+  candidate: string;
+  /** The saved flavor it best matches (always within that brand) */
+  match: string;
+}
+
+export interface MatchImportResult {
+  brandMatches: MatchImportBrandMatch[];
+  flavorMatches: MatchImportFlavorMatch[];
+  generatedAt: number;
+  /** Optional message when no matches could be made */
+  note?: string;
+}
+
+/**
  * Captured details about a reported issue or a crash
  */
 export interface IncidentContext {

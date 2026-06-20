@@ -610,6 +610,36 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/match-import:
+    post:
+      operationId: aiMatchImport
+      tags: [ai]
+      summary: Match imported brand/flavor names to saved ones (AI); read-only
+      description: >-
+        Given the saved brands and their flavors plus a list of imported
+        brand/flavor names that did NOT exactly match, returns the best saved
+        match for each (only when confident). Read-only — never writes anything;
+        the client uses the matches as pre-selected suggestions in the Excel
+        import dialog and the user can still override. Falls back silently to
+        the client's fuzzy matching when unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchImportInput"
+      responses:
+        "200":
+          description: Suggested matches (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchImportResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /incidents:
     post:
       operationId: reportIncident
@@ -1780,6 +1810,102 @@ components:
         note:
           type: string
           description: Optional message when no suggestions could be made
+
+    MatchImportCandidateFlavor:
+      type: object
+      description: An imported flavor (under a resolved saved brand) needing a match.
+      required:
+        - brand
+        - flavor
+      properties:
+        brand:
+          type: string
+          description: The saved brand this flavor belongs to (already resolved)
+        flavor:
+          type: string
+          description: The imported flavor name that did not exactly match
+
+    MatchImportInput:
+      type: object
+      required:
+        - brands
+        - brandFlavors
+        - unmatchedBrands
+        - unmatchedFlavors
+      properties:
+        brands:
+          type: array
+          description: All saved brand names (the allowed match targets for brands)
+          items:
+            type: string
+        brandFlavors:
+          type: object
+          description: Saved flavors keyed by brand name (allowed flavor targets)
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        unmatchedBrands:
+          type: array
+          description: Imported brand names with no exact saved match
+          items:
+            type: string
+        unmatchedFlavors:
+          type: array
+          description: Imported flavors (under a resolved brand) with no exact match
+          items:
+            $ref: "#/components/schemas/MatchImportCandidateFlavor"
+
+    MatchImportBrandMatch:
+      type: object
+      required:
+        - candidate
+        - match
+      properties:
+        candidate:
+          type: string
+          description: The imported brand name (echoes an unmatchedBrands entry)
+        match:
+          type: string
+          description: The saved brand it best matches (always one of brands)
+
+    MatchImportFlavorMatch:
+      type: object
+      required:
+        - brand
+        - candidate
+        - match
+      properties:
+        brand:
+          type: string
+          description: The saved brand the flavor belongs to
+        candidate:
+          type: string
+          description: The imported flavor name (echoes an unmatchedFlavors entry)
+        match:
+          type: string
+          description: The saved flavor it best matches (always within that brand)
+
+    MatchImportResult:
+      type: object
+      required:
+        - brandMatches
+        - flavorMatches
+        - generatedAt
+      properties:
+        brandMatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchImportBrandMatch"
+        flavorMatches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchImportFlavorMatch"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when no matches could be made
 
     IncidentContext:
       type: object

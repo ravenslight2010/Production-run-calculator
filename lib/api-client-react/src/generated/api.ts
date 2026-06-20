@@ -41,6 +41,8 @@ import type {
   InventoryLedgerEntry,
   InventorySettings,
   ListInventoryLedgerParams,
+  MatchImportInput,
+  MatchImportResult,
   MergeInventoryInput,
   MergeInventoryResult,
   OkResponse,
@@ -2122,6 +2124,78 @@ export const useAiFillMissing = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiFillMissingMutationOptions(options));
+    }
+
+export const getAiMatchImportUrl = () => {
+
+
+
+
+  return `/api/ai/match-import`
+}
+
+/**
+ * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
+ * @summary Match imported brand/flavor names to saved ones (AI); read-only
+ */
+export const aiMatchImport = async (matchImportInput: MatchImportInput, options?: RequestInit): Promise<MatchImportResult> => {
+
+  return customFetch<MatchImportResult>(getAiMatchImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      matchImportInput,)
+  }
+);}
+
+
+
+
+export const getAiMatchImportMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMatchImport>>, TError,{data: BodyType<MatchImportInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiMatchImport>>, TError,{data: BodyType<MatchImportInput>}, TContext> => {
+
+const mutationKey = ['aiMatchImport'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMatchImport>>, {data: BodyType<MatchImportInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiMatchImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiMatchImportMutationResult = NonNullable<Awaited<ReturnType<typeof aiMatchImport>>>
+    export type AiMatchImportMutationBody = BodyType<MatchImportInput>
+    export type AiMatchImportMutationError = ErrorType<void>
+
+    /**
+ * @summary Match imported brand/flavor names to saved ones (AI); read-only
+ */
+export const useAiMatchImport = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMatchImport>>, TError,{data: BodyType<MatchImportInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiMatchImport>>,
+        TError,
+        {data: BodyType<MatchImportInput>},
+        TContext
+      > => {
+      return useMutation(getAiMatchImportMutationOptions(options));
     }
 
 export const getReportIncidentUrl = () => {

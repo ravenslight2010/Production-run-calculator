@@ -14,11 +14,15 @@ import { useMe } from "@/hooks/useRole";
 import {
   exactMatch,
   fuzzyMatch,
+  mergeImportRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
+import { requestMatchImport } from "@/context/matchImport";
 
 const SKIP = "";
 const CREATE = "__create__";
+// Tint for AI-suggested match chips (distinct from primary/create/skip).
+const AI_TINT = "#8b5cf6";
 
 export type ImportCommit = {
   date: string;
@@ -56,6 +60,15 @@ export default function ExcelImportModal({
   const [flavorChoice, setFlavorChoice] = React.useState<Record<string, string>>({});
   const [unlocked, setUnlocked] = React.useState(false);
   const [pinEntry, setPinEntry] = React.useState("");
+  // AI-suggested matches for names that did not exactly match (best-effort; the
+  // modal still works without them via the Levenshtein fuzzy chips).
+  const [aiBrandMatch, setAiBrandMatch] = React.useState<Record<string, string>>({});
+  const [aiFlavorMatch, setAiFlavorMatch] = React.useState<Record<string, string>>({});
+  const [aiLoading, setAiLoading] = React.useState(false);
+  // Candidate keys already sent to the AI, so the brand->flavor cascade does not
+  // refetch the same names repeatedly.
+  const aiRequestedBrands = React.useRef<Set<string>>(new Set());
+  const aiRequestedFlavors = React.useRef<Set<string>>(new Set());
 
   const canCreate = !supervisorPin || unlocked || isManager;
   const rows = result?.rows ?? [];
@@ -107,6 +120,117 @@ export default function ExcelImportModal({
     });
   }, [result, brandChoice, brandFlavors, resolveBrandName]);
 
+  // Reset AI state whenever a new file is parsed.
+  React.useEffect(() => {
+    aiRequestedBrands.current = new Set();
+    aiRequestedFlavors.current = new Set();
+    setAiBrandMatch({});
+    setAiFlavorMatch({});
+    setAiLoading(false);
+  }, [result]);
+
+  // Ask the AI to match still-unmatched brand/flavor names against the saved
+  // ones. Runs again as brands resolve (exposing more flavors); a per-candidate
+  // ref guard prevents refetching the same names. Best-effort: any failure
+  // (offline, not a manager, rate-limited) is swallowed and the user falls back
+  // to the fuzzy chips.
+  React.useEffect(() => {
+    if (!result) return;
+    const newBrands: string[] = [];
+    const seenB = new Set<string>();
+    for (const r of result.rows) {
+      const k = r.brand.toLowerCase();
+      if (seenB.has(k)) continue;
+      seenB.add(k);
+      if (exactMatch(r.brand, brands)) continue;
+      if (aiRequestedBrands.current.has(k)) continue;
+      newBrands.push(r.brand);
+    }
+    const newFlavors: { brand: string; flavor: string }[] = [];
+    const seenF = new Set<string>();
+    for (const r of result.rows) {
+      if (!r.flavor) continue;
+      const brandName = resolveBrandName(r.brand);
+      if (!brandName) continue;
+      const opts = brandFlavors[brandName] ?? [];
+      if (exactMatch(r.flavor, opts)) continue;
+      const key = `${brandName.toLowerCase()}|||${r.flavor.toLowerCase()}`;
+      if (seenF.has(key)) continue;
+      seenF.add(key);
+      if (aiRequestedFlavors.current.has(key)) continue;
+      newFlavors.push({ brand: brandName, flavor: r.flavor });
+    }
+    if (newBrands.length === 0 && newFlavors.length === 0) return;
+    newBrands.forEach((b) => aiRequestedBrands.current.add(b.toLowerCase()));
+    newFlavors.forEach((f) =>
+      aiRequestedFlavors.current.add(`${f.brand.toLowerCase()}|||${f.flavor.toLowerCase()}`),
+    );
+
+    let cancelled = false;
+    setAiLoading(true);
+    requestMatchImport({ brands, brandFlavors, unmatchedBrands: newBrands, unmatchedFlavors: newFlavors })
+      .then((r) => {
+        if (cancelled) return;
+        if (r.brandMatches.length) {
+          setAiBrandMatch((p) => {
+            const next = { ...p };
+            for (const m of r.brandMatches) next[m.candidate.toLowerCase()] = m.match;
+            return next;
+          });
+        }
+        if (r.flavorMatches.length) {
+          setAiFlavorMatch((p) => {
+            const next = { ...p };
+            for (const m of r.flavorMatches) {
+              next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.match;
+            }
+            return next;
+          });
+        }
+      })
+      .catch(() => {
+        /* best-effort; fall back to fuzzy chips */
+      })
+      .finally(() => {
+        if (!cancelled) setAiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [result, brandChoice, brands, brandFlavors, resolveBrandName]);
+
+  // Apply AI brand matches to choices still at SKIP (never clobber a user pick).
+  React.useEffect(() => {
+    if (Object.keys(aiBrandMatch).length === 0) return;
+    setBrandChoice((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(aiBrandMatch)) {
+        if ((next[k] ?? SKIP) === SKIP && brands.includes(v)) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [aiBrandMatch, brands]);
+
+  // Apply AI flavor matches to choices still at SKIP (never clobber a user pick).
+  React.useEffect(() => {
+    if (Object.keys(aiFlavorMatch).length === 0) return;
+    setFlavorChoice((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(aiFlavorMatch)) {
+        if ((next[k] ?? SKIP) === SKIP) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [aiFlavorMatch]);
+
   if (!visible) return null;
 
   const uniqueBrands: string[] = [];
@@ -133,6 +257,26 @@ export default function ExcelImportModal({
     uniqueFlavors.push({ brandName, flavor: r.flavor, key });
   }
 
+  // Merge the AI-suggested value into the fuzzy chip list (dedup, AI first) and
+  // flag which value is the AI pick so it can be tinted differently.
+  const chipValues = (
+    aiVal: string | undefined,
+    fuzzy: { value: string }[],
+  ): { value: string; ai: boolean }[] => {
+    const seen = new Set<string>();
+    const out: { value: string; ai: boolean }[] = [];
+    if (aiVal) {
+      out.push({ value: aiVal, ai: true });
+      seen.add(aiVal.toLowerCase());
+    }
+    for (const s of fuzzy) {
+      if (seen.has(s.value.toLowerCase())) continue;
+      seen.add(s.value.toLowerCase());
+      out.push({ value: s.value, ai: false });
+    }
+    return out;
+  };
+
   function buildCommit(): ImportCommit {
     const createBrands = new Set<string>();
     const createFlavors = new Map<string, { brand: string; flavor: string }>();
@@ -158,7 +302,7 @@ export default function ExcelImportModal({
     }
     return {
       date: date.trim(),
-      runs: out,
+      runs: mergeImportRuns(out),
       createBrands: [...createBrands],
       createFlavors: [...createFlavors.values()],
     };
@@ -264,13 +408,20 @@ export default function ExcelImportModal({
               </View>
             ) : null}
 
+            {aiLoading ? (
+              <View style={styles.aiLoadingRow}>
+                <Feather name="zap" size={13} color={AI_TINT} />
+                <Text style={[styles.aiLoadingText, { color: AI_TINT }]}>AI matching…</Text>
+              </View>
+            ) : null}
+
             {uniqueBrands.length > 0 ? (
               <View style={styles.section}>
                 <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Map Brands</Text>
                 {uniqueBrands.map((cand) => {
                   const key = cand.toLowerCase();
                   const cur = brandChoice[key] ?? SKIP;
-                  const sugg = fuzzyMatch(cand, brands);
+                  const sugg = chipValues(aiBrandMatch[key], fuzzyMatch(cand, brands));
                   return (
                     <View key={key} style={[styles.mapRow, { borderColor: colors.border }]}>
                       <Text style={[styles.candidate, { color: colors.foreground }]} numberOfLines={1}>
@@ -280,8 +431,9 @@ export default function ExcelImportModal({
                         {sugg.map((s) => (
                           <Chip
                             key={s.value}
-                            label={s.value}
+                            label={s.ai ? `✦ ${s.value}` : s.value}
                             active={cur === s.value}
+                            tint={s.ai ? AI_TINT : undefined}
                             onPress={() => setBrandChoice((p) => ({ ...p, [key]: s.value }))}
                           />
                         ))}
@@ -311,7 +463,10 @@ export default function ExcelImportModal({
                 <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Map Flavors</Text>
                 {uniqueFlavors.map((f) => {
                   const cur = flavorChoice[f.key] ?? SKIP;
-                  const sugg = fuzzyMatch(f.flavor, brandFlavors[f.brandName] ?? []);
+                  const sugg = chipValues(
+                    aiFlavorMatch[f.key],
+                    fuzzyMatch(f.flavor, brandFlavors[f.brandName] ?? []),
+                  );
                   return (
                     <View key={f.key} style={[styles.mapRow, { borderColor: colors.border }]}>
                       <Text style={[styles.candidate, { color: colors.foreground }]} numberOfLines={1}>
@@ -321,8 +476,9 @@ export default function ExcelImportModal({
                         {sugg.map((s) => (
                           <Chip
                             key={s.value}
-                            label={s.value}
+                            label={s.ai ? `✦ ${s.value}` : s.value}
                             active={cur === s.value}
+                            tint={s.ai ? AI_TINT : undefined}
                             onPress={() => setFlavorChoice((p) => ({ ...p, [f.key]: s.value }))}
                           />
                         ))}
@@ -406,6 +562,8 @@ const styles = StyleSheet.create({
   errorBox: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 12, marginTop: 12 },
   errorTitle: { fontSize: 13, fontWeight: "700", marginBottom: 4 },
   help: { fontSize: 12, lineHeight: 17 },
+  aiLoadingRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 12 },
+  aiLoadingText: { fontSize: 12, fontWeight: "600" },
   section: { marginTop: 16 },
   sectionTitle: { fontSize: 14, fontWeight: "700", marginBottom: 8 },
   mapRow: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 10, marginBottom: 8 },

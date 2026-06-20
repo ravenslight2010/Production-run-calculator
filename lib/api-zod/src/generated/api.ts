@@ -589,6 +589,35 @@ export const AiFillMissingResponse = zod.object({
 
 
 /**
+ * Given the saved brands and their flavors plus a list of imported brand/flavor names that did NOT exactly match, returns the best saved match for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the Excel import dialog and the user can still override. Falls back silently to the client's fuzzy matching when unavailable.
+ * @summary Match imported brand/flavor names to saved ones (AI); read-only
+ */
+export const AiMatchImportBody = zod.object({
+  "brands": zod.array(zod.string()).describe('All saved brand names (the allowed match targets for brands)'),
+  "brandFlavors": zod.record(zod.string(), zod.array(zod.string())).describe('Saved flavors keyed by brand name (allowed flavor targets)'),
+  "unmatchedBrands": zod.array(zod.string()).describe('Imported brand names with no exact saved match'),
+  "unmatchedFlavors": zod.array(zod.object({
+  "brand": zod.string().describe('The saved brand this flavor belongs to (already resolved)'),
+  "flavor": zod.string().describe('The imported flavor name that did not exactly match')
+}).describe('An imported flavor (under a resolved saved brand) needing a match.')).describe('Imported flavors (under a resolved brand) with no exact match')
+})
+
+export const AiMatchImportResponse = zod.object({
+  "brandMatches": zod.array(zod.object({
+  "candidate": zod.string().describe('The imported brand name (echoes an unmatchedBrands entry)'),
+  "match": zod.string().describe('The saved brand it best matches (always one of brands)')
+})),
+  "flavorMatches": zod.array(zod.object({
+  "brand": zod.string().describe('The saved brand the flavor belongs to'),
+  "candidate": zod.string().describe('The imported flavor name (echoes an unmatchedFlavors entry)'),
+  "match": zod.string().describe('The saved flavor it best matches (always within that brand)')
+})),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no matches could be made')
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */

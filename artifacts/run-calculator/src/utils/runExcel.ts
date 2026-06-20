@@ -249,6 +249,62 @@ export function exactMatch(candidate: string, options: string[]): string | null 
 }
 
 // ---------------------------------------------------------------------------
+// Same brand+flavor merge
+// ---------------------------------------------------------------------------
+
+export type ImportCommitRun = {
+  brand: string;
+  flavor: string;
+  casesPlanned: number;
+  notes: string;
+};
+
+/**
+ * Combine resolved import runs that share the same brand AND flavor
+ * (case-insensitive, trimmed) into a single run: cases are summed and distinct
+ * notes are joined with "; ". Output order follows first appearance.
+ *
+ * This runs AFTER brand/flavor names are resolved to their canonical saved
+ * values, so e.g. two "Cheese" rows for the same brand on the same day become
+ * one run with the combined case count. Mirrored verbatim web + mobile per the
+ * replit.md parity rule.
+ */
+export function mergeImportRuns(runs: ImportCommitRun[]): ImportCommitRun[] {
+  const order: string[] = [];
+  const map = new Map<
+    string,
+    { brand: string; flavor: string; casesPlanned: number; notes: string[] }
+  >();
+  for (const r of runs) {
+    const key = `${r.brand.trim().toLowerCase()}|||${r.flavor.trim().toLowerCase()}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.casesPlanned += r.casesPlanned;
+      const note = r.notes.trim();
+      if (note && !existing.notes.includes(note)) existing.notes.push(note);
+    } else {
+      order.push(key);
+      const note = r.notes.trim();
+      map.set(key, {
+        brand: r.brand,
+        flavor: r.flavor,
+        casesPlanned: r.casesPlanned,
+        notes: note ? [note] : [],
+      });
+    }
+  }
+  return order.map((k) => {
+    const v = map.get(k)!;
+    return {
+      brand: v.brand,
+      flavor: v.flavor,
+      casesPlanned: v.casesPlanned,
+      notes: v.notes.join("; "),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // QuickBooks CSV
 // ---------------------------------------------------------------------------
 

@@ -14,6 +14,11 @@ import {
   validateFillMissingBody,
   type RequestedField,
 } from "./aiFillMissing";
+import {
+  buildMatchImportPrompt,
+  sanitizeMatchImport,
+  validateMatchImportBody,
+} from "./aiMatchImport";
 
 const router: IRouter = Router();
 
@@ -38,6 +43,15 @@ const FILL_MISSING_RATE_MAX = 10;
 const fillMissingRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(FILL_MISSING_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the Excel-import brand/flavor matcher: per-user fixed window,
+// Postgres-backed in production so the cap holds across instances.
+const MATCH_IMPORT_RATE_WINDOW_MS = 60_000;
+const MATCH_IMPORT_RATE_MAX = 10;
+const matchImportRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(MATCH_IMPORT_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -148,6 +162,61 @@ router.post(
     const { suggestions, note } = sanitizeFillMissingSuggestions(raw, requested);
     res.json({
       suggestions,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
+
+router.post(
+  "/ai/match-import",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: MATCH_IMPORT_RATE_WINDOW_MS,
+    max: MATCH_IMPORT_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: matchImportRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateMatchImportBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const { system, user } = buildMatchImportPrompt(validation.data);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 4096,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-match-import call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-match-import non-JSON response");
+      res.json({ brandMatches: [], flavorMatches: [], generatedAt: Date.now() });
+      return;
+    }
+
+    const { brandMatches, flavorMatches, note } = sanitizeMatchImport(raw, validation.data);
+    res.json({
+      brandMatches,
+      flavorMatches,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
