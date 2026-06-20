@@ -58,3 +58,22 @@ removal-aware model (tombstone map with timestamps / version vectors / explicit
 **How to apply:** any new synced master-data list must run its incoming union through
 the same tombstone filter (`dropMergedAway` on web, `dropTomb` on mobile). Mobile sync
 paths must stay fail-safe (no throws) — guard with `?? []` / `String()` coercion.
+
+## Merge-suggestion "Load" must canonicalize + scroll (separate, also fixed)
+The AI/learned merge-suggestion "Load" button (prefill the manual form) looked dead.
+Two causes: (1) on web the manual merge form renders BELOW the suggestion list inside
+the Manage dialog, so Load updated state off-screen — looked like a no-op. (2) source
+rows only tick when the loaded name EXACTLY matches the universe spelling
+(`mergeSources.includes(name)`), but AI/learned names can differ in case, so even
+loaded sources didn't visibly select.
+
+Fix (web `loadMergeSuggestion`, mobile `loadSuggestion`, parity): canonicalize target
++ sources to the universe's exact spelling (case-insensitive find, fallback to trimmed
+raw), dedupe, drop any equal to target. Web additionally scrolls the form into view via
+a `mergeFormRef` + `requestAnimationFrame(scrollIntoView)`; the manual-form fragment was
+wrapped in `<div ref={mergeFormRef} className="space-y-4 scroll-mt-2">` (mobile is a
+ScrollView so no scroll needed — logic-only parity).
+
+**How to apply:** any "load suggestion into a form" affordance must snap names to the
+canonical list (case-insensitive) or checkbox/selection state won't reflect, and on web
+ensure the target form is actually visible (scrollIntoView) when it sits below the list.

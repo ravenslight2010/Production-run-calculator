@@ -2005,6 +2005,7 @@ export default function Home() {
   const [showReorderDialog, setShowReorderDialog] = useState(false);
 
   // ── Manage Lists dialog ────────────────────────────────────────────────────
+  const mergeFormRef = useRef<HTMLDivElement | null>(null);
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [manageCategory, setManageCategory] = useState("brands");
   const [manageBrandFilter, setManageBrandFilter] = useState("");
@@ -2165,12 +2166,30 @@ export default function Home() {
   }
 
   // Pre-fill the manual merge form from a suggested group so the user can review
-  // and tweak the source selection before confirming.
+  // and tweak the source selection before confirming. Names are snapped to the
+  // universe's exact spelling so the source checkboxes actually tick (AI/learned
+  // suggestion names can differ in case), and the form (which sits below the
+  // suggestion list) is scrolled into view so it's obvious Load did something.
   function loadMergeSuggestion(s: MergeSuggestion) {
     setMergeError("");
     setMergeConfirming(false);
-    setMergeTarget(s.target);
-    setMergeSources(s.sources.filter((n) => n !== s.target));
+    const canon = (n: string) =>
+      mergeUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+    const tgt = canon(s.target);
+    const seen = new Set<string>();
+    const srcs: string[] = [];
+    for (const raw of s.sources) {
+      const n = canon(raw);
+      const key = n.toLowerCase();
+      if (n.toLowerCase() === tgt.toLowerCase() || seen.has(key)) continue;
+      seen.add(key);
+      srcs.push(n);
+    }
+    setMergeTarget(tgt);
+    setMergeSources(srcs);
+    requestAnimationFrame(() =>
+      mergeFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
   }
 
   // Apply a suggested group directly through the destructive merge path. On
@@ -5686,7 +5705,7 @@ export default function Home() {
                     {mergeUniverse.length === 0 ? (
                       <p className="text-xs text-muted-foreground text-center py-4">No ingredients to merge yet.</p>
                     ) : (
-                      <>
+                      <div ref={mergeFormRef} className="space-y-4 scroll-mt-2">
                         {/* Sources */}
                         <div className="space-y-1.5">
                           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Merge these (sources)</p>
@@ -5772,7 +5791,7 @@ export default function Home() {
                             >{mergeBusy ? "Merging…" : "Confirm merge"}</button>
                           )}
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
                 )}

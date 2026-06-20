@@ -338,8 +338,22 @@ function MergeManager() {
   const loadSuggestion = (s: ReviewedMergeSuggestion) => {
     setError("");
     setConfirming(false);
-    setTarget(s.target);
-    setSources(s.sources.filter((n) => n !== s.target));
+    // Snap names to the universe's exact spelling so the source rows actually
+    // select (AI/learned suggestion names can differ in case). Mirrors web.
+    const canon = (n: string) =>
+      universe.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+    const tgt = canon(s.target);
+    const seen = new Set<string>();
+    const srcs: string[] = [];
+    for (const raw of s.sources) {
+      const n = canon(raw);
+      const key = n.toLowerCase();
+      if (key === tgt.toLowerCase() || seen.has(key)) continue;
+      seen.add(key);
+      srcs.push(n);
+    }
+    setTarget(tgt);
+    setSources(srcs);
   };
 
   const applySuggestion = async (s: ReviewedMergeSuggestion) => {
