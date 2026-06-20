@@ -619,7 +619,7 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
   return { merged, results };
 }
 
-router.post("/inventory/merge", async (req, res): Promise<void> => {
+router.post("/inventory/merge", requireRole("manager"), async (req, res): Promise<void> => {
   const parsed = MergeInventoryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

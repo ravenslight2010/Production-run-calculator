@@ -226,6 +226,25 @@ const GATED_ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    // A self-merge (fromKey === toKey) is a safe no-op that returns 200 once
+    // past the guard, so it exercises authz without mutating real stock.
+    name: "POST /inventory/merge",
+    method: "POST",
+    path: () => "/api/inventory/merge",
+    body: {
+      merges: [
+        {
+          fromKey: "ingredient:Target:lbs",
+          toKey: "ingredient:Target:lbs",
+          toName: "Target",
+          category: "ingredient",
+          unit: "lbs",
+        },
+      ],
+    },
+    okStatus: 200,
+  },
+  {
     name: "POST /inventory/identify-photo",
     method: "POST",
     path: () => "/api/inventory/identify-photo",
