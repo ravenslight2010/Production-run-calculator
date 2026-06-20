@@ -40,6 +40,10 @@ import {
   photoErrorMessage,
   InventoryApiError,
   rankCandidatesByName,
+  fetchPhotoAliases,
+  savePhotoAliases,
+  applyPhotoAliases,
+  type PhotoAlias,
   inventoryClientId,
   isLowStock,
   lotExpiryStatus,
@@ -863,6 +867,23 @@ function PhotoIntakeCard({
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [noResults, setNoResults] = useState(false);
   const [committingId, setCommittingId] = useState<string | null>(null);
+  // Server-persisted learned photo aliases (guessName -> itemKey), factory-wide.
+  // Fetched once on mount; best-effort, so any failure leaves the list empty.
+  const [photoAliases, setPhotoAliases] = useState<PhotoAlias[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPhotoAliases()
+      .then((a) => {
+        if (!cancelled) setPhotoAliases(a);
+      })
+      .catch(() => {
+        /* best-effort: proceed without learned aliases */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Count down the rate-limit (429) cooldown so the retry button re-enables
   // exactly when the server will accept another request.
@@ -881,7 +902,13 @@ function PhotoIntakeCard({
 
   function toRows(guesses: PhotoGuess[]): ReviewRow[] {
     return guesses.map((g, i) => {
-      const matched = g.matchedKey ? candByKey.get(g.matchedKey) : undefined;
+      // Prefer the server's match; otherwise fall back to a learned alias for
+      // this guess name (only if that item still exists among candidates).
+      const learnedKey = g.matchedKey
+        ? null
+        : applyPhotoAliases(g.name, photoAliases, candidates);
+      const effectiveKey = g.matchedKey ?? learnedKey;
+      const matched = effectiveKey ? candByKey.get(effectiveKey) : undefined;
       return {
         id: `${Date.now()}-${i}`,
         guessName: g.name,
@@ -985,6 +1012,25 @@ function PhotoIntakeCard({
         expirationDate: row.expiration || undefined,
       });
       setRows((rs) => rs.filter((r) => r.id !== row.id));
+      // Remember the guessName -> matched item link so future scans auto-apply
+      // it. Only when matched to an existing item and the guess differs from the
+      // item name (skip trivial self-references, like the import-alias path).
+      if (
+        row.matchedKey &&
+        row.guessName.trim() &&
+        row.guessName.trim().toLowerCase() !== name.toLowerCase()
+      ) {
+        const alias: PhotoAlias = { guessName: row.guessName.trim(), itemKey: row.matchedKey };
+        setPhotoAliases((prev) => {
+          const others = prev.filter(
+            (a) => a.guessName.trim().toLowerCase() !== alias.guessName.toLowerCase(),
+          );
+          return [...others, alias];
+        });
+        void savePhotoAliases([alias]).catch(() => {
+          /* best-effort */
+        });
+      }
       onCommitted();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add stock");

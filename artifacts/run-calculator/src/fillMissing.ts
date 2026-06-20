@@ -13,7 +13,9 @@ import type {
   FillMissingInput,
   FillMissingResult,
   KnownLookup,
+  LearnedValueRow,
 } from "@workspace/fill-missing";
+import { pickLearnedForProduct } from "@workspace/fill-missing";
 import { SPEC_PROFILES } from "./specSeed";
 import { loadProfile } from "./storage";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
@@ -21,6 +23,34 @@ import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inven
 export * from "@workspace/fill-missing";
 
 type Rec = Record<string, unknown>;
+
+// ── Learned values (server-persisted, factory-wide) ──────────────────────────
+// When a user confirms a value for a blank field, it is saved here so future
+// scans of the same product propose it as a top-priority "learned" source — the
+// same pattern as learned import aliases. Best-effort: any failure silently
+// proceeds without learned values. Mirrors the mobile glue (replit.md parity).
+
+export async function fetchFillMissingValues(): Promise<LearnedValueRow[]> {
+  const res = await fetch("/api/fill-missing-values", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`List fill-missing values failed (${res.status})`);
+  const data = (await res.json()) as { values: LearnedValueRow[] };
+  return data.values ?? [];
+}
+
+export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<void> {
+  if (values.length === 0) return;
+  const res = await fetch("/api/fill-missing-values", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ values }),
+  });
+  if (!res.ok) throw new Error(`Save fill-missing values failed (${res.status})`);
+}
 
 export async function requestFillMissing(input: FillMissingInput): Promise<FillMissingResult> {
   const res = await fetch("/api/ai/fill-missing", {
@@ -55,19 +85,26 @@ export async function requestFillMissing(input: FillMissingInput): Promise<FillM
 export const fillMissingErrorMessage = photoErrorMessage;
 
 // ── Web known-source lookup ──────────────────────────────────────────────────
-// Builds a KnownLookup from this run's saved profile + the spec seed. Mobile has
-// its own equivalent reading brandProfiles + SPEC_PROFILES.
-export function makeWebLookup(brand: string, flavor: string): KnownLookup {
+// Builds a KnownLookup from this run's learned values (server-persisted) + saved
+// profile + the spec seed. Mobile has its own equivalent reading the same learned
+// list + brandProfiles + SPEC_PROFILES.
+export function makeWebLookup(
+  brand: string,
+  flavor: string,
+  learnedValues: ReadonlyArray<LearnedValueRow> = [],
+): KnownLookup {
   const profile = brand || flavor ? loadProfile(brand, flavor) : null;
   const specProfile = SPEC_PROFILES.find(
     (p) =>
       p.brand.toLowerCase() === brand.toLowerCase() &&
       p.flavor.toLowerCase() === flavor.toLowerCase(),
   );
+  const learned = pickLearnedForProduct(learnedValues, brand, flavor);
   return (key) => {
     const profVal = profile ? (profile as unknown as Rec)[key] : undefined;
     const specVal = specProfile ? (specProfile.values as Rec)[key] : undefined;
     return {
+      learned: learned[key],
       profile: profVal as string | number | undefined,
       spec: specVal as string | number | undefined,
     };

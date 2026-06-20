@@ -31,6 +31,7 @@ import type {
   CreateInventoryItemInput,
   FillMissingInput,
   FillMissingResult,
+  FillMissingValueList,
   ForgotPasswordRequest,
   HealthStatus,
   IdentifyPhotoInput,
@@ -50,13 +51,16 @@ import type {
   OptimizeInput,
   OptimizeResult,
   PasswordResetRequest,
+  PhotoAliasList,
   ProductionRun,
   ProductionRunInput,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
   RestockInput,
+  SaveFillMissingValuesInput,
   SaveImportAliasesInput,
+  SavePhotoAliasesInput,
   StaffMember,
   StaffRoleUpdate,
   UnreviewedIncidentCount,
@@ -2348,6 +2352,306 @@ export const useSaveImportAliases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveImportAliasesMutationOptions(options));
+    }
+
+export const getListFillMissingValuesUrl = () => {
+
+
+
+
+  return `/api/fill-missing-values`
+}
+
+/**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
+ * @summary List learned fill-missing values (per product + field)
+ */
+export const listFillMissingValues = async ( options?: RequestInit): Promise<FillMissingValueList> => {
+
+  return customFetch<FillMissingValueList>(getListFillMissingValuesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFillMissingValuesQueryKey = () => {
+    return [
+    `/api/fill-missing-values`
+    ] as const;
+    }
+
+
+export const getListFillMissingValuesQueryOptions = <TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFillMissingValuesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFillMissingValues>>> = ({ signal }) => listFillMissingValues({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFillMissingValuesQueryResult = NonNullable<Awaited<ReturnType<typeof listFillMissingValues>>>
+export type ListFillMissingValuesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned fill-missing values (per product + field)
+ */
+
+export function useListFillMissingValues<TData = Awaited<ReturnType<typeof listFillMissingValues>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFillMissingValues>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFillMissingValuesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveFillMissingValuesUrl = () => {
+
+
+
+
+  return `/api/fill-missing-values`
+}
+
+/**
+ * Persists a batch of confirmed field values, keyed case-insensitively on brand + flavor + fieldKey. Existing entries are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned fill-missing values (case-insensitive upsert)
+ */
+export const saveFillMissingValues = async (saveFillMissingValuesInput: SaveFillMissingValuesInput, options?: RequestInit): Promise<FillMissingValueList> => {
+
+  return customFetch<FillMissingValueList>(getSaveFillMissingValuesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveFillMissingValuesInput,)
+  }
+);}
+
+
+
+
+export const getSaveFillMissingValuesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFillMissingValues>>, TError,{data: BodyType<SaveFillMissingValuesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveFillMissingValues>>, TError,{data: BodyType<SaveFillMissingValuesInput>}, TContext> => {
+
+const mutationKey = ['saveFillMissingValues'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveFillMissingValues>>, {data: BodyType<SaveFillMissingValuesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveFillMissingValues(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveFillMissingValuesMutationResult = NonNullable<Awaited<ReturnType<typeof saveFillMissingValues>>>
+    export type SaveFillMissingValuesMutationBody = BodyType<SaveFillMissingValuesInput>
+    export type SaveFillMissingValuesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned fill-missing values (case-insensitive upsert)
+ */
+export const useSaveFillMissingValues = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFillMissingValues>>, TError,{data: BodyType<SaveFillMissingValuesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveFillMissingValues>>,
+        TError,
+        {data: BodyType<SaveFillMissingValuesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveFillMissingValuesMutationOptions(options));
+    }
+
+export const getListPhotoAliasesUrl = () => {
+
+
+
+
+  return `/api/photo-aliases`
+}
+
+/**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
+export const listPhotoAliases = async ( options?: RequestInit): Promise<PhotoAliasList> => {
+
+  return customFetch<PhotoAliasList>(getListPhotoAliasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPhotoAliasesQueryKey = () => {
+    return [
+    `/api/photo-aliases`
+    ] as const;
+    }
+
+
+export const getListPhotoAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPhotoAliasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPhotoAliases>>> = ({ signal }) => listPhotoAliases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPhotoAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof listPhotoAliases>>>
+export type ListPhotoAliasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
+
+export function useListPhotoAliases<TData = Awaited<ReturnType<typeof listPhotoAliases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPhotoAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPhotoAliasesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSavePhotoAliasesUrl = () => {
+
+
+
+
+  return `/api/photo-aliases`
+}
+
+/**
+ * Persists a batch of guessName -> itemKey mappings confirmed by the user during photo intake. Existing entries (matched case-insensitively on guessName) are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned photo-intake aliases (case-insensitive upsert)
+ */
+export const savePhotoAliases = async (savePhotoAliasesInput: SavePhotoAliasesInput, options?: RequestInit): Promise<PhotoAliasList> => {
+
+  return customFetch<PhotoAliasList>(getSavePhotoAliasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      savePhotoAliasesInput,)
+  }
+);}
+
+
+
+
+export const getSavePhotoAliasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePhotoAliases>>, TError,{data: BodyType<SavePhotoAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof savePhotoAliases>>, TError,{data: BodyType<SavePhotoAliasesInput>}, TContext> => {
+
+const mutationKey = ['savePhotoAliases'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof savePhotoAliases>>, {data: BodyType<SavePhotoAliasesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  savePhotoAliases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SavePhotoAliasesMutationResult = NonNullable<Awaited<ReturnType<typeof savePhotoAliases>>>
+    export type SavePhotoAliasesMutationBody = BodyType<SavePhotoAliasesInput>
+    export type SavePhotoAliasesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned photo-intake aliases (case-insensitive upsert)
+ */
+export const useSavePhotoAliases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePhotoAliases>>, TError,{data: BodyType<SavePhotoAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof savePhotoAliases>>,
+        TError,
+        {data: BodyType<SavePhotoAliasesInput>},
+        TContext
+      > => {
+      return useMutation(getSavePhotoAliasesMutationOptions(options));
     }
 
 export const getReportIncidentUrl = () => {

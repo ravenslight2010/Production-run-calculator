@@ -622,6 +622,48 @@ export interface SaveImportAliasesInput {
   aliases: ImportAlias[];
 }
 
+/**
+ * A learned value a user confirmed for a blank run-setup field.
+ */
+export interface FillMissingValue {
+  /** The run's brand (matched case-insensitively) */
+  brand: string;
+  /** The run's flavor (matched case-insensitively) */
+  flavor: string;
+  /** The run-setup field key this value is for */
+  fieldKey: string;
+  /** The confirmed value (a plain number string for number fields) */
+  value: string;
+}
+
+export interface FillMissingValueList {
+  values: FillMissingValue[];
+}
+
+export interface SaveFillMissingValuesInput {
+  /** The batch of learned values to upsert (confirmed by the user) */
+  values: FillMissingValue[];
+}
+
+/**
+ * A learned mapping from a vision-model guessed name to an inventory item key.
+ */
+export interface PhotoAlias {
+  /** The raw name the vision model returned (matched case-insensitively) */
+  guessName: string;
+  /** The inventory item key the guessed name resolves to */
+  itemKey: string;
+}
+
+export interface PhotoAliasList {
+  aliases: PhotoAlias[];
+}
+
+export interface SavePhotoAliasesInput {
+  /** The batch of photo aliases to upsert (confirmed during intake) */
+  aliases: PhotoAlias[];
+}
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];

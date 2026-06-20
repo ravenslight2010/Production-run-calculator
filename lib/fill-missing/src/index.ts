@@ -37,7 +37,7 @@ export type FieldSpec = {
   fillable: boolean;
 };
 
-export type ProposalSource = "profile" | "spec" | "default" | "ai" | "none";
+export type ProposalSource = "learned" | "profile" | "spec" | "default" | "ai" | "none";
 
 export type FieldProposal = {
   key: string;
@@ -213,12 +213,45 @@ export function detectMissingFields(rec: Rec): MissingField[] {
 
 // ── Known-source proposals ───────────────────────────────────────────────────
 
-// Resolver supplied by each platform: returns the value this run's saved profile
-// and/or spec-seed hold for a field (or undefined when neither does).
+// Resolver supplied by each platform: returns the value this run's learned
+// memory, saved profile, and/or spec-seed hold for a field (or undefined when
+// none does). `learned` is the factory-wide value a user previously confirmed in
+// the Fill Missing panel for this exact product (brand + flavor); it wins over
+// everything else because it is the most direct "what we actually used" memory.
 export type KnownLookup = (key: string, kind: FieldKind) => {
+  learned?: string | number;
   profile?: string | number;
   spec?: string | number;
 };
+
+// A flat record of learned values for ONE product, keyed by field key. Values
+// are stored/transmitted as strings (the same shape the AI endpoint returns).
+export type LearnedValueRow = {
+  brand: string;
+  flavor: string;
+  fieldKey: string;
+  value: string;
+};
+
+// Pure helper shared by both platforms: collapse the full learned-value list
+// into a { fieldKey -> value } map for one product, matching brand + flavor
+// case-insensitively. Empty brand/flavor never matches (no product key).
+export function pickLearnedForProduct(
+  values: ReadonlyArray<LearnedValueRow>,
+  brand: string,
+  flavor: string,
+): Record<string, string> {
+  const b = brand.trim().toLowerCase();
+  const f = flavor.trim().toLowerCase();
+  const out: Record<string, string> = {};
+  if (!b || !f) return out;
+  for (const v of values) {
+    if (v.brand.trim().toLowerCase() === b && v.flavor.trim().toLowerCase() === f) {
+      out[v.fieldKey] = v.value;
+    }
+  }
+  return out;
+}
 
 export function buildProposals(missing: MissingField[], lookup: KnownLookup): FieldProposal[] {
   return missing.map(({ spec, currentValue }): FieldProposal => {
@@ -232,6 +265,9 @@ export function buildProposals(missing: MissingField[], lookup: KnownLookup): Fi
       currentValue,
     };
     const known = lookup(spec.key, spec.kind);
+    if (known.learned !== undefined && !isBlankValue(spec.kind, known.learned)) {
+      return { ...base, value: known.learned, source: "learned" };
+    }
     if (known.profile !== undefined && !isBlankValue(spec.kind, known.profile)) {
       return { ...base, value: known.profile, source: "profile" };
     }

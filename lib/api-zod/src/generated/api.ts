@@ -655,6 +655,74 @@ export const SaveImportAliasesResponse = zod.object({
 
 
 /**
+ * Returns every learned "fill in missing data" value — a value a user previously confirmed for a blank run-setup field, keyed by the run's product (brand + flavor) and the field. Clients use these to propose the remembered value as a top-priority source before falling back to profile/spec/default/AI. Available to any signed-in user.
+ * @summary List learned fill-missing values (per product + field)
+ */
+export const ListFillMissingValuesResponse = zod.object({
+  "values": zod.array(zod.object({
+  "brand": zod.string().describe('The run\'s brand (matched case-insensitively)'),
+  "flavor": zod.string().describe('The run\'s flavor (matched case-insensitively)'),
+  "fieldKey": zod.string().describe('The run-setup field key this value is for'),
+  "value": zod.string().describe('The confirmed value (a plain number string for number fields)')
+}).describe('A learned value a user confirmed for a blank run-setup field.'))
+})
+
+
+/**
+ * Persists a batch of confirmed field values, keyed case-insensitively on brand + flavor + fieldKey. Existing entries are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned fill-missing values (case-insensitive upsert)
+ */
+export const SaveFillMissingValuesBody = zod.object({
+  "values": zod.array(zod.object({
+  "brand": zod.string().describe('The run\'s brand (matched case-insensitively)'),
+  "flavor": zod.string().describe('The run\'s flavor (matched case-insensitively)'),
+  "fieldKey": zod.string().describe('The run-setup field key this value is for'),
+  "value": zod.string().describe('The confirmed value (a plain number string for number fields)')
+}).describe('A learned value a user confirmed for a blank run-setup field.')).describe('The batch of learned values to upsert (confirmed by the user)')
+})
+
+export const SaveFillMissingValuesResponse = zod.object({
+  "values": zod.array(zod.object({
+  "brand": zod.string().describe('The run\'s brand (matched case-insensitively)'),
+  "flavor": zod.string().describe('The run\'s flavor (matched case-insensitively)'),
+  "fieldKey": zod.string().describe('The run-setup field key this value is for'),
+  "value": zod.string().describe('The confirmed value (a plain number string for number fields)')
+}).describe('A learned value a user confirmed for a blank run-setup field.'))
+})
+
+
+/**
+ * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
+ * @summary List learned photo-intake aliases (guessName -> itemKey)
+ */
+export const ListPhotoAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "guessName": zod.string().describe('The raw name the vision model returned (matched case-insensitively)'),
+  "itemKey": zod.string().describe('The inventory item key the guessed name resolves to')
+}).describe('A learned mapping from a vision-model guessed name to an inventory item key.'))
+})
+
+
+/**
+ * Persists a batch of guessName -> itemKey mappings confirmed by the user during photo intake. Existing entries (matched case-insensitively on guessName) are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned photo-intake aliases (case-insensitive upsert)
+ */
+export const SavePhotoAliasesBody = zod.object({
+  "aliases": zod.array(zod.object({
+  "guessName": zod.string().describe('The raw name the vision model returned (matched case-insensitively)'),
+  "itemKey": zod.string().describe('The inventory item key the guessed name resolves to')
+}).describe('A learned mapping from a vision-model guessed name to an inventory item key.')).describe('The batch of photo aliases to upsert (confirmed during intake)')
+})
+
+export const SavePhotoAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "guessName": zod.string().describe('The raw name the vision model returned (matched case-insensitively)'),
+  "itemKey": zod.string().describe('The inventory item key the guessed name resolves to')
+}).describe('A learned mapping from a vision-model guessed name to an inventory item key.'))
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */

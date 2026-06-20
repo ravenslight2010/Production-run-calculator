@@ -683,6 +683,90 @@ paths:
         "400":
           description: Invalid input
 
+  /fill-missing-values:
+    get:
+      operationId: listFillMissingValues
+      tags: [fillMissingValues]
+      summary: List learned fill-missing values (per product + field)
+      description: >-
+        Returns every learned "fill in missing data" value — a value a user
+        previously confirmed for a blank run-setup field, keyed by the run's
+        product (brand + flavor) and the field. Clients use these to propose the
+        remembered value as a top-priority source before falling back to
+        profile/spec/default/AI. Available to any signed-in user.
+      responses:
+        "200":
+          description: All learned values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FillMissingValueList"
+    post:
+      operationId: saveFillMissingValues
+      tags: [fillMissingValues]
+      summary: Save learned fill-missing values (case-insensitive upsert)
+      description: >-
+        Persists a batch of confirmed field values, keyed case-insensitively on
+        brand + flavor + fieldKey. Existing entries are updated; new ones are
+        inserted. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFillMissingValuesInput"
+      responses:
+        "200":
+          description: The full updated value list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FillMissingValueList"
+        "400":
+          description: Invalid input
+
+  /photo-aliases:
+    get:
+      operationId: listPhotoAliases
+      tags: [photoAliases]
+      summary: List learned photo-intake aliases (guessName -> itemKey)
+      description: >-
+        Returns every learned photo-intake alias — a saved mapping from a vision
+        model's guessed item name to the inventory item key a user confirmed it
+        matches. Clients use these to auto-apply remembered matches when
+        identifying inventory from a photo. Available to any signed-in user.
+      responses:
+        "200":
+          description: All learned photo aliases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoAliasList"
+    post:
+      operationId: savePhotoAliases
+      tags: [photoAliases]
+      summary: Save learned photo-intake aliases (case-insensitive upsert)
+      description: >-
+        Persists a batch of guessName -> itemKey mappings confirmed by the user
+        during photo intake. Existing entries (matched case-insensitively on
+        guessName) are updated; new ones are inserted. Available to any signed-in
+        user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavePhotoAliasesInput"
+      responses:
+        "200":
+          description: The full updated alias list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoAliasList"
+        "400":
+          description: Invalid input
+
   /incidents:
     post:
       operationId: reportIncident
@@ -1974,6 +2058,84 @@ components:
           description: The batch of aliases to upsert (confirmed during an import)
           items:
             $ref: "#/components/schemas/ImportAlias"
+
+    FillMissingValue:
+      type: object
+      description: A learned value a user confirmed for a blank run-setup field.
+      required:
+        - brand
+        - flavor
+        - fieldKey
+        - value
+      properties:
+        brand:
+          type: string
+          description: The run's brand (matched case-insensitively)
+        flavor:
+          type: string
+          description: The run's flavor (matched case-insensitively)
+        fieldKey:
+          type: string
+          description: The run-setup field key this value is for
+        value:
+          type: string
+          description: The confirmed value (a plain number string for number fields)
+
+    FillMissingValueList:
+      type: object
+      required:
+        - values
+      properties:
+        values:
+          type: array
+          items:
+            $ref: "#/components/schemas/FillMissingValue"
+
+    SaveFillMissingValuesInput:
+      type: object
+      required:
+        - values
+      properties:
+        values:
+          type: array
+          description: The batch of learned values to upsert (confirmed by the user)
+          items:
+            $ref: "#/components/schemas/FillMissingValue"
+
+    PhotoAlias:
+      type: object
+      description: A learned mapping from a vision-model guessed name to an inventory item key.
+      required:
+        - guessName
+        - itemKey
+      properties:
+        guessName:
+          type: string
+          description: The raw name the vision model returned (matched case-insensitively)
+        itemKey:
+          type: string
+          description: The inventory item key the guessed name resolves to
+
+    PhotoAliasList:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhotoAlias"
+
+    SavePhotoAliasesInput:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: The batch of photo aliases to upsert (confirmed during intake)
+          items:
+            $ref: "#/components/schemas/PhotoAlias"
 
     MatchImportResult:
       type: object

@@ -282,6 +282,41 @@ export function rankCandidatesByName(name: string, candidates: CandidateItem[]):
     .map((x) => x.c);
 }
 
+// ── Photo identifier learned aliases (server-persisted, factory-wide) ─────────
+// When a user confirms that a photo guess (e.g. "Hormel Pepperoni") maps to a
+// specific inventory item, that guessName -> itemKey link is remembered here so
+// future scans auto-apply the match — the same pattern as learned import
+// aliases. Open to any signed-in user (no manager gate), best-effort.
+export type PhotoAlias = { guessName: string; itemKey: string };
+
+export const fetchPhotoAliases = () =>
+  api<{ aliases: PhotoAlias[] }>("/photo-aliases").then((d) => d.aliases ?? []);
+
+export const savePhotoAliases = (aliases: PhotoAlias[]) =>
+  aliases.length === 0
+    ? Promise.resolve()
+    : api<void>("/photo-aliases", {
+        method: "POST",
+        body: JSON.stringify({ aliases }),
+      }).then(() => undefined);
+
+// Pure helper: given a guessed name and the learned aliases, return the matched
+// itemKey IF one is remembered AND that item still exists among the current
+// candidates (items can be deleted/renamed, so a stale alias must be ignored).
+// Case-insensitive on guessName, mirroring the server upsert. Returns null when
+// there is no usable learned match.
+export function applyPhotoAliases(
+  guessName: string,
+  aliases: ReadonlyArray<PhotoAlias>,
+  candidates: ReadonlyArray<CandidateItem>,
+): string | null {
+  const g = guessName.trim().toLowerCase();
+  if (!g) return null;
+  const hit = aliases.find((a) => a.guessName.trim().toLowerCase() === g);
+  if (!hit) return null;
+  return candidates.some((c) => c.key === hit.itemKey) ? hit.itemKey : null;
+}
+
 // ── Staff roles / access control ─────────────────────────────────────────────
 export type Role = "manager" | "operator";
 export type StaffMember = {

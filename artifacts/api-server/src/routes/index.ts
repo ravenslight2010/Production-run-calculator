@@ -8,6 +8,8 @@ import rolesRouter from "./roles";
 import aiRouter from "./ai";
 import incidentsRouter from "./incidents";
 import importAliasesRouter from "./importAliases";
+import fillMissingValuesRouter from "./fillMissingValues";
+import photoAliasesRouter from "./photoAliases";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -29,5 +31,7 @@ router.use(inventoryRouter);
 router.use(aiRouter);
 router.use(incidentsRouter);
 router.use(importAliasesRouter);
+router.use(fillMissingValuesRouter);
+router.use(photoAliasesRouter);
 
 export default router;

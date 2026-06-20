@@ -15,12 +15,16 @@ const keysOf = (rec: Record<string, unknown>) =>
   fm.detectMissingFields(rec).map((f) => f.spec.key);
 
 // A deterministic KnownLookup exercising every source-priority branch.
-function lookup(key: string): { profile?: string | number; spec?: string | number } {
+function lookup(key: string): {
+  learned?: string | number;
+  profile?: string | number;
+  spec?: string | number;
+} {
   switch (key) {
     case "casesNeeded":
-      return { profile: 500 }; // profile wins
+      return { learned: 600, profile: 500 }; // learned beats profile
     case "cycleSpeed":
-      return { spec: 9.1 }; // no profile -> spec
+      return { spec: 9.1 }; // no learned/profile -> spec
     case "shipper":
       return { profile: "12in", spec: "costco" }; // profile beats spec
     case "sauceOzPerPizza":
@@ -115,9 +119,10 @@ describe("buildProposals", () => {
     return new Map(props.map((p) => [p.key, p]));
   };
 
-  it("resolves sources in the order profile -> spec -> default -> none", () => {
+  it("resolves sources in the order learned -> profile -> spec -> default -> none", () => {
     const byKey = proposalsFor({});
-    expect(byKey.get("casesNeeded")).toMatchObject({ source: "profile", value: 500 });
+    // learned outranks profile when both are present.
+    expect(byKey.get("casesNeeded")).toMatchObject({ source: "learned", value: 600 });
     expect(byKey.get("cycleSpeed")).toMatchObject({ source: "spec", value: 9.1 });
     expect(byKey.get("shipper")).toMatchObject({ source: "profile", value: "12in" });
     // documentedDefault used when no known source.
@@ -183,6 +188,31 @@ describe("buildFillMissingInput", () => {
     expect(input.context?.some((c) => c.key === "brand" || c.key === "flavor")).toBe(false);
     expect(input.context).toContainEqual({ key: "pizzasPerCase", label: "Pizzas / Case", value: "12" });
     expect(input.fields.map((f) => f.key)).toEqual(["dieType", "skidStacking"]);
+  });
+});
+
+// ── pickLearnedForProduct ────────────────────────────────────────────────────
+
+describe("pickLearnedForProduct", () => {
+  const rows = [
+    { brand: "Lucia's", flavor: "Pepperoni", fieldKey: "casesNeeded", value: "600" },
+    { brand: "Lucia's", flavor: "Pepperoni", fieldKey: "dieType", value: "12in" },
+    { brand: "Other", flavor: "Cheese", fieldKey: "casesNeeded", value: "999" },
+  ];
+
+  it("returns only the fields for the matching brand+flavor", () => {
+    const got = fm.pickLearnedForProduct(rows, "Lucia's", "Pepperoni");
+    expect(got).toEqual({ casesNeeded: "600", dieType: "12in" });
+  });
+
+  it("matches brand+flavor case-insensitively and trims", () => {
+    const got = fm.pickLearnedForProduct(rows, "  lucia's ", "PEPPERONI");
+    expect(got).toEqual({ casesNeeded: "600", dieType: "12in" });
+  });
+
+  it("returns an empty map when nothing matches", () => {
+    expect(fm.pickLearnedForProduct(rows, "Nope", "Pepperoni")).toEqual({});
+    expect(fm.pickLearnedForProduct([], "Lucia's", "Pepperoni")).toEqual({});
   });
 });
 

@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CardSection, SectionHeader } from "@/components/UI";
 import { useColors } from "@/hooks/useColors";
@@ -11,6 +11,7 @@ import {
   type FieldProposal,
   type ProposalSource,
   type FieldCategory,
+  type LearnedValueRow,
   detectMissingFields,
   buildProposals,
   aiCandidates,
@@ -18,6 +19,8 @@ import {
   requestFillMissing,
   fillMissingErrorMessage,
   makeMobileLookup,
+  fetchFillMissingValues,
+  saveFillMissingValues,
 } from "@/context/fillMissing";
 
 const CATEGORY_LABEL: Record<FieldCategory, string> = {
@@ -40,6 +43,7 @@ const CATEGORY_ORDER: FieldCategory[] = [
 ];
 
 const SOURCE_LABEL: Record<ProposalSource, string> = {
+  learned: "Remembered",
   profile: "From profile",
   spec: "From spec sheet",
   default: "Default",
@@ -58,11 +62,30 @@ export default function FillMissingPanel() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  // Server-persisted learned values (factory-wide). Fetched once on mount;
+  // best-effort, so any failure just leaves the list empty.
+  const [learnedValues, setLearnedValues] = useState<LearnedValueRow[]>([]);
 
   const s = run.settings;
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchFillMissingValues()
+      .then((vals) => {
+        if (!cancelled) setLearnedValues(vals);
+      })
+      .catch(() => {
+        /* best-effort: proceed without learned values */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const sourceColor = (src: ProposalSource): string => {
     switch (src) {
+      case "learned":
+        return "#f59e0b";
       case "profile":
         return "#10b981";
       case "spec":
@@ -79,7 +102,10 @@ export default function FillMissingPanel() {
   function scan() {
     const rec = s as unknown as Record<string, unknown>;
     const missing = detectMissingFields(rec);
-    const props = buildProposals(missing, makeMobileLookup(brandProfiles, s.brand, s.flavor));
+    const props = buildProposals(
+      missing,
+      makeMobileLookup(brandProfiles, s.brand, s.flavor, learnedValues),
+    );
     setProposals(props);
     setAiError(null);
     setAiNote(null);
@@ -146,6 +172,31 @@ export default function FillMissingPanel() {
     updateSettings({ [p.key]: value } as never);
     setRows((prev) => ({ ...prev, [p.key]: { ...prev[p.key], applied: true, skipped: false } }));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Remember this confirmed value factory-wide so future scans of the same
+    // product propose it as a "learned" source. Needs a product key (brand +
+    // flavor); best-effort, so failures are swallowed. Mirrors the web panel.
+    if (s.brand.trim() && s.flavor.trim()) {
+      const learnedRow: LearnedValueRow = {
+        brand: s.brand.trim(),
+        flavor: s.flavor.trim(),
+        fieldKey: p.key,
+        value: String(value),
+      };
+      setLearnedValues((prev) => {
+        const others = prev.filter(
+          (v) =>
+            !(
+              v.fieldKey === learnedRow.fieldKey &&
+              v.brand.trim().toLowerCase() === learnedRow.brand.toLowerCase() &&
+              v.flavor.trim().toLowerCase() === learnedRow.flavor.toLowerCase()
+            ),
+        );
+        return [...others, learnedRow];
+      });
+      void saveFillMissingValues([learnedRow]).catch(() => {
+        /* best-effort */
+      });
+    }
   }
 
   function skip(key: string) {

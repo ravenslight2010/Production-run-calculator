@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ClipboardList,
   Loader2,
@@ -15,6 +15,7 @@ import {
   type FieldProposal,
   type ProposalSource,
   type FieldCategory,
+  type LearnedValueRow,
   detectMissingFields,
   buildProposals,
   aiCandidates,
@@ -22,6 +23,8 @@ import {
   requestFillMissing,
   fillMissingErrorMessage,
   makeWebLookup,
+  fetchFillMissingValues,
+  saveFillMissingValues,
 } from "../fillMissing";
 import { useMe } from "../useRole";
 
@@ -45,6 +48,7 @@ const CATEGORY_ORDER: FieldCategory[] = [
 ];
 
 const SOURCE_META: Record<ProposalSource, { label: string; cls: string }> = {
+  learned: { label: "Remembered", cls: "bg-amber-500/15 text-amber-300 border-amber-500/40" },
   profile: { label: "From profile", cls: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
   spec: { label: "From spec sheet", cls: "bg-sky-500/15 text-sky-400 border-sky-500/30" },
   default: { label: "Default", cls: "bg-slate-500/15 text-slate-300 border-slate-500/30" },
@@ -79,11 +83,28 @@ export default function FillMissingPanel({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNote, setAiNote] = useState<string | null>(null);
+  // Server-persisted learned values (factory-wide). Fetched once on mount;
+  // best-effort, so any failure just leaves the list empty.
+  const [learnedValues, setLearnedValues] = useState<LearnedValueRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFillMissingValues()
+      .then((vals) => {
+        if (!cancelled) setLearnedValues(vals);
+      })
+      .catch(() => {
+        /* best-effort: proceed without learned values */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function scan() {
     const rec = getRecord();
     const missing = detectMissingFields(rec);
-    const props = buildProposals(missing, makeWebLookup(brand, flavor));
+    const props = buildProposals(missing, makeWebLookup(brand, flavor, learnedValues));
     setProposals(props);
     setAiError(null);
     setAiNote(null);
@@ -138,6 +159,31 @@ export default function FillMissingPanel({
     if (p.kind === "number" && (!Number.isFinite(value as number) || (value as number) < 0)) return;
     onCommit(p.key, value);
     setRows((prev) => ({ ...prev, [p.key]: { ...prev[p.key], applied: true, skipped: false } }));
+    // Remember this confirmed value factory-wide so future scans of the same
+    // product propose it as a "learned" source. Needs a product key (brand +
+    // flavor); best-effort, so failures are swallowed.
+    if (brand.trim() && flavor.trim()) {
+      const learnedRow: LearnedValueRow = {
+        brand: brand.trim(),
+        flavor: flavor.trim(),
+        fieldKey: p.key,
+        value: String(value),
+      };
+      setLearnedValues((prev) => {
+        const others = prev.filter(
+          (v) =>
+            !(
+              v.fieldKey === learnedRow.fieldKey &&
+              v.brand.trim().toLowerCase() === learnedRow.brand.toLowerCase() &&
+              v.flavor.trim().toLowerCase() === learnedRow.flavor.toLowerCase()
+            ),
+        );
+        return [...others, learnedRow];
+      });
+      void saveFillMissingValues([learnedRow]).catch(() => {
+        /* best-effort */
+      });
+    }
   }
 
   function skip(key: string) {

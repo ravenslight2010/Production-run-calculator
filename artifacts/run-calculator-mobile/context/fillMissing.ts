@@ -14,7 +14,9 @@ import type {
   FillMissingInput,
   FillMissingResult,
   KnownLookup,
+  LearnedValueRow,
 } from "@workspace/fill-missing";
+import { pickLearnedForProduct } from "@workspace/fill-missing";
 import { getAuthToken } from "@workspace/api-client-react";
 import { SPEC_PROFILES } from "@/data/specSeed";
 import { profileKey, type RunProfile } from "./RunContext";
@@ -24,6 +26,46 @@ import { InventoryApiError, photoErrorMessage } from "./inventoryShared";
 export * from "@workspace/fill-missing";
 
 type Rec = Record<string, unknown>;
+
+// ── Learned values (server-persisted, factory-wide) ──────────────────────────
+// When a user confirms a value for a blank field, it is saved here so future
+// scans of the same product propose it as a top-priority "learned" source — the
+// same pattern as learned import aliases. Best-effort: any failure silently
+// proceeds without learned values. Mirrors the web glue (replit.md parity).
+
+export async function fetchFillMissingValues(): Promise<LearnedValueRow[]> {
+  const base = getApiBaseUrl();
+  if (!base) throw new Error("No API base URL (sync disabled)");
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const res = await fetch(`${base}/api/fill-missing-values`, {
+    headers: {
+      "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) throw new Error(`List fill-missing values failed (${res.status})`);
+  const data = (await res.json()) as { values: LearnedValueRow[] };
+  return data.values ?? [];
+}
+
+export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<void> {
+  if (values.length === 0) return;
+  const base = getApiBaseUrl();
+  if (!base) throw new Error("No API base URL (sync disabled)");
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const res = await fetch(`${base}/api/fill-missing-values`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ values }),
+  });
+  if (!res.ok) throw new Error(`Save fill-missing values failed (${res.status})`);
+}
 
 export async function requestFillMissing(input: FillMissingInput): Promise<FillMissingResult> {
   const base = getApiBaseUrl();
@@ -69,14 +111,17 @@ export function makeMobileLookup(
   brandProfiles: Record<string, RunProfile>,
   brand: string,
   flavor: string,
+  learnedValues: ReadonlyArray<LearnedValueRow> = [],
 ): KnownLookup {
   const key = profileKey(brand, flavor);
   const profile = brandProfiles[key];
   const specProfile = SPEC_PROFILES[key];
+  const learned = pickLearnedForProduct(learnedValues, brand, flavor);
   return (fieldKey) => {
     const profVal = profile ? (profile as unknown as Rec)[fieldKey] : undefined;
     const specVal = specProfile ? (specProfile as unknown as Rec)[fieldKey] : undefined;
     return {
+      learned: learned[fieldKey],
       profile: profVal as string | number | undefined,
       spec: specVal as string | number | undefined,
     };
