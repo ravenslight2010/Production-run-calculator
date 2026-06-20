@@ -200,6 +200,8 @@ import {
   type ImportParseResult,
 } from "@/utils/runExcel";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
+import SpecImportDialog from "@/components/SpecImportDialog";
+import { prepareSpecImport, commitSpecImport, type SpecImportPrepared } from "@/specImport";
 
 import {
   Form,
@@ -1756,6 +1758,31 @@ export default function Home() {
     schedulePush(dayStateRef.current);
   }
 
+  // Re-read all master-data lists from storage into state. Used after the
+  // spec-sheet importer writes brand/flavor/type/ingredient/recipe-name lists
+  // directly to storage, so the Setup dropdowns reflect the new options
+  // immediately without a reload. Mirrors each list's initializer above.
+  function reloadMasterData() {
+    setBrands([...loadList(BRANDS_KEY, ["Lucia's"])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b)));
+    setBrandFlavors(loadBrandFlavors());
+    setIngredientTypes([...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b)));
+    setPepTypes(() => {
+      const LEGACY_PEP_TYPES = ["Natural", "Cured"];
+      const saved = loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES);
+      const cleaned = saved
+        .map(t => PEP_TYPE_RENAMES[t] ?? t)
+        .filter(t => !LEGACY_PEP_TYPES.includes(t) && !RETIRED_PEP_TYPES.includes(t));
+      return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
+    });
+    setDieTypes([...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])].sort((a, b) => a.localeCompare(b)));
+    setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
+    setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
+    setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)));
+    setFrontlineIngredients([...loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
+    setFrontlineRecipeNames([...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].filter(n => !SEED_MIX_RECIPE_NAMES.has(n)).sort((a, b) => a.localeCompare(b)));
+    setCheeseRecipeNames([...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
+  }
+
   const [mixRecipeNames, setMixRecipeNames] = useState<string[]>(() =>
     [...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b))
   );
@@ -2104,6 +2131,13 @@ export default function Home() {
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
+  // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
+  const [showSpecImport, setShowSpecImport] = useState(false);
+  const [specImportLoading, setSpecImportLoading] = useState(false);
+  const [specImportApplying, setSpecImportApplying] = useState(false);
+  const [specImportError, setSpecImportError] = useState<string | null>(null);
+  const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
+  const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importDefaultDate, setImportDefaultDate] = useState(tomorrowStr());
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
@@ -3404,6 +3438,48 @@ export default function Home() {
       setShowImportDialog(true);
     } catch {
       // ignore malformed file — user can retry
+    }
+  }
+
+  // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
+  // structured spec profiles + recipes, canonicalize the names, and show a
+  // single review/summary screen. Nothing is written until the user confirms.
+  async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setSpecImportPrepared(null);
+    setSpecImportError(null);
+    setSpecImportLoading(true);
+    setShowSpecImport(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const prepared = await prepareSpecImport(buf);
+      setSpecImportPrepared(prepared);
+    } catch (err) {
+      setSpecImportError(
+        err instanceof Error ? err.message : "Could not read or interpret that workbook.",
+      );
+    } finally {
+      setSpecImportLoading(false);
+    }
+  }
+
+  async function handleSpecImportConfirm() {
+    if (!specImportPrepared) return;
+    setSpecImportApplying(true);
+    try {
+      await commitSpecImport(specImportPrepared);
+      // Refresh derived dropdowns/profiles now that storage changed.
+      reloadMasterData();
+      setShowSpecImport(false);
+      setSpecImportPrepared(null);
+    } catch (err) {
+      setSpecImportError(
+        err instanceof Error ? err.message : "Import failed while saving. Please try again.",
+      );
+    } finally {
+      setSpecImportApplying(false);
     }
   }
 
@@ -8643,6 +8719,25 @@ export default function Home() {
                           className="hidden"
                           onChange={handleImportFile}
                         />
+                        {isManager && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => specImportInputRef.current?.click()}
+                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                              title="Import spec sheets & recipes from an Excel workbook (AI-interpreted)"
+                            >
+                              <Upload className="w-3.5 h-3.5" /> Import Spec Sheet
+                            </button>
+                            <input
+                              ref={specImportInputRef}
+                              type="file"
+                              accept=".xlsx"
+                              className="hidden"
+                              onChange={handleSpecImportFile}
+                            />
+                          </>
+                        )}
                       </div>
 
                       {/* Day Totals banner */}
@@ -9218,6 +9313,17 @@ export default function Home() {
           canCreate={isSupervisor}
           defaultDate={importDefaultDate}
           onConfirm={importIntoEditor ? importExcelIntoEditor : commitExcelImport}
+        />
+
+        {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}
+        <SpecImportDialog
+          open={showSpecImport}
+          onClose={() => { setShowSpecImport(false); setSpecImportPrepared(null); setSpecImportError(null); }}
+          loading={specImportLoading}
+          error={specImportError}
+          prepared={specImportPrepared}
+          applying={specImportApplying}
+          onConfirm={handleSpecImportConfirm}
         />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}

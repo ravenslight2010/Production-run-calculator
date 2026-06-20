@@ -19,6 +19,11 @@ import {
   sanitizeMatchImport,
   validateMatchImportBody,
 } from "./aiMatchImport";
+import {
+  buildParseSpecSheetPrompt,
+  sanitizeParseSpecSheet,
+  validateParseSpecSheetBody,
+} from "./aiParseSpecSheet";
 
 const router: IRouter = Router();
 
@@ -52,6 +57,15 @@ const MATCH_IMPORT_RATE_MAX = 10;
 const matchImportRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(MATCH_IMPORT_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the Excel spec-sheet / recipe parser: per-user fixed window,
+// Postgres-backed in production so the cap holds across instances.
+const PARSE_SPEC_RATE_WINDOW_MS = 60_000;
+const PARSE_SPEC_RATE_MAX = 10;
+const parseSpecRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PARSE_SPEC_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -219,6 +233,61 @@ router.post(
       flavorMatches,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
+    });
+  },
+);
+
+router.post(
+  "/ai/parse-spec-sheet",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: PARSE_SPEC_RATE_WINDOW_MS,
+    max: PARSE_SPEC_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: parseSpecRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateParseSpecSheetBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const { system, user } = buildParseSpecSheetPrompt(validation.data);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 16384,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-parse-spec-sheet call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-parse-spec-sheet non-JSON response");
+      res.json({ profiles: [], recipes: [], generatedAt: Date.now() });
+      return;
+    }
+
+    const parsed = sanitizeParseSpecSheet(raw);
+    res.json({
+      profiles: parsed.profiles,
+      recipes: parsed.recipes,
+      generatedAt: Date.now(),
+      ...(parsed.note ? { note: parsed.note } : {}),
     });
   },
 );

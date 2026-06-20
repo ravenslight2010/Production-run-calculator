@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { Stack } from "expo-router";
 import React, { useState } from "react";
@@ -13,15 +15,31 @@ import {
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
-import { useRun, type MasterListKey, type RunSettings } from "@/context/RunContext";
+import SpecImportModal from "@/components/SpecImportModal";
+import {
+  profileKey,
+  useRun,
+  type MasterListKey,
+  type RunSettings,
+} from "@/context/RunContext";
 import {
   buildMergeMap,
   countMergeReferences,
   type MergeMap,
 } from "@/context/mergeIngredients";
 import { scoreNameMatch } from "@/context/inventoryShared";
+import {
+  prepareSpecImport,
+  commitSpecImport,
+  readWorkbookGridsFromArrayBuffer,
+  readWorkbookGridsFromBase64,
+  type SpecImportPrepared,
+  type SpecImportStore,
+} from "@/context/specImport";
 import { useColors } from "@/hooks/useColors";
+import { useMe } from "@/hooks/useRole";
 import { FONTS } from "@/constants/fonts";
+import type { ParsedRecipe } from "@workspace/spec-import";
 
 function tap() {
   Haptics.selectionAsync();
@@ -512,10 +530,152 @@ export default function MasterDataScreen() {
     renameRecipePreset,
     supervisorPin,
     setSupervisorPin,
+    brandProfiles,
+    doughRecipePresets,
+    cheeseRecipePresets,
+    frontlineRecipePresets,
+    applySpecImport,
   } = useRun();
+  const { isManager } = useMe();
 
   const [pinDraft, setPinDraft] = useState("");
   const mixNames = Object.keys(mixRecipePresets);
+
+  // ── Excel spec-sheet import (manager only; mirrors the web header action) ──
+  const [specOpen, setSpecOpen] = useState(false);
+  const [specLoading, setSpecLoading] = useState(false);
+  const [specApplying, setSpecApplying] = useState(false);
+  const [specError, setSpecError] = useState<string | null>(null);
+  const [specPrepared, setSpecPrepared] = useState<SpecImportPrepared | null>(null);
+
+  // Build the store the orchestration glue needs from live context (web reads
+  // localStorage directly; mobile injects the same shape here).
+  const buildSpecStore = (): SpecImportStore => {
+    const appTypeSet = new Set<string>();
+    for (const prof of Object.values(brandProfiles)) {
+      for (const slot of [1, 2, 3, 4] as const) {
+        const t = prof[`app${slot}Type` as keyof typeof prof];
+        if (typeof t === "string" && t.trim()) appTypeSet.add(t);
+      }
+    }
+    const SPEC_FIELDS: (keyof RunSettings)[] = [
+      "dieType",
+      "sauceOzPerPizza",
+      "app1Type",
+      "app2Type",
+      "app3Type",
+      "app4Type",
+      "pep1Type",
+      "pep2Type",
+      "doughRecipeName",
+      "frontlineRecipeName",
+      "app1CheeseRecipeName",
+    ];
+    const recipeMapForKind = (
+      kind: ParsedRecipe["kind"],
+    ): Record<string, unknown> =>
+      kind === "dough"
+        ? doughRecipePresets
+        : kind === "sauce"
+          ? frontlineRecipePresets
+          : cheeseRecipePresets;
+    return {
+      known: {
+        brands,
+        flavorsByBrand: brandFlavors,
+        appTypes: [...appTypeSet],
+        pepTypes,
+        cheeseIngredients,
+        doughIngredients,
+        sauceIngredients: frontlineIngredients,
+        dieTypes,
+      },
+      profileExists: (brand, flavor) => {
+        const prof = brandProfiles[profileKey(brand, flavor)];
+        if (!prof) return false;
+        // Mirror web's profileObjHasRealData: any recipe array OR any
+        // applicator/pepperoni/die/recipe-name string counts as "real data".
+        const arr = (x: unknown) => Array.isArray(x) && x.length > 0;
+        const p = prof as Record<string, unknown>;
+        if (arr(p.doughRecipe) || arr(p.frontlineRecipe)) return true;
+        for (const k of [
+          "app1CheeseRecipe",
+          "app2CheeseRecipe",
+          "app3CheeseRecipe",
+          "app4CheeseRecipe",
+        ]) {
+          if (arr(p[k])) return true;
+        }
+        return SPEC_FIELDS.some((f) => {
+          const v = prof[f];
+          return typeof v === "string"
+            ? v.trim() !== ""
+            : typeof v === "number"
+              ? v !== 0
+              : false;
+        });
+      },
+      recipeExists: (kind, name) => {
+        const map = recipeMapForKind(kind);
+        const lower = name.trim().toLowerCase();
+        return Object.keys(map).some((k) => k.trim().toLowerCase() === lower);
+      },
+      apply: applySpecImport,
+    };
+  };
+
+  async function handleSpecImportPick() {
+    setSpecError(null);
+    setSpecPrepared(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      setSpecOpen(true);
+      setSpecLoading(true);
+      const grids =
+        Platform.OS === "web"
+          ? readWorkbookGridsFromArrayBuffer(
+              await (await fetch(asset.uri)).arrayBuffer(),
+            )
+          : readWorkbookGridsFromBase64(
+              await Promise.resolve(new File(asset.uri).base64()),
+            );
+      const prepared = await prepareSpecImport(grids, buildSpecStore());
+      setSpecPrepared(prepared);
+    } catch (e) {
+      setSpecError(
+        e instanceof Error ? e.message : "Could not read or interpret that file.",
+      );
+    } finally {
+      setSpecLoading(false);
+    }
+  }
+
+  async function handleSpecImportConfirm() {
+    if (!specPrepared) return;
+    setSpecApplying(true);
+    try {
+      await commitSpecImport(specPrepared, buildSpecStore());
+      setSpecOpen(false);
+      setSpecPrepared(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      setSpecError(
+        e instanceof Error ? e.message : "Could not apply the import. Please retry.",
+      );
+    } finally {
+      setSpecApplying(false);
+    }
+  }
 
   const simpleList = (key: MasterListKey) => ({
     onAdd: (v: string) => addListItem(key, v),
@@ -539,6 +699,35 @@ export default function MasterDataScreen() {
           gap: 4,
         }}
       >
+        {/* Excel spec-sheet import (managers only) */}
+        {isManager ? (
+          <>
+            <SectionHeader title="Import Spec Sheet" />
+            <CardSection>
+              <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                Upload an Excel (.xlsx) workbook of spec sheets and/or recipes. The
+                app interprets it and shows a summary before applying — existing
+                brand/flavor profiles and recipes are overwritten, new ones are
+                added.
+              </Text>
+              <Pressable
+                onPress={handleSpecImportPick}
+                style={({ pressed }) => [
+                  styles.importBtn,
+                  { backgroundColor: colors.primary, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
+                <Feather name="upload" size={16} color={colors.primaryForeground} />
+                <Text
+                  style={[styles.importBtnText, { color: colors.primaryForeground }]}
+                >
+                  Choose Excel file…
+                </Text>
+              </Pressable>
+            </CardSection>
+          </>
+        ) : null}
+
         {/* Brands & flavors */}
         <SectionHeader title="Brands & Flavors" />
         <CardSection>
@@ -720,6 +909,20 @@ export default function MasterDataScreen() {
           ) : null}
         </CardSection>
       </KeyboardAwareScrollViewCompat>
+
+      <SpecImportModal
+        visible={specOpen}
+        onClose={() => {
+          setSpecOpen(false);
+          setSpecPrepared(null);
+          setSpecError(null);
+        }}
+        loading={specLoading}
+        error={specError}
+        prepared={specPrepared}
+        applying={specApplying}
+        onConfirm={handleSpecImportConfirm}
+      />
     </>
   );
 }
@@ -737,6 +940,16 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   chipText: { fontSize: 13, fontFamily: FONTS.medium },
+  importBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginTop: 10,
+  },
+  importBtnText: { fontSize: 14, fontFamily: FONTS.medium },
   editRow: {
     flexDirection: "row",
     alignItems: "center",

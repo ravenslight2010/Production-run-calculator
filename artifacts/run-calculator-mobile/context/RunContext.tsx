@@ -19,6 +19,7 @@ import {
   CHEESE_RECIPES,
   CHEESE_BRAND_SPECS,
 } from "@/data/specSeed";
+import type { ParsedSpecImport } from "@workspace/spec-import";
 import React, {
   createContext,
   useCallback,
@@ -1233,6 +1234,8 @@ interface RunContextValue {
     newName: string,
   ) => void;
   mixRecipePresets: Record<string, RecipeRow[]>;
+  // Apply a canonicalized Excel spec-sheet import (overwrite existing, add new).
+  applySpecImport: (parsed: ParsedSpecImport) => void;
   // Rename helpers for master data
   renameListItem: (list: MasterListKey, oldName: string, newName: string) => void;
   renameBrand: (oldName: string, newName: string) => void;
@@ -2297,6 +2300,132 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Apply an (already-canonicalized) Excel spec-sheet import. Overwrite semantics
+  // (per product): brand/flavor profiles and dough/sauce/cheese recipes of the
+  // same name are overwritten; brand-new ones are added; option lists merge
+  // additively so every new brand/flavor/type/ingredient becomes selectable.
+  // Mirrors the web applySpecImport in artifacts/run-calculator/src/storage.ts
+  // (replit.md parity). Fail-safe: a malformed entry is skipped, never aborts.
+  const applySpecImport = useCallback(
+    (parsed: ParsedSpecImport) => {
+      setAppState((prev) => {
+        const doughRecipePresets: Record<string, RecipeRow[]> = { ...prev.doughRecipePresets };
+        const frontlineRecipePresets: Record<string, RecipeRow[]> = { ...prev.frontlineRecipePresets };
+        const cheeseRecipePresets: Record<string, RecipeRow[]> = { ...prev.cheeseRecipePresets };
+        const brandProfiles: Record<string, RunProfile> = { ...prev.brandProfiles };
+        let brands = [...prev.brands];
+        const brandFlavors: Record<string, string[]> = { ...prev.brandFlavors };
+        const newDoughIng: string[] = [];
+        const newSauceIng: string[] = [];
+        const newCheeseIng: string[] = [];
+        const newPepTypes: string[] = [];
+        const newDieTypes: string[] = [];
+
+        const registerBrandFlavor = (brand: string, flavor: string) => {
+          if (!brand || !flavor) return;
+          if (!brands.some((b) => b.toLowerCase() === brand.toLowerCase())) {
+            brands = [...brands, brand];
+          }
+          const list = brandFlavors[brand] ?? [];
+          if (!list.some((f) => f.toLowerCase() === flavor.toLowerCase())) {
+            brandFlavors[brand] = [...list, flavor];
+          }
+        };
+
+        // ── Recipe libraries (overwrite by name) ──
+        for (const r of parsed.recipes) {
+          const name = r.name.trim();
+          if (!name || r.rows.length === 0) continue;
+          const rows = r.rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs }));
+          if (r.kind === "dough") {
+            doughRecipePresets[name] = rows;
+            newDoughIng.push(...rows.map((x) => x.ingredient));
+          } else if (r.kind === "sauce") {
+            frontlineRecipePresets[name] = rows;
+            newSauceIng.push(...rows.map((x) => x.ingredient));
+          } else {
+            cheeseRecipePresets[name] = rows;
+            newCheeseIng.push(...rows.map((x) => x.ingredient));
+          }
+        }
+
+        // ── Profiles (overwrite spec fields, preserve unrelated fields) ──
+        for (const p of parsed.profiles) {
+          const brand = p.brand.trim();
+          const flavor = p.flavor.trim();
+          if (!brand || !flavor) continue;
+          registerBrandFlavor(brand, flavor);
+          const key = profileKey(brand, flavor);
+          const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
+          if (p.dieType) {
+            prof.dieType = p.dieType;
+            newDieTypes.push(p.dieType);
+          }
+          if (p.sauceOzPerPizza != null) prof.sauceOzPerPizza = p.sauceOzPerPizza;
+          p.applicators.slice(0, 4).forEach((a, i) => {
+            const slot = i + 1;
+            const type = a.type.trim();
+            if (!type) return;
+            (prof as Record<string, unknown>)[`app${slot}Type`] = type;
+            (prof as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
+          });
+          p.pepperonis.slice(0, 2).forEach((pp, i) => {
+            const slot = i + 1;
+            const type = pp.type.trim();
+            if (!type) return;
+            (prof as Record<string, unknown>)[`pep${slot}Type`] = type;
+            (prof as Record<string, unknown>)[`pep${slot}Sticks`] = pp.sticks;
+            (prof as Record<string, unknown>)[`pep${slot}OzPerPizza`] = pp.ozPerPizza;
+            newPepTypes.push(type);
+          });
+          brandProfiles[key] = prof;
+        }
+
+        // ── Tie recipes that name a brand+flavor onto their profiles ──
+        for (const r of parsed.recipes) {
+          const brand = (r.brand ?? "").trim();
+          const flavor = (r.flavor ?? "").trim();
+          if (!brand || !flavor) continue;
+          registerBrandFlavor(brand, flavor);
+          const rows = r.rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs }));
+          const key = profileKey(brand, flavor);
+          const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
+          if (r.kind === "dough") {
+            prof.doughRecipeName = r.name;
+            prof.doughRecipe = rows;
+            if (r.doughballOz != null) prof.doughballWeightOz = r.doughballOz;
+          } else if (r.kind === "sauce") {
+            prof.frontlineRecipeName = r.name;
+            prof.frontlineRecipe = rows;
+          } else {
+            const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
+            (prof as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
+            (prof as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+          }
+          brandProfiles[key] = prof;
+        }
+
+        const next: AppState = {
+          ...prev,
+          brands: brands.sort((a, b) => a.localeCompare(b)),
+          brandFlavors,
+          brandProfiles,
+          doughRecipePresets,
+          frontlineRecipePresets,
+          cheeseRecipePresets,
+          doughIngredients: mergeInsensitive(prev.doughIngredients, newDoughIng),
+          frontlineIngredients: mergeInsensitive(prev.frontlineIngredients, newSauceIng),
+          cheeseIngredients: mergeInsensitive(prev.cheeseIngredients, newCheeseIng),
+          pepTypes: mergeInsensitive(prev.pepTypes, newPepTypes),
+          dieTypes: mergeInsensitive(prev.dieTypes, newDieTypes),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   const renameListItem = useCallback(
     (list: MasterListKey, oldName: string, newName: string) => {
       const n = newName.trim();
@@ -2725,6 +2854,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         saveRecipePreset,
         deleteRecipePreset,
         renameRecipePreset,
+        applySpecImport,
         mixRecipePresets: appState.mixRecipePresets,
         renameListItem,
         renameBrand,

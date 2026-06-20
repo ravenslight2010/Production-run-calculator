@@ -179,6 +179,9 @@ importers:
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../../lib/spec-import
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -432,6 +435,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../../lib/spec-import
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -664,6 +670,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../../lib/spec-import
       expo-file-system:
         specifier: ~19.0.23
         version: 19.0.23(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
@@ -893,6 +902,8 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.1.0
+
+  lib/spec-import: {}
 
   scripts:
     devDependencies:
@@ -7195,7 +7206,7 @@ packages:
     hasBin: true
 
   xlsx@https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz:
-    resolution: {tarball: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz}
+    resolution: {integrity: sha512-oLDq3jw7AcLqKWH2AhCpVTZl8mf6X2YReP+Neh0SJUzV/BdZYjth94tG5toiMB1PPrYtxOCfaoUCkvtuH+3AJA==, tarball: https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz}
     version: 0.20.3
     engines: {node: '>=0.8'}
     hasBin: true

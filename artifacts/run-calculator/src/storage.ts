@@ -70,6 +70,11 @@ import {
   CHEESE_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
+import type {
+  ParsedSpecImport,
+  ParsedRecipe,
+  SpecImportAlias,
+} from "@workspace/spec-import";
 
 export function loadList(key: string, fallback: string[]): string[] {
   try {
@@ -958,3 +963,204 @@ export function applyCheeseSpecsSeedIfNeeded(): void {
     localStorage.setItem(CHEESE_SPECS_SEED_KEY, "1");
   } catch {}
 }
+
+// ── Excel spec-sheet importer (user-facing) ──────────────────────────────────
+//
+// These power the user-facing Excel importer (web header menu → Import Spec
+// Sheet). The pure logic — canonicalization, alias collection, new-vs-updated
+// summary, prompt shaping — lives in @workspace/spec-import; this is the thin
+// platform glue that reads the known canonical lists and writes profiles +
+// recipe presets to localStorage. Apply semantics (per product): overwrite
+// existing brand/flavor profiles + recipes and add brand-new ones automatically.
+// Mirrors the mobile glue in artifacts/run-calculator-mobile/context (parity).
+
+/** All known canonical name lists, supplied to ground the AI parse + fuzzy match. */
+export function loadSpecImportKnown(): {
+  brands: string[];
+  flavorsByBrand: Record<string, string[]>;
+  appTypes: string[];
+  pepTypes: string[];
+  cheeseIngredients: string[];
+  doughIngredients: string[];
+  sauceIngredients: string[];
+  dieTypes: string[];
+} {
+  return {
+    brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
+    flavorsByBrand: loadBrandFlavors(),
+    appTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
+    pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES)
+      .map(t => PEP_TYPE_RENAMES[t] ?? t)
+      .filter(t => !RETIRED_PEP_TYPES.includes(t)),
+    cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
+    doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
+    sauceIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+    dieTypes: [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])],
+  };
+}
+
+/** True when a brand+flavor already has a stored profile with real data. */
+export function profileExistsForImport(brand: string, flavor: string): boolean {
+  return profileHasRealData(brand, flavor);
+}
+
+function recipePresetMapForKind(kind: ParsedRecipe["kind"]): Record<string, RecipeRow[]> {
+  if (kind === "dough") {
+    const presets = loadDoughRecipePresets();
+    const out: Record<string, RecipeRow[]> = {};
+    for (const [name, p] of Object.entries(presets)) out[name] = p.rows;
+    return out;
+  }
+  if (kind === "sauce") return loadFrontlineRecipePresets();
+  return loadCheeseRecipePresets();
+}
+
+/** True when a dough/sauce/cheese recipe already exists in the library by name. */
+export function recipeExistsForImport(kind: ParsedRecipe["kind"], name: string): boolean {
+  const map = recipePresetMapForKind(kind);
+  const lower = name.trim().toLowerCase();
+  return Object.keys(map).some(k => k.trim().toLowerCase() === lower);
+}
+
+function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaults: string[] } {
+  if (kind === "dough") return { key: DOUGH_INGREDIENTS_KEY, defaults: DEFAULT_DOUGH_INGREDIENTS };
+  if (kind === "sauce") return { key: FRONTLINE_INGREDIENTS_KEY, defaults: DEFAULT_FRONTLINE_INGREDIENTS };
+  return { key: CHEESE_INGREDIENTS_KEY, defaults: DEFAULT_CHEESE_INGREDIENTS };
+}
+
+/**
+ * Apply a (already-canonicalized) parsed spec-sheet import to local storage.
+ * Profiles and recipes overwrite existing entries of the same brand+flavor /
+ * name and add new ones; option lists are additively merged so every new
+ * brand/flavor/type/ingredient/recipe name becomes selectable. Best-effort and
+ * fail-safe: a malformed entry is skipped rather than aborting the whole import.
+ */
+export function applySpecImport(parsed: ParsedSpecImport): void {
+  if (typeof localStorage === "undefined") return;
+
+  // ── Recipe libraries (overwrite by name + register names/ingredients) ──
+  const doughPresets = loadDoughRecipePresets();
+  const saucePresets = loadFrontlineRecipePresets();
+  const cheesePresets = loadCheeseRecipePresets();
+  const newDoughIng: string[] = [];
+  const newSauceIng: string[] = [];
+  const newCheeseIng: string[] = [];
+  const newDoughNames: string[] = [];
+  const newSauceNames: string[] = [];
+  const newCheeseNames: string[] = [];
+
+  for (const r of parsed.recipes) {
+    const name = r.name.trim();
+    if (!name || r.rows.length === 0) continue;
+    const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
+    if (r.kind === "dough") {
+      doughPresets[name] = { rows };
+      newDoughNames.push(name);
+      newDoughIng.push(...rows.map(x => x.ingredient));
+    } else if (r.kind === "sauce") {
+      saucePresets[name] = rows;
+      newSauceNames.push(name);
+      newSauceIng.push(...rows.map(x => x.ingredient));
+    } else {
+      cheesePresets[name] = rows;
+      newCheeseNames.push(name);
+      newCheeseIng.push(...rows.map(x => x.ingredient));
+    }
+  }
+
+  saveDoughRecipePresets(doughPresets);
+  saveFrontlineRecipePresets(saucePresets);
+  saveCheeseRecipePresets(cheesePresets);
+
+  if (newDoughNames.length) {
+    saveList(DOUGH_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES), newDoughNames).sort((a, b) => a.localeCompare(b)));
+    saveList(ingredientKeyForKind("dough").key, mergeListInsensitive(loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS), newDoughIng).sort((a, b) => a.localeCompare(b)));
+  }
+  if (newSauceNames.length) {
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES), newSauceNames).sort((a, b) => a.localeCompare(b)));
+    saveList(ingredientKeyForKind("sauce").key, mergeListInsensitive(loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS), newSauceIng).sort((a, b) => a.localeCompare(b)));
+  }
+  if (newCheeseNames.length) {
+    saveList(CHEESE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(CHEESE_RECIPE_NAMES_KEY, []), newCheeseNames).sort((a, b) => a.localeCompare(b)));
+    saveList(ingredientKeyForKind("cheese").key, mergeListInsensitive(loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS), newCheeseIng).sort((a, b) => a.localeCompare(b)));
+  }
+
+  // ── Profiles (overwrite spec fields, preserve unrelated fields) ──
+  const bf = loadBrandFlavors();
+  const newBrands: string[] = [];
+  const newAppTypes: string[] = [];
+  const newPepTypes: string[] = [];
+
+  function registerBrandFlavor(brand: string, flavor: string): void {
+    if (!brand || !flavor) return;
+    newBrands.push(brand);
+    const list = bf[brand] ?? [];
+    if (!list.some(f => f.toLowerCase() === flavor.toLowerCase())) bf[brand] = [...list, flavor];
+  }
+
+  for (const p of parsed.profiles) {
+    const brand = p.brand.trim();
+    const flavor = p.flavor.trim();
+    if (!brand || !flavor) continue;
+    registerBrandFlavor(brand, flavor);
+    const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
+    if (p.dieType) values.dieType = p.dieType;
+    if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
+    p.applicators.slice(0, 4).forEach((a, i) => {
+      const slot = i + 1;
+      const type = a.type.trim();
+      if (!type) return;
+      (values as Record<string, unknown>)[`app${slot}Type`] = type;
+      (values as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
+      newAppTypes.push(type);
+    });
+    p.pepperonis.slice(0, 2).forEach((pp, i) => {
+      const slot = i + 1;
+      const type = pp.type.trim();
+      if (!type) return;
+      (values as Record<string, unknown>)[`pep${slot}Type`] = type;
+      (values as Record<string, unknown>)[`pep${slot}Sticks`] = pp.sticks;
+      (values as Record<string, unknown>)[`pep${slot}OzPerPizza`] = pp.ozPerPizza;
+      newPepTypes.push(type);
+    });
+    saveProfile(brand, flavor, values);
+  }
+
+  // ── Tie recipes that name a brand+flavor onto their profiles ──
+  for (const r of parsed.recipes) {
+    const brand = (r.brand ?? "").trim();
+    const flavor = (r.flavor ?? "").trim();
+    if (!brand || !flavor) continue;
+    registerBrandFlavor(brand, flavor);
+    const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
+    const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
+    if (r.kind === "dough") {
+      values.doughRecipeName = r.name;
+      values.doughRecipe = rows;
+      if (r.doughballOz != null) values.targetDoughballWeight = r.doughballOz;
+    } else if (r.kind === "sauce") {
+      values.frontlineRecipeName = r.name;
+      values.frontlineRecipe = rows;
+    } else {
+      const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
+      (values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
+      (values as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+    }
+    saveProfile(brand, flavor, values);
+  }
+
+  // ── Register brands/flavors + new option-list entries ──
+  if (newBrands.length) {
+    saveList(BRANDS_KEY, mergeListInsensitive(loadList(BRANDS_KEY, []), newBrands).sort((a, b) => a.localeCompare(b)));
+    saveBrandFlavors(bf);
+  }
+  if (newAppTypes.length) {
+    saveList(INGREDIENT_TYPES_KEY, mergeListInsensitive(loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES), newAppTypes).sort((a, b) => a.localeCompare(b)));
+  }
+  if (newPepTypes.length) {
+    saveList(PEP_TYPES_KEY, mergeListInsensitive(loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES), newPepTypes));
+  }
+}
+
+/** Re-export so the importer glue can pass the alias type through to clients. */
+export type { SpecImportAlias };

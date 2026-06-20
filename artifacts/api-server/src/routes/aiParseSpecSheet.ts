@@ -1,0 +1,129 @@
+import { AiParseSpecSheetBody } from "@workspace/api-zod";
+import { sanitizeParsedSpecImport, type ParsedSpecImport } from "@workspace/spec-import";
+import * as z from "zod";
+
+// Bounds so a single request can't blow up cost/latency. Mirrors the photo /
+// optimize / fill-missing / match-import endpoint guards.
+export const MAX_WORKBOOK_CHARS = 60_000;
+export const MAX_KNOWN_LIST = 4000;
+export const MAX_ALIASES = 4000;
+
+export type ParseSpecSheetInput = z.infer<typeof AiParseSpecSheetBody>;
+
+export type ParseSpecSheetValidationResult =
+  | { ok: true; data: ParseSpecSheetInput }
+  | { ok: false; status: number; error: string };
+
+// Validate and bound-check the request body for POST /ai/parse-spec-sheet.
+export function validateParseSpecSheetBody(body: unknown): ParseSpecSheetValidationResult {
+  const parsed = AiParseSpecSheetBody.safeParse(body);
+  if (!parsed.success) {
+    return { ok: false, status: 400, error: parsed.error.message };
+  }
+  const data = parsed.data;
+  const text = (data.workbookText ?? "").trim();
+  if (!text) {
+    return { ok: false, status: 400, error: "Empty workbook" };
+  }
+  if (text.length > MAX_WORKBOOK_CHARS) {
+    return { ok: false, status: 400, error: `Workbook too large (max ${MAX_WORKBOOK_CHARS} chars)` };
+  }
+  const known = data.known ?? {};
+  const knownTotal =
+    (known.brands?.length ?? 0) +
+    Object.values(known.flavorsByBrand ?? {}).reduce((a, l) => a + (l?.length ?? 0), 0) +
+    (known.appTypes?.length ?? 0) +
+    (known.pepTypes?.length ?? 0) +
+    (known.cheeseIngredients?.length ?? 0) +
+    (known.doughIngredients?.length ?? 0) +
+    (known.sauceIngredients?.length ?? 0) +
+    (known.dieTypes?.length ?? 0);
+  if (knownTotal > MAX_KNOWN_LIST) {
+    return { ok: false, status: 400, error: `Too many known names (max ${MAX_KNOWN_LIST})` };
+  }
+  if ((data.aliases?.length ?? 0) > MAX_ALIASES) {
+    return { ok: false, status: 400, error: `Too many aliases (max ${MAX_ALIASES})` };
+  }
+  return { ok: true, data };
+}
+
+// The model returns structured JSON but is not trustworthy — the lib's
+// sanitizer coerces/bounds/drops anything malformed and never throws.
+export function sanitizeParseSpecSheet(raw: unknown): ParsedSpecImport {
+  return sanitizeParsedSpecImport(raw);
+}
+
+// Shape the validated input into a compact, model-friendly prompt. Heavy shaping
+// lives server-side (contract-first design) so both clients stay thin/identical.
+export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
+  system: string;
+  user: string;
+} {
+  const system =
+    "You read a frozen-pizza factory's uploaded Excel workbook (flattened to " +
+    "tab-separated text) and extract two things: (1) SPEC PROFILES — one per " +
+    "brand+flavor — with the cheese/topping applicators (type + oz per pizza, up " +
+    "to 4), pepperonis (type + sticks + oz per pizza, up to 2), the die type, and " +
+    "the sauce oz per pizza; and (2) RECIPES — dough, sauce, and cheese ingredient " +
+    "lists (each row an ingredient name + pounds). Spreadsheets are messy: merged " +
+    "headers, abbreviations, varied layouts, blanks. Infer the structure. When a " +
+    "name closely matches one of the provided KNOWN canonical names, RETURN THE " +
+    "KNOWN NAME VERBATIM (so existing profiles/recipes are updated, not " +
+    "duplicated); otherwise return the workbook's name as-is (a new one will be " +
+    "created). Use the provided ALIASES as authoritative label→canonical mappings. " +
+    "Never invent data that is not in the workbook. Omit fields you cannot find. " +
+    "This is read-only; the user reviews a summary before anything is saved.";
+
+  const known = input.known ?? {};
+  const lines: string[] = [];
+  const list = (label: string, items?: string[]) => {
+    lines.push(`${label}: ${items && items.length ? items.join(", ") : "(none)"}`);
+  };
+  lines.push("KNOWN CANONICAL NAMES (reuse verbatim when the workbook clearly means one):");
+  list("Brands", known.brands);
+  const flavorLines = Object.entries(known.flavorsByBrand ?? {})
+    .filter(([, f]) => (f?.length ?? 0) > 0)
+    .map(([brand, f]) => `  - ${brand}: ${f.join(", ")}`);
+  lines.push("Flavors by brand:");
+  lines.push(flavorLines.length ? flavorLines.join("\n") : "  (none)");
+  list("Applicator types", known.appTypes);
+  list("Pepperoni types", known.pepTypes);
+  list("Cheese ingredients", known.cheeseIngredients);
+  list("Dough ingredients", known.doughIngredients);
+  list("Sauce ingredients", known.sauceIngredients);
+  list("Die types", known.dieTypes);
+
+  if (input.aliases && input.aliases.length) {
+    lines.push("");
+    lines.push("KNOWN ALIASES (apply these label→canonical mappings):");
+    lines.push(
+      input.aliases
+        .map(
+          (a) =>
+            `  - [${a.kind}] "${a.externalName}" => "${a.canonicalName}"` +
+            (a.context ? ` (within ${a.context})` : ""),
+        )
+        .join("\n"),
+    );
+  }
+
+  lines.push("");
+  lines.push("WORKBOOK:");
+  lines.push(input.workbookText);
+
+  lines.push("");
+  lines.push(
+    "Return ONLY JSON of the exact shape: " +
+      '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
+      '"sauceOzPerPizza":number,"applicators":[{"type":string,"ozPerPizza":number}],' +
+      '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
+      '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
+      '"flavor":string,"doughballOz":number,"app":number,' +
+      '"rows":[{"ingredient":string,"lbs":number}]}],"note":string}. ' +
+      "Omit any field or row you cannot determine. For cheese recipes, set \"app\" to the " +
+      "applicator slot number (1-4) it belongs to when discernible. Use \"note\" only for a " +
+      "brief overall comment (e.g. what you could not parse).",
+  );
+
+  return { system, user: lines.join("\n") };
+}

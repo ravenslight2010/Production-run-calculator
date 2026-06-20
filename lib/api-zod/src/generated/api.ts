@@ -618,6 +618,100 @@ export const AiMatchImportResponse = zod.object({
 
 
 /**
+ * Given the flattened text of an uploaded .xlsx workbook plus the app's known canonical lists (brands, flavors, applicator/pepperoni types, recipe ingredients) and learned aliases, returns structured spec profiles and dough/sauce/cheese recipes. Read-only — never writes anything; the client canonicalizes names and applies the import.
+ * @summary Interpret an uploaded Excel spec sheet / recipe workbook (AI)
+ */
+export const AiParseSpecSheetBody = zod.object({
+  "workbookText": zod.string().describe('The flattened, bounded text of the uploaded workbook'),
+  "known": zod.object({
+  "brands": zod.array(zod.string()).optional(),
+  "flavorsByBrand": zod.record(zod.string(), zod.array(zod.string())).optional(),
+  "appTypes": zod.array(zod.string()).optional(),
+  "pepTypes": zod.array(zod.string()).optional(),
+  "cheeseIngredients": zod.array(zod.string()).optional(),
+  "doughIngredients": zod.array(zod.string()).optional(),
+  "sauceIngredients": zod.array(zod.string()).optional(),
+  "dieTypes": zod.array(zod.string()).optional()
+}).optional().describe('The app\'s known canonical lists, supplied to ground the AI parse.'),
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).optional().describe('Learned spec-import aliases to ground name mapping')
+})
+
+export const AiParseSpecSheetResponse = zod.object({
+  "profiles": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().optional(),
+  "sauceOzPerPizza": zod.number().optional(),
+  "applicators": zod.array(zod.object({
+  "type": zod.string(),
+  "ozPerPizza": zod.number()
+})),
+  "pepperonis": zod.array(zod.object({
+  "type": zod.string(),
+  "sticks": zod.number(),
+  "ozPerPizza": zod.number()
+}))
+})),
+  "recipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "doughballOz": zod.number().optional(),
+  "app": zod.number().optional(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+})),
+  "note": zod.string().optional(),
+  "generatedAt": zod.number()
+})
+
+
+/**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
+export const ListSpecImportAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
+})
+
+
+/**
+ * Persists a batch of label mappings resolved during a spec-sheet import. Existing aliases (matched case-insensitively on kind + externalName + context) are updated; new ones are inserted. Available to any signed-in user (operators included).
+ * @summary Save learned spec-import aliases (case-insensitive upsert)
+ */
+export const SaveSpecImportAliasesBody = zod.object({
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.')).describe('The batch of spec-import aliases to upsert')
+})
+
+export const SaveSpecImportAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient']).describe('Which name-space the mapping lives in'),
+  "externalName": zod.string().describe('The raw spreadsheet label (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
+  "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
+}).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
+})
+
+
+/**
  * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
  * @summary List learned import aliases (brand/flavor name mappings)
  */

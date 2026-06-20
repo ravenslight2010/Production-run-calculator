@@ -47,6 +47,7 @@
 - [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.
 - [Run-calc parity test](run-calc-parity-test.md) — web computeCalc is inline (not importable); parity guard uses web computeSummaryStats vs mobile computeCalc on a coinciding basis; mobile loaded via strip-imports harness.
 - [Orval query coerce quirk](orval-query-coerce-quirk.md) — generated *QueryParams use zod.coerce.string(), so a MISSING required param becomes "undefined" and never 400s; guard presence explicitly in the route.
+- [Spec-sheet Excel importer](spec-import.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool (not cheese); mobile profileExists must mirror web profileObjHasRealData; web+mobile parity.
 - [Learned-memory pattern](learned-memory-pattern.md) — server-persisted "remember user corrections" for AI features (import/fill-missing/photo): requireAuth-only, ci-upsert, pure tested matcher w/ existence guard, best-effort, web+mobile.
 - [Learned import aliases](learned-import-aliases.md) — confirmed Excel-import brand/flavor matches persisted server-side, auto-applied next time; priority alias>AI>fuzzy; apply only if target still exists.
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.

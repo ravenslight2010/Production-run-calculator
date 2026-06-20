@@ -1,0 +1,38 @@
+// Learned spec-sheet-import aliases — web platform glue.
+//
+// When the Excel spec-sheet importer resolves a messy spreadsheet label to a
+// saved canonical name (brand, flavor, applicator/pepperoni type, or a recipe
+// ingredient), that mapping is persisted server-side (factory-wide, shared
+// across all signed-in users). Future imports fetch these and auto-apply
+// remembered matches BEFORE falling back to AI/fuzzy matching — no AI call
+// needed, and it works for operators too (the endpoint is requireAuth, not
+// manager-gated).
+//
+// Best-effort: on any failure (sync disabled, network) the importer silently
+// proceeds without learned aliases. Mirrors the mobile glue in
+// artifacts/run-calculator-mobile/context/specImportAliases.ts (replit.md parity).
+
+import type { SpecImportAlias } from "@workspace/spec-import";
+import { inventoryClientId } from "./inventoryShared";
+
+export async function fetchSpecImportAliases(): Promise<SpecImportAlias[]> {
+  const res = await fetch("/api/spec-import-aliases", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`List spec-import aliases failed (${res.status})`);
+  const data = (await res.json()) as { aliases: SpecImportAlias[] };
+  return data.aliases ?? [];
+}
+
+export async function saveSpecImportAliases(aliases: SpecImportAlias[]): Promise<void> {
+  if (aliases.length === 0) return;
+  const res = await fetch("/api/spec-import-aliases", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ aliases }),
+  });
+  if (!res.ok) throw new Error(`Save spec-import aliases failed (${res.status})`);
+}

@@ -22,6 +22,8 @@ tags:
     description: AI assistant (optimization recommendations)
   - name: incidents
     description: Issue reports, crash capture, and AI diagnosis
+  - name: specImport
+    description: Learned spec-sheet / recipe import aliases
 paths:
   /healthz:
     get:
@@ -639,6 +641,78 @@ paths:
           description: Invalid input
         "502":
           description: AI provider error
+
+  /ai/parse-spec-sheet:
+    post:
+      operationId: aiParseSpecSheet
+      tags: [ai]
+      summary: Interpret an uploaded Excel spec sheet / recipe workbook (AI)
+      description: >-
+        Given the flattened text of an uploaded .xlsx workbook plus the app's
+        known canonical lists (brands, flavors, applicator/pepperoni types,
+        recipe ingredients) and learned aliases, returns structured spec
+        profiles and dough/sauce/cheese recipes. Read-only — never writes
+        anything; the client canonicalizes names and applies the import.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParseSpecSheetInput"
+      responses:
+        "200":
+          description: Structured spec profiles + recipes (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseSpecSheetResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
+  /spec-import-aliases:
+    get:
+      operationId: listSpecImportAliases
+      tags: [specImport]
+      summary: List learned spec-import aliases (messy label -> canonical name)
+      description: >-
+        Returns every learned spec-import alias — a saved mapping from a raw
+        spreadsheet label to the app's canonical name it resolves to, across all
+        name-kinds (brand, flavor, applicator type, pepperoni type, recipe
+        ingredients). Clients supply these to the AI parser and apply them
+        deterministically. Available to any signed-in user (operators included).
+      responses:
+        "200":
+          description: All learned spec-import aliases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecImportAliasList"
+    post:
+      operationId: saveSpecImportAliases
+      tags: [specImport]
+      summary: Save learned spec-import aliases (case-insensitive upsert)
+      description: >-
+        Persists a batch of label mappings resolved during a spec-sheet import.
+        Existing aliases (matched case-insensitively on kind + externalName +
+        context) are updated; new ones are inserted. Available to any signed-in
+        user (operators included).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveSpecImportAliasesInput"
+      responses:
+        "200":
+          description: The full updated alias list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecImportAliasList"
+        "400":
+          description: Invalid input
 
   /import-aliases:
     get:
@@ -2136,6 +2210,213 @@ components:
           description: The batch of photo aliases to upsert (confirmed during intake)
           items:
             $ref: "#/components/schemas/PhotoAlias"
+
+    SpecImportAlias:
+      type: object
+      description: A learned mapping from a raw spreadsheet label to a canonical app name.
+      required:
+        - kind
+        - externalName
+        - canonicalName
+      properties:
+        kind:
+          type: string
+          enum: [brand, flavor, appType, pepType, cheeseIngredient, doughIngredient, sauceIngredient]
+          description: Which name-space the mapping lives in
+        externalName:
+          type: string
+          description: The raw spreadsheet label (matched case-insensitively)
+        canonicalName:
+          type: string
+          description: The saved canonical name the label resolves to
+        context:
+          type: string
+          nullable: true
+          description: >-
+            Disambiguator within a kind (e.g. the canonical brand for a flavor
+            alias); null/omitted otherwise.
+
+    SpecImportAliasList:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportAlias"
+
+    SaveSpecImportAliasesInput:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: The batch of spec-import aliases to upsert
+          items:
+            $ref: "#/components/schemas/SpecImportAlias"
+
+    ParseSpecSheetKnown:
+      type: object
+      description: The app's known canonical lists, supplied to ground the AI parse.
+      properties:
+        brands:
+          type: array
+          items:
+            type: string
+        flavorsByBrand:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        appTypes:
+          type: array
+          items:
+            type: string
+        pepTypes:
+          type: array
+          items:
+            type: string
+        cheeseIngredients:
+          type: array
+          items:
+            type: string
+        doughIngredients:
+          type: array
+          items:
+            type: string
+        sauceIngredients:
+          type: array
+          items:
+            type: string
+        dieTypes:
+          type: array
+          items:
+            type: string
+
+    ParseSpecSheetInput:
+      type: object
+      required:
+        - workbookText
+      properties:
+        workbookText:
+          type: string
+          description: The flattened, bounded text of the uploaded workbook
+        known:
+          $ref: "#/components/schemas/ParseSpecSheetKnown"
+        aliases:
+          type: array
+          description: Learned spec-import aliases to ground name mapping
+          items:
+            $ref: "#/components/schemas/SpecImportAlias"
+
+    SpecImportApplicator:
+      type: object
+      required:
+        - type
+        - ozPerPizza
+      properties:
+        type:
+          type: string
+        ozPerPizza:
+          type: number
+
+    SpecImportPepperoni:
+      type: object
+      required:
+        - type
+        - sticks
+        - ozPerPizza
+      properties:
+        type:
+          type: string
+        sticks:
+          type: number
+        ozPerPizza:
+          type: number
+
+    SpecImportProfile:
+      type: object
+      required:
+        - brand
+        - flavor
+        - applicators
+        - pepperonis
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        sauceOzPerPizza:
+          type: number
+        applicators:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportApplicator"
+        pepperonis:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportPepperoni"
+
+    SpecImportRecipeRow:
+      type: object
+      required:
+        - ingredient
+        - lbs
+      properties:
+        ingredient:
+          type: string
+        lbs:
+          type: number
+
+    SpecImportRecipe:
+      type: object
+      required:
+        - kind
+        - name
+        - rows
+      properties:
+        kind:
+          type: string
+          enum: [dough, sauce, cheese]
+        name:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        doughballOz:
+          type: number
+        app:
+          type: number
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportRecipeRow"
+
+    ParseSpecSheetResult:
+      type: object
+      required:
+        - profiles
+        - recipes
+        - generatedAt
+      properties:
+        profiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportProfile"
+        recipes:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecImportRecipe"
+        note:
+          type: string
+        generatedAt:
+          type: number
 
     MatchImportResult:
       type: object

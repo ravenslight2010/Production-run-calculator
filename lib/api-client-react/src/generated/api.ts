@@ -50,6 +50,8 @@ import type {
   OkResponse,
   OptimizeInput,
   OptimizeResult,
+  ParseSpecSheetInput,
+  ParseSpecSheetResult,
   PasswordResetRequest,
   PhotoAliasList,
   ProductionRun,
@@ -61,6 +63,8 @@ import type {
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
   SavePhotoAliasesInput,
+  SaveSpecImportAliasesInput,
+  SpecImportAliasList,
   StaffMember,
   StaffRoleUpdate,
   UnreviewedIncidentCount,
@@ -2202,6 +2206,228 @@ export const useAiMatchImport = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiMatchImportMutationOptions(options));
+    }
+
+export const getAiParseSpecSheetUrl = () => {
+
+
+
+
+  return `/api/ai/parse-spec-sheet`
+}
+
+/**
+ * Given the flattened text of an uploaded .xlsx workbook plus the app's known canonical lists (brands, flavors, applicator/pepperoni types, recipe ingredients) and learned aliases, returns structured spec profiles and dough/sauce/cheese recipes. Read-only — never writes anything; the client canonicalizes names and applies the import.
+ * @summary Interpret an uploaded Excel spec sheet / recipe workbook (AI)
+ */
+export const aiParseSpecSheet = async (parseSpecSheetInput: ParseSpecSheetInput, options?: RequestInit): Promise<ParseSpecSheetResult> => {
+
+  return customFetch<ParseSpecSheetResult>(getAiParseSpecSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      parseSpecSheetInput,)
+  }
+);}
+
+
+
+
+export const getAiParseSpecSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiParseSpecSheet>>, TError,{data: BodyType<ParseSpecSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiParseSpecSheet>>, TError,{data: BodyType<ParseSpecSheetInput>}, TContext> => {
+
+const mutationKey = ['aiParseSpecSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiParseSpecSheet>>, {data: BodyType<ParseSpecSheetInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiParseSpecSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiParseSpecSheetMutationResult = NonNullable<Awaited<ReturnType<typeof aiParseSpecSheet>>>
+    export type AiParseSpecSheetMutationBody = BodyType<ParseSpecSheetInput>
+    export type AiParseSpecSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Interpret an uploaded Excel spec sheet / recipe workbook (AI)
+ */
+export const useAiParseSpecSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiParseSpecSheet>>, TError,{data: BodyType<ParseSpecSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiParseSpecSheet>>,
+        TError,
+        {data: BodyType<ParseSpecSheetInput>},
+        TContext
+      > => {
+      return useMutation(getAiParseSpecSheetMutationOptions(options));
+    }
+
+export const getListSpecImportAliasesUrl = () => {
+
+
+
+
+  return `/api/spec-import-aliases`
+}
+
+/**
+ * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
+export const listSpecImportAliases = async ( options?: RequestInit): Promise<SpecImportAliasList> => {
+
+  return customFetch<SpecImportAliasList>(getListSpecImportAliasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSpecImportAliasesQueryKey = () => {
+    return [
+    `/api/spec-import-aliases`
+    ] as const;
+    }
+
+
+export const getListSpecImportAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSpecImportAliasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSpecImportAliases>>> = ({ signal }) => listSpecImportAliases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSpecImportAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof listSpecImportAliases>>>
+export type ListSpecImportAliasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned spec-import aliases (messy label -> canonical name)
+ */
+
+export function useListSpecImportAliases<TData = Awaited<ReturnType<typeof listSpecImportAliases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSpecImportAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSpecImportAliasesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveSpecImportAliasesUrl = () => {
+
+
+
+
+  return `/api/spec-import-aliases`
+}
+
+/**
+ * Persists a batch of label mappings resolved during a spec-sheet import. Existing aliases (matched case-insensitively on kind + externalName + context) are updated; new ones are inserted. Available to any signed-in user (operators included).
+ * @summary Save learned spec-import aliases (case-insensitive upsert)
+ */
+export const saveSpecImportAliases = async (saveSpecImportAliasesInput: SaveSpecImportAliasesInput, options?: RequestInit): Promise<SpecImportAliasList> => {
+
+  return customFetch<SpecImportAliasList>(getSaveSpecImportAliasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveSpecImportAliasesInput,)
+  }
+);}
+
+
+
+
+export const getSaveSpecImportAliasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSpecImportAliases>>, TError,{data: BodyType<SaveSpecImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveSpecImportAliases>>, TError,{data: BodyType<SaveSpecImportAliasesInput>}, TContext> => {
+
+const mutationKey = ['saveSpecImportAliases'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveSpecImportAliases>>, {data: BodyType<SaveSpecImportAliasesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveSpecImportAliases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveSpecImportAliasesMutationResult = NonNullable<Awaited<ReturnType<typeof saveSpecImportAliases>>>
+    export type SaveSpecImportAliasesMutationBody = BodyType<SaveSpecImportAliasesInput>
+    export type SaveSpecImportAliasesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned spec-import aliases (case-insensitive upsert)
+ */
+export const useSaveSpecImportAliases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSpecImportAliases>>, TError,{data: BodyType<SaveSpecImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveSpecImportAliases>>,
+        TError,
+        {data: BodyType<SaveSpecImportAliasesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveSpecImportAliasesMutationOptions(options));
     }
 
 export const getListImportAliasesUrl = () => {

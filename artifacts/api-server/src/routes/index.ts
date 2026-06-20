@@ -10,6 +10,7 @@ import incidentsRouter from "./incidents";
 import importAliasesRouter from "./importAliases";
 import fillMissingValuesRouter from "./fillMissingValues";
 import photoAliasesRouter from "./photoAliases";
+import specImportAliasesRouter from "./specImportAliases";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -33,5 +34,6 @@ router.use(incidentsRouter);
 router.use(importAliasesRouter);
 router.use(fillMissingValuesRouter);
 router.use(photoAliasesRouter);
+router.use(specImportAliasesRouter);
 
 export default router;

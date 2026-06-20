@@ -664,6 +664,120 @@ export interface SavePhotoAliasesInput {
   aliases: PhotoAlias[];
 }
 
+/**
+ * Which name-space the mapping lives in
+ */
+export type SpecImportAliasKind = typeof SpecImportAliasKind[keyof typeof SpecImportAliasKind];
+
+
+export const SpecImportAliasKind = {
+  brand: 'brand',
+  flavor: 'flavor',
+  appType: 'appType',
+  pepType: 'pepType',
+  cheeseIngredient: 'cheeseIngredient',
+  doughIngredient: 'doughIngredient',
+  sauceIngredient: 'sauceIngredient',
+} as const;
+
+/**
+ * A learned mapping from a raw spreadsheet label to a canonical app name.
+ */
+export interface SpecImportAlias {
+  /** Which name-space the mapping lives in */
+  kind: SpecImportAliasKind;
+  /** The raw spreadsheet label (matched case-insensitively) */
+  externalName: string;
+  /** The saved canonical name the label resolves to */
+  canonicalName: string;
+  /** Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null/omitted otherwise. */
+  context?: string | null;
+}
+
+export interface SpecImportAliasList {
+  aliases: SpecImportAlias[];
+}
+
+export interface SaveSpecImportAliasesInput {
+  /** The batch of spec-import aliases to upsert */
+  aliases: SpecImportAlias[];
+}
+
+export type ParseSpecSheetKnownFlavorsByBrand = {[key: string]: string[]};
+
+/**
+ * The app's known canonical lists, supplied to ground the AI parse.
+ */
+export interface ParseSpecSheetKnown {
+  brands?: string[];
+  flavorsByBrand?: ParseSpecSheetKnownFlavorsByBrand;
+  appTypes?: string[];
+  pepTypes?: string[];
+  cheeseIngredients?: string[];
+  doughIngredients?: string[];
+  sauceIngredients?: string[];
+  dieTypes?: string[];
+}
+
+export interface ParseSpecSheetInput {
+  /** The flattened, bounded text of the uploaded workbook */
+  workbookText: string;
+  known?: ParseSpecSheetKnown;
+  /** Learned spec-import aliases to ground name mapping */
+  aliases?: SpecImportAlias[];
+}
+
+export interface SpecImportApplicator {
+  type: string;
+  ozPerPizza: number;
+}
+
+export interface SpecImportPepperoni {
+  type: string;
+  sticks: number;
+  ozPerPizza: number;
+}
+
+export interface SpecImportProfile {
+  brand: string;
+  flavor: string;
+  dieType?: string;
+  sauceOzPerPizza?: number;
+  applicators: SpecImportApplicator[];
+  pepperonis: SpecImportPepperoni[];
+}
+
+export interface SpecImportRecipeRow {
+  ingredient: string;
+  lbs: number;
+}
+
+export type SpecImportRecipeKind = typeof SpecImportRecipeKind[keyof typeof SpecImportRecipeKind];
+
+
+export const SpecImportRecipeKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+} as const;
+
+export interface SpecImportRecipe {
+  kind: SpecImportRecipeKind;
+  name: string;
+  brand?: string;
+  flavor?: string;
+  doughballOz?: number;
+  app?: number;
+  rows: SpecImportRecipeRow[];
+}
+
+export interface ParseSpecSheetResult {
+  profiles: SpecImportProfile[];
+  recipes: SpecImportRecipe[];
+  note?: string;
+  generatedAt: number;
+}
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];

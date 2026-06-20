@@ -22,6 +22,9 @@
       "path": "./lib/inventory-math"
     },
     {
+      "path": "./lib/spec-import"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]
