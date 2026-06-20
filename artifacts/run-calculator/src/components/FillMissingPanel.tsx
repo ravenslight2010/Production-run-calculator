@@ -26,7 +26,13 @@ import {
   fetchFillMissingValues,
   saveFillMissingValues,
 } from "../fillMissing";
+import type { ReviewVerdict } from "@workspace/ai-review";
+import ReviewBadge from "./ReviewBadge";
 import { useMe } from "../useRole";
+
+// AI suggestions may carry an advisory reviewer verdict; the shared lib's
+// FieldProposal doesn't, so widen it locally for display.
+type ReviewedProposal = FieldProposal & { review?: ReviewVerdict };
 
 const CATEGORY_LABEL: Record<FieldCategory, string> = {
   identity: "Run Identity",
@@ -78,7 +84,7 @@ export default function FillMissingPanel({
   onCommit: (key: string, value: string | number) => void;
 }) {
   const { isManager } = useMe();
-  const [proposals, setProposals] = useState<FieldProposal[] | null>(null);
+  const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -130,7 +136,7 @@ export default function FillMissingPanel({
         (prev ?? []).map((p) => {
           const s = byKey.get(p.key);
           if (!s || p.source !== "none") return p;
-          return { ...p, value: s.value, source: "ai", rationale: s.rationale };
+          return { ...p, value: s.value, source: "ai", rationale: s.rationale, review: s.review };
         }),
       );
       setRows((prev) => {
@@ -281,6 +287,11 @@ export default function FillMissingPanel({
                       </div>
                       {p.rationale && (
                         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{p.rationale}</p>
+                      )}
+                      {p.source === "ai" && p.review && (
+                        <div className="mt-1">
+                          <ReviewBadge review={p.review} />
+                        </div>
                       )}
                       {!p.fillable ? (
                         <p className="mt-2 text-[11px] text-amber-400">

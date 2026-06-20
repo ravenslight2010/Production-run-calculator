@@ -7,6 +7,8 @@
  */
 
 export * from './adjustInput';
+export * from './aiCorrection';
+export * from './aiCorrectionList';
 export * from './approvePasswordResetResult';
 export * from './authCredentials';
 export * from './authResponse';
@@ -89,6 +91,9 @@ export * from './reportIncidentInputSource';
 export * from './resetPasswordRequest';
 export * from './resetStaffPassword';
 export * from './restockInput';
+export * from './reviewVerdict';
+export * from './reviewVerdictStatus';
+export * from './saveAiCorrectionsInput';
 export * from './saveFillMissingValuesInput';
 export * from './saveImportAliasesInput';
 export * from './saveMergeAliasesInput';

@@ -18,9 +18,13 @@ import {
   type MergeAlias,
   type MergeSuggestion,
 } from "@workspace/merge-suggest";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 
 export type { MergeAlias, MergeSuggestion };
+
+/** A merge suggestion plus its (optional) reviewer-AI verdict. */
+export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
 
 export async function fetchMergeAliases(): Promise<MergeAlias[]> {
   const res = await fetch("/api/merge-aliases", {
@@ -47,7 +51,7 @@ export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
 async function requestAiSuggestMerges(
   names: string[],
   aliases: MergeAlias[],
-): Promise<MergeSuggestion[]> {
+): Promise<ReviewedMergeSuggestion[]> {
   const res = await fetch("/api/ai/suggest-merges", {
     method: "POST",
     headers: {
@@ -63,12 +67,12 @@ async function requestAiSuggestMerges(
     } catch {}
     throw new Error(detail || `Suggest-merges request failed (${res.status})`);
   }
-  const data = (await res.json()) as { suggestions?: MergeSuggestion[] };
+  const data = (await res.json()) as { suggestions?: ReviewedMergeSuggestion[] };
   return data.suggestions ?? [];
 }
 
 export type MergeSuggestResult = {
-  suggestions: MergeSuggestion[];
+  suggestions: ReviewedMergeSuggestion[];
   /** True when the AI call succeeded; false when only remembered groups show. */
   usedAi: boolean;
   /** Set when the AI call failed (the remembered groups are still returned). */
@@ -91,7 +95,17 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
   const remembered = suggestionsFromAliases(names, aliases);
   try {
     const ai = await requestAiSuggestMerges(names, aliases);
-    return { suggestions: mergeSuggestionLists(remembered, ai), usedAi: true };
+    // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
+    // so re-attach each AI group's verdict to the merged result by target name.
+    const reviewByTarget = new Map<string, ReviewVerdict>();
+    for (const s of ai) {
+      if (s.review) reviewByTarget.set(s.target.trim().toLowerCase(), s.review);
+    }
+    const merged = mergeSuggestionLists(remembered, ai).map((s) => {
+      const review = reviewByTarget.get(s.target.trim().toLowerCase());
+      return review ? { ...s, review } : s;
+    });
+    return { suggestions: merged, usedAi: true };
   } catch (e) {
     return {
       suggestions: remembered,

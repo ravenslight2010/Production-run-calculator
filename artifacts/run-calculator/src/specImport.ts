@@ -31,6 +31,10 @@ import {
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import { requestParseSpecSheet } from "./parseSpecSheet";
+import { saveAiCorrections } from "./aiCorrections";
+import type { ReviewVerdict } from "@workspace/ai-review";
+
+export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
 
 export type SpecImportPrepared = {
   /** Canonicalized, ready-to-apply parse result. */
@@ -38,8 +42,19 @@ export type SpecImportPrepared = {
   summary: SpecImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
+  /** Reviewer-AI flags on parsed profiles/recipes (warn/reject only; advisory). */
+  flagged: SpecFlaggedItem[];
   note?: string;
 };
+
+// Map a learned spec-import alias kind to a shared-corrections domain.
+function aliasKindToDomain(kind: SpecAliasKind): string {
+  if (kind === "brand") return "brand";
+  if (kind === "flavor") return "flavor";
+  if (kind === "appType" || kind === "pepType") return "item";
+  // dough/sauce/cheese ingredient kinds
+  return "ingredient";
+}
 
 /** Read an .xlsx File/Blob into flat sheet grids (string cells). */
 export async function readWorkbookGrids(data: ArrayBuffer): Promise<SheetGrid[]> {
@@ -178,7 +193,21 @@ export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPr
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const newAliases = collectSpecAliases(resolved);
 
-  return { parsed, summary, newAliases, ...(parsed.note ? { note: parsed.note } : {}) };
+  // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
+  const flagged: SpecFlaggedItem[] = [];
+  for (const p of ai.profiles) {
+    if (p.review && p.review.status !== "ok") {
+      flagged.push({ label: `${p.brand} / ${p.flavor}`.trim(), review: p.review });
+    }
+  }
+  for (const r of ai.recipes) {
+    if (r.review && r.review.status !== "ok") {
+      const ctx = r.brand ? ` — ${r.brand}${r.flavor ? `/${r.flavor}` : ""}` : "";
+      flagged.push({ label: `${r.kind} recipe${ctx}`, review: r.review });
+    }
+  }
+
+  return { parsed, summary, newAliases, flagged, ...(parsed.note ? { note: parsed.note } : {}) };
 }
 
 /** Apply a prepared import: write profiles + recipes, then persist new aliases. */
@@ -190,5 +219,15 @@ export async function commitSpecImport(prepared: SpecImportPrepared): Promise<vo
     } catch {
       // Best-effort: the import already applied; learning is a bonus.
     }
+    // Mirror each learned name mapping into the factory-wide corrections pool
+    // (additive — alongside the spec-import aliases above) so every other
+    // name-resolving AI helper honors it too.
+    void saveAiCorrections(
+      prepared.newAliases.map((a) => ({
+        domain: aliasKindToDomain(a.kind),
+        fromText: a.externalName,
+        toText: a.canonicalName,
+      })),
+    );
   }
 }

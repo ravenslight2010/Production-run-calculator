@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 
 export interface MergeSuggestion {
   /** The recommended canonical name to keep */
@@ -13,4 +14,5 @@ export interface MergeSuggestion {
   sources: string[];
   /** Optional short rationale for the suggested grouping */
   reason?: string;
+  review?: ReviewVerdict;
 }

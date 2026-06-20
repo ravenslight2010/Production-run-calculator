@@ -9,6 +9,9 @@ import {
 } from "@/utils/runExcel";
 import { requestMatchImport } from "@/matchImport";
 import { fetchImportAliases, saveImportAliases } from "@/importAliases";
+import { saveAiCorrections } from "@/aiCorrections";
+import type { ReviewVerdict } from "@workspace/ai-review";
+import ReviewBadge from "./ReviewBadge";
 
 const SKIP = "";
 const CREATE = "__create__";
@@ -48,6 +51,11 @@ export default function ExcelImportDialog({
   // dialog still works without them via the Levenshtein fuzzy chips).
   const [aiBrandMatch, setAiBrandMatch] = useState<Record<string, string>>({});
   const [aiFlavorMatch, setAiFlavorMatch] = useState<Record<string, string>>({});
+  // Reviewer-AI verdicts for the AI-suggested matches (advisory; keyed like the
+  // match maps). Shown next to a row when the user's current choice is the AI
+  // value the reviewer flagged.
+  const [aiBrandReview, setAiBrandReview] = useState<Record<string, ReviewVerdict>>({});
+  const [aiFlavorReview, setAiFlavorReview] = useState<Record<string, ReviewVerdict>>({});
   const [aiLoading, setAiLoading] = useState(false);
   // Candidate keys already sent to the AI, so the brand->flavor cascade does not
   // refetch the same names repeatedly.
@@ -113,6 +121,8 @@ export default function ExcelImportDialog({
     aiRequestedFlavors.current = new Set();
     setAiBrandMatch({});
     setAiFlavorMatch({});
+    setAiBrandReview({});
+    setAiFlavorReview({});
     setAiLoading(false);
   }, [result]);
 
@@ -207,12 +217,24 @@ export default function ExcelImportDialog({
             for (const m of r.brandMatches) next[m.candidate.toLowerCase()] = m.match;
             return next;
           });
+          setAiBrandReview((p) => {
+            const next = { ...p };
+            for (const m of r.brandMatches) if (m.review) next[m.candidate.toLowerCase()] = m.review;
+            return next;
+          });
         }
         if (r.flavorMatches.length) {
           setAiFlavorMatch((p) => {
             const next = { ...p };
             for (const m of r.flavorMatches) {
               next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.match;
+            }
+            return next;
+          });
+          setAiFlavorReview((p) => {
+            const next = { ...p };
+            for (const m of r.flavorMatches) {
+              if (m.review) next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.review;
             }
             return next;
           });
@@ -370,7 +392,19 @@ export default function ExcelImportDialog({
       skip: SKIP,
       create: CREATE,
     });
-    if (aliases.length > 0) void saveImportAliases(aliases).catch(() => {});
+    if (aliases.length > 0) {
+      void saveImportAliases(aliases).catch(() => {});
+      // Also record each confirmed name fix in the factory-wide corrections pool
+      // (additive — alongside the import-specific aliases above) so every other
+      // name-resolving AI helper honors it too. Brand/flavor domains.
+      void saveAiCorrections(
+        aliases.map((a) => ({
+          domain: a.type,
+          fromText: a.externalName,
+          toText: a.canonicalName,
+        })),
+      );
+    }
     onConfirm(buildCommit());
   }
 
@@ -517,6 +551,9 @@ export default function ExcelImportDialog({
                           Skip
                         </button>
                       </div>
+                      {aiBrandReview[key] && cur === aiBrandMatch[key] && (
+                        <ReviewBadge review={aiBrandReview[key]} className="mt-2" />
+                      )}
                     </div>
                   );
                 })}
@@ -570,6 +607,9 @@ export default function ExcelImportDialog({
                           Skip
                         </button>
                       </div>
+                      {aiFlavorReview[f.key] && cur === aiFlavorMatch[f.key] && (
+                        <ReviewBadge review={aiFlavorReview[f.key]} className="mt-2" />
+                      )}
                     </div>
                   );
                 })}

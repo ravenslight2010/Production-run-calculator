@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 
 export interface MatchImportFlavorMatch {
   /** The saved brand the flavor belongs to */
@@ -13,4 +14,5 @@ export interface MatchImportFlavorMatch {
   candidate: string;
   /** The saved flavor it best matches (always within that brand) */
   match: string;
+  review?: ReviewVerdict;
 }

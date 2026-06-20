@@ -123,7 +123,9 @@ import {
   type MergeMap,
 } from "../mergeIngredients";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
-import { suggestMerges, saveMergeAliases } from "../mergeSuggest";
+import { suggestMerges, saveMergeAliases, type ReviewedMergeSuggestion } from "../mergeSuggest";
+import { saveAiCorrections } from "../aiCorrections";
+import ReviewBadge from "../components/ReviewBadge";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1969,7 +1971,7 @@ export default function Home() {
   const [mergeError, setMergeError] = useState("");
   // AI + learned-memory merge suggestions (groups of duplicates, each with a
   // recommended canonical name). Reviewed before applying — merge is destructive.
-  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
+  const [mergeSuggestions, setMergeSuggestions] = useState<ReviewedMergeSuggestion[]>([]);
   const [mergeSuggestBusy, setMergeSuggestBusy] = useState(false);
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
@@ -2181,6 +2183,13 @@ export default function Home() {
       } catch {
         // Non-fatal: the merge itself already succeeded; learning is additive.
       }
+      // Also record each confirmed source→target as a factory-wide correction
+      // (ingredient domain) so every other name-resolving AI helper honors it.
+      void saveAiCorrections(
+        srcs
+          .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
+          .map((src) => ({ domain: "ingredient", fromText: src, toText: tgt })),
+      );
       window.location.reload();
     } catch (e) {
       setMergeBusy(false);
@@ -5535,6 +5544,7 @@ export default function Home() {
                                   {s.reason && (
                                     <p className="text-[11px] text-muted-foreground">{s.reason}</p>
                                   )}
+                                  {s.review && <ReviewBadge review={s.review} />}
                                   <div className="flex items-center gap-2 pt-0.5">
                                     <button
                                       type="button"

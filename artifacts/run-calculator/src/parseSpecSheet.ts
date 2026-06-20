@@ -12,7 +12,13 @@
 // This module NEVER writes anything. Mirrors the mobile glue in
 // artifacts/run-calculator-mobile/context/parseSpecSheet.ts (replit.md parity).
 
-import type { ParsedSpecImport, SpecImportAlias } from "@workspace/spec-import";
+import type {
+  ParsedSpecImport,
+  ParsedProfile,
+  ParsedRecipe,
+  SpecImportAlias,
+} from "@workspace/spec-import";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 
 export type SpecSheetKnown = {
@@ -32,7 +38,14 @@ export type ParseSpecSheetInput = {
   aliases?: SpecImportAlias[];
 };
 
-export type ParseSpecSheetResult = ParsedSpecImport & { generatedAt: number };
+export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
+export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
+
+export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"> & {
+  profiles: ReviewedProfile[];
+  recipes: ReviewedRecipe[];
+  generatedAt: number;
+};
 
 export async function requestParseSpecSheet(
   input: ParseSpecSheetInput,

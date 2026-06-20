@@ -24,6 +24,7 @@ import {
   optimizeErrorMessage,
 } from "../aiOptimize";
 import { useMe } from "../useRole";
+import ReviewBadge from "./ReviewBadge";
 
 const CATEGORY_META: Record<
   OptimizeCategory,
@@ -99,6 +100,7 @@ function RecCard({
       {rec.appliesTo && (
         <p className="mt-1.5 text-[11px] font-medium text-primary/80">{rec.appliesTo}</p>
       )}
+      {rec.review && <ReviewBadge review={rec.review} className="mt-2" />}
       {rec.action && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <Button

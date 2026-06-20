@@ -57,6 +57,7 @@ import {
 } from "./mergeIngredients";
 import { collectMergeAliases } from "@workspace/merge-suggest";
 import { saveMergeAliases } from "./mergeSuggest";
+import { saveAiCorrections } from "./aiCorrections";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
@@ -2599,6 +2600,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       } catch {
         // ignore: learning is additive, the merge stands either way.
       }
+      // Also record each confirmed source→target as a factory-wide correction
+      // (ingredient domain) so every other name-resolving AI helper honors it.
+      void saveAiCorrections(
+        sources
+          .filter((src) => src.trim() && src.trim().toLowerCase() !== target.trim().toLowerCase())
+          .map((src) => ({ domain: "ingredient", fromText: src, toText: target })),
+      );
     },
     [persistNow],
   );

@@ -548,7 +548,11 @@ export const AiOptimizeResponse = zod.object({
   "runId": zod.string().optional().describe('Target run id (set_run_target, reorder_run)'),
   "casesNeeded": zod.number().optional().describe('New case target (set_run_target)'),
   "beforeRunId": zod.string().nullish().describe('reorder_run: move runId immediately before this run id, or null to move it last')
-}).describe('Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today\'s run ids.'),zod.null()]).optional().describe('Optional one-tap action, or null when nothing is safely applicable')
+}).describe('Optional one-tap action a manager can apply from a recommendation. Advisory until explicitly tapped; each kind maps to an existing client mutation. Run-targeted kinds reference today\'s run ids.'),zod.null()]).optional().describe('Optional one-tap action, or null when nothing is safely applicable'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Optional message when data is insufficient for analysis')
@@ -581,7 +585,11 @@ export const AiFillMissingResponse = zod.object({
   "suggestions": zod.array(zod.object({
   "key": zod.string().describe('The field key this suggestion is for (echoes a requested key)'),
   "value": zod.string().describe('Suggested value, as a string (numbers\/selects coerced client-side)'),
-  "rationale": zod.string().describe('Short plain-language reason for the suggested value')
+  "rationale": zod.string().describe('Short plain-language reason for the suggested value'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Optional message when no suggestions could be made')
@@ -605,12 +613,20 @@ export const AiMatchImportBody = zod.object({
 export const AiMatchImportResponse = zod.object({
   "brandMatches": zod.array(zod.object({
   "candidate": zod.string().describe('The imported brand name (echoes an unmatchedBrands entry)'),
-  "match": zod.string().describe('The saved brand it best matches (always one of brands)')
+  "match": zod.string().describe('The saved brand it best matches (always one of brands)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "flavorMatches": zod.array(zod.object({
   "brand": zod.string().describe('The saved brand the flavor belongs to'),
   "candidate": zod.string().describe('The imported flavor name (echoes an unmatchedFlavors entry)'),
-  "match": zod.string().describe('The saved flavor it best matches (always within that brand)')
+  "match": zod.string().describe('The saved flavor it best matches (always within that brand)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
@@ -655,7 +671,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "type": zod.string(),
   "sticks": zod.number(),
   "ozPerPizza": zod.number()
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "recipes": zod.array(zod.object({
   "kind": zod.enum(['dough', 'sauce', 'cheese']),
@@ -667,7 +687,11 @@ export const AiParseSpecSheetResponse = zod.object({
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
-}))
+})),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "note": zod.string().optional(),
   "generatedAt": zod.number()
@@ -690,7 +714,11 @@ export const AiSuggestMergesResponse = zod.object({
   "suggestions": zod.array(zod.object({
   "target": zod.string().describe('The recommended canonical name to keep'),
   "sources": zod.array(zod.string()).describe('The duplicate names to merge into the target'),
-  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping')
+  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
   "note": zod.string().optional().describe('Optional brief overall comment from the model')
@@ -725,6 +753,40 @@ export const SaveMergeAliasesResponse = zod.object({
   "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
 }).describe('A learned mapping from a merged-away ingredient name to the kept name.'))
+})
+
+
+/**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
+ * @summary List the shared factory-wide AI name corrections
+ */
+export const ListAiCorrectionsResponse = zod.object({
+  "corrections": zod.array(zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.'))
+})
+
+
+/**
+ * Persists a batch of confirmed name corrections recorded when staff apply a suggestion in any AI helper. Existing entries (matched case-insensitively on domain + fromText) are updated; new ones inserted. Additive — each helper keeps its own alias table too. Available to any signed-in user.
+ * @summary Save confirmed AI name corrections (case-insensitive upsert)
+ */
+export const SaveAiCorrectionsBody = zod.object({
+  "corrections": zod.array(zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.')).describe('The batch of confirmed corrections to upsert into the shared pool')
+})
+
+export const SaveAiCorrectionsResponse = zod.object({
+  "corrections": zod.array(zod.object({
+  "domain": zod.string().describe('What kind of name this is (ingredient, brand, flavor, die, item)'),
+  "fromText": zod.string().describe('The messy\/wrong name that was corrected (matched case-insensitively)'),
+  "toText": zod.string().describe('The canonical name it should be read as')
+}).describe('A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.'))
 })
 
 

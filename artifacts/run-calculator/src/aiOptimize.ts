@@ -1,3 +1,4 @@
+import type { ReviewVerdict } from "@workspace/ai-review";
 import type { FormValues, RunMeta, HistoryDay } from "./types";
 import { computeSummaryStats, runLabel } from "./utils";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
@@ -64,6 +65,8 @@ export type OptimizeRecommendation = {
   impact: OptimizeImpact;
   appliesTo: string | null;
   action?: OptimizeAction | null;
+  /** Reviewer-AI "second set of eyes" verdict (advisory; absent if unavailable). */
+  review?: ReviewVerdict;
 };
 
 export type OptimizeResult = {

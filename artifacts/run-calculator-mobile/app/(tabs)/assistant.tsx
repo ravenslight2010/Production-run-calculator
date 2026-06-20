@@ -3,6 +3,7 @@ import React from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card } from "@/components/UI";
+import ReviewBadge from "@/components/ReviewBadge";
 import { FONTS } from "@/constants/fonts";
 import { todayStr, useRun } from "@/context/RunContext";
 import {
@@ -94,6 +95,11 @@ function RecCard({
       <Text style={[styles.recDetail, { color: colors.mutedForeground }]}>{rec.detail}</Text>
       {rec.appliesTo ? (
         <Text style={[styles.recApplies, { color: colors.primary }]}>{rec.appliesTo}</Text>
+      ) : null}
+      {rec.review ? (
+        <View style={{ marginTop: 8 }}>
+          <ReviewBadge review={rec.review} />
+        </View>
       ) : null}
       {rec.action ? (
         <View style={styles.actionRow}>

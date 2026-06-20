@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 
 export interface FillMissingSuggestion {
   /** The field key this suggestion is for (echoes a requested key) */
@@ -13,4 +14,5 @@ export interface FillMissingSuggestion {
   value: string;
   /** Short plain-language reason for the suggested value */
   rationale: string;
+  review?: ReviewVerdict;
 }

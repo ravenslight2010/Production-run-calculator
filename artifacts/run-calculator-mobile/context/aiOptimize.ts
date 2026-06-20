@@ -7,6 +7,7 @@
 // through fetch (no cookie jar), exactly like context/inventoryShared.ts.
 
 import { getAuthToken } from "@workspace/api-client-react";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import {
   computeCalc,
   runLabel,
@@ -78,6 +79,7 @@ export type OptimizeRecommendation = {
   impact: OptimizeImpact;
   appliesTo: string | null;
   action?: OptimizeAction | null;
+  review?: ReviewVerdict;
 };
 
 export type OptimizeResult = {

@@ -1,5 +1,6 @@
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import type { SpecImportPrepared } from "@/specImport";
+import ReviewBadge from "./ReviewBadge";
 
 type Props = {
   open: boolean;
@@ -102,6 +103,21 @@ export default function SpecImportDialog({
                   {prepared.newAliases.length === 1 ? "" : "s"} will be remembered for
                   future imports.
                 </p>
+              )}
+
+              {prepared.flagged.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    A second AI check flagged {prepared.flagged.length} item
+                    {prepared.flagged.length === 1 ? "" : "s"} to double-check before applying:
+                  </p>
+                  {prepared.flagged.map((f, i) => (
+                    <div key={i} className="space-y-0.5">
+                      <p className="text-xs font-medium text-foreground">{f.label}</p>
+                      <ReviewBadge review={f.review} />
+                    </div>
+                  ))}
+                </div>
               )}
 
               {prepared.note && (

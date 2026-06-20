@@ -20,6 +20,9 @@ import {
 } from "@/utils/runExcel";
 import { requestMatchImport } from "@/context/matchImport";
 import { fetchImportAliases, saveImportAliases } from "@/context/importAliases";
+import { saveAiCorrections } from "@/context/aiCorrections";
+import type { ReviewVerdict } from "@workspace/ai-review";
+import ReviewBadge from "@/components/ReviewBadge";
 
 const SKIP = "";
 const CREATE = "__create__";
@@ -70,6 +73,10 @@ export default function ExcelImportModal({
   // modal still works without them via the Levenshtein fuzzy chips).
   const [aiBrandMatch, setAiBrandMatch] = React.useState<Record<string, string>>({});
   const [aiFlavorMatch, setAiFlavorMatch] = React.useState<Record<string, string>>({});
+  // Reviewer-AI verdicts keyed identically to the match maps; shown only when the
+  // current choice equals the AI-suggested value the reviewer flagged.
+  const [aiBrandReview, setAiBrandReview] = React.useState<Record<string, ReviewVerdict>>({});
+  const [aiFlavorReview, setAiFlavorReview] = React.useState<Record<string, ReviewVerdict>>({});
   const [aiLoading, setAiLoading] = React.useState(false);
   // Candidate keys already sent to the AI, so the brand->flavor cascade does not
   // refetch the same names repeatedly.
@@ -138,6 +145,8 @@ export default function ExcelImportModal({
     aiRequestedFlavors.current = new Set();
     setAiBrandMatch({});
     setAiFlavorMatch({});
+    setAiBrandReview({});
+    setAiFlavorReview({});
     setAiLoading(false);
   }, [result]);
 
@@ -232,12 +241,24 @@ export default function ExcelImportModal({
             for (const m of r.brandMatches) next[m.candidate.toLowerCase()] = m.match;
             return next;
           });
+          setAiBrandReview((p) => {
+            const next = { ...p };
+            for (const m of r.brandMatches) if (m.review) next[m.candidate.toLowerCase()] = m.review;
+            return next;
+          });
         }
         if (r.flavorMatches.length) {
           setAiFlavorMatch((p) => {
             const next = { ...p };
             for (const m of r.flavorMatches) {
               next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.match;
+            }
+            return next;
+          });
+          setAiFlavorReview((p) => {
+            const next = { ...p };
+            for (const m of r.flavorMatches) {
+              if (m.review) next[`${m.brand.toLowerCase()}|||${m.candidate.toLowerCase()}`] = m.review;
             }
             return next;
           });
@@ -414,7 +435,19 @@ export default function ExcelImportModal({
       skip: SKIP,
       create: CREATE,
     });
-    if (aliases.length > 0) void saveImportAliases(aliases).catch(() => {});
+    if (aliases.length > 0) {
+      void saveImportAliases(aliases).catch(() => {});
+      // Also record each confirmed name fix in the factory-wide corrections pool
+      // (additive — alongside the import-specific aliases above) so every other
+      // name-resolving AI helper honors it too. Brand/flavor domains.
+      void saveAiCorrections(
+        aliases.map((a) => ({
+          domain: a.type,
+          fromText: a.externalName,
+          toText: a.canonicalName,
+        })),
+      );
+    }
     onConfirm(buildCommit());
   }
 
@@ -568,6 +601,11 @@ export default function ExcelImportModal({
                           onPress={() => setBrandChoice((p) => ({ ...p, [key]: SKIP }))}
                         />
                       </View>
+                      {aiBrandReview[key] && cur === aiBrandMatch[key] ? (
+                        <View style={{ marginTop: 8 }}>
+                          <ReviewBadge review={aiBrandReview[key]} />
+                        </View>
+                      ) : null}
                     </View>
                   );
                 })}
@@ -620,6 +658,11 @@ export default function ExcelImportModal({
                           onPress={() => setFlavorChoice((p) => ({ ...p, [f.key]: SKIP }))}
                         />
                       </View>
+                      {aiFlavorReview[f.key] && cur === aiFlavorMatch[f.key] ? (
+                        <View style={{ marginTop: 8 }}>
+                          <ReviewBadge review={aiFlavorReview[f.key]} />
+                        </View>
+                      ) : null}
                     </View>
                   );
                 })}

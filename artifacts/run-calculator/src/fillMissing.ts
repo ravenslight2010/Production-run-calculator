@@ -12,10 +12,12 @@
 import type {
   FillMissingInput,
   FillMissingResult,
+  FillMissingSuggestion,
   KnownLookup,
   LearnedValueRow,
 } from "@workspace/fill-missing";
 import { pickLearnedForProduct } from "@workspace/fill-missing";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { SPEC_PROFILES } from "./specSeed";
 import { loadProfile } from "./storage";
 import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
@@ -52,7 +54,16 @@ export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<
   if (!res.ok) throw new Error(`Save fill-missing values failed (${res.status})`);
 }
 
-export async function requestFillMissing(input: FillMissingInput): Promise<FillMissingResult> {
+// The server attaches a reviewer-AI verdict to each suggestion (advisory). The
+// shared lib type doesn't carry it, so widen the result here for the UI.
+export type ReviewedFillMissingSuggestion = FillMissingSuggestion & { review?: ReviewVerdict };
+export type ReviewedFillMissingResult = Omit<FillMissingResult, "suggestions"> & {
+  suggestions: ReviewedFillMissingSuggestion[];
+};
+
+export async function requestFillMissing(
+  input: FillMissingInput,
+): Promise<ReviewedFillMissingResult> {
   const res = await fetch("/api/ai/fill-missing", {
     method: "POST",
     headers: {
@@ -79,7 +90,7 @@ export async function requestFillMissing(input: FillMissingInput): Promise<FillM
       serverMessage,
     );
   }
-  return (await res.json()) as FillMissingResult;
+  return (await res.json()) as ReviewedFillMissingResult;
 }
 
 export const fillMissingErrorMessage = photoErrorMessage;

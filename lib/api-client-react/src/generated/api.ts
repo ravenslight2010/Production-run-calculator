@@ -21,6 +21,7 @@ import type {
 
 import type {
   AdjustInput,
+  AiCorrectionList,
   ApprovePasswordResetResult,
   AuthCredentials,
   AuthResponse,
@@ -61,6 +62,7 @@ import type {
   ResetPasswordRequest,
   ResetStaffPassword,
   RestockInput,
+  SaveAiCorrectionsInput,
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
@@ -2504,6 +2506,156 @@ export const useSaveMergeAliases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveMergeAliasesMutationOptions(options));
+    }
+
+export const getListAiCorrectionsUrl = () => {
+
+
+
+
+  return `/api/ai-corrections`
+}
+
+/**
+ * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
+ * @summary List the shared factory-wide AI name corrections
+ */
+export const listAiCorrections = async ( options?: RequestInit): Promise<AiCorrectionList> => {
+
+  return customFetch<AiCorrectionList>(getListAiCorrectionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAiCorrectionsQueryKey = () => {
+    return [
+    `/api/ai-corrections`
+    ] as const;
+    }
+
+
+export const getListAiCorrectionsQueryOptions = <TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAiCorrectionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAiCorrections>>> = ({ signal }) => listAiCorrections({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAiCorrectionsQueryResult = NonNullable<Awaited<ReturnType<typeof listAiCorrections>>>
+export type ListAiCorrectionsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the shared factory-wide AI name corrections
+ */
+
+export function useListAiCorrections<TData = Awaited<ReturnType<typeof listAiCorrections>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAiCorrections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAiCorrectionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveAiCorrectionsUrl = () => {
+
+
+
+
+  return `/api/ai-corrections`
+}
+
+/**
+ * Persists a batch of confirmed name corrections recorded when staff apply a suggestion in any AI helper. Existing entries (matched case-insensitively on domain + fromText) are updated; new ones inserted. Additive — each helper keeps its own alias table too. Available to any signed-in user.
+ * @summary Save confirmed AI name corrections (case-insensitive upsert)
+ */
+export const saveAiCorrections = async (saveAiCorrectionsInput: SaveAiCorrectionsInput, options?: RequestInit): Promise<AiCorrectionList> => {
+
+  return customFetch<AiCorrectionList>(getSaveAiCorrectionsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveAiCorrectionsInput,)
+  }
+);}
+
+
+
+
+export const getSaveAiCorrectionsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveAiCorrections>>, TError,{data: BodyType<SaveAiCorrectionsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveAiCorrections>>, TError,{data: BodyType<SaveAiCorrectionsInput>}, TContext> => {
+
+const mutationKey = ['saveAiCorrections'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveAiCorrections>>, {data: BodyType<SaveAiCorrectionsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveAiCorrections(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveAiCorrectionsMutationResult = NonNullable<Awaited<ReturnType<typeof saveAiCorrections>>>
+    export type SaveAiCorrectionsMutationBody = BodyType<SaveAiCorrectionsInput>
+    export type SaveAiCorrectionsMutationError = ErrorType<void>
+
+    /**
+ * @summary Save confirmed AI name corrections (case-insensitive upsert)
+ */
+export const useSaveAiCorrections = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveAiCorrections>>, TError,{data: BodyType<SaveAiCorrectionsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveAiCorrections>>,
+        TError,
+        {data: BodyType<SaveAiCorrectionsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveAiCorrectionsMutationOptions(options));
     }
 
 export const getListSpecImportAliasesUrl = () => {

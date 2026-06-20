@@ -22,6 +22,12 @@ import {
   fetchFillMissingValues,
   saveFillMissingValues,
 } from "@/context/fillMissing";
+import type { ReviewVerdict } from "@workspace/ai-review";
+import ReviewBadge from "@/components/ReviewBadge";
+
+// AI suggestions may carry an advisory reviewer verdict; the shared lib's
+// proposal type is value-only, so widen locally to carry it through to the UI.
+type ReviewedProposal = FieldProposal & { review?: ReviewVerdict };
 
 const CATEGORY_LABEL: Record<FieldCategory, string> = {
   identity: "Run Identity",
@@ -57,7 +63,7 @@ export default function FillMissingPanel() {
   const colors = useColors();
   const { isManager } = useMe();
   const { run, brandProfiles, updateSettings } = useRun();
-  const [proposals, setProposals] = useState<FieldProposal[] | null>(null);
+  const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -138,7 +144,7 @@ export default function FillMissingPanel() {
         (prev ?? []).map((p) => {
           const sug = byKey.get(p.key);
           if (!sug || p.source !== "none") return p;
-          return { ...p, value: sug.value, source: "ai", rationale: sug.rationale };
+          return { ...p, value: sug.value, source: "ai", rationale: sug.rationale, review: sug.review };
         }),
       );
       setRows((prev) => {
@@ -305,6 +311,11 @@ export default function FillMissingPanel() {
                         </View>
                         {p.rationale ? (
                           <Text style={[styles.rationale, { color: colors.mutedForeground }]}>{p.rationale}</Text>
+                        ) : null}
+                        {p.source === "ai" && p.review ? (
+                          <View style={{ marginTop: 4 }}>
+                            <ReviewBadge review={p.review} />
+                          </View>
                         ) : null}
                         {!p.fillable ? (
                           <Text style={[styles.notFillable, { color: "#f59e0b" }]}>

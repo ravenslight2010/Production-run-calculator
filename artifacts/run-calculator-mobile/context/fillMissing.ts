@@ -13,10 +13,12 @@
 import type {
   FillMissingInput,
   FillMissingResult,
+  FillMissingSuggestion,
   KnownLookup,
   LearnedValueRow,
 } from "@workspace/fill-missing";
 import { pickLearnedForProduct } from "@workspace/fill-missing";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { getAuthToken } from "@workspace/api-client-react";
 import { SPEC_PROFILES } from "@/data/specSeed";
 import { profileKey, type RunProfile } from "./RunContext";
@@ -67,7 +69,16 @@ export async function saveFillMissingValues(values: LearnedValueRow[]): Promise<
   if (!res.ok) throw new Error(`Save fill-missing values failed (${res.status})`);
 }
 
-export async function requestFillMissing(input: FillMissingInput): Promise<FillMissingResult> {
+// The server attaches a reviewer-AI verdict to each suggestion (advisory). The
+// shared lib type doesn't carry it, so widen the result here for the UI.
+export type ReviewedFillMissingSuggestion = FillMissingSuggestion & { review?: ReviewVerdict };
+export type ReviewedFillMissingResult = Omit<FillMissingResult, "suggestions"> & {
+  suggestions: ReviewedFillMissingSuggestion[];
+};
+
+export async function requestFillMissing(
+  input: FillMissingInput,
+): Promise<ReviewedFillMissingResult> {
   const base = getApiBaseUrl();
   if (!base) throw new Error("No API base URL (sync disabled)");
   const clientId = await getOrCreateClientId();
@@ -99,7 +110,7 @@ export async function requestFillMissing(input: FillMissingInput): Promise<FillM
       serverMessage,
     );
   }
-  return (await res.json()) as FillMissingResult;
+  return (await res.json()) as ReviewedFillMissingResult;
 }
 
 export const fillMissingErrorMessage = photoErrorMessage;

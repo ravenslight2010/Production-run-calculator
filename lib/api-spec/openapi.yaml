@@ -743,6 +743,49 @@ paths:
         "400":
           description: Invalid input
 
+  /ai-corrections:
+    get:
+      operationId: listAiCorrections
+      tags: [aiCorrections]
+      summary: List the shared factory-wide AI name corrections
+      description: >-
+        Returns every confirmed name correction in the shared pool (domain-tagged
+        fromText -> toText), recorded whenever staff confirm a correction in any
+        AI helper. Clients supply these to the AI helpers to ground name
+        resolution. Available to any signed-in user.
+      responses:
+        "200":
+          description: All shared AI corrections
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiCorrectionList"
+    post:
+      operationId: saveAiCorrections
+      tags: [aiCorrections]
+      summary: Save confirmed AI name corrections (case-insensitive upsert)
+      description: >-
+        Persists a batch of confirmed name corrections recorded when staff apply
+        a suggestion in any AI helper. Existing entries (matched
+        case-insensitively on domain + fromText) are updated; new ones inserted.
+        Additive — each helper keeps its own alias table too. Available to any
+        signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveAiCorrectionsInput"
+      responses:
+        "200":
+          description: The full updated correction list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiCorrectionList"
+        "400":
+          description: Invalid input
+
   /spec-import-aliases:
     get:
       operationId: listSpecImportAliases
@@ -1966,6 +2009,8 @@ components:
             - $ref: "#/components/schemas/OptimizeAction"
             - type: "null"
           description: Optional one-tap action, or null when nothing is safely applicable
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     OptimizeResult:
       type: object
@@ -2067,6 +2112,8 @@ components:
         rationale:
           type: string
           description: Short plain-language reason for the suggested value
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     FillMissingResult:
       type: object
@@ -2141,6 +2188,8 @@ components:
         match:
           type: string
           description: The saved brand it best matches (always one of brands)
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     MatchImportFlavorMatch:
       type: object
@@ -2158,6 +2207,8 @@ components:
         match:
           type: string
           description: The saved flavor it best matches (always within that brand)
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     ImportAlias:
       type: object
@@ -2283,6 +2334,65 @@ components:
           items:
             $ref: "#/components/schemas/PhotoAlias"
 
+    ReviewVerdict:
+      type: object
+      description: >-
+        A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory
+        only — surfaced in the review UI, never blocks applying the suggestion.
+        Absent when the reviewer was unavailable (fail-safe).
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok, warn, reject]
+          description: ok = looks fine, warn = double-check, reject = likely wrong/unsafe
+        reason:
+          type: string
+          description: Short reason for a warn/reject verdict
+
+    AiCorrection:
+      type: object
+      description: >-
+        A factory-wide confirmed name correction: read fromText as toText. Tagged
+        by domain (ingredient, brand, flavor, die, item). Shared across every AI
+        helper so a fix learned once is honored everywhere.
+      required:
+        - domain
+        - fromText
+        - toText
+      properties:
+        domain:
+          type: string
+          description: What kind of name this is (ingredient, brand, flavor, die, item)
+        fromText:
+          type: string
+          description: The messy/wrong name that was corrected (matched case-insensitively)
+        toText:
+          type: string
+          description: The canonical name it should be read as
+
+    AiCorrectionList:
+      type: object
+      required:
+        - corrections
+      properties:
+        corrections:
+          type: array
+          items:
+            $ref: "#/components/schemas/AiCorrection"
+
+    SaveAiCorrectionsInput:
+      type: object
+      required:
+        - corrections
+      properties:
+        corrections:
+          type: array
+          description: The batch of confirmed corrections to upsert into the shared pool
+          items:
+            $ref: "#/components/schemas/AiCorrection"
+
     MergeAlias:
       type: object
       description: A learned mapping from a merged-away ingredient name to the kept name.
@@ -2351,6 +2461,8 @@ components:
         reason:
           type: string
           description: Optional short rationale for the suggested grouping
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     SuggestMergesResult:
       type: object
@@ -2519,6 +2631,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SpecImportPepperoni"
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     SpecImportRecipeRow:
       type: object
@@ -2555,6 +2669,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SpecImportRecipeRow"
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
 
     ParseSpecSheetResult:
       type: object

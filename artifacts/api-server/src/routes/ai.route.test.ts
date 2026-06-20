@@ -27,6 +27,12 @@ const mock = vi.hoisted(() => ({
   shouldThrow: false as boolean,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   lastMessages: undefined as any,
+  // The optimize route makes two model calls per request: the recommendations
+  // pass, then the advisory reviewer ("second set of eyes") pass. `lastMessages`
+  // captures the most recent (reviewer) prompt; `firstMessages` pins the first
+  // (recommendations) prompt so glue assertions can target it specifically.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  firstMessages: undefined as any,
   calls: 0,
 }));
 
@@ -38,6 +44,7 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
         create: async (args: any) => {
           mock.calls += 1;
           mock.lastMessages = args.messages;
+          if (mock.firstMessages === undefined) mock.firstMessages = args.messages;
           if (mock.shouldThrow) throw new Error("provider blew up");
           return { choices: [{ message: { content: mock.nextContent } }] };
         },
@@ -90,6 +97,7 @@ beforeEach(() => {
   mock.nextContent = JSON.stringify({ recommendations: [] });
   mock.shouldThrow = false;
   mock.lastMessages = undefined;
+  mock.firstMessages = undefined;
   mock.calls = 0;
 });
 
@@ -189,11 +197,13 @@ describe("POST /ai/optimize — happy path glue (build -> call -> sanitize)", ()
       generatedAt: number;
     };
 
-    // The model was called with the built prompt (system + user that includes
-    // the run id), proving build -> call wiring.
-    expect(mock.calls).toBe(1);
-    expect(mock.lastMessages?.[0]?.role).toBe("system");
-    expect(mock.lastMessages?.[1]?.content).toContain("id=run-1");
+    // Two model calls: the recommendations pass, then the advisory reviewer
+    // ("second set of eyes") pass over the sanitized recommendations.
+    expect(mock.calls).toBe(2);
+    // The first (recommendations) call got the built prompt (system + user that
+    // includes the run id), proving build -> call wiring.
+    expect(mock.firstMessages?.[0]?.role).toBe("system");
+    expect(mock.firstMessages?.[1]?.content).toContain("id=run-1");
 
     // Output is the SANITIZED shape (trimmed, impact mapped), not raw model JSON.
     expect(json.recommendations).toHaveLength(1);

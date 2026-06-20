@@ -11,6 +11,7 @@
 // artifacts/run-calculator/src/matchImport.ts (replit.md parity).
 
 import { getAuthToken } from "@workspace/api-client-react";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 
 export type MatchImportInput = {
@@ -20,9 +21,17 @@ export type MatchImportInput = {
   unmatchedFlavors: { brand: string; flavor: string }[];
 };
 
+export type BrandMatch = { candidate: string; match: string; review?: ReviewVerdict };
+export type FlavorMatch = {
+  brand: string;
+  candidate: string;
+  match: string;
+  review?: ReviewVerdict;
+};
+
 export type MatchImportResult = {
-  brandMatches: { candidate: string; match: string }[];
-  flavorMatches: { brand: string; candidate: string; match: string }[];
+  brandMatches: BrandMatch[];
+  flavorMatches: FlavorMatch[];
   generatedAt: number;
   note?: string;
 };

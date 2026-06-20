@@ -453,6 +453,28 @@ export const OptimizeRecommendationImpact = {
   low: 'low',
 } as const;
 
+/**
+ * ok = looks fine, warn = double-check, reject = likely wrong/unsafe
+ */
+export type ReviewVerdictStatus = typeof ReviewVerdictStatus[keyof typeof ReviewVerdictStatus];
+
+
+export const ReviewVerdictStatus = {
+  ok: 'ok',
+  warn: 'warn',
+  reject: 'reject',
+} as const;
+
+/**
+ * A reviewer-AI "second set of eyes" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).
+ */
+export interface ReviewVerdict {
+  /** ok = looks fine, warn = double-check, reject = likely wrong/unsafe */
+  status: ReviewVerdictStatus;
+  /** Short reason for a warn/reject verdict */
+  reason?: string;
+}
+
 export interface OptimizeRecommendation {
   category: OptimizeRecommendationCategory;
   title: string;
@@ -465,6 +487,7 @@ export interface OptimizeRecommendation {
   appliesTo: string | null;
   /** Optional one-tap action, or null when nothing is safely applicable */
   action?: OptimizeAction | null;
+  review?: ReviewVerdict;
 }
 
 export interface OptimizeResult {
@@ -537,6 +560,7 @@ export interface FillMissingSuggestion {
   value: string;
   /** Short plain-language reason for the suggested value */
   rationale: string;
+  review?: ReviewVerdict;
 }
 
 export interface FillMissingResult {
@@ -577,6 +601,7 @@ export interface MatchImportBrandMatch {
   candidate: string;
   /** The saved brand it best matches (always one of brands) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 export interface MatchImportFlavorMatch {
@@ -586,6 +611,7 @@ export interface MatchImportFlavorMatch {
   candidate: string;
   /** The saved flavor it best matches (always within that brand) */
   match: string;
+  review?: ReviewVerdict;
 }
 
 /**
@@ -665,6 +691,27 @@ export interface SavePhotoAliasesInput {
 }
 
 /**
+ * A factory-wide confirmed name correction: read fromText as toText. Tagged by domain (ingredient, brand, flavor, die, item). Shared across every AI helper so a fix learned once is honored everywhere.
+ */
+export interface AiCorrection {
+  /** What kind of name this is (ingredient, brand, flavor, die, item) */
+  domain: string;
+  /** The messy/wrong name that was corrected (matched case-insensitively) */
+  fromText: string;
+  /** The canonical name it should be read as */
+  toText: string;
+}
+
+export interface AiCorrectionList {
+  corrections: AiCorrection[];
+}
+
+export interface SaveAiCorrectionsInput {
+  /** The batch of confirmed corrections to upsert into the shared pool */
+  corrections: AiCorrection[];
+}
+
+/**
  * A learned mapping from a merged-away ingredient name to the kept name.
  */
 export interface MergeAlias {
@@ -697,6 +744,7 @@ export interface MergeSuggestion {
   sources: string[];
   /** Optional short rationale for the suggested grouping */
   reason?: string;
+  review?: ReviewVerdict;
 }
 
 export interface SuggestMergesResult {
@@ -788,6 +836,7 @@ export interface SpecImportProfile {
   sauceOzPerPizza?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
+  review?: ReviewVerdict;
 }
 
 export interface SpecImportRecipeRow {
@@ -812,6 +861,7 @@ export interface SpecImportRecipe {
   doughballOz?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
+  review?: ReviewVerdict;
 }
 
 export interface ParseSpecSheetResult {

@@ -29,6 +29,8 @@ import {
   sanitizeSuggestMerges,
   validateSuggestMergesBody,
 } from "./aiSuggestMerges";
+import { reviewSuggestions } from "./aiReviewer";
+import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 
 const router: IRouter = Router();
 
@@ -129,8 +131,24 @@ router.post(
 
     const knownRunIds = new Set(validation.data.runs.map((r) => r.id));
     const { recommendations, note } = sanitizeRecommendations(raw, knownRunIds);
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "production run-schedule optimization recommendations",
+      instructions:
+        "Flag any recommendation that contradicts the provided run data, is unsafe to apply on a live production line, or whose action would set an impossible or implausible value (e.g. a finish time in the past). Approve sound, low-risk suggestions.",
+      items: recommendations.map((r, i) => ({
+        id: `rec-${i}`,
+        text: `${r.title} [${r.category}/${r.impact}${r.appliesTo ? `, applies to ${r.appliesTo}` : ""}]: ${r.detail}`,
+      })),
+      log: req.log,
+    });
+    const reviewed = recommendations.map((r, i) => {
+      const v = verdicts.get(`rec-${i}`);
+      return v ? { ...r, review: v } : r;
+    });
+
     res.json({
-      recommendations,
+      recommendations: reviewed,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
@@ -153,7 +171,15 @@ router.post(
       return;
     }
 
+    const corrections = await loadCorrections(req.log);
     const { system, user } = buildFillMissingPrompt(validation.data);
+    const userPrompt = appendCorrectionsBlock(user, corrections, [
+      "brand",
+      "flavor",
+      "die",
+      "item",
+      "ingredient",
+    ]);
 
     let content = "";
     try {
@@ -163,7 +189,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       content = response.choices[0]?.message?.content ?? "";
@@ -188,8 +214,24 @@ router.post(
       options: f.options,
     }));
     const { suggestions, note } = sanitizeFillMissingSuggestions(raw, requested);
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "auto-filled values for missing product/run setup fields",
+      instructions:
+        "Flag any value that is implausible for its field, contradicts the product's known brand/flavor/size, or is an unsafe default to commit. Approve values that are clearly correct and well-justified.",
+      items: suggestions.map((s, i) => ({
+        id: `fm-${i}`,
+        text: `${s.key} = "${s.value}" — ${s.rationale}`,
+      })),
+      log: req.log,
+    });
+    const reviewed = suggestions.map((s, i) => {
+      const v = verdicts.get(`fm-${i}`);
+      return v ? { ...s, review: v } : s;
+    });
+
     res.json({
-      suggestions,
+      suggestions: reviewed,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
@@ -212,7 +254,9 @@ router.post(
       return;
     }
 
+    const corrections = await loadCorrections(req.log);
     const { system, user } = buildMatchImportPrompt(validation.data);
+    const userPrompt = appendCorrectionsBlock(user, corrections, ["brand", "flavor"]);
 
     let content = "";
     try {
@@ -222,7 +266,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       content = response.choices[0]?.message?.content ?? "";
@@ -242,9 +286,35 @@ router.post(
     }
 
     const { brandMatches, flavorMatches, note } = sanitizeMatchImport(raw, validation.data);
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "spreadsheet brand/flavor matches to existing saved names",
+      instructions:
+        "Flag any match where the imported name is likely NOT the same real-world product as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
+      items: [
+        ...brandMatches.map((m, i) => ({
+          id: `brand-${i}`,
+          text: `Imported brand "${m.candidate}" matched to saved "${m.match}"`,
+        })),
+        ...flavorMatches.map((m, i) => ({
+          id: `flavor-${i}`,
+          text: `Imported flavor "${m.candidate}" (brand ${m.brand}) matched to saved "${m.match}"`,
+        })),
+      ],
+      log: req.log,
+    });
+    const reviewedBrands = brandMatches.map((m, i) => {
+      const v = verdicts.get(`brand-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
+    const reviewedFlavors = flavorMatches.map((m, i) => {
+      const v = verdicts.get(`flavor-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
+
     res.json({
-      brandMatches,
-      flavorMatches,
+      brandMatches: reviewedBrands,
+      flavorMatches: reviewedFlavors,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
@@ -267,7 +337,14 @@ router.post(
       return;
     }
 
+    const corrections = await loadCorrections(req.log);
     const { system, user } = buildParseSpecSheetPrompt(validation.data);
+    const userPrompt = appendCorrectionsBlock(user, corrections, [
+      "brand",
+      "flavor",
+      "die",
+      "ingredient",
+    ]);
 
     let content = "";
     try {
@@ -277,7 +354,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       content = response.choices[0]?.message?.content ?? "";
@@ -297,9 +374,35 @@ router.post(
     }
 
     const parsed = sanitizeParseSpecSheet(raw);
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
+      instructions:
+        "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible.",
+      items: [
+        ...parsed.profiles.map((p, i) => ({
+          id: `profile-${i}`,
+          text: `Spec profile: brand "${p.brand}", flavor "${p.flavor}"${p.dieType ? `, die ${p.dieType}` : ""}`,
+        })),
+        ...parsed.recipes.map((r, i) => ({
+          id: `recipe-${i}`,
+          text: `${r.kind} recipe "${r.name}"${r.brand ? ` (brand ${r.brand}${r.flavor ? `, flavor ${r.flavor}` : ""})` : ""}`,
+        })),
+      ],
+      log: req.log,
+    });
+    const reviewedProfiles = parsed.profiles.map((p, i) => {
+      const v = verdicts.get(`profile-${i}`);
+      return v ? { ...p, review: v } : p;
+    });
+    const reviewedRecipes = parsed.recipes.map((r, i) => {
+      const v = verdicts.get(`recipe-${i}`);
+      return v ? { ...r, review: v } : r;
+    });
+
     res.json({
-      profiles: parsed.profiles,
-      recipes: parsed.recipes,
+      profiles: reviewedProfiles,
+      recipes: reviewedRecipes,
       generatedAt: Date.now(),
       ...(parsed.note ? { note: parsed.note } : {}),
     });
@@ -322,7 +425,9 @@ router.post(
       return;
     }
 
+    const corrections = await loadCorrections(req.log);
     const { system, user } = buildSuggestMergesPrompt(validation.data);
+    const userPrompt = appendCorrectionsBlock(user, corrections, ["ingredient", "die"]);
 
     let content = "";
     try {
@@ -332,7 +437,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       content = response.choices[0]?.message?.content ?? "";
@@ -356,8 +461,24 @@ router.post(
       raw && typeof raw === "object" && typeof (raw as { note?: unknown }).note === "string"
         ? (raw as { note: string }).note.trim().slice(0, 500)
         : "";
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "proposed ingredient-name merges (folding duplicates into one canonical name)",
+      instructions:
+        "Flag any group that would merge names which are actually DIFFERENT products or ingredients (a merge that loses a real distinction). Approve groups that are clearly the same item spelled differently.",
+      items: suggestions.map((s, i) => ({
+        id: `merge-${i}`,
+        text: `Merge [${s.sources.join(", ")}] into "${s.target}"${s.reason ? ` — ${s.reason}` : ""}`,
+      })),
+      log: req.log,
+    });
+    const reviewed = suggestions.map((s, i) => {
+      const v = verdicts.get(`merge-${i}`);
+      return v ? { ...s, review: v } : s;
+    });
+
     res.json({
-      suggestions,
+      suggestions: reviewed,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });

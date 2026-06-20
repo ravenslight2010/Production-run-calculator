@@ -15,7 +15,13 @@
 // client id through fetch (no cookie jar), exactly like context/aiOptimize.ts.
 
 import { getAuthToken } from "@workspace/api-client-react";
-import type { ParsedSpecImport, SpecImportAlias } from "@workspace/spec-import";
+import type {
+  ParsedProfile,
+  ParsedRecipe,
+  ParsedSpecImport,
+  SpecImportAlias,
+} from "@workspace/spec-import";
+import type { ReviewVerdict } from "@workspace/ai-review";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 
 export type SpecSheetKnown = {
@@ -35,7 +41,14 @@ export type ParseSpecSheetInput = {
   aliases?: SpecImportAlias[];
 };
 
-export type ParseSpecSheetResult = ParsedSpecImport & { generatedAt: number };
+export type ReviewedProfile = ParsedProfile & { review?: ReviewVerdict };
+export type ReviewedRecipe = ParsedRecipe & { review?: ReviewVerdict };
+
+export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"> & {
+  profiles: ReviewedProfile[];
+  recipes: ReviewedRecipe[];
+  generatedAt: number;
+};
 
 export async function requestParseSpecSheet(
   input: ParseSpecSheetInput,

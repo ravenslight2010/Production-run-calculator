@@ -11,6 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@workspace/ai-memory": "workspace:*",
+    "@workspace/ai-review": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",

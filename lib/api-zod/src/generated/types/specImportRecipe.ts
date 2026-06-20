@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ReviewVerdict } from './reviewVerdict';
 import type { SpecImportRecipeKind } from './specImportRecipeKind';
 import type { SpecImportRecipeRow } from './specImportRecipeRow';
 
@@ -16,4 +17,5 @@ export interface SpecImportRecipe {
   doughballOz?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
+  review?: ReviewVerdict;
 }

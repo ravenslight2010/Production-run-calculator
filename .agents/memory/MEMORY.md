@@ -51,6 +51,7 @@
 - [Spec-sheet Excel importer](spec-import.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool (not cheese); mobile profileExists must mirror web profileObjHasRealData; web+mobile parity.
 - [Learned-memory pattern](learned-memory-pattern.md) — server-persisted "remember user corrections" for AI features (import/fill-missing/photo): requireAuth-only, ci-upsert, pure tested matcher w/ existence guard, best-effort, web+mobile.
 - [Learned import aliases](learned-import-aliases.md) — confirmed Excel-import brand/flavor matches persisted server-side, auto-applied next time; priority alias>AI>fuzzy; apply only if target still exists.
+- [AI reviewer + corrections memory](ai-reviewer-and-corrections.md) — 2nd-pass reviewer AI (ok/warn/reject, advisory/fail-safe, strip id at wire) + factory-wide name-corrections pool written on merge/match/spec confirms; web+mobile.
 - [AI Excel-import matching](ai-match-import.md) — manager-gated /ai/match-import; server canonicalizes AI output to known lists, clients fall back silently, AI auto-applies only to SKIP; web+mobile parity.
 - [Import run merge](import-run-merge.md) — mergeImportRuns collapses same brand+flavor runs on a day (sum cases, join notes) post-resolution; verbatim web+mobile mirror.
 - [Crust runs have no dough batches](crust-run-no-dough-batches.md) — in crust mode suppress ALL dough-batch alerts/UI (web+mobile); clear stale showBatchDue + gate render, not just the hook.

@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import type { SpecImportPrepared } from "@/context/specImport";
+import ReviewBadge from "@/components/ReviewBadge";
 
 type Props = {
   visible: boolean;
@@ -125,6 +126,21 @@ export default function SpecImportModal({
                     {prepared.newAliases.length === 1 ? "" : "s"} will be remembered
                     for future imports.
                   </Text>
+                ) : null}
+
+                {prepared.flagged.length > 0 ? (
+                  <View style={{ gap: 6 }}>
+                    <Text style={[styles.note, { color: colors.mutedForeground }]}>
+                      A second AI check flagged {prepared.flagged.length} item
+                      {prepared.flagged.length === 1 ? "" : "s"} to double-check before applying:
+                    </Text>
+                    {prepared.flagged.map((f, i) => (
+                      <View key={i} style={{ gap: 2 }}>
+                        <Text style={[styles.help, { color: colors.foreground }]}>{f.label}</Text>
+                        <ReviewBadge review={f.review} />
+                      </View>
+                    ))}
+                  </View>
                 ) : null}
 
                 {prepared.note ? (

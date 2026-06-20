@@ -28,6 +28,12 @@
       "path": "./lib/merge-suggest"
     },
     {
+      "path": "./lib/ai-memory"
+    },
+    {
+      "path": "./lib/ai-review"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]

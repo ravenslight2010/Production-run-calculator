@@ -29,7 +29,8 @@ import {
   type MergeMap,
 } from "@/context/mergeIngredients";
 import { scoreNameMatch } from "@/context/inventoryShared";
-import { suggestMerges, type MergeSuggestion } from "@/context/mergeSuggest";
+import { suggestMerges, type ReviewedMergeSuggestion } from "@/context/mergeSuggest";
+import ReviewBadge from "@/components/ReviewBadge";
 import {
   prepareSpecImport,
   commitSpecImport,
@@ -221,7 +222,7 @@ function MergeManager() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   // AI + learned-memory merge suggestions (reviewed before applying).
-  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
+  const [suggestions, setSuggestions] = useState<ReviewedMergeSuggestion[]>([]);
   const [suggestBusy, setSuggestBusy] = useState(false);
   const [suggestError, setSuggestError] = useState("");
   const [suggestNote, setSuggestNote] = useState("");
@@ -334,14 +335,14 @@ function MergeManager() {
     }
   };
 
-  const loadSuggestion = (s: MergeSuggestion) => {
+  const loadSuggestion = (s: ReviewedMergeSuggestion) => {
     setError("");
     setConfirming(false);
     setTarget(s.target);
     setSources(s.sources.filter((n) => n !== s.target));
   };
 
-  const applySuggestion = async (s: MergeSuggestion) => {
+  const applySuggestion = async (s: ReviewedMergeSuggestion) => {
     const srcs = s.sources.filter((n) => n !== s.target);
     if (srcs.length === 0) return;
     setBusy(true);
@@ -461,6 +462,11 @@ function MergeManager() {
                 <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
                   {s.reason}
                 </Text>
+              ) : null}
+              {s.review ? (
+                <View style={{ marginTop: 4 }}>
+                  <ReviewBadge review={s.review} />
+                </View>
               ) : null}
               <View style={[styles.addRow, { marginTop: 2 }]}>
                 <Pressable

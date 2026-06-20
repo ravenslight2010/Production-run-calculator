@@ -8,6 +8,7 @@
 import type { OptimizeAction } from './optimizeAction';
 import type { OptimizeRecommendationCategory } from './optimizeRecommendationCategory';
 import type { OptimizeRecommendationImpact } from './optimizeRecommendationImpact';
+import type { ReviewVerdict } from './reviewVerdict';
 
 export interface OptimizeRecommendation {
   category: OptimizeRecommendationCategory;
@@ -21,4 +22,5 @@ export interface OptimizeRecommendation {
   appliesTo: string | null;
   /** Optional one-tap action, or null when nothing is safely applicable */
   action?: OptimizeAction | null;
+  review?: ReviewVerdict;
 }
