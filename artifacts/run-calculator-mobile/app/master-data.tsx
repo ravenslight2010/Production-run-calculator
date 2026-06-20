@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import { Stack } from "expo-router";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   Pressable,
   StyleSheet,
@@ -28,6 +29,7 @@ import {
   type MergeMap,
 } from "@/context/mergeIngredients";
 import { scoreNameMatch } from "@/context/inventoryShared";
+import { suggestMerges, type MergeSuggestion } from "@/context/mergeSuggest";
 import {
   prepareSpecImport,
   commitSpecImport,
@@ -218,6 +220,12 @@ function MergeManager() {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // AI + learned-memory merge suggestions (reviewed before applying).
+  const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [suggestError, setSuggestError] = useState("");
+  const [suggestNote, setSuggestNote] = useState("");
+  const [suggestRan, setSuggestRan] = useState(false);
 
   // The mergeable universe: master-data lists whose values a merge rewrites —
   // ingredient names plus die types (the `dieType` selection field is rewritten
@@ -303,6 +311,51 @@ function MergeManager() {
     setError("");
   };
 
+  // Ask for duplicate-group suggestions (AI clustering + learned aliases).
+  // Reviewed, never auto-applied: "Load" pre-fills the form, "Apply" merges
+  // directly through the same destructive merge path.
+  const suggest = async () => {
+    setSuggestBusy(true);
+    setSuggestError("");
+    setSuggestNote("");
+    setSuggestRan(true);
+    try {
+      const { suggestions: out, usedAi, error: err } = await suggestMerges(universe);
+      setSuggestions(out);
+      if (!usedAi && err) {
+        setSuggestError(`AI unavailable (${err}). Showing previously-merged suggestions only.`);
+      }
+      if (usedAi && out.length === 0) setSuggestNote("No duplicate groups found.");
+    } catch (e) {
+      setSuggestions([]);
+      setSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
+    } finally {
+      setSuggestBusy(false);
+    }
+  };
+
+  const loadSuggestion = (s: MergeSuggestion) => {
+    setError("");
+    setConfirming(false);
+    setTarget(s.target);
+    setSources(s.sources.filter((n) => n !== s.target));
+  };
+
+  const applySuggestion = async (s: MergeSuggestion) => {
+    const srcs = s.sources.filter((n) => n !== s.target);
+    if (srcs.length === 0) return;
+    setBusy(true);
+    setError("");
+    try {
+      await mergeIngredients(srcs, s.target);
+      reset();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      setBusy(false);
+      setError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+    }
+  };
+
   const apply = async () => {
     if (!hasMerge) {
       setError("Pick at least one source and a different target.");
@@ -336,6 +389,115 @@ function MergeManager() {
         template and history entry is updated, and inventory stock is folded into the
         target. This can&apos;t be undone.
       </Text>
+
+      {/* AI + learned-memory suggestions: scan for duplicate groups, review
+          before merging. */}
+      <View
+        style={[
+          styles.suggestBox,
+          { borderColor: colors.border, backgroundColor: colors.secondary },
+        ]}
+      >
+        <View style={styles.suggestHeader}>
+          <View style={{ flex: 1, paddingRight: 8 }}>
+            <Text style={[styles.suggestTitle, { color: colors.foreground }]}>
+              Suggested merges
+            </Text>
+            <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+              Scan for likely duplicates and previously-merged names.
+            </Text>
+          </View>
+          <Pressable
+            onPress={suggest}
+            disabled={suggestBusy || busy}
+            style={({ pressed }) => [
+              styles.suggestBtn,
+              {
+                borderColor: colors.primary,
+                opacity: suggestBusy || busy ? 0.5 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            {suggestBusy ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={[styles.suggestBtnText, { color: colors.primary }]}>
+                Suggest with AI
+              </Text>
+            )}
+          </Pressable>
+        </View>
+
+        {suggestError ? (
+          <Text style={[styles.previewSub, { color: colors.destructive }]}>
+            {suggestError}
+          </Text>
+        ) : null}
+        {suggestRan && !suggestBusy && suggestions.length === 0 && !suggestError ? (
+          <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+            {suggestNote || "No duplicate groups found."}
+          </Text>
+        ) : null}
+
+        {suggestions.map((s, i) => {
+          const srcs = s.sources.filter((n) => n !== s.target);
+          if (srcs.length === 0) return null;
+          return (
+            <View
+              key={`${s.target}-${i}`}
+              style={[
+                styles.suggestItem,
+                { borderColor: colors.border, backgroundColor: colors.background },
+              ]}
+            >
+              <Text style={[styles.previewText, { color: colors.foreground }]}>
+                <Text style={{ color: colors.mutedForeground }}>{srcs.join(", ")}</Text>
+                {" → "}
+                <Text style={{ color: colors.primary, fontFamily: FONTS.bold }}>
+                  {s.target}
+                </Text>
+              </Text>
+              {s.reason ? (
+                <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+                  {s.reason}
+                </Text>
+              ) : null}
+              <View style={[styles.addRow, { marginTop: 2 }]}>
+                <Pressable
+                  onPress={() => loadSuggestion(s)}
+                  disabled={busy || suggestBusy}
+                  style={({ pressed }) => [
+                    styles.suggestActionBtn,
+                    { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+                  ]}
+                >
+                  <Text style={[styles.suggestActionText, { color: colors.foreground }]}>
+                    Load
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => applySuggestion(s)}
+                  disabled={busy || suggestBusy}
+                  style={({ pressed }) => [
+                    styles.suggestActionBtn,
+                    {
+                      borderColor: colors.primary,
+                      backgroundColor: colors.primary,
+                      opacity: busy || suggestBusy ? 0.5 : pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.suggestActionText, { color: colors.primaryForeground }]}
+                  >
+                    Apply
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          );
+        })}
+      </View>
 
       <Text style={[styles.mergeLabel, { color: colors.mutedForeground }]}>
         MERGE THESE (SOURCES)
@@ -1042,4 +1204,43 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   mergeBtnText: { fontSize: 14, fontFamily: FONTS.semibold },
+  suggestBox: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  suggestHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  suggestTitle: { fontSize: 13, fontFamily: FONTS.semibold },
+  suggestBtn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    minWidth: 96,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  suggestBtnText: { fontSize: 12, fontFamily: FONTS.semibold },
+  suggestItem: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  suggestActionBtn: {
+    flex: 1,
+    height: 32,
+    borderWidth: 1,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  suggestActionText: { fontSize: 12, fontFamily: FONTS.medium },
 });

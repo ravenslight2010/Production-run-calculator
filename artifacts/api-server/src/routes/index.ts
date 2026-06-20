@@ -11,6 +11,7 @@ import importAliasesRouter from "./importAliases";
 import fillMissingValuesRouter from "./fillMissingValues";
 import photoAliasesRouter from "./photoAliases";
 import specImportAliasesRouter from "./specImportAliases";
+import mergeAliasesRouter from "./mergeAliases";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -35,5 +36,6 @@ router.use(importAliasesRouter);
 router.use(fillMissingValuesRouter);
 router.use(photoAliasesRouter);
 router.use(specImportAliasesRouter);
+router.use(mergeAliasesRouter);
 
 export default router;

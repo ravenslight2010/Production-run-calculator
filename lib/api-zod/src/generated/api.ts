@@ -675,6 +675,60 @@ export const AiParseSpecSheetResponse = zod.object({
 
 
 /**
+ * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
+ * @summary Suggest groups of duplicate ingredient names to merge (AI)
+ */
+export const AiSuggestMergesBody = zod.object({
+  "names": zod.array(zod.string()).describe('The full pool of mergeable ingredient\/die names to cluster'),
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away ingredient name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions')
+})
+
+export const AiSuggestMergesResponse = zod.object({
+  "suggestions": zod.array(zod.object({
+  "target": zod.string().describe('The recommended canonical name to keep'),
+  "sources": zod.array(zod.string()).describe('The duplicate names to merge into the target'),
+  "reason": zod.string().optional().describe('Optional short rationale for the suggested grouping')
+})),
+  "generatedAt": zod.number().describe('Epoch ms when the suggestions were generated'),
+  "note": zod.string().optional().describe('Optional brief overall comment from the model')
+})
+
+
+/**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
+export const ListMergeAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away ingredient name to the kept name.'))
+})
+
+
+/**
+ * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName) are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
+ */
+export const SaveMergeAliasesBody = zod.object({
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away ingredient name to the kept name.')).describe('The batch of merge aliases to upsert')
+})
+
+export const SaveMergeAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The canonical name it was folded into')
+}).describe('A learned mapping from a merged-away ingredient name to the kept name.'))
+})
+
+
+/**
  * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
  * @summary List learned spec-import aliases (messy label -> canonical name)
  */

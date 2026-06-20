@@ -29,3 +29,4 @@ export * from "./importAliases";
 export * from "./fillMissingValues";
 export * from "./photoAliases";
 export * from "./specImportAliases";
+export * from "./mergeAliases";

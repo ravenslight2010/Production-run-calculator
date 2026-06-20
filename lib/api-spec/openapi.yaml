@@ -671,6 +671,78 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/suggest-merges:
+    post:
+      operationId: aiSuggestMerges
+      tags: [ai]
+      summary: Suggest groups of duplicate ingredient names to merge (AI)
+      description: >-
+        Given the app's full pool of mergeable ingredient/die names (plus any
+        learned merge aliases), returns groups of likely duplicates, each with a
+        recommended canonical name to keep. Read-only — never writes anything;
+        the user reviews the suggestions and applies merges through the existing
+        merge path. Falls back silently to remembered (alias-derived) suggestions
+        when unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SuggestMergesInput"
+      responses:
+        "200":
+          description: Suggested merge groups (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuggestMergesResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
+  /merge-aliases:
+    get:
+      operationId: listMergeAliases
+      tags: [mergeAliases]
+      summary: List learned ingredient-merge aliases (merged-away name -> kept name)
+      description: >-
+        Returns every learned merge alias — a saved mapping from an
+        ingredient name that was merged away to the canonical name it was folded
+        into. Clients supply these to the AI suggester and surface remembered
+        suggestions deterministically. Available to any signed-in user.
+      responses:
+        "200":
+          description: All learned merge aliases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeAliasList"
+    post:
+      operationId: saveMergeAliases
+      tags: [mergeAliases]
+      summary: Save learned ingredient-merge aliases (case-insensitive upsert)
+      description: >-
+        Persists a batch of merged-away -> kept name mappings recorded when a
+        merge is confirmed. Existing aliases (matched case-insensitively on
+        externalName) are updated; new ones are inserted. Available to any
+        signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMergeAliasesInput"
+      responses:
+        "200":
+          description: The full updated alias list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeAliasList"
+        "400":
+          description: Invalid input
+
   /spec-import-aliases:
     get:
       operationId: listSpecImportAliases
@@ -2210,6 +2282,92 @@ components:
           description: The batch of photo aliases to upsert (confirmed during intake)
           items:
             $ref: "#/components/schemas/PhotoAlias"
+
+    MergeAlias:
+      type: object
+      description: A learned mapping from a merged-away ingredient name to the kept name.
+      required:
+        - externalName
+        - canonicalName
+      properties:
+        externalName:
+          type: string
+          description: The ingredient name that was merged away (matched case-insensitively)
+        canonicalName:
+          type: string
+          description: The canonical name it was folded into
+
+    MergeAliasList:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          items:
+            $ref: "#/components/schemas/MergeAlias"
+
+    SaveMergeAliasesInput:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: The batch of merge aliases to upsert
+          items:
+            $ref: "#/components/schemas/MergeAlias"
+
+    SuggestMergesInput:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: The full pool of mergeable ingredient/die names to cluster
+          items:
+            type: string
+        aliases:
+          type: array
+          description: Learned merge aliases to ground the suggestions
+          items:
+            $ref: "#/components/schemas/MergeAlias"
+
+    MergeSuggestion:
+      type: object
+      required:
+        - target
+        - sources
+      properties:
+        target:
+          type: string
+          description: The recommended canonical name to keep
+        sources:
+          type: array
+          description: The duplicate names to merge into the target
+          items:
+            type: string
+        reason:
+          type: string
+          description: Optional short rationale for the suggested grouping
+
+    SuggestMergesResult:
+      type: object
+      required:
+        - suggestions
+        - generatedAt
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/MergeSuggestion"
+        generatedAt:
+          type: number
+          description: Epoch ms when the suggestions were generated
+        note:
+          type: string
+          description: Optional brief overall comment from the model
 
     SpecImportAlias:
       type: object

@@ -45,6 +45,7 @@ import type {
   ListInventoryLedgerParams,
   MatchImportInput,
   MatchImportResult,
+  MergeAliasList,
   MergeInventoryInput,
   MergeInventoryResult,
   OkResponse,
@@ -62,11 +63,14 @@ import type {
   RestockInput,
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
+  SaveMergeAliasesInput,
   SavePhotoAliasesInput,
   SaveSpecImportAliasesInput,
   SpecImportAliasList,
   StaffMember,
   StaffRoleUpdate,
+  SuggestMergesInput,
+  SuggestMergesResult,
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
   UpdateInventorySettingsInput,
@@ -2278,6 +2282,228 @@ export const useAiParseSpecSheet = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiParseSpecSheetMutationOptions(options));
+    }
+
+export const getAiSuggestMergesUrl = () => {
+
+
+
+
+  return `/api/ai/suggest-merges`
+}
+
+/**
+ * Given the app's full pool of mergeable ingredient/die names (plus any learned merge aliases), returns groups of likely duplicates, each with a recommended canonical name to keep. Read-only — never writes anything; the user reviews the suggestions and applies merges through the existing merge path. Falls back silently to remembered (alias-derived) suggestions when unavailable.
+ * @summary Suggest groups of duplicate ingredient names to merge (AI)
+ */
+export const aiSuggestMerges = async (suggestMergesInput: SuggestMergesInput, options?: RequestInit): Promise<SuggestMergesResult> => {
+
+  return customFetch<SuggestMergesResult>(getAiSuggestMergesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      suggestMergesInput,)
+  }
+);}
+
+
+
+
+export const getAiSuggestMergesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,{data: BodyType<SuggestMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,{data: BodyType<SuggestMergesInput>}, TContext> => {
+
+const mutationKey = ['aiSuggestMerges'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSuggestMerges>>, {data: BodyType<SuggestMergesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiSuggestMerges(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiSuggestMergesMutationResult = NonNullable<Awaited<ReturnType<typeof aiSuggestMerges>>>
+    export type AiSuggestMergesMutationBody = BodyType<SuggestMergesInput>
+    export type AiSuggestMergesMutationError = ErrorType<void>
+
+    /**
+ * @summary Suggest groups of duplicate ingredient names to merge (AI)
+ */
+export const useAiSuggestMerges = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSuggestMerges>>, TError,{data: BodyType<SuggestMergesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiSuggestMerges>>,
+        TError,
+        {data: BodyType<SuggestMergesInput>},
+        TContext
+      > => {
+      return useMutation(getAiSuggestMergesMutationOptions(options));
+    }
+
+export const getListMergeAliasesUrl = () => {
+
+
+
+
+  return `/api/merge-aliases`
+}
+
+/**
+ * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
+export const listMergeAliases = async ( options?: RequestInit): Promise<MergeAliasList> => {
+
+  return customFetch<MergeAliasList>(getListMergeAliasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMergeAliasesQueryKey = () => {
+    return [
+    `/api/merge-aliases`
+    ] as const;
+    }
+
+
+export const getListMergeAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMergeAliasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMergeAliases>>> = ({ signal }) => listMergeAliases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMergeAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof listMergeAliases>>>
+export type ListMergeAliasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
+ */
+
+export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMergeAliasesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveMergeAliasesUrl = () => {
+
+
+
+
+  return `/api/merge-aliases`
+}
+
+/**
+ * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName) are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
+ */
+export const saveMergeAliases = async (saveMergeAliasesInput: SaveMergeAliasesInput, options?: RequestInit): Promise<MergeAliasList> => {
+
+  return customFetch<MergeAliasList>(getSaveMergeAliasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveMergeAliasesInput,)
+  }
+);}
+
+
+
+
+export const getSaveMergeAliasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMergeAliases>>, TError,{data: BodyType<SaveMergeAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveMergeAliases>>, TError,{data: BodyType<SaveMergeAliasesInput>}, TContext> => {
+
+const mutationKey = ['saveMergeAliases'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveMergeAliases>>, {data: BodyType<SaveMergeAliasesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveMergeAliases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveMergeAliasesMutationResult = NonNullable<Awaited<ReturnType<typeof saveMergeAliases>>>
+    export type SaveMergeAliasesMutationBody = BodyType<SaveMergeAliasesInput>
+    export type SaveMergeAliasesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
+ */
+export const useSaveMergeAliases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMergeAliases>>, TError,{data: BodyType<SaveMergeAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveMergeAliases>>,
+        TError,
+        {data: BodyType<SaveMergeAliasesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveMergeAliasesMutationOptions(options));
     }
 
 export const getListSpecImportAliasesUrl = () => {

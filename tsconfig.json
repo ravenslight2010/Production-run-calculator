@@ -25,6 +25,9 @@
       "path": "./lib/spec-import"
     },
     {
+      "path": "./lib/merge-suggest"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]

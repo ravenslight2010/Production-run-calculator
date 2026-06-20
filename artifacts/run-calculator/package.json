@@ -87,6 +87,7 @@
   "dependencies": {
     "@workspace/fill-missing": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
+    "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",
     "@workspace/spec-import": "workspace:*"
   }

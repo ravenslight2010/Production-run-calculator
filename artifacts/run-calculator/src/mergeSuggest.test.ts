@@ -1,0 +1,158 @@
+import { describe, it, expect } from "vitest";
+import {
+  collectMergeAliases,
+  mergeAliasKey,
+  mergeSuggestionLists,
+  sanitizeMergeSuggestions,
+  suggestionsFromAliases,
+  type MergeAlias,
+  type MergeSuggestion,
+} from "@workspace/merge-suggest";
+
+describe("mergeAliasKey", () => {
+  it("is case-insensitive and trimmed", () => {
+    expect(mergeAliasKey("  Pepperoni ")).toBe("pepperoni");
+    expect(mergeAliasKey("PEPPERONI")).toBe(mergeAliasKey("pepperoni"));
+  });
+});
+
+describe("collectMergeAliases", () => {
+  it("maps each source to the target, dropping blanks/self/dupes", () => {
+    expect(collectMergeAliases(["Peperoni", "pepperoni ", "", "  "], "Pepperoni")).toEqual([
+      { externalName: "Peperoni", canonicalName: "Pepperoni" },
+    ]);
+  });
+
+  it("dedupes sources case-insensitively, first spelling wins", () => {
+    expect(collectMergeAliases(["Mozz", "MOZZ", "Mozz "], "Mozzarella")).toEqual([
+      { externalName: "Mozz", canonicalName: "Mozzarella" },
+    ]);
+  });
+
+  it("returns [] when target is blank", () => {
+    expect(collectMergeAliases(["a", "b"], "   ")).toEqual([]);
+  });
+});
+
+describe("suggestionsFromAliases", () => {
+  const aliases: MergeAlias[] = [
+    { externalName: "Peperoni", canonicalName: "Pepperoni" },
+    { externalName: "Pep.", canonicalName: "Pepperoni" },
+    { externalName: "Mozz", canonicalName: "Mozzarella" },
+  ];
+
+  it("re-proposes remembered merges only when BOTH names still exist", () => {
+    const out = suggestionsFromAliases(["Pepperoni", "Peperoni", "Pep."], aliases);
+    expect(out).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni", "Pep."], reason: "Previously merged" },
+    ]);
+  });
+
+  it("drops a remembered merge whose target no longer exists (existence guard)", () => {
+    // "Mozzarella" target absent → no suggestion even though "Mozz" is present.
+    const out = suggestionsFromAliases(["Mozz", "Pepperoni", "Peperoni"], aliases);
+    expect(out).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni"], reason: "Previously merged" },
+    ]);
+  });
+
+  it("drops a remembered merge whose source no longer exists", () => {
+    const out = suggestionsFromAliases(["Pepperoni"], aliases);
+    expect(out).toEqual([]);
+  });
+
+  it("uses the current spelling of present names", () => {
+    const out = suggestionsFromAliases(["PEPPERONI", "peperoni"], aliases);
+    expect(out).toEqual([
+      { target: "PEPPERONI", sources: ["peperoni"], reason: "Previously merged" },
+    ]);
+  });
+});
+
+describe("sanitizeMergeSuggestions", () => {
+  const universe = ["Pepperoni", "Peperoni", "Mozzarella", "Mozz", "Cheddar"];
+
+  it("keeps only groups whose target and sources are real known names", () => {
+    const raw = {
+      suggestions: [
+        { target: "Pepperoni", sources: ["Peperoni", "Ghost Topping"], reason: "typo" },
+        { target: "Mozzarella", sources: ["Mozz"] },
+        { target: "Unknown Target", sources: ["Cheddar"] },
+      ],
+    };
+    expect(sanitizeMergeSuggestions(raw, universe)).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni"], reason: "typo" },
+      { target: "Mozzarella", sources: ["Mozz"] },
+    ]);
+  });
+
+  it("returns the known-name spelling, not the model's casing", () => {
+    const raw = { suggestions: [{ target: "pepperoni", sources: ["PEPERONI"] }] };
+    expect(sanitizeMergeSuggestions(raw, universe)).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni"] },
+    ]);
+  });
+
+  it("drops a group whose only source equals the target", () => {
+    const raw = { suggestions: [{ target: "Pepperoni", sources: ["Pepperoni"] }] };
+    expect(sanitizeMergeSuggestions(raw, universe)).toEqual([]);
+  });
+
+  it("dedupes sources and collapses one-group-per-target", () => {
+    const raw = {
+      suggestions: [
+        { target: "Pepperoni", sources: ["Peperoni", "peperoni"] },
+        { target: "PEPPERONI", sources: ["Mozz"] },
+      ],
+    };
+    // second group is dropped (target already used); sources deduped
+    expect(sanitizeMergeSuggestions(raw, universe)).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni"] },
+    ]);
+  });
+
+  it("tolerates garbage shapes without throwing", () => {
+    expect(sanitizeMergeSuggestions(null, universe)).toEqual([]);
+    expect(sanitizeMergeSuggestions({ suggestions: "nope" }, universe)).toEqual([]);
+    expect(sanitizeMergeSuggestions({ suggestions: [42, null, {}] }, universe)).toEqual([]);
+  });
+
+  it("accepts a bare array as well as a wrapped object", () => {
+    const raw = [{ target: "Mozzarella", sources: ["Mozz"] }];
+    expect(sanitizeMergeSuggestions(raw, universe)).toEqual([
+      { target: "Mozzarella", sources: ["Mozz"] },
+    ]);
+  });
+
+  it("bounds group and source counts", () => {
+    const raw = {
+      suggestions: [{ target: "Pepperoni", sources: ["Peperoni", "Mozz", "Mozzarella"] }],
+    };
+    const out = sanitizeMergeSuggestions(raw, universe, { maxSourcesPerGroup: 1 });
+    expect(out).toEqual([{ target: "Pepperoni", sources: ["Peperoni"] }]);
+  });
+});
+
+describe("mergeSuggestionLists", () => {
+  it("combines remembered + AI groups by shared target, remembered first", () => {
+    const remembered: MergeSuggestion[] = [
+      { target: "Pepperoni", sources: ["Peperoni"], reason: "Previously merged" },
+    ];
+    const ai: MergeSuggestion[] = [
+      { target: "Pepperoni", sources: ["Pep."], reason: "ai" },
+      { target: "Mozzarella", sources: ["Mozz"] },
+    ];
+    expect(mergeSuggestionLists(remembered, ai)).toEqual([
+      { target: "Pepperoni", sources: ["Peperoni", "Pep."], reason: "Previously merged" },
+      { target: "Mozzarella", sources: ["Mozz"] },
+    ]);
+  });
+
+  it("never lets a source equal the target and drops empties", () => {
+    const out = mergeSuggestionLists(
+      [{ target: "Pepperoni", sources: ["Pepperoni"] }],
+      [{ target: "Mozzarella", sources: ["Mozz"] }],
+    );
+    expect(out).toEqual([{ target: "Mozzarella", sources: ["Mozz"] }]);
+  });
+});

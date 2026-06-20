@@ -55,6 +55,8 @@ import {
   mergeSettingsObject,
   type MergeMap,
 } from "./mergeIngredients";
+import { collectMergeAliases } from "@workspace/merge-suggest";
+import { saveMergeAliases } from "./mergeSuggest";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
@@ -2588,6 +2590,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persistNow(next);
         return next;
       });
+
+      // Persist the confirmed merge as factory-wide learned aliases (best
+      // effort): feeds the AI suggester next time and powers "previously
+      // merged" suggestions. Non-fatal — the merge itself already succeeded.
+      try {
+        await saveMergeAliases(collectMergeAliases(sources, target));
+      } catch {
+        // ignore: learning is additive, the merge stands either way.
+      }
     },
     [persistNow],
   );

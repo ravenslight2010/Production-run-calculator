@@ -122,6 +122,8 @@ import {
   mapName,
   type MergeMap,
 } from "../mergeIngredients";
+import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
+import { suggestMerges, saveMergeAliases } from "../mergeSuggest";
 
 import { useClock } from "../hooks/useClock";
 import { useAutoTrack } from "../hooks/useAutoTrack";
@@ -1965,6 +1967,13 @@ export default function Home() {
   const [mergeConfirming, setMergeConfirming] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeError, setMergeError] = useState("");
+  // AI + learned-memory merge suggestions (groups of duplicates, each with a
+  // recommended canonical name). Reviewed before applying — merge is destructive.
+  const [mergeSuggestions, setMergeSuggestions] = useState<MergeSuggestion[]>([]);
+  const [mergeSuggestBusy, setMergeSuggestBusy] = useState(false);
+  const [mergeSuggestError, setMergeSuggestError] = useState("");
+  const [mergeSuggestNote, setMergeSuggestNote] = useState("");
+  const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
 
   // The mergeable universe: every master-data list whose values get rewritten by
   // a merge — ingredient names plus die types (the `dieType` selection field is
@@ -2070,8 +2079,54 @@ export default function Home() {
     setMergeError("");
   }
 
-  async function handleApplyMerge() {
-    const map = buildMergeMap(mergeSources, mergeTarget);
+  // Ask for duplicate-group suggestions: combines AI clustering with learned
+  // "previously merged" aliases. Results are reviewed (never auto-applied);
+  // each group's "Load" pre-fills the manual merge form for inspection, while
+  // "Apply" merges it directly through the same destructive merge path.
+  async function handleSuggestMerges() {
+    setMergeSuggestBusy(true);
+    setMergeSuggestError("");
+    setMergeSuggestNote("");
+    setMergeSuggestRan(true);
+    try {
+      const { suggestions, usedAi, error } = await suggestMerges(mergeUniverse);
+      setMergeSuggestions(suggestions);
+      if (!usedAi && error) {
+        setMergeSuggestError(
+          `AI unavailable (${error}). Showing previously-merged suggestions only.`,
+        );
+      }
+      if (usedAi && suggestions.length === 0) {
+        setMergeSuggestNote("No duplicate groups found.");
+      }
+    } catch (e) {
+      setMergeSuggestions([]);
+      setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
+    } finally {
+      setMergeSuggestBusy(false);
+    }
+  }
+
+  // Pre-fill the manual merge form from a suggested group so the user can review
+  // and tweak the source selection before confirming.
+  function loadMergeSuggestion(s: MergeSuggestion) {
+    setMergeError("");
+    setMergeConfirming(false);
+    setMergeTarget(s.target);
+    setMergeSources(s.sources.filter((n) => n !== s.target));
+  }
+
+  // Apply a suggested group directly through the destructive merge path.
+  async function applyMergeSuggestion(s: MergeSuggestion) {
+    const sources = s.sources.filter((n) => n !== s.target);
+    if (sources.length === 0) return;
+    await handleApplyMerge(sources, s.target);
+  }
+
+  async function handleApplyMerge(sourcesArg?: string[], targetArg?: string) {
+    const srcs = sourcesArg ?? mergeSources;
+    const tgt = targetArg ?? mergeTarget;
+    const map = buildMergeMap(srcs, tgt);
     if (Object.keys(map).length === 0) {
       setMergeError("Pick at least one source and a different target.");
       return;
@@ -2118,6 +2173,14 @@ export default function Home() {
       // Rewrite every localStorage surface, then reload so React re-initializes
       // from the merged data and the live-sync push carries the merged lists.
       applyIngredientMerge(map);
+      // Persist the confirmed merge as factory-wide learned aliases (best
+      // effort): feeds the AI suggester next time and powers "previously
+      // merged" suggestions. Awaited so the POST completes before we reload.
+      try {
+        await saveMergeAliases(collectMergeAliases(srcs, tgt));
+      } catch {
+        // Non-fatal: the merge itself already succeeded; learning is additive.
+      }
       window.location.reload();
     } catch (e) {
       setMergeBusy(false);
@@ -5429,6 +5492,71 @@ export default function Home() {
                       inventory stock is folded into the target. This can't be undone.
                     </p>
 
+                    {/* AI + learned-memory suggestions: scan the whole list for
+                        duplicate groups and let the user review before merging. */}
+                    {mergeUniverse.length > 0 && (
+                      <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold text-foreground">Suggested merges</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              Scan for likely duplicates and previously-merged names.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={mergeSuggestBusy || mergeBusy}
+                            onClick={handleSuggestMerges}
+                            className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
+                          >{mergeSuggestBusy ? "Scanning…" : "Suggest with AI"}</button>
+                        </div>
+
+                        {mergeSuggestError && (
+                          <p className="text-[11px] text-amber-600 dark:text-amber-500">{mergeSuggestError}</p>
+                        )}
+                        {mergeSuggestRan && !mergeSuggestBusy && mergeSuggestions.length === 0 && !mergeSuggestError && (
+                          <p className="text-[11px] text-muted-foreground">
+                            {mergeSuggestNote || "No duplicate groups found."}
+                          </p>
+                        )}
+
+                        {mergeSuggestions.length > 0 && (
+                          <div className="space-y-2">
+                            {mergeSuggestions.map((s, i) => {
+                              const sources = s.sources.filter(n => n !== s.target);
+                              if (sources.length === 0) return null;
+                              return (
+                                <div key={`${s.target}-${i}`} className="rounded-md border border-border bg-background/60 px-2.5 py-2 space-y-1">
+                                  <p className="text-xs">
+                                    <span className="text-muted-foreground">{sources.join(", ")}</span>
+                                    {" → "}
+                                    <span className="font-semibold text-primary">{s.target}</span>
+                                  </p>
+                                  {s.reason && (
+                                    <p className="text-[11px] text-muted-foreground">{s.reason}</p>
+                                  )}
+                                  <div className="flex items-center gap-2 pt-0.5">
+                                    <button
+                                      type="button"
+                                      disabled={mergeBusy || mergeSuggestBusy}
+                                      onClick={() => loadMergeSuggestion(s)}
+                                      className="px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
+                                    >Load</button>
+                                    <button
+                                      type="button"
+                                      disabled={mergeBusy || mergeSuggestBusy}
+                                      onClick={() => applyMergeSuggestion(s)}
+                                      className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+                                    >Apply</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {mergeUniverse.length === 0 ? (
                       <p className="text-xs text-muted-foreground text-center py-4">No ingredients to merge yet.</p>
                     ) : (
@@ -5513,7 +5641,7 @@ export default function Home() {
                             <button
                               type="button"
                               disabled={mergeBusy}
-                              onClick={handleApplyMerge}
+                              onClick={() => handleApplyMerge()}
                               className="flex-1 px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors disabled:opacity-50"
                             >{mergeBusy ? "Merging…" : "Confirm merge"}</button>
                           )}

@@ -665,6 +665,49 @@ export interface SavePhotoAliasesInput {
 }
 
 /**
+ * A learned mapping from a merged-away ingredient name to the kept name.
+ */
+export interface MergeAlias {
+  /** The ingredient name that was merged away (matched case-insensitively) */
+  externalName: string;
+  /** The canonical name it was folded into */
+  canonicalName: string;
+}
+
+export interface MergeAliasList {
+  aliases: MergeAlias[];
+}
+
+export interface SaveMergeAliasesInput {
+  /** The batch of merge aliases to upsert */
+  aliases: MergeAlias[];
+}
+
+export interface SuggestMergesInput {
+  /** The full pool of mergeable ingredient/die names to cluster */
+  names: string[];
+  /** Learned merge aliases to ground the suggestions */
+  aliases?: MergeAlias[];
+}
+
+export interface MergeSuggestion {
+  /** The recommended canonical name to keep */
+  target: string;
+  /** The duplicate names to merge into the target */
+  sources: string[];
+  /** Optional short rationale for the suggested grouping */
+  reason?: string;
+}
+
+export interface SuggestMergesResult {
+  suggestions: MergeSuggestion[];
+  /** Epoch ms when the suggestions were generated */
+  generatedAt: number;
+  /** Optional brief overall comment from the model */
+  note?: string;
+}
+
+/**
  * Which name-space the mapping lives in
  */
 export type SpecImportAliasKind = typeof SpecImportAliasKind[keyof typeof SpecImportAliasKind];
