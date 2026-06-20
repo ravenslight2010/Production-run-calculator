@@ -25,10 +25,26 @@ merge — the box closed and nothing happened" (duplicates reappear).
 
 **Why:** without this, any merge silently un-does itself on the next sync tick.
 
-## Web reload race (separate, also fixed)
-Web merge previously called `window.location.reload()` *before* pushing the merged
-payload, so the reload's pull re-fetched the un-merged server state. Merge must
-`await` the PUT of the merged payload to `/api/sync/today` **before** reloading.
+## Web merge must refresh in place, not reload (separate, also fixed)
+Web merge originally ended with `window.location.reload()`. Two problems: (1) the
+always-mounted Merge panel + its `mergeSuggestions` list were torn down, so only ONE
+suggestion could ever be applied before the box "closed"; (2) the reload's sync-pull
+could race the merged-payload push and resurrect un-merged names.
+
+Fix — mirror mobile's in-place merge instead of reloading:
+- `handleApplyMerge` returns a success boolean; `applyMergeSuggestion` drops just the
+  applied suggestion (referential `x !== s` filter) so the panel stays open and the
+  user works through the rest. Mobile `applySuggestion` does the identical filter.
+- A `refreshAfterMerge()` re-reads **every** React surface `applyIngredientMerge`
+  rewrites: master lists (incl. mix lists — `reloadMasterData` originally omitted
+  them), `templates`, `history`, `dayState`, and the current-run `form.reset` +
+  `resetFieldArrays`. Missing any one leaves stale state; in particular the
+  current-run form MUST be reset or its autosave writes the pre-merge names back.
+- **Ordering trap:** `buildSyncPayload` serializes the active run from
+  `form.getValues()`, not storage. So `refreshAfterMerge()` (which does the
+  `form.reset`) must run **before** the `/api/sync/today` PUT, or the push ships
+  stale pre-merge current-run values. Build the payload from `loadDayState()` after
+  the refresh.
 
 ## Accepted tradeoff: cross-peer re-add resurrection
 Tombstones reconcile by **union** (`local ∪ remote`), with no per-name version/clock.

@@ -350,6 +350,9 @@ function MergeManager() {
     try {
       await mergeIngredients(srcs, s.target);
       reset();
+      // Drop just this suggestion so the user can keep working through the rest
+      // of the list (web parity).
+      setSuggestions((prev) => prev.filter((x) => x !== s));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
       setBusy(false);

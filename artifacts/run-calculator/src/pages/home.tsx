@@ -1805,6 +1805,27 @@ export default function Home() {
     setFrontlineIngredients([...loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setFrontlineRecipeNames([...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES)].filter(n => !SEED_MIX_RECIPE_NAMES.has(n)).sort((a, b) => a.localeCompare(b)));
     setCheeseRecipeNames([...loadList(CHEESE_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
+    setMixIngredients([...loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
+    setMixRecipeNames([...loadList(MIX_RECIPE_NAMES_KEY, [])].sort((a, b) => a.localeCompare(b)));
+  }
+
+  // Re-sync every React surface a merge rewrites in localStorage, in place, so the
+  // Merge panel (and its remaining suggestions) stays open instead of being torn
+  // down by a full-page reload. Mirrors mobile, which merges via in-place state.
+  // Must also reset the current run's form: it holds the live values for the open
+  // run, and its autosave effects would otherwise write the pre-merge names back
+  // to storage and silently undo the merge.
+  function refreshAfterMerge() {
+    reloadMasterData();
+    setTemplates(loadTemplates());
+    setHistory(loadHistory());
+    const ds = loadDayState();
+    setDayState(ds);
+    if (ds.runToTime) setRunToTime(ds.runToTime);
+    const curId = ds.runs[ds.currentIndex]?.id ?? "";
+    const vals = { ...DEFAULT_VALUES, ...loadRunValues(curId) };
+    form.reset(vals);
+    resetFieldArrays(vals);
   }
 
   const [mixRecipeNames, setMixRecipeNames] = useState<string[]>(() =>
@@ -2152,20 +2173,23 @@ export default function Home() {
     setMergeSources(s.sources.filter((n) => n !== s.target));
   }
 
-  // Apply a suggested group directly through the destructive merge path.
-  async function applyMergeSuggestion(s: MergeSuggestion) {
+  // Apply a suggested group directly through the destructive merge path. On
+  // success drop just this suggestion so the user can keep working through the
+  // rest of the list (the panel stays open — no reload).
+  async function applyMergeSuggestion(s: ReviewedMergeSuggestion) {
     const sources = s.sources.filter((n) => n !== s.target);
     if (sources.length === 0) return;
-    await handleApplyMerge(sources, s.target);
+    const ok = await handleApplyMerge(sources, s.target);
+    if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
   }
 
-  async function handleApplyMerge(sourcesArg?: string[], targetArg?: string) {
+  async function handleApplyMerge(sourcesArg?: string[], targetArg?: string): Promise<boolean> {
     const srcs = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
     const map = buildMergeMap(srcs, tgt);
     if (Object.keys(map).length === 0) {
       setMergeError("Pick at least one source and a different target.");
-      return;
+      return false;
     }
     setMergeBusy(true);
     setMergeError("");
@@ -2178,7 +2202,7 @@ export default function Home() {
       } catch {
         setMergeBusy(false);
         setMergeError("Couldn't verify inventory state — merge cancelled. Check your connection and try again.");
-        return;
+        return false;
       }
       const lines: MergeInventoryLine[] = [];
       for (const item of inv) {
@@ -2195,7 +2219,7 @@ export default function Home() {
       }
       // Surface any inventory folds the server skipped (e.g. an item deleted
       // between the fetch above and the merge). All lines here come from tracked
-      // inventory, so a skip is unexpected and worth flagging before we reload.
+      // inventory, so a skip is unexpected and worth flagging.
       const skipped = lines.length > 0 ? (await mergeInventory(lines)).results.filter(r => r.status === "skipped") : [];
       if (skipped.length > 0) {
         const summary = skipped
@@ -2206,12 +2230,13 @@ export default function Home() {
             "Ingredient names were still merged everywhere else. Check these items' stock in Inventory.",
         );
       }
-      // Rewrite every localStorage surface, then reload so React re-initializes
-      // from the merged data and the live-sync push carries the merged lists.
+      // Rewrite every localStorage surface, then refresh React state in place so
+      // the merged data shows immediately and the live-sync push carries the
+      // merged lists — without tearing down the open Merge panel via a reload.
       applyIngredientMerge(map);
       // Persist the confirmed merge as factory-wide learned aliases (best
       // effort): feeds the AI suggester next time and powers "previously
-      // merged" suggestions. Awaited so the POST completes before we reload.
+      // merged" suggestions. Awaited so the POST completes before we push.
       try {
         await saveMergeAliases(collectMergeAliases(srcs, tgt));
       } catch {
@@ -2224,27 +2249,37 @@ export default function Home() {
           .filter((src) => src.trim() && src.trim().toLowerCase() !== tgt.trim().toLowerCase())
           .map((src) => ({ domain: "ingredient", fromText: src, toText: tgt })),
       );
+      // Refresh all React surfaces the merge rewrote, in place, BEFORE pushing.
+      // This resets the current-run form to the merged values, so the sync
+      // payload below (which serializes the active run from form.getValues())
+      // ships merged names rather than the stale pre-merge ones.
+      refreshAfterMerge();
       // Push the merged payload (with its mergedAway tombstones) to the server
-      // BEFORE reloading. Otherwise the reload's sync-pull races ahead of any
+      // immediately. Otherwise an incoming sync-pull could race ahead of the
       // debounced push and the additive list-union re-adds the merged-away names
-      // from the still-stale server copy. Best-effort: the reboot's tombstone
-      // filter is the backstop if this push fails.
+      // from the still-stale server copy. Best-effort: the local tombstone filter
+      // is the backstop if this push fails.
       try {
         await fetch("/api/sync/today", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             senderId: clientId.current,
-            payload: buildSyncPayload(dayStateRef.current),
+            payload: buildSyncPayload(loadDayState()),
           }),
         });
       } catch {
-        // Non-fatal: tombstones are persisted locally and applied on reboot.
+        // Non-fatal: tombstones are persisted locally.
       }
-      window.location.reload();
+      // Clear the merge form. The panel stays open so the user can apply more
+      // suggestions.
+      resetMergeForm();
+      setMergeBusy(false);
+      return true;
     } catch (e) {
       setMergeBusy(false);
       setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+      return false;
     }
   }
 
