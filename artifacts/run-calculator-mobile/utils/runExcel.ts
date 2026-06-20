@@ -383,4 +383,65 @@ export function buildQuickBooksCsv(
   return lines.join("\n");
 }
 
+// ── Learned import aliases ───────────────────────────────────────────────────
+// When the user confirms a non-exact match of an imported brand/flavor name to a
+// saved one, we persist that mapping so FUTURE imports auto-apply it. This pure
+// helper walks the resolved import choices and returns the alias pairs worth
+// saving: only real saved matches (NOT Create/Skip) where the imported name
+// differs from the saved name (case-insensitively). brandContext is the canonical
+// parent brand for flavor aliases, null for brand aliases. Mirrored verbatim
+// across web and mobile (replit.md parity); unit-tested in runExcel.test.ts.
+export type ImportAliasPair = {
+  type: "brand" | "flavor";
+  externalName: string;
+  canonicalName: string;
+  brandContext: string | null;
+};
+
+export function collectImportAliases(
+  rows: { brand: string; flavor: string }[],
+  brandChoice: Record<string, string>,
+  flavorChoice: Record<string, string>,
+  opts: { skip: string; create: string },
+): ImportAliasPair[] {
+  const { skip, create } = opts;
+  const byKey = new Map<string, ImportAliasPair>();
+  const keyOf = (type: string, ext: string, ctx: string) =>
+    `${type}|||${ext.toLowerCase()}|||${ctx.toLowerCase()}`;
+  for (const r of rows) {
+    const brand = (r.brand ?? "").trim();
+    if (!brand) continue;
+    const bc = brandChoice[brand.toLowerCase()] ?? skip;
+    if (bc === skip) continue;
+    let canonicalBrand: string;
+    if (bc === create) {
+      canonicalBrand = brand;
+    } else {
+      canonicalBrand = bc;
+      if (brand.toLowerCase() !== bc.toLowerCase()) {
+        byKey.set(keyOf("brand", brand, ""), {
+          type: "brand",
+          externalName: brand,
+          canonicalName: bc,
+          brandContext: null,
+        });
+      }
+    }
+    const flavor = (r.flavor ?? "").trim();
+    if (!flavor) continue;
+    const fKey = `${canonicalBrand.toLowerCase()}|||${flavor.toLowerCase()}`;
+    const fc = flavorChoice[fKey] ?? skip;
+    if (fc === skip || fc === create) continue;
+    if (flavor.toLowerCase() !== fc.toLowerCase()) {
+      byKey.set(keyOf("flavor", flavor, canonicalBrand), {
+        type: "flavor",
+        externalName: flavor,
+        canonicalName: fc,
+        brandContext: canonicalBrand,
+      });
+    }
+  }
+  return [...byKey.values()];
+}
+
 export { runLabel };

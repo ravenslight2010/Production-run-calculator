@@ -640,6 +640,49 @@ paths:
         "502":
           description: AI provider error
 
+  /import-aliases:
+    get:
+      operationId: listImportAliases
+      tags: [importAliases]
+      summary: List learned import aliases (brand/flavor name mappings)
+      description: >-
+        Returns every learned import alias — a saved mapping from a raw imported
+        brand/flavor name to the saved (canonical) name a user previously
+        confirmed it matches. Clients use these to auto-apply remembered matches
+        in the Excel import dialog before falling back to AI/fuzzy matching.
+        Available to any signed-in user (operators included).
+      responses:
+        "200":
+          description: All learned aliases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportAliasList"
+    post:
+      operationId: saveImportAliases
+      tags: [importAliases]
+      summary: Save learned import aliases (case-insensitive upsert)
+      description: >-
+        Persists a batch of brand/flavor name mappings confirmed by the user
+        during an Excel import. Existing aliases (matched case-insensitively on
+        type + externalName + brandContext) are updated; new ones are inserted.
+        Available to any signed-in user (operators included).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveImportAliasesInput"
+      responses:
+        "200":
+          description: The full updated alias list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportAliasList"
+        "400":
+          description: Invalid input
+
   /incidents:
     post:
       operationId: reportIncident
@@ -1885,6 +1928,52 @@ components:
         match:
           type: string
           description: The saved flavor it best matches (always within that brand)
+
+    ImportAlias:
+      type: object
+      description: A learned mapping from a raw imported name to a saved canonical name.
+      required:
+        - type
+        - externalName
+        - canonicalName
+      properties:
+        type:
+          type: string
+          enum: [brand, flavor]
+          description: Whether this alias maps a brand name or a flavor name
+        externalName:
+          type: string
+          description: The raw imported name (matched case-insensitively)
+        canonicalName:
+          type: string
+          description: The saved name the imported name resolves to
+        brandContext:
+          type: string
+          nullable: true
+          description: >-
+            For flavor aliases, the canonical parent brand the flavor belongs to;
+            null/omitted for brand aliases.
+
+    ImportAliasList:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportAlias"
+
+    SaveImportAliasesInput:
+      type: object
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: The batch of aliases to upsert (confirmed during an import)
+          items:
+            $ref: "#/components/schemas/ImportAlias"
 
     MatchImportResult:
       type: object

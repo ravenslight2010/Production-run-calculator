@@ -618,6 +618,43 @@ export const AiMatchImportResponse = zod.object({
 
 
 /**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
+export const ListImportAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
+  "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
+}).describe('A learned mapping from a raw imported name to a saved canonical name.'))
+})
+
+
+/**
+ * Persists a batch of brand/flavor name mappings confirmed by the user during an Excel import. Existing aliases (matched case-insensitively on type + externalName + brandContext) are updated; new ones are inserted. Available to any signed-in user (operators included).
+ * @summary Save learned import aliases (case-insensitive upsert)
+ */
+export const SaveImportAliasesBody = zod.object({
+  "aliases": zod.array(zod.object({
+  "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
+  "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
+}).describe('A learned mapping from a raw imported name to a saved canonical name.')).describe('The batch of aliases to upsert (confirmed during an import)')
+})
+
+export const SaveImportAliasesResponse = zod.object({
+  "aliases": zod.array(zod.object({
+  "type": zod.enum(['brand', 'flavor']).describe('Whether this alias maps a brand name or a flavor name'),
+  "externalName": zod.string().describe('The raw imported name (matched case-insensitively)'),
+  "canonicalName": zod.string().describe('The saved name the imported name resolves to'),
+  "brandContext": zod.string().nullish().describe('For flavor aliases, the canonical parent brand the flavor belongs to; null\/omitted for brand aliases.')
+}).describe('A learned mapping from a raw imported name to a saved canonical name.'))
+})
+
+
+/**
  * Records an incident (a user-reported problem or an auto-captured crash) and returns a plain-language AI diagnosis plus a suggested workaround. Allowed for any signed-in user. The diagnosis is also stored on the incident for managers to review later. Rate-limited per user.
  * @summary Report an issue or a crash and get an AI diagnosis
  */

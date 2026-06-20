@@ -588,6 +588,40 @@ export interface MatchImportFlavorMatch {
   match: string;
 }
 
+/**
+ * Whether this alias maps a brand name or a flavor name
+ */
+export type ImportAliasType = typeof ImportAliasType[keyof typeof ImportAliasType];
+
+
+export const ImportAliasType = {
+  brand: 'brand',
+  flavor: 'flavor',
+} as const;
+
+/**
+ * A learned mapping from a raw imported name to a saved canonical name.
+ */
+export interface ImportAlias {
+  /** Whether this alias maps a brand name or a flavor name */
+  type: ImportAliasType;
+  /** The raw imported name (matched case-insensitively) */
+  externalName: string;
+  /** The saved name the imported name resolves to */
+  canonicalName: string;
+  /** For flavor aliases, the canonical parent brand the flavor belongs to; null/omitted for brand aliases. */
+  brandContext?: string | null;
+}
+
+export interface ImportAliasList {
+  aliases: ImportAlias[];
+}
+
+export interface SaveImportAliasesInput {
+  /** The batch of aliases to upsert (confirmed during an import) */
+  aliases: ImportAlias[];
+}
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];

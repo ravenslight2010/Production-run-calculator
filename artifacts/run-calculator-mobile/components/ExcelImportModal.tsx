@@ -15,14 +15,20 @@ import {
   exactMatch,
   fuzzyMatch,
   mergeImportRuns,
+  collectImportAliases,
   type ImportParseResult,
 } from "@/utils/runExcel";
 import { requestMatchImport } from "@/context/matchImport";
+import { fetchImportAliases, saveImportAliases } from "@/context/importAliases";
 
 const SKIP = "";
 const CREATE = "__create__";
 // Tint for AI-suggested match chips (distinct from primary/create/skip).
 const AI_TINT = "#8b5cf6";
+// Tint for learned-alias ("saved") match chips — confirmed in a PAST import.
+const SAVED_TINT = "#f59e0b";
+
+type ChipSource = "saved" | "ai" | "default";
 
 export type ImportCommit = {
   date: string;
@@ -69,6 +75,12 @@ export default function ExcelImportModal({
   // refetch the same names repeatedly.
   const aiRequestedBrands = React.useRef<Set<string>>(new Set());
   const aiRequestedFlavors = React.useRef<Set<string>>(new Set());
+  // Learned aliases — confirmed matches from PAST imports, fetched once per file
+  // and auto-applied (taking priority over AI; the AI never re-derives names an
+  // alias already covers). Keyed like the AI maps.
+  const [aliasBrandMatch, setAliasBrandMatch] = React.useState<Record<string, string>>({});
+  const [aliasFlavorMatch, setAliasFlavorMatch] = React.useState<Record<string, string>>({});
+  const [aliasLoaded, setAliasLoaded] = React.useState(false);
 
   const canCreate = !supervisorPin || unlocked || isManager;
   const rows = result?.rows ?? [];
@@ -129,6 +141,42 @@ export default function ExcelImportModal({
     setAiLoading(false);
   }, [result]);
 
+  // Fetch learned aliases once per parsed file and build lookup maps. Best-effort
+  // (sync off / offline → no aliases). `aliasLoaded` gates the AI request so the
+  // AI never re-derives a name an alias already covers (alias wins).
+  React.useEffect(() => {
+    if (!result) return;
+    setAliasBrandMatch({});
+    setAliasFlavorMatch({});
+    setAliasLoaded(false);
+    let cancelled = false;
+    fetchImportAliases()
+      .then((aliases) => {
+        if (cancelled) return;
+        const bm: Record<string, string> = {};
+        const fm: Record<string, string> = {};
+        for (const a of aliases) {
+          if (a.type === "brand") {
+            bm[a.externalName.toLowerCase()] = a.canonicalName;
+          } else if (a.type === "flavor" && a.brandContext) {
+            fm[`${a.brandContext.toLowerCase()}|||${a.externalName.toLowerCase()}`] =
+              a.canonicalName;
+          }
+        }
+        setAliasBrandMatch(bm);
+        setAliasFlavorMatch(fm);
+      })
+      .catch(() => {
+        /* best-effort; proceed with no learned aliases */
+      })
+      .finally(() => {
+        if (!cancelled) setAliasLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [result]);
+
   // Ask the AI to match still-unmatched brand/flavor names against the saved
   // ones. Runs again as brands resolve (exposing more flavors); a per-candidate
   // ref guard prevents refetching the same names. Best-effort: any failure
@@ -136,6 +184,9 @@ export default function ExcelImportModal({
   // to the fuzzy chips.
   React.useEffect(() => {
     if (!result) return;
+    // Wait for learned aliases so the AI doesn't re-derive names an alias already
+    // covers (a learned, human-confirmed match always wins over a fresh guess).
+    if (!aliasLoaded) return;
     const newBrands: string[] = [];
     const seenB = new Set<string>();
     for (const r of result.rows) {
@@ -143,6 +194,8 @@ export default function ExcelImportModal({
       if (seenB.has(k)) continue;
       seenB.add(k);
       if (exactMatch(r.brand, brands)) continue;
+      // Covered by a valid learned alias → skip the AI for this brand.
+      if (aliasBrandMatch[k] && brands.includes(aliasBrandMatch[k])) continue;
       if (aiRequestedBrands.current.has(k)) continue;
       newBrands.push(r.brand);
     }
@@ -157,6 +210,8 @@ export default function ExcelImportModal({
       const key = `${brandName.toLowerCase()}|||${r.flavor.toLowerCase()}`;
       if (seenF.has(key)) continue;
       seenF.add(key);
+      // Covered by a valid learned alias → skip the AI for this flavor.
+      if (aliasFlavorMatch[key] && opts.includes(aliasFlavorMatch[key])) continue;
       if (aiRequestedFlavors.current.has(key)) continue;
       newFlavors.push({ brand: brandName, flavor: r.flavor });
     }
@@ -197,7 +252,48 @@ export default function ExcelImportModal({
     return () => {
       cancelled = true;
     };
-  }, [result, brandChoice, brands, brandFlavors, resolveBrandName]);
+  }, [result, brandChoice, brands, brandFlavors, resolveBrandName, aliasLoaded, aliasBrandMatch, aliasFlavorMatch]);
+
+  // Apply learned brand aliases to choices still at SKIP (never clobber a user
+  // pick; only when the saved target still exists).
+  React.useEffect(() => {
+    if (Object.keys(aliasBrandMatch).length === 0) return;
+    setBrandChoice((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(aliasBrandMatch)) {
+        if ((next[k] ?? SKIP) === SKIP && brands.includes(v)) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [aliasBrandMatch, brands]);
+
+  // Apply learned flavor aliases to choices still at SKIP — only when the saved
+  // target still exists under that brand (a stale alias must NOT lock in a
+  // now-missing flavor; leaving it SKIP lets AI/fuzzy correct it instead).
+  React.useEffect(() => {
+    if (Object.keys(aliasFlavorMatch).length === 0) return;
+    const optsByBrandLower = new Map<string, string[]>();
+    for (const [b, opts] of Object.entries(brandFlavors)) {
+      optsByBrandLower.set(b.toLowerCase(), opts);
+    }
+    setFlavorChoice((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(aliasFlavorMatch)) {
+        if ((next[k] ?? SKIP) !== SKIP) continue;
+        const brandLower = k.split("|||")[0] ?? "";
+        const opts = optsByBrandLower.get(brandLower) ?? [];
+        if (!opts.includes(v)) continue;
+        next[k] = v;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [aliasFlavorMatch, brandFlavors]);
 
   // Apply AI brand matches to choices still at SKIP (never clobber a user pick).
   React.useEffect(() => {
@@ -257,23 +353,25 @@ export default function ExcelImportModal({
     uniqueFlavors.push({ brandName, flavor: r.flavor, key });
   }
 
-  // Merge the AI-suggested value into the fuzzy chip list (dedup, AI first) and
-  // flag which value is the AI pick so it can be tinted differently.
+  // Merge the learned-alias value (highest priority) and AI-suggested value into
+  // the fuzzy chip list (dedup; saved first, then AI) and flag each value's
+  // source so it can be tinted/iconed distinctly.
   const chipValues = (
+    aliasVal: string | undefined,
     aiVal: string | undefined,
     fuzzy: { value: string }[],
-  ): { value: string; ai: boolean }[] => {
+  ): { value: string; source: ChipSource }[] => {
     const seen = new Set<string>();
-    const out: { value: string; ai: boolean }[] = [];
-    if (aiVal) {
-      out.push({ value: aiVal, ai: true });
-      seen.add(aiVal.toLowerCase());
-    }
-    for (const s of fuzzy) {
-      if (seen.has(s.value.toLowerCase())) continue;
-      seen.add(s.value.toLowerCase());
-      out.push({ value: s.value, ai: false });
-    }
+    const out: { value: string; source: ChipSource }[] = [];
+    const push = (value: string, source: ChipSource) => {
+      const k = value.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ value, source });
+    };
+    if (aliasVal) push(aliasVal, "saved");
+    if (aiVal) push(aiVal, "ai");
+    for (const s of fuzzy) push(s.value, "default");
     return out;
   };
 
@@ -306,6 +404,18 @@ export default function ExcelImportModal({
       createBrands: [...createBrands],
       createFlavors: [...createFlavors.values()],
     };
+  }
+
+  // Persist every non-exact match the user confirmed (manual, AI-accepted, or
+  // alias-reused) so future imports auto-apply it. Best-effort; never blocks the
+  // import.
+  function handleConfirm() {
+    const aliases = collectImportAliases(rows, brandChoice, flavorChoice, {
+      skip: SKIP,
+      create: CREATE,
+    });
+    if (aliases.length > 0) void saveImportAliases(aliases).catch(() => {});
+    onConfirm(buildCommit());
   }
 
   const preview = buildCommit();
@@ -421,7 +531,7 @@ export default function ExcelImportModal({
                 {uniqueBrands.map((cand) => {
                   const key = cand.toLowerCase();
                   const cur = brandChoice[key] ?? SKIP;
-                  const sugg = chipValues(aiBrandMatch[key], fuzzyMatch(cand, brands));
+                  const sugg = chipValues(aliasBrandMatch[key], aiBrandMatch[key], fuzzyMatch(cand, brands));
                   return (
                     <View key={key} style={[styles.mapRow, { borderColor: colors.border }]}>
                       <Text style={[styles.candidate, { color: colors.foreground }]} numberOfLines={1}>
@@ -431,9 +541,15 @@ export default function ExcelImportModal({
                         {sugg.map((s) => (
                           <Chip
                             key={s.value}
-                            label={s.ai ? `✦ ${s.value}` : s.value}
+                            label={
+                              s.source === "saved"
+                                ? `↺ ${s.value}`
+                                : s.source === "ai"
+                                  ? `✦ ${s.value}`
+                                  : s.value
+                            }
                             active={cur === s.value}
-                            tint={s.ai ? AI_TINT : undefined}
+                            tint={s.source === "saved" ? SAVED_TINT : s.source === "ai" ? AI_TINT : undefined}
                             onPress={() => setBrandChoice((p) => ({ ...p, [key]: s.value }))}
                           />
                         ))}
@@ -464,6 +580,7 @@ export default function ExcelImportModal({
                 {uniqueFlavors.map((f) => {
                   const cur = flavorChoice[f.key] ?? SKIP;
                   const sugg = chipValues(
+                    aliasFlavorMatch[f.key],
                     aiFlavorMatch[f.key],
                     fuzzyMatch(f.flavor, brandFlavors[f.brandName] ?? []),
                   );
@@ -476,9 +593,15 @@ export default function ExcelImportModal({
                         {sugg.map((s) => (
                           <Chip
                             key={s.value}
-                            label={s.ai ? `✦ ${s.value}` : s.value}
+                            label={
+                              s.source === "saved"
+                                ? `↺ ${s.value}`
+                                : s.source === "ai"
+                                  ? `✦ ${s.value}`
+                                  : s.value
+                            }
                             active={cur === s.value}
-                            tint={s.ai ? AI_TINT : undefined}
+                            tint={s.source === "saved" ? SAVED_TINT : s.source === "ai" ? AI_TINT : undefined}
                             onPress={() => setFlavorChoice((p) => ({ ...p, [f.key]: s.value }))}
                           />
                         ))}

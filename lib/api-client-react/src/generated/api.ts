@@ -35,6 +35,7 @@ import type {
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
+  ImportAliasList,
   Incident,
   IncidentDiagnosis,
   InventoryItem,
@@ -55,6 +56,7 @@ import type {
   ResetPasswordRequest,
   ResetStaffPassword,
   RestockInput,
+  SaveImportAliasesInput,
   StaffMember,
   StaffRoleUpdate,
   UnreviewedIncidentCount,
@@ -2196,6 +2198,156 @@ export const useAiMatchImport = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiMatchImportMutationOptions(options));
+    }
+
+export const getListImportAliasesUrl = () => {
+
+
+
+
+  return `/api/import-aliases`
+}
+
+/**
+ * Returns every learned import alias — a saved mapping from a raw imported brand/flavor name to the saved (canonical) name a user previously confirmed it matches. Clients use these to auto-apply remembered matches in the Excel import dialog before falling back to AI/fuzzy matching. Available to any signed-in user (operators included).
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
+export const listImportAliases = async ( options?: RequestInit): Promise<ImportAliasList> => {
+
+  return customFetch<ImportAliasList>(getListImportAliasesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListImportAliasesQueryKey = () => {
+    return [
+    `/api/import-aliases`
+    ] as const;
+    }
+
+
+export const getListImportAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListImportAliasesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listImportAliases>>> = ({ signal }) => listImportAliases({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListImportAliasesQueryResult = NonNullable<Awaited<ReturnType<typeof listImportAliases>>>
+export type ListImportAliasesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned import aliases (brand/flavor name mappings)
+ */
+
+export function useListImportAliases<TData = Awaited<ReturnType<typeof listImportAliases>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listImportAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListImportAliasesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveImportAliasesUrl = () => {
+
+
+
+
+  return `/api/import-aliases`
+}
+
+/**
+ * Persists a batch of brand/flavor name mappings confirmed by the user during an Excel import. Existing aliases (matched case-insensitively on type + externalName + brandContext) are updated; new ones are inserted. Available to any signed-in user (operators included).
+ * @summary Save learned import aliases (case-insensitive upsert)
+ */
+export const saveImportAliases = async (saveImportAliasesInput: SaveImportAliasesInput, options?: RequestInit): Promise<ImportAliasList> => {
+
+  return customFetch<ImportAliasList>(getSaveImportAliasesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveImportAliasesInput,)
+  }
+);}
+
+
+
+
+export const getSaveImportAliasesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveImportAliases>>, TError,{data: BodyType<SaveImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveImportAliases>>, TError,{data: BodyType<SaveImportAliasesInput>}, TContext> => {
+
+const mutationKey = ['saveImportAliases'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveImportAliases>>, {data: BodyType<SaveImportAliasesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveImportAliases(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveImportAliasesMutationResult = NonNullable<Awaited<ReturnType<typeof saveImportAliases>>>
+    export type SaveImportAliasesMutationBody = BodyType<SaveImportAliasesInput>
+    export type SaveImportAliasesMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned import aliases (case-insensitive upsert)
+ */
+export const useSaveImportAliases = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveImportAliases>>, TError,{data: BodyType<SaveImportAliasesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveImportAliases>>,
+        TError,
+        {data: BodyType<SaveImportAliasesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveImportAliasesMutationOptions(options));
     }
 
 export const getReportIncidentUrl = () => {
