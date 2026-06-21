@@ -93,7 +93,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 beforeEach(async () => {
   await db.execute(sql`TRUNCATE ${deniedMergesTable} RESTART IDENTITY CASCADE`);

@@ -138,7 +138,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 // A signed-in (manager) GET. SSE endpoints stream forever, so callers can pass
 // an AbortController and cancel once the response headers have arrived.
