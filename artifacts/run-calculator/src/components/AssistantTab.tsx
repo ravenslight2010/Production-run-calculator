@@ -719,6 +719,42 @@ function RecipeAssistChat({
     });
   const micDenied = micState === "denied";
 
+  // Voice output: an opt-in toggle that reads the latest AI reply aloud,
+  // completing the hands-free loop. It only narrates text already on screen, so
+  // this changes nothing about the answer itself. Hidden when SpeechSynthesis
+  // isn't available (graceful fallback to reading). Mirrors AskChat.
+  const { supported: ttsSupported, speaking, speak, cancel: cancelSpeech } = useSpeechOutput();
+  const [speakAnswers, setSpeakAnswers] = useState(false);
+  // Index of the last assistant turn we've narrated, so re-renders don't repeat.
+  const lastSpokenRef = useRef(-1);
+
+  useEffect(() => {
+    if (!speakAnswers || !ttsSupported) return;
+    let idx = -1;
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      if (turns[i].role !== "user") {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0 && idx !== lastSpokenRef.current) {
+      lastSpokenRef.current = idx;
+      speak(turns[idx].text);
+    }
+  }, [turns, speakAnswers, ttsSupported, speak]);
+
+  function toggleSpeak() {
+    if (!ttsSupported) return;
+    if (speakAnswers) {
+      setSpeakAnswers(false);
+      cancelSpeech();
+    } else {
+      // Re-read the current latest reply when (re)enabling.
+      lastSpokenRef.current = -1;
+      setSpeakAnswers(true);
+    }
+  }
+
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -855,6 +891,21 @@ function RecipeAssistChat({
               data-testid="button-recipe-assist-mic"
             >
               <Mic className="h-4 w-4" />
+            </Button>
+          )}
+          {ttsSupported && (
+            <Button
+              type="button"
+              variant={speakAnswers ? "default" : "outline"}
+              size="icon"
+              onClick={toggleSpeak}
+              className={`shrink-0 ${speakAnswers && speaking ? "animate-pulse" : ""}`}
+              aria-pressed={speakAnswers}
+              aria-label={speakAnswers ? "Stop reading answers aloud" : "Read answers aloud"}
+              title={speakAnswers ? "Stop reading answers aloud" : "Read answers aloud"}
+              data-testid="button-recipe-assist-speak"
+            >
+              {speakAnswers ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </Button>
           )}
           <Button

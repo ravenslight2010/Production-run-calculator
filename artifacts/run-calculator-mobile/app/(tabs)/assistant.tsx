@@ -705,6 +705,43 @@ function RecipeAssistChat({
     });
   const micDenied = micState === "denied";
 
+  // Voice output: an opt-in toggle that reads the latest AI reply aloud,
+  // completing the hands-free loop. It only narrates text already on screen, so
+  // this changes nothing about the answer itself. Hidden when SpeechSynthesis
+  // isn't available (native build) — graceful fallback to reading. EXACT mirror
+  // of the web RecipeAssistChat (replit.md parity).
+  const { supported: ttsSupported, speaking, speak, cancel: cancelSpeech } = useSpeechOutput();
+  const [speakAnswers, setSpeakAnswers] = React.useState(false);
+  // Index of the last assistant turn we've narrated, so re-renders don't repeat.
+  const lastSpokenRef = React.useRef(-1);
+
+  React.useEffect(() => {
+    if (!speakAnswers || !ttsSupported) return;
+    let idx = -1;
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      if (turns[i].role !== "user") {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0 && idx !== lastSpokenRef.current) {
+      lastSpokenRef.current = idx;
+      speak(turns[idx].text);
+    }
+  }, [turns, speakAnswers, ttsSupported, speak]);
+
+  function toggleSpeak() {
+    if (!ttsSupported) return;
+    if (speakAnswers) {
+      setSpeakAnswers(false);
+      cancelSpeech();
+    } else {
+      // Re-read the current latest reply when (re)enabling.
+      lastSpokenRef.current = -1;
+      setSpeakAnswers(true);
+    }
+  }
+
   React.useEffect(() => {
     const id = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(id);
@@ -830,6 +867,28 @@ function RecipeAssistChat({
               name="mic"
               size={18}
               color={listening ? colors.primaryForeground : colors.foreground}
+            />
+          </Pressable>
+        ) : null}
+        {ttsSupported ? (
+          <Pressable
+            onPress={toggleSpeak}
+            accessibilityRole="button"
+            accessibilityState={{ selected: speakAnswers }}
+            accessibilityLabel={speakAnswers ? "Stop reading answers aloud" : "Read answers aloud"}
+            style={({ pressed }) => [
+              styles.micBtn,
+              {
+                borderColor: speakAnswers ? colors.primary : colors.border,
+                backgroundColor: speakAnswers ? colors.primary : colors.background,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Feather
+              name={speakAnswers ? "volume-2" : "volume-x"}
+              size={18}
+              color={speakAnswers ? colors.primaryForeground : colors.foreground}
             />
           </Pressable>
         ) : null}
