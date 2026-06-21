@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, mergeAliasesTable, type MergeAlias as MergeAliasRow } from "@workspace/db";
 import { SaveMergeAliasesBody } from "@workspace/api-zod";
 import { mergeAliasKey } from "@workspace/merge-suggest";
+import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -33,6 +34,7 @@ async function listAll(): Promise<AliasRow[]> {
 
 router.get("/merge-aliases", async (req: Request, res: Response) => {
   try {
+    noStore(res);
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {

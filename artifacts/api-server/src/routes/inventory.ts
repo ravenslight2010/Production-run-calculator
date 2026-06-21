@@ -18,6 +18,7 @@ import {
   MergeInventoryBody,
   UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
+import { noStore } from "../lib/cacheControl";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
@@ -114,6 +115,7 @@ export async function drawDown(exec: Executor, itemId: number, qty: number): Pro
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 router.get("/inventory", async (_req, res): Promise<void> => {
+  noStore(res);
   const items = await db
     .select()
     .from(inventoryItemsTable)
@@ -631,6 +633,7 @@ router.post("/inventory/merge", requireRole("manager"), async (req, res): Promis
 });
 
 router.get("/inventory/ledger", async (req, res): Promise<void> => {
+  noStore(res);
   const itemIdRaw = req.query.itemId;
   const itemId = itemIdRaw != null ? parseId(String(itemIdRaw)) : null;
   const rows = itemId != null
@@ -670,6 +673,7 @@ async function loadSettings() {
 }
 
 router.get("/inventory/settings", async (_req, res): Promise<void> => {
+  noStore(res);
   const row = await loadSettings();
   res.json({ expirySoonDays: row.expirySoonDays });
 });

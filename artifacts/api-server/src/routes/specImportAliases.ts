@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
 import { SPEC_ALIAS_KINDS, specAliasKey, type SpecAliasKind } from "@workspace/spec-import";
+import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -41,6 +42,7 @@ async function listAll(): Promise<AliasRow[]> {
 
 router.get("/spec-import-aliases", async (req: Request, res: Response) => {
   try {
+    noStore(res);
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {
