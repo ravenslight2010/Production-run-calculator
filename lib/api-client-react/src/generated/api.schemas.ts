@@ -217,6 +217,129 @@ export interface IdentifyPhotoResult {
   items: PhotoGuess[];
 }
 
+/**
+ * What the photo is of, to focus the assessment
+ */
+export type QualityCheckPhotoInputProductType = typeof QualityCheckPhotoInputProductType[keyof typeof QualityCheckPhotoInputProductType];
+
+
+export const QualityCheckPhotoInputProductType = {
+  pizza: 'pizza',
+  crust: 'crust',
+  other: 'other',
+} as const;
+
+export interface QualityCheckPhotoInput {
+  /** Base64-encoded image data (no data URI prefix) */
+  imageBase64: string;
+  /** Image MIME type, e.g. image/jpeg */
+  mimeType?: string;
+  /** What the photo is of, to focus the assessment */
+  productType?: QualityCheckPhotoInputProductType;
+  /** Optional plain-language context the user wants considered (e.g. the product/run, expected size, or a specific concern). */
+  notes?: string;
+}
+
+export type QualityIssueSeverity = typeof QualityIssueSeverity[keyof typeof QualityIssueSeverity];
+
+
+export const QualityIssueSeverity = {
+  minor: 'minor',
+  major: 'major',
+  critical: 'critical',
+} as const;
+
+/**
+ * One specific quality concern the AI observed in the photo.
+ */
+export interface QualityIssue {
+  /** Short category of the issue (e.g. size, topping coverage, appearance, burn) */
+  type: string;
+  severity: QualityIssueSeverity;
+  /** One plain-language sentence describing the issue */
+  detail: string;
+}
+
+/**
+ * Overall verdict — pass (looks good), warn (minor issues), fail (clear defects)
+ */
+export type QualityAssessmentStatus = typeof QualityAssessmentStatus[keyof typeof QualityAssessmentStatus];
+
+
+export const QualityAssessmentStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export interface QualityAssessment {
+  /** One-or-two-sentence plain-language overall assessment */
+  summary: string;
+  /** Overall verdict — pass (looks good), warn (minor issues), fail (clear defects) */
+  status: QualityAssessmentStatus;
+  /** 0..1 model confidence in this assessment */
+  confidence: number;
+  issues: QualityIssue[];
+}
+
+export interface QualityCheckResult {
+  assessment: QualityAssessment;
+  generatedAt: number;
+  /** Optional message when the photo could not be assessed */
+  note?: string;
+}
+
+/**
+ * Request for an expiry/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.
+ */
+export interface WasteInsightInput {
+  /** Items the current/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional. */
+  plannedItems?: PhotoCandidate[];
+}
+
+export type WasteInsightItemStatus = typeof WasteInsightItemStatus[keyof typeof WasteInsightItemStatus];
+
+
+export const WasteInsightItemStatus = {
+  expired: 'expired',
+  soon: 'soon',
+} as const;
+
+/**
+ * An inventory item flagged as expired or expiring soon.
+ */
+export interface WasteInsightItem {
+  key: string;
+  name: string;
+  category: string;
+  unit: string;
+  status: WasteInsightItemStatus;
+  /** Quantity in flagged (expired or expiring-soon) lots */
+  qtyAtRisk: number;
+  /**
+     * Earliest expiration date among the flagged lots (YYYY-MM-DD)
+     * @nullable
+     */
+  earliestExpiration: string | null;
+  /**
+     * Days until the earliest flagged lot expires (negative if already expired)
+     * @nullable
+     */
+  daysUntilExpiry: number | null;
+}
+
+export interface WasteInsightResult {
+  flagged: WasteInsightItem[];
+  /**
+     * Plain-language run-order suggestion, or null when nothing is at risk
+     * @nullable
+     */
+  suggestion: string | null;
+  generatedAt: number;
+  /** Optional message when no suggestion could be produced */
+  note?: string;
+}
+
 export interface AuthCredentials {
   /**
      * @minLength 3

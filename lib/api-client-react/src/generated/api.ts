@@ -67,6 +67,8 @@ import type {
   ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
+  QualityCheckPhotoInput,
+  QualityCheckResult,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
@@ -88,7 +90,9 @@ import type {
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
   UpdateInventorySettingsInput,
-  UsernameAvailability
+  UsernameAvailability,
+  WasteInsightInput,
+  WasteInsightResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -2008,6 +2012,150 @@ export const useIdentifyInventoryPhoto = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getIdentifyInventoryPhotoMutationOptions(options));
+    }
+
+export const getQualityCheckPhotoUrl = () => {
+
+
+
+
+  return `/api/inventory/quality-photo`
+}
+
+/**
+ * Looks at a photo of a finished pizza or crust and returns a plain-language quality assessment (size, topping coverage, appearance defects) plus a confidence score. Read-only — never records anything; the manager reviews the assessment and decides whether to confirm it. A confirmed outcome is written back into the shared facility memory by the client through the existing facility-knowledge write path.
+ * @summary Assess finished-product quality from a photo (AI vision); read-only
+ */
+export const qualityCheckPhoto = async (qualityCheckPhotoInput: QualityCheckPhotoInput, options?: RequestInit): Promise<QualityCheckResult> => {
+
+  return customFetch<QualityCheckResult>(getQualityCheckPhotoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      qualityCheckPhotoInput,)
+  }
+);}
+
+
+
+
+export const getQualityCheckPhotoMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof qualityCheckPhoto>>, TError,{data: BodyType<QualityCheckPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof qualityCheckPhoto>>, TError,{data: BodyType<QualityCheckPhotoInput>}, TContext> => {
+
+const mutationKey = ['qualityCheckPhoto'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof qualityCheckPhoto>>, {data: BodyType<QualityCheckPhotoInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  qualityCheckPhoto(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type QualityCheckPhotoMutationResult = NonNullable<Awaited<ReturnType<typeof qualityCheckPhoto>>>
+    export type QualityCheckPhotoMutationBody = BodyType<QualityCheckPhotoInput>
+    export type QualityCheckPhotoMutationError = ErrorType<void>
+
+    /**
+ * @summary Assess finished-product quality from a photo (AI vision); read-only
+ */
+export const useQualityCheckPhoto = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof qualityCheckPhoto>>, TError,{data: BodyType<QualityCheckPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof qualityCheckPhoto>>,
+        TError,
+        {data: BodyType<QualityCheckPhotoInput>},
+        TContext
+      > => {
+      return useMutation(getQualityCheckPhotoMutationOptions(options));
+    }
+
+export const getWasteInsightUrl = () => {
+
+
+
+
+  return `/api/inventory/waste-insight`
+}
+
+/**
+ * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
+ * @summary Flag items trending toward expiry and suggest run-order to use them first
+ */
+export const wasteInsight = async (wasteInsightInput: WasteInsightInput, options?: RequestInit): Promise<WasteInsightResult> => {
+
+  return customFetch<WasteInsightResult>(getWasteInsightUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      wasteInsightInput,)
+  }
+);}
+
+
+
+
+export const getWasteInsightMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof wasteInsight>>, TError,{data: BodyType<WasteInsightInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof wasteInsight>>, TError,{data: BodyType<WasteInsightInput>}, TContext> => {
+
+const mutationKey = ['wasteInsight'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof wasteInsight>>, {data: BodyType<WasteInsightInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  wasteInsight(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WasteInsightMutationResult = NonNullable<Awaited<ReturnType<typeof wasteInsight>>>
+    export type WasteInsightMutationBody = BodyType<WasteInsightInput>
+    export type WasteInsightMutationError = ErrorType<void>
+
+    /**
+ * @summary Flag items trending toward expiry and suggest run-order to use them first
+ */
+export const useWasteInsight = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof wasteInsight>>, TError,{data: BodyType<WasteInsightInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof wasteInsight>>,
+        TError,
+        {data: BodyType<WasteInsightInput>},
+        TContext
+      > => {
+      return useMutation(getWasteInsightMutationOptions(options));
     }
 
 export const getAiOptimizeUrl = () => {

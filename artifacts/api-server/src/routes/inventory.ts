@@ -25,6 +25,19 @@ import { requireRole } from "../middlewares/requireRole";
 import { getOrCreateUserRole } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 import {
+  buildQualityPrompt,
+  sanitizeAssessment,
+  validateQualityPhotoBody,
+} from "./qualityPhoto";
+import {
+  buildWastePrompt,
+  flagExpiringItems,
+  sanitizeWasteSuggestion,
+  validateWasteInsightBody,
+  type FlaggableItem,
+} from "./wasteInsight";
+import { groundPromptWithMemory, recordFacilityKnowledge } from "./aiMemoryContext";
+import {
   applyRunConsumption,
   planDrawDown,
   sortLotsForConsumption,
@@ -44,6 +57,18 @@ const PHOTO_RATE_MAX = 10; // requests per user per minute
 // Everywhere else (dev/test, a single process) the limiter falls back to its
 // in-memory store — identical behavior and headers, no DB dependency.
 const photoRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
+    : undefined;
+
+// The quality-check (vision) and waste-insight (text) AI endpoints get their own
+// cost caps so they can't starve each other or the stock-intake limiter. Same
+// per-user posture and Postgres-in-prod backing as the photo limiter above.
+const qualityRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
+    : undefined;
+const wasteRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
@@ -358,6 +383,196 @@ router.post(
   }
   res.json({ items: sanitizeGuesses(raw, candidateKeys) });
 });
+
+// AI quality/defect check for a finished pizza or crust. A user photographs the
+// product and gets a plain-language assessment (status + confidence + specific
+// issues) to review. This endpoint is strictly READ-ONLY: it never records,
+// grades, accepts, or rejects anything — confirming an outcome is a separate,
+// user-driven write to facility memory through the existing /ai-memory path. The
+// prompt is grounded in facility memory (the "quality" topic and prior notes) so
+// the model reflects what the facility has learned. Validation + model-output
+// sanitizing live in ./qualityPhoto so they can be unit-tested without a DB or
+// the vision provider.
+router.post(
+  "/inventory/quality-photo",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: qualityRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateQualityPhotoBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const input = validation.data;
+    const dataUri = `data:${input.mimeType || "image/jpeg"};base64,${input.imageBase64}`;
+    const { system, userText } = buildQualityPrompt(input);
+    const groundedUserText = await groundPromptWithMemory(req.log, userText, {
+      facilityDomains: ["quality"],
+    });
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 8192,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: groundedUserText },
+              { type: "image_url", image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "quality-photo vision call failed");
+      res.status(502).json({ error: "Vision provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "quality-photo non-JSON response");
+      res.json({
+        assessment: { summary: "", status: "warn", confidence: 0, issues: [] },
+        generatedAt: Date.now(),
+        note: "The assessment could not be read. Please try another photo.",
+      });
+      return;
+    }
+    const { assessment, note } = sanitizeAssessment(raw);
+    res.json({ assessment, generatedAt: Date.now(), ...(note ? { note } : {}) });
+  },
+);
+
+// AI expiry & waste insight. The server reads current inventory + the global
+// expiry-soon lead time and flags items that are expired or expiring soon
+// (pure logic in ./wasteInsight). When nothing is at risk it returns an empty
+// result WITHOUT calling the model (no cost for a no-op). Otherwise it asks the
+// model — grounded in facility memory ("waste"/"inventory") and the optional
+// upcoming-plan items — for a plain-language run-order suggestion to consume the
+// at-risk stock first. Advisory only: it never reorders runs or touches stock.
+// A best-effort note is recorded back to facility memory so the insight informs
+// future grounding; a write failure never fails the request.
+router.post(
+  "/inventory/waste-insight",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: wasteRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateWasteInsightBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const plannedItems = validation.data.plannedItems ?? [];
+
+    const settings = await loadSettings();
+    const soonDays = settings.expirySoonDays ?? 7;
+
+    const items = await db
+      .select()
+      .from(inventoryItemsTable)
+      .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
+    const allLots = await db.select().from(inventoryLotsTable);
+    const lotsByItem = new Map<number, InventoryLot[]>();
+    for (const lot of allLots) {
+      const arr = lotsByItem.get(lot.itemId) ?? [];
+      arr.push(lot);
+      lotsByItem.set(lot.itemId, arr);
+    }
+    const flaggable: FlaggableItem[] = items.map((item) => ({
+      key: item.key,
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      lots: (lotsByItem.get(item.id) ?? []).map((l) => ({
+        qtyRemaining: l.qtyRemaining,
+        expirationDate: l.expirationDate,
+      })),
+    }));
+    const flagged = flagExpiringItems(flaggable, soonDays);
+
+    // Nothing at risk → no AI call, no cost.
+    if (flagged.length === 0) {
+      res.json({ flagged: [], suggestion: null, generatedAt: Date.now() });
+      return;
+    }
+
+    const { system, user } = buildWastePrompt(flagged, plannedItems);
+    const groundedUser = await groundPromptWithMemory(req.log, user, {
+      facilityDomains: ["waste", "inventory"],
+    });
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 4096,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: groundedUser },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "waste-insight AI call failed");
+      res.json({
+        flagged,
+        suggestion: null,
+        generatedAt: Date.now(),
+        note: "Could not generate a suggestion right now. The flagged items above are still accurate.",
+      });
+      return;
+    }
+
+    const { suggestion, note } = sanitizeWasteSuggestion(content);
+
+    // Best-effort: remember that these items trended toward waste so future
+    // insights are grounded in it. Never let a memory write fail the request.
+    if (suggestion) {
+      try {
+        const topNames = flagged
+          .slice(0, 5)
+          .map((f) => f.name)
+          .join(", ");
+        await recordFacilityKnowledge([
+          {
+            domain: "waste",
+            key: `at-risk:${todayStr()}`,
+            fact: `On ${todayStr()}, at-risk stock flagged: ${topNames}. Suggested run-order: ${suggestion}`,
+            source: "waste-insight",
+          },
+        ]);
+      } catch (err) {
+        req.log.warn({ err }, "waste-insight memory write failed (non-fatal)");
+      }
+    }
+
+    res.json({
+      flagged,
+      suggestion: suggestion || null,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
 
 // Apply a manual stock correction. A positive delta lands in a new lot; a
 // negative delta draws stock down through the same FIFO/FEFO `drawDown` logic as

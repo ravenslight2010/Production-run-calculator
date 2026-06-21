@@ -474,6 +474,63 @@ export const IdentifyInventoryPhotoResponse = zod.object({
 
 
 /**
+ * Looks at a photo of a finished pizza or crust and returns a plain-language quality assessment (size, topping coverage, appearance defects) plus a confidence score. Read-only — never records anything; the manager reviews the assessment and decides whether to confirm it. A confirmed outcome is written back into the shared facility memory by the client through the existing facility-knowledge write path.
+ * @summary Assess finished-product quality from a photo (AI vision); read-only
+ */
+export const QualityCheckPhotoBody = zod.object({
+  "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
+  "productType": zod.enum(['pizza', 'crust', 'other']).optional().describe('What the photo is of, to focus the assessment'),
+  "notes": zod.string().optional().describe('Optional plain-language context the user wants considered (e.g. the product\/run, expected size, or a specific concern).')
+})
+
+export const QualityCheckPhotoResponse = zod.object({
+  "assessment": zod.object({
+  "summary": zod.string().describe('One-or-two-sentence plain-language overall assessment'),
+  "status": zod.enum(['pass', 'warn', 'fail']).describe('Overall verdict — pass (looks good), warn (minor issues), fail (clear defects)'),
+  "confidence": zod.number().describe('0..1 model confidence in this assessment'),
+  "issues": zod.array(zod.object({
+  "type": zod.string().describe('Short category of the issue (e.g. size, topping coverage, appearance, burn)'),
+  "severity": zod.enum(['minor', 'major', 'critical']),
+  "detail": zod.string().describe('One plain-language sentence describing the issue')
+}).describe('One specific quality concern the AI observed in the photo.'))
+}),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when the photo could not be assessed')
+})
+
+
+/**
+ * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
+ * @summary Flag items trending toward expiry and suggest run-order to use them first
+ */
+export const WasteInsightBody = zod.object({
+  "plannedItems": zod.array(zod.object({
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string()
+})).optional().describe('Items the current\/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional.')
+}).describe('Request for an expiry\/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.')
+
+export const WasteInsightResponse = zod.object({
+  "flagged": zod.array(zod.object({
+  "key": zod.string(),
+  "name": zod.string(),
+  "category": zod.string(),
+  "unit": zod.string(),
+  "status": zod.enum(['expired', 'soon']),
+  "qtyAtRisk": zod.number().describe('Quantity in flagged (expired or expiring-soon) lots'),
+  "earliestExpiration": zod.string().nullable().describe('Earliest expiration date among the flagged lots (YYYY-MM-DD)'),
+  "daysUntilExpiry": zod.number().nullable().describe('Days until the earliest flagged lot expires (negative if already expired)')
+}).describe('An inventory item flagged as expired or expiring soon.')),
+  "suggestion": zod.string().nullable().describe('Plain-language run-order suggestion, or null when nothing is at risk'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no suggestion could be produced')
+})
+
+
+/**
  * Analyzes the current day's runs, scheduled runs, and recent history and returns grouped/ranked recommendation cards. Read-only — never applies any change.
  * @summary AI optimization recommendations for runs and break timing
  */

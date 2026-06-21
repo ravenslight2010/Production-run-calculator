@@ -560,6 +560,71 @@ paths:
         "502":
           description: Vision provider error
 
+  /inventory/quality-photo:
+    post:
+      operationId: qualityCheckPhoto
+      tags: [inventory]
+      summary: Assess finished-product quality from a photo (AI vision); read-only
+      description: >-
+        Looks at a photo of a finished pizza or crust and returns a
+        plain-language quality assessment (size, topping coverage, appearance
+        defects) plus a confidence score. Read-only — never records anything; the
+        manager reviews the assessment and decides whether to confirm it. A
+        confirmed outcome is written back into the shared facility memory by the
+        client through the existing facility-knowledge write path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QualityCheckPhotoInput"
+      responses:
+        "200":
+          description: A quality assessment (advisory only; requires confirmation)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualityCheckResult"
+        "400":
+          description: Invalid input
+        "413":
+          description: Image too large
+        "429":
+          description: Rate limited
+        "502":
+          description: Vision provider error
+
+  /inventory/waste-insight:
+    post:
+      operationId: wasteInsight
+      tags: [inventory]
+      summary: Flag items trending toward expiry and suggest run-order to use them first
+      description: >-
+        Reads current inventory and the configured expiry lead time, flags lots
+        that are expired or expiring soon, and (when anything is flagged) asks
+        the AI for a plain-language run-order suggestion to consume the
+        at-risk stock first. Grounded in the real inventory data and the shared
+        facility memory. Read-only — never applies any change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WasteInsightInput"
+      responses:
+        "200":
+          description: Flagged items plus an advisory run-order suggestion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WasteInsightResult"
+        "400":
+          description: Invalid input
+        "429":
+          description: Rate limited
+        "502":
+          description: AI provider error
+
   /ai/optimize:
     post:
       operationId: aiOptimize
@@ -1928,6 +1993,152 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PhotoGuess"
+
+    QualityCheckPhotoInput:
+      type: object
+      required:
+        - imageBase64
+      properties:
+        imageBase64:
+          type: string
+          description: Base64-encoded image data (no data URI prefix)
+        mimeType:
+          type: string
+          description: Image MIME type, e.g. image/jpeg
+        productType:
+          type: string
+          enum: [pizza, crust, other]
+          description: What the photo is of, to focus the assessment
+        notes:
+          type: string
+          description: >-
+            Optional plain-language context the user wants considered (e.g. the
+            product/run, expected size, or a specific concern).
+
+    QualityIssue:
+      type: object
+      description: One specific quality concern the AI observed in the photo.
+      required:
+        - type
+        - severity
+        - detail
+      properties:
+        type:
+          type: string
+          description: Short category of the issue (e.g. size, topping coverage, appearance, burn)
+        severity:
+          type: string
+          enum: [minor, major, critical]
+        detail:
+          type: string
+          description: One plain-language sentence describing the issue
+
+    QualityAssessment:
+      type: object
+      required:
+        - summary
+        - status
+        - confidence
+        - issues
+      properties:
+        summary:
+          type: string
+          description: One-or-two-sentence plain-language overall assessment
+        status:
+          type: string
+          enum: [pass, warn, fail]
+          description: Overall verdict — pass (looks good), warn (minor issues), fail (clear defects)
+        confidence:
+          type: number
+          description: 0..1 model confidence in this assessment
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/QualityIssue"
+
+    QualityCheckResult:
+      type: object
+      required:
+        - assessment
+        - generatedAt
+      properties:
+        assessment:
+          $ref: "#/components/schemas/QualityAssessment"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when the photo could not be assessed
+
+    WasteInsightInput:
+      type: object
+      description: >-
+        Request for an expiry/waste insight. Inventory and expiry data are read
+        server-side; the optional plannedItems give the AI the production context
+        it needs to suggest which planned products to run first.
+      properties:
+        plannedItems:
+          type: array
+          description: >-
+            Items the current/upcoming production plan would consume, so the AI
+            can recommend which planned products to run first to use at-risk
+            stock. Optional.
+          items:
+            $ref: "#/components/schemas/PhotoCandidate"
+
+    WasteInsightItem:
+      type: object
+      description: An inventory item flagged as expired or expiring soon.
+      required:
+        - key
+        - name
+        - category
+        - unit
+        - status
+        - qtyAtRisk
+        - earliestExpiration
+        - daysUntilExpiry
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        unit:
+          type: string
+        status:
+          type: string
+          enum: [expired, soon]
+        qtyAtRisk:
+          type: number
+          description: Quantity in flagged (expired or expiring-soon) lots
+        earliestExpiration:
+          type: [string, "null"]
+          description: Earliest expiration date among the flagged lots (YYYY-MM-DD)
+        daysUntilExpiry:
+          type: [number, "null"]
+          description: Days until the earliest flagged lot expires (negative if already expired)
+
+    WasteInsightResult:
+      type: object
+      required:
+        - flagged
+        - suggestion
+        - generatedAt
+      properties:
+        flagged:
+          type: array
+          items:
+            $ref: "#/components/schemas/WasteInsightItem"
+        suggestion:
+          type: [string, "null"]
+          description: Plain-language run-order suggestion, or null when nothing is at risk
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when no suggestion could be produced
 
     AuthCredentials:
       type: object

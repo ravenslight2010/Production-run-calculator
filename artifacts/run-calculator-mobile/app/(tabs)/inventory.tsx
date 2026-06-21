@@ -49,11 +49,18 @@ import {
   EXPIRY_SOON_DAYS,
   type InventoryCategory,
   type PhotoGuess,
+  qualityCheckPhoto,
+  wasteInsight,
+  type QualityProductType,
+  type QualityStatus,
+  type QualityCheckResult,
+  type WasteInsightResult,
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
 import { useMe } from "@/hooks/useRole";
 import StaffRolesCard from "@/components/StaffRolesCard";
 import ChangePasswordCard from "@/components/ChangePasswordCard";
+import { saveFacilityKnowledge } from "@/context/aiMemory";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -266,6 +273,12 @@ export default function InventoryScreen() {
 
         {/* Photo stock intake (manager only: paid AI action) */}
         {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+
+        {/* AI quality/defect photo check (manager only: paid AI action) */}
+        {isManager && <QualityCheckCard />}
+
+        {/* AI expiry & waste insight (manager only: paid AI action) */}
+        {isManager && <WasteInsightCard />}
 
         {loading && (
           <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading inventory…</Text>
@@ -1411,6 +1424,490 @@ function PhotoIntakeCard({
                   </View>
                 );
               })}
+            </View>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+// ── AI quality/defect photo check (read-only) ────────────────────────────────
+// Photograph a finished pizza/crust for an AI quality assessment. Advisory only
+// — nothing is recorded unless the user reviews and confirms the outcome, which
+// writes a single fact to shared facility memory. Mirrors the web card.
+function qualityStatusMeta(
+  status: QualityStatus,
+  colors: ReturnType<typeof useColors>,
+): { label: string; color: string; icon: keyof typeof Feather.glyphMap } {
+  switch (status) {
+    case "pass":
+      return { label: "Looks good", color: colors.success ?? colors.primary, icon: "check-circle" };
+    case "warn":
+      return { label: "Minor issues", color: colors.warning, icon: "alert-triangle" };
+    case "fail":
+      return { label: "Defects found", color: colors.destructive, icon: "alert-triangle" };
+  }
+}
+
+function QualityCheckCard() {
+  const colors = useColors();
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [productType, setProductType] = useState<QualityProductType>("pizza");
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<QualityCheckResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  async function analyze(imageBase64: string | null | undefined) {
+    if (!imageBase64) return;
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setConfirmed(false);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await qualityCheckPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        productType,
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
+    if (!asset?.uri) return;
+    let base64: string | null;
+    setPreparing(true);
+    try {
+      base64 = await prepareImageBase64(
+        asset.uri,
+        asset.width ?? MAX_PHOTO_EDGE,
+        asset.height ?? MAX_PHOTO_EDGE,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process photo");
+      return;
+    } finally {
+      setPreparing(false);
+    }
+    await analyze(base64);
+  }
+
+  async function takePhoto() {
+    setError(null);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setError("Camera permission is required to take a photo.");
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  async function pickPhoto() {
+    setError(null);
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  // Record the reviewed outcome to shared facility memory. This is the ONLY
+  // write — the assessment itself is never auto-saved.
+  async function confirmOutcome() {
+    if (!result) return;
+    const a = result.assessment;
+    setConfirming(true);
+    setError(null);
+    try {
+      const issueText = a.issues.length
+        ? ` Issues: ${a.issues.map((i) => `${i.type} (${i.severity}) — ${i.detail}`).join("; ")}.`
+        : "";
+      await saveFacilityKnowledge([
+        {
+          domain: "quality",
+          key: `check:${productType}:${todayStr()}`,
+          fact:
+            `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
+            `"${a.status}" (${Math.round(a.confidence * 100)}% confidence). ${a.summary}${issueText}`,
+        },
+      ]);
+      setConfirmed(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save outcome");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  const meta = result ? qualityStatusMeta(result.assessment.status, colors) : null;
+
+  return (
+    <Card title="Quality Check" icon="shield" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "camera"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Check"}
+        </Text>
+      </Pressable>
+
+      {open && (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            Photograph a finished pizza or crust for an AI quality assessment. This is advisory only
+            — nothing is recorded unless you review and confirm the outcome.
+          </Text>
+          <View style={styles.formRow}>
+            {(["pizza", "crust", "other"] as QualityProductType[]).map((t) => {
+              const active = productType === t;
+              return (
+                <Pressable
+                  key={t}
+                  onPress={() => setProductType(t)}
+                  style={[
+                    styles.input,
+                    styles.categoryToggle,
+                    {
+                      flex: 1,
+                      justifyContent: "center",
+                      borderColor: active ? colors.primary : colors.border,
+                      backgroundColor: active ? colors.primary : colors.background,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: active ? colors.primaryForeground : colors.foreground,
+                      fontFamily: FONTS.medium,
+                      fontSize: 12,
+                      textTransform: "capitalize",
+                    }}
+                  >
+                    {t}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <TextInput
+            placeholder="Optional context (e.g. expected 16in, light topping)"
+            placeholderTextColor={colors.mutedForeground}
+            value={notes}
+            onChangeText={setNotes}
+            style={inputStyle}
+          />
+          <View style={styles.formRow}>
+            <View style={{ flex: 1 }}>
+              <Button label="Take photo" icon="camera" size="sm" disabled={preparing || analyzing} onPress={takePhoto} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={preparing || analyzing} onPress={pickPhoto} />
+            </View>
+          </View>
+
+          {(preparing || analyzing) && (
+            <View style={styles.analyzingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                {preparing ? "Preparing photo…" : "Assessing…"}
+              </Text>
+            </View>
+          )}
+          {error && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>
+              {lastImageRef.current && (
+                <Button
+                  label={retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                  icon="refresh-cw"
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing || retryIn > 0}
+                  onPress={retry}
+                />
+              )}
+            </View>
+          )}
+
+          {result && meta && (
+            <View
+              style={[styles.reviewRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+            >
+              <View style={styles.reviewHeader}>
+                <View style={[styles.badge, { borderColor: meta.color }]}>
+                  <Feather name={meta.icon} size={12} color={meta.color} />
+                  <Text style={[styles.badgeText, { color: meta.color, marginLeft: 4 }]}>
+                    {meta.label.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                  {Math.round(result.assessment.confidence * 100)}% confidence
+                </Text>
+              </View>
+              {result.assessment.summary ? (
+                <Text style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 13 }}>
+                  {result.assessment.summary}
+                </Text>
+              ) : null}
+              {result.note ? (
+                <Text style={[styles.muted, { color: colors.warning, fontStyle: "normal" }]}>
+                  {result.note}
+                </Text>
+              ) : null}
+              {result.assessment.issues.length > 0 && (
+                <View style={{ gap: 4 }}>
+                  {result.assessment.issues.map((iss, i) => (
+                    <View key={i} style={{ flexDirection: "row", gap: 6 }}>
+                      <Text
+                        style={{
+                          color:
+                            iss.severity === "critical"
+                              ? colors.destructive
+                              : iss.severity === "major"
+                                ? colors.warning
+                                : colors.mutedForeground,
+                          fontFamily: FONTS.bold,
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {iss.type}
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.mutedForeground,
+                          fontFamily: FONTS.regular,
+                          fontSize: 11,
+                          flex: 1,
+                        }}
+                      >
+                        {iss.detail}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {confirmed ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Feather name="check-circle" size={14} color={colors.success ?? colors.primary} />
+                  <Text style={{ color: colors.success ?? colors.primary, fontFamily: FONTS.medium, fontSize: 12 }}>
+                    Outcome saved to facility memory.
+                  </Text>
+                </View>
+              ) : (
+                <Button
+                  label={confirming ? "Saving…" : "Confirm & remember outcome"}
+                  icon="check-circle"
+                  variant="outline"
+                  size="sm"
+                  disabled={confirming}
+                  onPress={confirmOutcome}
+                />
+              )}
+            </View>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+// ── AI expiry & waste insight ────────────────────────────────────────────────
+// The server flags expired/expiring-soon stock and (when anything is at risk)
+// suggests a run order to consume it first. Advisory only — nothing is changed.
+// Mirrors the web card.
+function WasteInsightCard() {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<WasteInsightResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  async function run() {
+    setError(null);
+    setRetryIn(0);
+    setLoading(true);
+    try {
+      const res = await wasteInsight({});
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card title="Waste Insight" icon="trash-2" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "chevron-right"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Open"}
+        </Text>
+      </Pressable>
+
+      {open && (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            Flag stock that's expired or expiring soon and get an AI suggestion for which runs to
+            prioritize so it gets used first. Advisory only — nothing is rescheduled.
+          </Text>
+          <Button
+            label={loading ? "Checking…" : retryIn > 0 ? `Try again in ${retryIn}s` : "Check expiring stock"}
+            icon="trash-2"
+            size="sm"
+            disabled={loading || retryIn > 0}
+            onPress={run}
+          />
+
+          {error && <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>}
+
+          {result && (
+            <View style={{ gap: 8 }}>
+              {result.flagged.length === 0 ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Feather name="check-circle" size={14} color={colors.success ?? colors.primary} />
+                  <Text style={{ color: colors.success ?? colors.primary, fontFamily: FONTS.medium, fontSize: 12 }}>
+                    Nothing is expired or expiring soon.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>
+                    AT RISK ({result.flagged.length})
+                  </Text>
+                  <View style={{ gap: 6 }}>
+                    {result.flagged.map((f) => (
+                      <View
+                        key={f.key}
+                        style={[
+                          styles.reviewRow,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: colors.secondary,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: 8,
+                          },
+                        ]}
+                      >
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1 }}>
+                          <View
+                            style={[
+                              styles.badge,
+                              { borderColor: f.status === "expired" ? colors.destructive : colors.warning },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                { color: f.status === "expired" ? colors.destructive : colors.warning },
+                              ]}
+                            >
+                              {f.status.toUpperCase()}
+                            </Text>
+                          </View>
+                          <Text
+                            style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 13, flexShrink: 1 }}
+                            numberOfLines={1}
+                          >
+                            {f.name}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                          <Feather name="clock" size={12} color={colors.mutedForeground} />
+                          <Text style={{ color: colors.mutedForeground, fontFamily: FONTS.mono, fontSize: 11 }}>
+                            {f.daysUntilExpiry == null
+                              ? "—"
+                              : f.daysUntilExpiry < 0
+                                ? `${Math.abs(f.daysUntilExpiry)}d ago`
+                                : `${f.daysUntilExpiry}d`}
+                            {" · "}
+                            {fmtQty(f.qtyAtRisk)} {f.unit}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                  {result.suggestion ? (
+                    <View
+                      style={[
+                        styles.reviewRow,
+                        { borderColor: colors.primary, backgroundColor: colors.secondary, gap: 4 },
+                      ]}
+                    >
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                        <Feather name="zap" size={12} color={colors.primary} />
+                        <Text style={[styles.detailLabel, { color: colors.primary }]}>
+                          SUGGESTED RUN ORDER
+                        </Text>
+                      </View>
+                      <Text style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 13 }}>
+                        {result.suggestion}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {result.note ? (
+                    <Text style={[styles.muted, { color: colors.warning, fontStyle: "normal" }]}>
+                      {result.note}
+                    </Text>
+                  ) : null}
+                </>
+              )}
             </View>
           )}
         </View>

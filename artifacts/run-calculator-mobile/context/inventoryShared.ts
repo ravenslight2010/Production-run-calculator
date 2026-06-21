@@ -497,6 +497,74 @@ export const identifyInventoryPhoto = (body: IdentifyPhotoBody) =>
     body: JSON.stringify(body),
   });
 
+// ── AI quality/defect photo check (read-only) ────────────────────────────────
+// Mirrors the web glue (replit.md parity).
+export type QualityProductType = "pizza" | "crust" | "other";
+export type QualitySeverity = "minor" | "major" | "critical";
+export type QualityStatus = "pass" | "warn" | "fail";
+
+export type QualityIssue = {
+  type: string;
+  severity: QualitySeverity;
+  detail: string;
+};
+export type QualityAssessment = {
+  summary: string;
+  status: QualityStatus;
+  confidence: number;
+  issues: QualityIssue[];
+};
+export type QualityCheckResult = {
+  assessment: QualityAssessment;
+  generatedAt: number;
+  note?: string;
+};
+export type QualityCheckBody = {
+  imageBase64: string;
+  mimeType?: string;
+  productType?: QualityProductType;
+  notes?: string;
+};
+
+// Read-only: asks the AI to assess a finished pizza/crust photo. Never records
+// anything; confirming an outcome is a separate user-driven write to facility
+// memory.
+export const qualityCheckPhoto = (body: QualityCheckBody) =>
+  api<QualityCheckResult>("/inventory/quality-photo", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// ── AI expiry & waste insight ────────────────────────────────────────────────
+export type WasteStatus = "expired" | "soon";
+export type WasteInsightItem = {
+  key: string;
+  name: string;
+  category: string;
+  unit: string;
+  status: WasteStatus;
+  qtyAtRisk: number;
+  earliestExpiration: string | null;
+  daysUntilExpiry: number | null;
+};
+export type WasteInsightResult = {
+  flagged: WasteInsightItem[];
+  suggestion: string | null;
+  generatedAt: number;
+  note?: string;
+};
+export type WasteInsightBody = {
+  plannedItems?: CandidateItem[];
+};
+
+// Server flags expiring/expired stock and (when anything is at risk) asks the AI
+// for a run-order suggestion to consume it first. Advisory only.
+export const wasteInsight = (body: WasteInsightBody = {}) =>
+  api<WasteInsightResult>("/inventory/waste-insight", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 // Maps a photo-intake failure to a friendly, human message. The server guards
 // this endpoint with a rate limit (429) and image-size cap (413); surface those
 // as intentional, actionable guidance rather than a generic failure.

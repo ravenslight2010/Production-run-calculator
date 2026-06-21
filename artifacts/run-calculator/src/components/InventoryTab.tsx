@@ -14,6 +14,10 @@ import {
   Sparkles,
   Loader2,
   X,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  Recycle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,6 +38,12 @@ import {
   fetchInventorySettings,
   updateInventorySettings,
   identifyInventoryPhoto,
+  qualityCheckPhoto,
+  wasteInsight,
+  type QualityCheckResult,
+  type QualityProductType,
+  type QualityStatus,
+  type WasteInsightResult,
   MAX_IMAGE_BASE64_CHARS,
   isHeicFile,
   HEIC_UNSUPPORTED_MESSAGE,
@@ -52,6 +62,7 @@ import {
   type PhotoGuess,
   type InventoryCategory,
 } from "../inventoryShared";
+import { saveFacilityKnowledge } from "../aiMemory";
 import { useMe } from "../useRole";
 import StaffRolesCard from "./StaffRolesCard";
 import ProductionRulesManager from "./ProductionRulesManager";
@@ -254,6 +265,10 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
 
       {/* Photo stock intake (manager only: paid AI action) */}
       {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+
+      {isManager && <QualityCheckCard />}
+
+      {isManager && <WasteInsightCard />}
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -853,6 +868,426 @@ type ReviewRow = {
 };
 
 const NEW_ITEM = "__new__";
+
+// ── AI quality/defect photo check (read-only) ────────────────────────────────
+// Photograph a finished pizza/crust and get a plain-language assessment to
+// review. Nothing is ever auto-recorded; the user explicitly confirms an outcome
+// which is written to shared facility memory so future checks are grounded in it.
+const QUALITY_STATUS_META: Record<
+  QualityStatus,
+  { label: string; cls: string; icon: typeof CheckCircle2 }
+> = {
+  pass: { label: "Looks good", cls: "text-emerald-500 border-emerald-500/50", icon: CheckCircle2 },
+  warn: { label: "Minor issues", cls: "text-amber-500 border-amber-500/50", icon: AlertTriangle },
+  fail: { label: "Defects found", cls: "text-red-500 border-red-500/50", icon: AlertTriangle },
+};
+
+function QualityCheckCard() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [productType, setProductType] = useState<QualityProductType>("pizza");
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<QualityCheckResult | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  async function analyze(imageBase64: string) {
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setConfirmed(false);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await qualityCheckPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        productType,
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (
+        e instanceof InventoryApiError &&
+        e.status === 429 &&
+        e.retryAfterSec &&
+        e.retryAfterSec > 0
+      ) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function onPick(file: File | null) {
+    if (!file) return;
+    let imageBase64: string;
+    setError(null);
+    setPreparing(true);
+    try {
+      imageBase64 = await fileToBase64Jpeg(file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read photo");
+      return;
+    } finally {
+      setPreparing(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+    await analyze(imageBase64);
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  // Record the reviewed outcome to shared facility memory. This is the ONLY
+  // write — the assessment itself is never auto-saved.
+  async function confirmOutcome() {
+    if (!result) return;
+    const a = result.assessment;
+    setConfirming(true);
+    setError(null);
+    try {
+      const issueText = a.issues.length
+        ? ` Issues: ${a.issues.map((i) => `${i.type} (${i.severity}) — ${i.detail}`).join("; ")}.`
+        : "";
+      await saveFacilityKnowledge([
+        {
+          domain: "quality",
+          key: `check:${productType}:${todayStr()}`,
+          fact:
+            `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
+            `"${a.status}" (${Math.round(a.confidence * 100)}% confidence). ${a.summary}${issueText}`,
+        },
+      ]);
+      setConfirmed(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save outcome");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  const meta = result ? QUALITY_STATUS_META[result.assessment.status] : null;
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4" /> Quality Check
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />}{" "}
+            {open ? "Close" : "Check"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Photograph a finished pizza or crust for an AI quality assessment. This is advisory
+            only — nothing is recorded unless you review and confirm the outcome.
+          </p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(["pizza", "crust", "other"] as QualityProductType[]).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setProductType(t)}
+                className={`h-8 rounded-md border text-xs font-semibold capitalize transition-colors ${
+                  productType === t
+                    ? "border-primary/60 bg-primary/10 text-primary"
+                    : "border-border/60 text-muted-foreground hover:bg-muted/50"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <Input
+            placeholder="Optional context (e.g. expected 16in, light topping)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="h-8 text-xs"
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            size="sm"
+            className="h-9 w-full text-sm"
+            disabled={preparing || analyzing}
+            onClick={() => fileRef.current?.click()}
+          >
+            {preparing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
+              </>
+            ) : analyzing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Assessing…
+              </>
+            ) : (
+              <>
+                <Camera className="w-3.5 h-3.5" /> Choose photo
+              </>
+            )}
+          </Button>
+
+          {error && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-red-500">{error}</p>
+              {lastImageRef.current && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 w-full text-xs"
+                  disabled={analyzing || retryIn > 0}
+                  onClick={retry}
+                >
+                  <Loader2 className={`w-3.5 h-3.5 ${analyzing ? "animate-spin" : "hidden"}`} />
+                  {retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {result && meta && (
+            <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`flex items-center gap-1.5 text-[11px] font-bold uppercase border rounded px-1.5 py-0.5 ${meta.cls}`}
+                >
+                  <meta.icon className="w-3.5 h-3.5" /> {meta.label}
+                </span>
+                <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
+                  {Math.round(result.assessment.confidence * 100)}% confidence
+                </span>
+              </div>
+              {result.assessment.summary && (
+                <p className="text-xs text-foreground/90">{result.assessment.summary}</p>
+              )}
+              {result.note && <p className="text-[11px] text-amber-500">{result.note}</p>}
+              {result.assessment.issues.length > 0 && (
+                <ul className="space-y-1">
+                  {result.assessment.issues.map((iss, i) => (
+                    <li key={i} className="text-[11px] text-muted-foreground flex gap-1.5">
+                      <span
+                        className={`font-bold uppercase shrink-0 ${
+                          iss.severity === "critical"
+                            ? "text-red-500"
+                            : iss.severity === "major"
+                              ? "text-amber-500"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {iss.type}
+                      </span>
+                      <span>{iss.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {confirmed ? (
+                <p className="text-xs text-emerald-500 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Outcome saved to facility memory.
+                </p>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 w-full text-xs"
+                  disabled={confirming}
+                  onClick={confirmOutcome}
+                >
+                  {confirming ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-3 h-3" /> Confirm &amp; remember outcome
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── AI expiry & waste insight ────────────────────────────────────────────────
+// The server flags expired/expiring-soon stock and (when anything is at risk)
+// suggests a run order to consume it first. Advisory only — nothing is changed.
+function WasteInsightCard() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<WasteInsightResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  async function run() {
+    setError(null);
+    setRetryIn(0);
+    setLoading(true);
+    try {
+      const res = await wasteInsight({});
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (
+        e instanceof InventoryApiError &&
+        e.status === 429 &&
+        e.retryAfterSec &&
+        e.retryAfterSec > 0
+      ) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Recycle className="w-4 h-4" /> Waste Insight
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}{" "}
+            {open ? "Close" : "Open"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Flag stock that's expired or expiring soon and get an AI suggestion for which runs to
+            prioritize so it gets used first. Advisory only — nothing is rescheduled.
+          </p>
+          <Button
+            size="sm"
+            className="h-9 w-full text-sm"
+            disabled={loading || retryIn > 0}
+            onClick={run}
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Checking…
+              </>
+            ) : retryIn > 0 ? (
+              `Try again in ${retryIn}s`
+            ) : (
+              <>
+                <Recycle className="w-3.5 h-3.5" /> Check expiring stock
+              </>
+            )}
+          </Button>
+
+          {error && <p className="text-xs text-red-500">{error}</p>}
+
+          {result && (
+            <div className="space-y-2">
+              {result.flagged.length === 0 ? (
+                <p className="text-xs text-emerald-500 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Nothing is expired or expiring soon.
+                </p>
+              ) : (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    At risk ({result.flagged.length})
+                  </p>
+                  <div className="space-y-1">
+                    {result.flagged.map((f) => (
+                      <div
+                        key={f.key}
+                        className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/10 px-2.5 py-1.5"
+                      >
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`text-[10px] font-bold uppercase border rounded px-1 shrink-0 ${
+                              f.status === "expired"
+                                ? "text-red-500 border-red-500/50"
+                                : "text-amber-500 border-amber-500/50"
+                            }`}
+                          >
+                            {f.status}
+                          </span>
+                          <span className="text-xs truncate">{f.name}</span>
+                        </span>
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap tabular-nums flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {f.daysUntilExpiry == null
+                            ? "—"
+                            : f.daysUntilExpiry < 0
+                              ? `${Math.abs(f.daysUntilExpiry)}d ago`
+                              : `${f.daysUntilExpiry}d`}
+                          {" · "}
+                          {fmtQty(f.qtyAtRisk)} {f.unit}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {result.suggestion && (
+                    <div className="rounded-md border border-primary/30 bg-primary/5 p-2.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Suggested run order
+                      </p>
+                      <p className="text-xs text-foreground/90 whitespace-pre-wrap">
+                        {result.suggestion}
+                      </p>
+                    </div>
+                  )}
+                  {result.note && <p className="text-[11px] text-amber-500">{result.note}</p>}
+                </>
+              )}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
 
 function PhotoIntakeCard({
   candidates,
