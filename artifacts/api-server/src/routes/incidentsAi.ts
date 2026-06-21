@@ -219,7 +219,10 @@ function parseSignature(key: string): { platform: string; screen: string; tokens
   return { platform, screen, tokens: toks ? toks.split("-").filter(Boolean) : [] };
 }
 
-function jaccard(a: string[], b: string[]): number {
+// Token-overlap similarity (intersection over union). Exported for focused unit
+// tests of the recurrence-matching threshold; the route uses it via
+// analyzeIncidentHistory.
+export function jaccard(a: string[], b: string[]): number {
   if (a.length === 0 && b.length === 0) return 0;
   const setA = new Set(a);
   const setB = new Set(b);
