@@ -23,13 +23,25 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { sql } from "drizzle-orm";
-import express, { type Express } from "express";
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import type { Express } from "express";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import pg from "pg";
 import { signToken } from "../lib/auth";
 import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
 import { collectGetRoutePathsFromRouter } from "../lib/routeScan";
+
+// Boot the REAL, fully-assembled app (app.ts: pino-http, cors, cookie-parser,
+// body parsers, the dev token-in-URL promotion, then the router mounted at
+// /api) instead of a hand-rebuilt minimal copy, so a caching/middleware
+// regression introduced in app.ts itself — e.g. a future cache layer mounted
+// ahead of the router, or a change to how the router is mounted — is caught
+// here. We only swap the pino logger for a silent one so the suite doesn't spam
+// stdout or spin up the pino-pretty transport worker; everything else is the
+// production middleware stack.
+vi.mock("../lib/logger", async () => {
+  const pino = (await import("pino")).default;
+  return { logger: pino({ enabled: false }) };
+});
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -79,10 +91,14 @@ beforeAll(async () => {
   }
 
   // Point the app's db at the throwaway DB, THEN load the modules so the
-  // singleton pool binds to it.
+  // singleton pool binds to it. We import the real app.ts (which transitively
+  // imports the router) AND the router directly: app.ts mounts the same router
+  // module instance at /api, and the direct import is what we introspect for
+  // route discovery below.
   process.env.DATABASE_URL = testUrlStr;
   const dbMod = await import("@workspace/db");
   const routerMod = await import("./index");
+  const appMod = await import("../app");
   db = dbMod.db;
   pool = dbMod.pool;
   userRolesTable = dbMod.userRolesTable;
@@ -99,16 +115,11 @@ beforeAll(async () => {
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager", passwordHash: "x" }]);
   await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);
 
-  // Minimal app: the real router, behind a no-op req.log so handlers that log
-  // don't crash without pino-http. Mounted at /api to match production paths.
-  const app: Express = express();
-  app.use(express.json({ limit: "10mb" }));
-  app.use((req, _res, next) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
-    next();
-  });
-  app.use("/api", routerMod.default);
+  // The real, fully-assembled production app (router mounted at /api), with only
+  // the logger stubbed (see vi.mock above). This exercises the entire app.ts
+  // middleware stack so a cache regression there — not just in the router — is
+  // caught.
+  const app: Express = appMod.default;
 
   await new Promise<void>((resolve) => {
     server = app.listen(0, () => resolve());
