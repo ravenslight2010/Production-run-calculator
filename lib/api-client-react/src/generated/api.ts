@@ -40,6 +40,8 @@ import type {
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
+  ForecastAccuracyInput,
+  ForecastAccuracyResult,
   ForecastInput,
   ForecastResult,
   ForgotPasswordRequest,
@@ -2830,6 +2832,78 @@ export const useAiForecast = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiForecastMutationOptions(options));
+    }
+
+export const getAiForecastAccuracyUrl = () => {
+
+
+
+
+  return `/api/ai/forecast-accuracy`
+}
+
+/**
+ * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
+ * @summary Review how accurate past forecasts were vs. what actually ran; read-only
+ */
+export const aiForecastAccuracy = async (forecastAccuracyInput: ForecastAccuracyInput, options?: RequestInit): Promise<ForecastAccuracyResult> => {
+
+  return customFetch<ForecastAccuracyResult>(getAiForecastAccuracyUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      forecastAccuracyInput,)
+  }
+);}
+
+
+
+
+export const getAiForecastAccuracyMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,{data: BodyType<ForecastAccuracyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,{data: BodyType<ForecastAccuracyInput>}, TContext> => {
+
+const mutationKey = ['aiForecastAccuracy'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiForecastAccuracy>>, {data: BodyType<ForecastAccuracyInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiForecastAccuracy(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiForecastAccuracyMutationResult = NonNullable<Awaited<ReturnType<typeof aiForecastAccuracy>>>
+    export type AiForecastAccuracyMutationBody = BodyType<ForecastAccuracyInput>
+    export type AiForecastAccuracyMutationError = ErrorType<void>
+
+    /**
+ * @summary Review how accurate past forecasts were vs. what actually ran; read-only
+ */
+export const useAiForecastAccuracy = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecastAccuracy>>, TError,{data: BodyType<ForecastAccuracyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiForecastAccuracy>>,
+        TError,
+        {data: BodyType<ForecastAccuracyInput>},
+        TContext
+      > => {
+      return useMutation(getAiForecastAccuracyMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {

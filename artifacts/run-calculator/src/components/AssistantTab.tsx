@@ -40,7 +40,11 @@ import {
   type ForecastInput,
   type ForecastPlan,
   type ForecastConfidence,
+  type ForecastAccuracyInput,
+  type ForecastAccuracyReview,
+  type ForecastAccuracyProductStatus,
   requestForecast,
+  requestForecastAccuracy,
   forecastErrorMessage,
 } from "../aiForecast";
 import { fetchConversationHistory, type ConversationTurn } from "../aiMemory";
@@ -646,18 +650,170 @@ function ForecastSection({
   );
 }
 
+function accuracyStatusClass(s: ForecastAccuracyProductStatus): string {
+  if (s === "hit") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+  if (s === "missed" || s === "unexpected")
+    return "bg-red-500/15 text-red-400 border-red-500/30";
+  return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+}
+
+const ACCURACY_STATUS_LABEL: Record<ForecastAccuracyProductStatus, string> = {
+  hit: "on target",
+  over: "over-predicted",
+  under: "under-predicted",
+  missed: "not run",
+  unexpected: "unplanned",
+};
+
+function accuracyPctClass(pct: number): string {
+  if (pct >= 85) return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
+  if (pct >= 60) return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+  return "bg-red-500/15 text-red-400 border-red-500/30";
+}
+
+// Manager-only forecast accuracy. After a forecasted day finishes, compares what
+// the forecast predicted against the actual finished runs. Read-only — no AI call,
+// nothing committed; purely a hindsight signal so managers can calibrate trust.
+function AccuracySection({
+  buildAccuracy,
+}: {
+  buildAccuracy: () => ForecastAccuracyInput;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<
+    { reviews: ForecastAccuracyReview[]; note?: string; generatedAt: number } | null
+  >(null);
+
+  async function review() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestForecastAccuracy(buildAccuracy());
+      setResult(res);
+    } catch (e) {
+      setError(forecastErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const reviews = result?.reviews ?? [];
+
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Gauge className="w-5 h-5 text-primary" />
+            Forecast Accuracy
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            See how past demand forecasts held up against what actually ran. Compares each
+            forecasted day&apos;s predicted brands, flavors, and cases to the finished runs so you
+            can calibrate how much to trust upcoming forecasts.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button
+            onClick={review}
+            disabled={loading}
+            className="gap-2"
+            data-testid="button-forecast-accuracy"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" /> Checking…
+              </>
+            ) : result ? (
+              <>
+                <RefreshCw className="w-4 h-4" /> Re-check accuracy
+              </>
+            ) : (
+              <>
+                <Gauge className="w-4 h-4" /> Check past accuracy
+              </>
+            )}
+          </Button>
+          {error && (
+            <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {result && reviews.length === 0 && (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+            <Gauge className="w-6 h-6 text-muted-foreground" />
+            <p className="text-sm font-semibold text-foreground">No forecasts to score yet</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              {result.note ??
+                "Once a day you forecasted has finished its runs, its accuracy will show up here."}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {reviews.map((rev) => (
+        <Card key={rev.date} data-testid={`accuracy-review-${rev.date}`}>
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Gauge className="w-4 h-4 text-primary" />
+                {formatTargetDate(rev.date)}
+              </CardTitle>
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${accuracyPctClass(rev.caseAccuracyPct)}`}
+                data-testid={`accuracy-pct-${rev.date}`}
+              >
+                {rev.caseAccuracyPct}% accurate
+              </span>
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Predicted {rev.predictedTotalCases} cs · Actual {rev.actualTotalCases} cs ·{" "}
+              {rev.confidence} confidence at forecast time
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {rev.products.map((p, i) => (
+              <div key={i} className="rounded-lg border border-border bg-card/60 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-semibold text-foreground">{p.label}</p>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${accuracyStatusClass(p.status)}`}
+                  >
+                    {ACCURACY_STATUS_LABEL[p.status]}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                  Predicted {p.predictedCases} cs · Actual {p.actualCases} cs
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+    </>
+  );
+}
+
 export default function AssistantTab({
   buildInput,
   buildRecipeContext,
   onApplyAction,
   buildForecast,
   onApplyForecast,
+  buildAccuracy,
 }: {
   buildInput: () => OptimizeInput;
   buildRecipeContext: () => Omit<RecipeAssistInput, "question">;
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
   buildForecast: () => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
+  buildAccuracy: () => ForecastAccuracyInput;
 }) {
   const { isManager, isLoading: roleLoading } = useMe();
   const [loading, setLoading] = useState(false);
@@ -702,6 +858,8 @@ export default function AssistantTab({
       {!isManager ? null : (
       <>
       <ForecastSection buildForecast={buildForecast} onApplyForecast={onApplyForecast} />
+
+      <AccuracySection buildAccuracy={buildAccuracy} />
 
       <Card>
         <CardHeader>

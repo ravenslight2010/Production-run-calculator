@@ -67,6 +67,12 @@ import {
   validateForecastBody,
   FORECAST_MIN_RUNS,
 } from "./aiForecast";
+import {
+  validateForecastAccuracyBody,
+  buildForecastReviews,
+  formatForecastFact,
+  formatAccuracyFact,
+} from "./forecastAccuracy";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 import {
@@ -636,14 +642,11 @@ router.post(
     // can reference what was predicted for this kind of day. A write failure
     // must never break the response, so swallow errors.
     if (forecast) {
-      const products = forecast.runs
-        .map((r) => `${r.brand} ${r.flavor} (~${r.casesNeeded}cs)`)
-        .join(", ");
       void recordFacilityKnowledge([
         {
           domain: "forecast",
           key: `plan:${forecast.targetDate}`,
-          fact: `Forecast for ${forecast.targetDate} [${forecast.confidence} confidence]: ${products}.`,
+          fact: formatForecastFact(forecast),
           source: "demand-forecaster",
         },
       ]).catch((err) => {
@@ -655,6 +658,53 @@ router.post(
       forecast,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
+    });
+  },
+);
+
+// Forecast-accuracy review: grade previously-recorded forecasts (facility
+// memory, domain "forecast", key `plan:<date>`) against the actual finished
+// history the client supplies for those dates. Manager-gated and read-only —
+// purely deterministic arithmetic (NO AI call), so there's no rate limit. Best-
+// effort records each review back to facility memory (key `accuracy:<date>`) so
+// future forecast prompts learn from past misses.
+router.post(
+  "/ai/forecast-accuracy",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const validation = validateForecastAccuracyBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const reviews = buildForecastReviews(knowledge, validation.data.history);
+
+    // Record accuracy back to shared memory (best-effort) so the forecaster is
+    // grounded in how it actually did. A write failure must never break the
+    // response, so swallow errors.
+    if (reviews.length > 0) {
+      void recordFacilityKnowledge(
+        reviews.map((r) => ({
+          domain: "forecast",
+          key: `accuracy:${r.date}`,
+          fact: formatAccuracyFact(r),
+          source: "forecast-accuracy",
+        })),
+      ).catch((err) => {
+        req.log.error({ err }, "failed to record forecast accuracy to facility memory");
+      });
+    }
+
+    res.json({
+      reviews,
+      generatedAt: Date.now(),
+      ...(reviews.length === 0
+        ? {
+            note: "No past forecasts to review yet. Once a forecasted day finishes its runs, its accuracy shows up here.",
+          }
+        : {}),
     });
   },
 );

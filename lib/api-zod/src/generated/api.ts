@@ -931,6 +931,43 @@ export const AiForecastResponse = zod.object({
 
 
 /**
+ * Compares previously recorded demand forecasts (kept in shared facility memory) against the supplied actual finished production history for those dates. Returns a per-date review of predicted vs. actual products and case quantities plus a lightweight accuracy signal, so managers can see how well the forecaster has been doing and the AI can learn from misses. Read-only — never writes or commits run data; only the deterministic comparison is computed (no AI call).
+ * @summary Review how accurate past forecasts were vs. what actually ran; read-only
+ */
+export const AiForecastAccuracyBody = zod.object({
+  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
+  "history": zod.array(zod.object({
+  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().describe('May be empty when unknown'),
+  "cases": zod.number().describe('Cases actually produced for this run'),
+  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
+}).describe('A finished run from a past day, used to learn demand patterns.'))
+}).describe('One past production day with its finished runs.')).describe('Recent finished production days (the actual results to compare forecasts to)')
+}).describe('Actual finished production history to grade past forecasts against.')
+
+export const AiForecastAccuracyResponse = zod.object({
+  "reviews": zod.array(zod.object({
+  "date": zod.string().describe('ISO date (YYYY-MM-DD) the forecast was for'),
+  "confidence": zod.enum(['high', 'medium', 'low']).describe('Confidence the forecast was issued with'),
+  "predictedTotalCases": zod.number(),
+  "actualTotalCases": zod.number(),
+  "caseAccuracyPct": zod.number().describe('0–100 closeness of predicted total cases to actual total cases'),
+  "products": zod.array(zod.object({
+  "label": zod.string().describe('Product label (brand + flavor) as recorded\/run'),
+  "predictedCases": zod.number().describe('Cases the forecast predicted (0 if it was not predicted)'),
+  "actualCases": zod.number().describe('Cases actually produced (0 if it did not run)'),
+  "status": zod.enum(['hit', 'over', 'under', 'missed', 'unexpected']).describe('hit = predicted ≈ actual; over\/under = predicted more\/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted')
+}).describe('One product\'s predicted vs. actual cases for a reviewed day.'))
+}).describe('One past forecast graded against the day\'s actual finished runs.')).describe('Per-date reviews, most recent first'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Explanation when there is nothing to review yet')
+})
+
+
+/**
  * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
  * @summary Suggest values for blank run-setup fields (AI); read-only
  */

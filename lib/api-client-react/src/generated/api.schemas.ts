@@ -913,6 +913,79 @@ export interface ForecastResult {
   note?: string;
 }
 
+/**
+ * Actual finished production history to grade past forecasts against.
+ */
+export interface ForecastAccuracyInput {
+  /** Client clock in epoch ms (for relative reasoning) */
+  nowMs: number;
+  /** Recent finished production days (the actual results to compare forecasts to) */
+  history: ForecastHistoryDay[];
+}
+
+/**
+ * hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted
+ */
+export type ForecastAccuracyProductStatus = typeof ForecastAccuracyProductStatus[keyof typeof ForecastAccuracyProductStatus];
+
+
+export const ForecastAccuracyProductStatus = {
+  hit: 'hit',
+  over: 'over',
+  under: 'under',
+  missed: 'missed',
+  unexpected: 'unexpected',
+} as const;
+
+/**
+ * One product's predicted vs. actual cases for a reviewed day.
+ */
+export interface ForecastAccuracyProduct {
+  /** Product label (brand + flavor) as recorded/run */
+  label: string;
+  /** Cases the forecast predicted (0 if it was not predicted) */
+  predictedCases: number;
+  /** Cases actually produced (0 if it did not run) */
+  actualCases: number;
+  /** hit = predicted ≈ actual; over/under = predicted more/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted */
+  status: ForecastAccuracyProductStatus;
+}
+
+/**
+ * Confidence the forecast was issued with
+ */
+export type ForecastAccuracyReviewConfidence = typeof ForecastAccuracyReviewConfidence[keyof typeof ForecastAccuracyReviewConfidence];
+
+
+export const ForecastAccuracyReviewConfidence = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+/**
+ * One past forecast graded against the day's actual finished runs.
+ */
+export interface ForecastAccuracyReview {
+  /** ISO date (YYYY-MM-DD) the forecast was for */
+  date: string;
+  /** Confidence the forecast was issued with */
+  confidence: ForecastAccuracyReviewConfidence;
+  predictedTotalCases: number;
+  actualTotalCases: number;
+  /** 0–100 closeness of predicted total cases to actual total cases */
+  caseAccuracyPct: number;
+  products: ForecastAccuracyProduct[];
+}
+
+export interface ForecastAccuracyResult {
+  /** Per-date reviews, most recent first */
+  reviews: ForecastAccuracyReview[];
+  generatedAt: number;
+  /** Explanation when there is nothing to review yet */
+  note?: string;
+}
+
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
 
 

@@ -28,10 +28,15 @@ import {
 } from "@/context/aiOptimize";
 import {
   buildForecastInput,
+  buildForecastAccuracyInput,
   forecastErrorMessage,
   requestForecast,
+  requestForecastAccuracy,
   type ForecastConfidence,
   type ForecastPlan,
+  type ForecastAccuracyInput,
+  type ForecastAccuracyReview,
+  type ForecastAccuracyProductStatus,
 } from "@/context/aiForecast";
 import { askErrorMessage, requestAsk } from "@/context/aiAsk";
 import {
@@ -606,6 +611,131 @@ function ForecastSection({
   );
 }
 
+function accuracyStatusColors(s: ForecastAccuracyProductStatus): { bg: string; fg: string } {
+  if (s === "hit") return { bg: "rgba(16,185,129,0.15)", fg: "#34d399" };
+  if (s === "missed" || s === "unexpected") return { bg: "rgba(239,68,68,0.15)", fg: "#f87171" };
+  return { bg: "rgba(245,158,11,0.15)", fg: "#fbbf24" };
+}
+
+const ACCURACY_STATUS_LABEL: Record<ForecastAccuracyProductStatus, string> = {
+  hit: "ON TARGET",
+  over: "OVER-PREDICTED",
+  under: "UNDER-PREDICTED",
+  missed: "NOT RUN",
+  unexpected: "UNPLANNED",
+};
+
+function accuracyPctColors(pct: number): { bg: string; fg: string } {
+  if (pct >= 85) return { bg: "rgba(16,185,129,0.15)", fg: "#34d399" };
+  if (pct >= 60) return { bg: "rgba(245,158,11,0.15)", fg: "#fbbf24" };
+  return { bg: "rgba(239,68,68,0.15)", fg: "#f87171" };
+}
+
+// Manager-only forecast accuracy. After a forecasted day finishes, compares what
+// the forecast predicted against the actual finished runs. Read-only — no AI call,
+// nothing committed. EXACT mirror of the web AccuracySection (replit.md parity).
+function AccuracySection({ buildAccuracy }: { buildAccuracy: () => ForecastAccuracyInput }) {
+  const colors = useColors();
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<{
+    reviews: ForecastAccuracyReview[];
+    note?: string;
+    generatedAt: number;
+  } | null>(null);
+
+  async function review() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestForecastAccuracy(buildAccuracy());
+      setResult(res);
+    } catch (e) {
+      setError(forecastErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const reviews = result?.reviews ?? [];
+
+  return (
+    <>
+      <Card title="Forecast Accuracy" icon="bar-chart-2" accent>
+        <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+          See how past demand forecasts held up against what actually ran. Compares each forecasted
+          day&apos;s predicted brands, flavors, and cases to the finished runs so you can calibrate
+          how much to trust upcoming forecasts.
+        </Text>
+        <Button
+          label={loading ? "Checking…" : result ? "Re-check accuracy" : "Check past accuracy"}
+          icon={result && !loading ? "refresh-cw" : "bar-chart-2"}
+          onPress={review}
+          disabled={loading}
+          style={{ marginTop: 12 }}
+        />
+        {error ? (
+          <View style={[styles.errorBox, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" }]}>
+            <Feather name="alert-triangle" size={14} color="#f87171" />
+            <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+          </View>
+        ) : null}
+      </Card>
+
+      {result && reviews.length === 0 ? (
+        <Card>
+          <View style={styles.emptyBox}>
+            <Feather name="bar-chart-2" size={22} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
+              No forecasts to score yet
+            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              {result.note ??
+                "Once a day you forecasted has finished its runs, its accuracy will show up here."}
+            </Text>
+          </View>
+        </Card>
+      ) : null}
+
+      {reviews.map((rev) => (
+        <Card key={rev.date} title={formatTargetDate(rev.date)} icon="bar-chart-2">
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View style={[styles.badge, { backgroundColor: accuracyPctColors(rev.caseAccuracyPct).bg }]}>
+              <Text style={[styles.badgeText, { color: accuracyPctColors(rev.caseAccuracyPct).fg }]}>
+                {rev.caseAccuracyPct}% ACCURATE
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.recDetail, { color: colors.mutedForeground, marginTop: 0 }]}>
+            Predicted {rev.predictedTotalCases} cs · Actual {rev.actualTotalCases} cs ·{" "}
+            {rev.confidence} confidence at forecast time
+          </Text>
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {rev.products.map((p, i) => (
+              <View
+                key={i}
+                style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+              >
+                <View style={styles.recHeader}>
+                  <Text style={[styles.recTitle, { color: colors.foreground }]}>{p.label}</Text>
+                  <View style={[styles.badge, { backgroundColor: accuracyStatusColors(p.status).bg }]}>
+                    <Text style={[styles.badgeText, { color: accuracyStatusColors(p.status).fg }]}>
+                      {ACCURACY_STATUS_LABEL[p.status]}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
+                  Predicted {p.predictedCases} cs · Actual {p.actualCases} cs
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ))}
+    </>
+  );
+}
+
 export default function AssistantScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -757,6 +887,12 @@ export default function AssistantScreen() {
     });
   }, [scheduled, history]);
 
+  // Shapes recent finished history into the accuracy wire input — the server
+  // reads the recorded forecasts itself. Mirrors the web buildAccuracy wiring.
+  const buildAccuracy = React.useCallback(() => {
+    return buildForecastAccuracyInput({ nowMs: Date.now(), history });
+  }, [history]);
+
   // Non-destructive apply: add each forecast run to the schedule for the target
   // date, then navigate to the schedule screen so the manager reviews/adjusts.
   // Nothing is auto-committed beyond seeding the editable schedule.
@@ -799,6 +935,8 @@ export default function AssistantScreen() {
       {!isManager ? null : (
       <>
       <ForecastSection buildForecast={buildForecast} onApplyForecast={applyForecast} />
+
+      <AccuracySection buildAccuracy={buildAccuracy} />
 
       <Card title="AI Assistant" icon="zap" accent>
         <Text style={[styles.intro, { color: colors.mutedForeground }]}>

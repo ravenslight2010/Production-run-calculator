@@ -869,6 +869,35 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/forecast-accuracy:
+    post:
+      operationId: aiForecastAccuracy
+      tags: [ai]
+      summary: Review how accurate past forecasts were vs. what actually ran; read-only
+      description: >-
+        Compares previously recorded demand forecasts (kept in shared facility
+        memory) against the supplied actual finished production history for those
+        dates. Returns a per-date review of predicted vs. actual products and
+        case quantities plus a lightweight accuracy signal, so managers can see
+        how well the forecaster has been doing and the AI can learn from misses.
+        Read-only — never writes or commits run data; only the deterministic
+        comparison is computed (no AI call).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForecastAccuracyInput"
+      responses:
+        "200":
+          description: Per-date forecast-vs-actual reviews
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForecastAccuracyResult"
+        "400":
+          description: Invalid input
+
   /ai/fill-missing:
     post:
       operationId: aiFillMissing
@@ -3085,6 +3114,94 @@ components:
         note:
           type: string
           description: Explanation when no forecast could responsibly be produced
+
+    ForecastAccuracyInput:
+      type: object
+      description: Actual finished production history to grade past forecasts against.
+      required:
+        - nowMs
+        - history
+      properties:
+        nowMs:
+          type: number
+          description: Client clock in epoch ms (for relative reasoning)
+        history:
+          type: array
+          description: Recent finished production days (the actual results to compare forecasts to)
+          items:
+            $ref: "#/components/schemas/ForecastHistoryDay"
+
+    ForecastAccuracyProduct:
+      type: object
+      description: One product's predicted vs. actual cases for a reviewed day.
+      required:
+        - label
+        - predictedCases
+        - actualCases
+        - status
+      properties:
+        label:
+          type: string
+          description: Product label (brand + flavor) as recorded/run
+        predictedCases:
+          type: number
+          description: Cases the forecast predicted (0 if it was not predicted)
+        actualCases:
+          type: number
+          description: Cases actually produced (0 if it did not run)
+        status:
+          type: string
+          enum: [hit, over, under, missed, unexpected]
+          description: >-
+            hit = predicted ≈ actual; over/under = predicted more/fewer than ran;
+            missed = predicted but did not run; unexpected = ran but not predicted
+
+    ForecastAccuracyReview:
+      type: object
+      description: One past forecast graded against the day's actual finished runs.
+      required:
+        - date
+        - confidence
+        - predictedTotalCases
+        - actualTotalCases
+        - caseAccuracyPct
+        - products
+      properties:
+        date:
+          type: string
+          description: ISO date (YYYY-MM-DD) the forecast was for
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Confidence the forecast was issued with
+        predictedTotalCases:
+          type: number
+        actualTotalCases:
+          type: number
+        caseAccuracyPct:
+          type: number
+          description: 0–100 closeness of predicted total cases to actual total cases
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/ForecastAccuracyProduct"
+
+    ForecastAccuracyResult:
+      type: object
+      required:
+        - reviews
+        - generatedAt
+      properties:
+        reviews:
+          type: array
+          description: Per-date reviews, most recent first
+          items:
+            $ref: "#/components/schemas/ForecastAccuracyReview"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Explanation when there is nothing to review yet
 
     FillMissingField:
       type: object

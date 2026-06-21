@@ -119,7 +119,7 @@ import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import { buildRecipeAssistContext } from "../aiRecipe";
-import { buildForecastInput, type ForecastPlan } from "../aiForecast";
+import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
 import {
@@ -8008,6 +8008,13 @@ export default function Home() {
                     })
                   }
                   onApplyForecast={applyForecast}
+                  buildAccuracy={() =>
+                    buildForecastAccuracyInput({
+                      nowMs: Date.now(),
+                      history,
+                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                    })
+                  }
                 />
               </TabsContent>
 
