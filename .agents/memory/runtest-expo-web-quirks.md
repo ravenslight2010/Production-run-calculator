@@ -27,6 +27,16 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
   needed. Judging "locked grey vs green play" button colour burns extra iterations —
   prefer the unambiguous "did the run actually start (Pause/End appear)" signal.
 
+- **Beat the iteration cap by pre-seeding the bearer token instead of driving the
+  sign-in form.** The mobile web build restores its session from localStorage key
+  `rc_auth_token` on load. Do ALL setup outside the test (mint a token via
+  `POST /api/auth/sign-up`, then SQL: force role, set `users.onboarding_seen=true`
+  so the Get-Started overlay never auto-opens, insert the rule, clear today's
+  `daily_sync`). Then the test plan is just: navigate (signed-out) → `localStorage.setItem('rc_auth_token', <token>)`
+  → navigate AGAIN (restores session + loads rules) → set field → start. localStorage
+  is per-origin so the first navigation must hit the Expo origin before setting it.
+  This collapsed the bypass positive-path test to ~5 browser steps, well under the cap.
+
 - **Clean the shared day-state before mobile run-screen tests.** Web+mobile share the
   `/api/sync` day-state (`daily_sync`, date PK). If an earlier test started/ended a run,
   today's row holds a non-pending run and the mobile app loads it, forcing the agent to
