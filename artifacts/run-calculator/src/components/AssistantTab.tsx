@@ -49,6 +49,7 @@ import {
   type ForecastAccuracyInput,
   type ForecastAccuracyReview,
   type ForecastAccuracyProductStatus,
+  type ForecastAccuracyTrend,
   requestForecast,
   requestForecastAccuracy,
   forecastErrorMessage,
@@ -1050,7 +1051,12 @@ function AccuracySection({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<
-    { reviews: ForecastAccuracyReview[]; note?: string; generatedAt: number } | null
+    {
+      reviews: ForecastAccuracyReview[];
+      trend: ForecastAccuracyTrend;
+      note?: string;
+      generatedAt: number;
+    } | null
   >(null);
 
   async function review() {
@@ -1067,6 +1073,7 @@ function AccuracySection({
   }
 
   const reviews = result?.reviews ?? [];
+  const trend = result?.trend;
 
   return (
     <>
@@ -1111,6 +1118,73 @@ function AccuracySection({
           )}
         </CardContent>
       </Card>
+
+      {trend && trend.daysScored > 0 && (
+        <Card data-testid="accuracy-trend">
+          <CardHeader>
+            <div className="flex items-start justify-between gap-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingUp className="w-4 h-4 text-primary" />
+                Accuracy trend
+              </CardTitle>
+              <span
+                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${accuracyPctClass(trend.averageCaseAccuracyPct)}`}
+                data-testid="accuracy-trend-average"
+              >
+                {trend.averageCaseAccuracyPct}% avg
+              </span>
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Averaged across the last {trend.daysScored} scored{" "}
+              {trend.daysScored === 1 ? "day" : "days"}.
+            </p>
+          </CardHeader>
+          {(trend.chronicOver.length > 0 || trend.chronicUnder.length > 0) && (
+            <CardContent className="space-y-3">
+              {trend.chronicOver.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-amber-400">
+                    Repeatedly over-predicted
+                  </p>
+                  {trend.chronicOver.map((p) => (
+                    <div
+                      key={p.label}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card/60 px-3 py-2"
+                      data-testid={`accuracy-trend-over-${p.label}`}
+                    >
+                      <span className="text-sm font-semibold text-foreground">{p.label}</span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        over on {p.daysOver} of {p.daysScored}{" "}
+                        {p.daysScored === 1 ? "day" : "days"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {trend.chronicUnder.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-amber-400">
+                    Repeatedly under-predicted
+                  </p>
+                  {trend.chronicUnder.map((p) => (
+                    <div
+                      key={p.label}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card/60 px-3 py-2"
+                      data-testid={`accuracy-trend-under-${p.label}`}
+                    >
+                      <span className="text-sm font-semibold text-foreground">{p.label}</span>
+                      <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        under on {p.daysUnder} of {p.daysScored}{" "}
+                        {p.daysScored === 1 ? "day" : "days"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
+      )}
 
       {result && reviews.length === 0 && (
         <Card>

@@ -26,6 +26,10 @@ Managers review how past demand forecasts held up vs. actual finished runs. Surf
 - Best-effort records `accuracy:<date>` back to facility memory so the forecaster learns from misses; a write failure must never break the response.
 - Pure logic lives in `artifacts/api-server/src/routes/forecastAccuracy.ts` (unit-tested separately from the route).
 
+## Cross-day trend rollup
+- The accuracy response carries a `trend` rollup (average accuracy + days scored + chronically over-/under-predicted products) alongside the per-day reviews. It is a required response field — the server ALWAYS sends it (empty defaults when nothing to score), so client types must require it too, not mirror it as optional.
+- "Chronic" means a product missed in the SAME direction on at least 2 reviewed days AND that direction strictly dominated the other. Deliberately counts only the literal `over`/`under` statuses, NOT `missed`/`unexpected`, so the highlight wording ("repeatedly over/under-predicted") stays literally true. **Why:** a one-bad-day flag is noise, and folding in missed/unexpected would mislabel forecast gaps as mis-predictions.
+
 ## Client/UI parity
 - Both clients reuse the SAME finished-history builder (`buildForecastHistory`) shared with the forecast input, so "actual" means identically the same thing in forecast and accuracy.
 - Accuracy input is just `{nowMs, history}` — the server reads recorded forecasts itself; clients never send forecasts.

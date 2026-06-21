@@ -77,6 +77,7 @@ import {
 import {
   validateForecastAccuracyBody,
   buildForecastReviews,
+  summarizeAccuracyTrend,
   formatForecastFact,
   formatAccuracyFact,
 } from "./forecastAccuracy";
@@ -818,6 +819,7 @@ router.post(
 
     const knowledge = await loadFacilityKnowledge(req.log);
     const reviews = buildForecastReviews(knowledge, validation.data.history);
+    const trend = summarizeAccuracyTrend(reviews);
 
     // Record accuracy back to shared memory (best-effort) so the forecaster is
     // grounded in how it actually did. A write failure must never break the
@@ -837,6 +839,7 @@ router.post(
 
     res.json({
       reviews,
+      trend,
       generatedAt: Date.now(),
       ...(reviews.length === 0
         ? {

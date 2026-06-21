@@ -1038,6 +1038,22 @@ export const AiForecastAccuracyResponse = zod.object({
   "status": zod.enum(['hit', 'over', 'under', 'missed', 'unexpected']).describe('hit = predicted ≈ actual; over\/under = predicted more\/fewer than ran; missed = predicted but did not run; unexpected = ran but not predicted')
 }).describe('One product\'s predicted vs. actual cases for a reviewed day.'))
 }).describe('One past forecast graded against the day\'s actual finished runs.')).describe('Per-date reviews, most recent first'),
+  "trend": zod.object({
+  "daysScored": zod.number().describe('Number of reviewed (forecast + finished) days included'),
+  "averageCaseAccuracyPct": zod.number().describe('Mean case-accuracy across the reviewed days (0–100)'),
+  "chronicOver": zod.array(zod.object({
+  "label": zod.string().describe('Product label (brand + flavor)'),
+  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
+  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
+  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
+}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly over-predicted, most frequent first'),
+  "chronicUnder": zod.array(zod.object({
+  "label": zod.string().describe('Product label (brand + flavor)'),
+  "daysOver": zod.number().describe('Reviewed days this product was over-predicted'),
+  "daysUnder": zod.number().describe('Reviewed days this product was under-predicted'),
+  "daysScored": zod.number().describe('Reviewed days this product appeared in at all')
+}).describe('A product the forecast consistently mis-predicts across reviewed days.')).describe('Products repeatedly under-predicted, most frequent first')
+}).describe('Cross-day calibration summary rolled up from the per-day reviews.'),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Explanation when there is nothing to review yet')
 })

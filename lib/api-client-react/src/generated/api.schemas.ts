@@ -1017,9 +1017,38 @@ export interface ForecastAccuracyReview {
   products: ForecastAccuracyProduct[];
 }
 
+/**
+ * A product the forecast consistently mis-predicts across reviewed days.
+ */
+export interface ForecastAccuracyTrendProduct {
+  /** Product label (brand + flavor) */
+  label: string;
+  /** Reviewed days this product was over-predicted */
+  daysOver: number;
+  /** Reviewed days this product was under-predicted */
+  daysUnder: number;
+  /** Reviewed days this product appeared in at all */
+  daysScored: number;
+}
+
+/**
+ * Cross-day calibration summary rolled up from the per-day reviews.
+ */
+export interface ForecastAccuracyTrend {
+  /** Number of reviewed (forecast + finished) days included */
+  daysScored: number;
+  /** Mean case-accuracy across the reviewed days (0–100) */
+  averageCaseAccuracyPct: number;
+  /** Products repeatedly over-predicted, most frequent first */
+  chronicOver: ForecastAccuracyTrendProduct[];
+  /** Products repeatedly under-predicted, most frequent first */
+  chronicUnder: ForecastAccuracyTrendProduct[];
+}
+
 export interface ForecastAccuracyResult {
   /** Per-date reviews, most recent first */
   reviews: ForecastAccuracyReview[];
+  trend: ForecastAccuracyTrend;
   generatedAt: number;
   /** Explanation when there is nothing to review yet */
   note?: string;

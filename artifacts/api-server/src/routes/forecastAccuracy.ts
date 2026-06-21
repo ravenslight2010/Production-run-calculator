@@ -42,6 +42,28 @@ export type ForecastAccuracyReviewOut = {
   products: ForecastAccuracyProductOut[];
 };
 
+// A product the forecast has consistently mis-predicted across several reviewed
+// days. `daysOver`/`daysUnder` count the days it landed in that status and
+// `daysScored` is how many reviewed days the product appeared in at all, so the
+// UI can say "over-predicted 3 of 4 days".
+export type AccuracyTrendProductOut = {
+  label: string;
+  daysOver: number;
+  daysUnder: number;
+  daysScored: number;
+};
+
+// Rolling, cross-day calibration signal: average case accuracy over the reviewed
+// days plus the products that are chronically over- or under-predicted. Turns the
+// per-day reviews into a "is forecasting improving / where does it keep missing"
+// summary.
+export type AccuracyTrendOut = {
+  daysScored: number;
+  averageCaseAccuracyPct: number;
+  chronicOver: AccuracyTrendProductOut[];
+  chronicUnder: AccuracyTrendProductOut[];
+};
+
 export type ForecastAccuracyValidationResult =
   | { ok: true; data: ForecastAccuracyInput }
   | { ok: false; status: number; error: string };
@@ -259,6 +281,61 @@ export function buildForecastReviews(
 
   reviews.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   return reviews.slice(0, ACCURACY_MAX_REVIEWS);
+}
+
+// A product must land in the same mis-prediction direction on at least this many
+// reviewed days before we flag it as a chronic miss (one bad day is noise).
+export const CHRONIC_MIN_DAYS = 2;
+
+// Roll the per-day reviews up into a cross-day calibration summary: average case
+// accuracy over the reviewed days, the count of days scored, and the products
+// that keep landing on the same wrong side (over- vs. under-predicted). Pure and
+// deterministic so it's covered by unit tests alongside the rest of the scoring.
+export function summarizeAccuracyTrend(
+  reviews: ReadonlyArray<ForecastAccuracyReviewOut>,
+): AccuracyTrendOut {
+  const daysScored = reviews.length;
+  const averageCaseAccuracyPct =
+    daysScored === 0
+      ? 0
+      : Math.round(reviews.reduce((acc, r) => acc + r.caseAccuracyPct, 0) / daysScored);
+
+  type Agg = { label: string; daysOver: number; daysUnder: number; daysSeen: number };
+  const byLabel = new Map<string, Agg>();
+  for (const rev of reviews) {
+    for (const p of rev.products) {
+      const k = normLabel(p.label);
+      if (!k) continue;
+      let agg = byLabel.get(k);
+      if (!agg) {
+        agg = { label: p.label, daysOver: 0, daysUnder: 0, daysSeen: 0 };
+        byLabel.set(k, agg);
+      }
+      agg.daysSeen += 1;
+      if (p.status === "over") agg.daysOver += 1;
+      else if (p.status === "under") agg.daysUnder += 1;
+    }
+  }
+
+  const chronicOver: AccuracyTrendProductOut[] = [];
+  const chronicUnder: AccuracyTrendProductOut[] = [];
+  for (const agg of byLabel.values()) {
+    const out: AccuracyTrendProductOut = {
+      label: agg.label,
+      daysOver: agg.daysOver,
+      daysUnder: agg.daysUnder,
+      daysScored: agg.daysSeen,
+    };
+    if (agg.daysOver >= CHRONIC_MIN_DAYS && agg.daysOver > agg.daysUnder) {
+      chronicOver.push(out);
+    } else if (agg.daysUnder >= CHRONIC_MIN_DAYS && agg.daysUnder > agg.daysOver) {
+      chronicUnder.push(out);
+    }
+  }
+  chronicOver.sort((a, b) => b.daysOver - a.daysOver || a.label.localeCompare(b.label));
+  chronicUnder.sort((a, b) => b.daysUnder - a.daysUnder || a.label.localeCompare(b.label));
+
+  return { daysScored, averageCaseAccuracyPct, chronicOver, chronicUnder };
 }
 
 // One-line accuracy fact we record back to facility memory (best-effort) so

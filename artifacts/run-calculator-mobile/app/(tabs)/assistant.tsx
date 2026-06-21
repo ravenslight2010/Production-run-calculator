@@ -37,6 +37,7 @@ import {
   type ForecastAccuracyInput,
   type ForecastAccuracyReview,
   type ForecastAccuracyProductStatus,
+  type ForecastAccuracyTrend,
 } from "@/context/aiForecast";
 import { askErrorMessage, requestAsk } from "@/context/aiAsk";
 import {
@@ -1099,6 +1100,7 @@ function AccuracySection({ buildAccuracy }: { buildAccuracy: () => ForecastAccur
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<{
     reviews: ForecastAccuracyReview[];
+    trend: ForecastAccuracyTrend;
     note?: string;
     generatedAt: number;
   } | null>(null);
@@ -1117,6 +1119,7 @@ function AccuracySection({ buildAccuracy }: { buildAccuracy: () => ForecastAccur
   }
 
   const reviews = result?.reviews ?? [];
+  const trend = result?.trend;
 
   return (
     <>
@@ -1140,6 +1143,72 @@ function AccuracySection({ buildAccuracy }: { buildAccuracy: () => ForecastAccur
           </View>
         ) : null}
       </Card>
+
+      {trend && trend.daysScored > 0 ? (
+        <Card title="Accuracy trend" icon="trending-up">
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View
+              style={[styles.badge, { backgroundColor: accuracyPctColors(trend.averageCaseAccuracyPct).bg }]}
+            >
+              <Text
+                style={[styles.badgeText, { color: accuracyPctColors(trend.averageCaseAccuracyPct).fg }]}
+              >
+                {trend.averageCaseAccuracyPct}% AVG
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.recDetail, { color: colors.mutedForeground, marginTop: 0 }]}>
+            Averaged across the last {trend.daysScored} scored{" "}
+            {trend.daysScored === 1 ? "day" : "days"}.
+          </Text>
+          {trend.chronicOver.length > 0 ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={[styles.trendGroupLabel, { color: "#fbbf24" }]}>
+                REPEATEDLY OVER-PREDICTED
+              </Text>
+              <View style={{ gap: 8, marginTop: 6 }}>
+                {trend.chronicOver.map((p) => (
+                  <View
+                    key={p.label}
+                    style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  >
+                    <View style={styles.recHeader}>
+                      <Text style={[styles.recTitle, { color: colors.foreground }]}>{p.label}</Text>
+                      <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
+                        over on {p.daysOver} of {p.daysScored}{" "}
+                        {p.daysScored === 1 ? "day" : "days"}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+          {trend.chronicUnder.length > 0 ? (
+            <View style={{ marginTop: 12 }}>
+              <Text style={[styles.trendGroupLabel, { color: "#fbbf24" }]}>
+                REPEATEDLY UNDER-PREDICTED
+              </Text>
+              <View style={{ gap: 8, marginTop: 6 }}>
+                {trend.chronicUnder.map((p) => (
+                  <View
+                    key={p.label}
+                    style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  >
+                    <View style={styles.recHeader}>
+                      <Text style={[styles.recTitle, { color: colors.foreground }]}>{p.label}</Text>
+                      <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
+                        under on {p.daysUnder} of {p.daysScored}{" "}
+                        {p.daysScored === 1 ? "day" : "days"}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+        </Card>
+      ) : null}
 
       {result && reviews.length === 0 ? (
         <Card>
@@ -1843,6 +1912,7 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 9, fontFamily: FONTS.bold, letterSpacing: 0.5 },
   recDetail: { marginTop: 6, fontSize: 12, lineHeight: 18, fontFamily: FONTS.regular },
   recApplies: { marginTop: 6, fontSize: 11, fontFamily: FONTS.medium },
+  trendGroupLabel: { fontSize: 11, fontFamily: FONTS.bold, letterSpacing: 0.5 },
   actionRow: { marginTop: 10, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
   actionMsg: { fontSize: 11, fontFamily: FONTS.medium },
   suggestionCard: { borderWidth: 1, borderRadius: 10, padding: 10, alignSelf: "stretch" },

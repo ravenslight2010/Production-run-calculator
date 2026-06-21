@@ -45,6 +45,8 @@ export * from './forecastAccuracyProductStatus';
 export * from './forecastAccuracyResult';
 export * from './forecastAccuracyReview';
 export * from './forecastAccuracyReviewConfidence';
+export * from './forecastAccuracyTrend';
+export * from './forecastAccuracyTrendProduct';
 export * from './forecastHistoryDay';
 export * from './forecastHistoryRun';
 export * from './forecastInput';

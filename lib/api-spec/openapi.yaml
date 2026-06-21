@@ -3274,10 +3274,59 @@ components:
           items:
             $ref: "#/components/schemas/ForecastAccuracyProduct"
 
+    ForecastAccuracyTrendProduct:
+      type: object
+      description: A product the forecast consistently mis-predicts across reviewed days.
+      required:
+        - label
+        - daysOver
+        - daysUnder
+        - daysScored
+      properties:
+        label:
+          type: string
+          description: Product label (brand + flavor)
+        daysOver:
+          type: number
+          description: Reviewed days this product was over-predicted
+        daysUnder:
+          type: number
+          description: Reviewed days this product was under-predicted
+        daysScored:
+          type: number
+          description: Reviewed days this product appeared in at all
+
+    ForecastAccuracyTrend:
+      type: object
+      description: Cross-day calibration summary rolled up from the per-day reviews.
+      required:
+        - daysScored
+        - averageCaseAccuracyPct
+        - chronicOver
+        - chronicUnder
+      properties:
+        daysScored:
+          type: number
+          description: Number of reviewed (forecast + finished) days included
+        averageCaseAccuracyPct:
+          type: number
+          description: Mean case-accuracy across the reviewed days (0–100)
+        chronicOver:
+          type: array
+          description: Products repeatedly over-predicted, most frequent first
+          items:
+            $ref: "#/components/schemas/ForecastAccuracyTrendProduct"
+        chronicUnder:
+          type: array
+          description: Products repeatedly under-predicted, most frequent first
+          items:
+            $ref: "#/components/schemas/ForecastAccuracyTrendProduct"
+
     ForecastAccuracyResult:
       type: object
       required:
         - reviews
+        - trend
         - generatedAt
       properties:
         reviews:
@@ -3285,6 +3334,8 @@ components:
           description: Per-date reviews, most recent first
           items:
             $ref: "#/components/schemas/ForecastAccuracyReview"
+        trend:
+          $ref: "#/components/schemas/ForecastAccuracyTrend"
         generatedAt:
           type: number
         note:

@@ -8,9 +8,11 @@ import {
   caseAccuracyPct,
   compareForecastToActual,
   buildForecastReviews,
+  summarizeAccuracyTrend,
   formatAccuracyFact,
   validateForecastAccuracyBody,
   ACCURACY_MAX_TOTAL_RUNS,
+  type ForecastAccuracyReviewOut,
 } from "./forecastAccuracy";
 
 function plan(overrides: Partial<ForecastPlanOut> = {}): ForecastPlanOut {
@@ -162,6 +164,94 @@ describe("buildForecastReviews", () => {
       { date: "2026-06-17", runs: [{ brand: "C", flavor: "D", cases: 50 }] },
     ]);
     expect(reviews.map((r) => r.date)).toEqual(["2026-06-17", "2026-06-16"]);
+  });
+});
+
+describe("summarizeAccuracyTrend", () => {
+  function review(
+    date: string,
+    caseAccuracyPct: number,
+    products: ForecastAccuracyReviewOut["products"],
+  ): ForecastAccuracyReviewOut {
+    return {
+      date,
+      confidence: "medium",
+      predictedTotalCases: 0,
+      actualTotalCases: 0,
+      caseAccuracyPct,
+      products,
+    };
+  }
+
+  it("averages case accuracy and counts the days scored", () => {
+    const trend = summarizeAccuracyTrend([
+      review("2026-06-17", 90, []),
+      review("2026-06-16", 70, []),
+      review("2026-06-15", 80, []),
+    ]);
+    expect(trend.daysScored).toBe(3);
+    expect(trend.averageCaseAccuracyPct).toBe(80);
+  });
+
+  it("returns zeros and empty lists when there are no reviews", () => {
+    const trend = summarizeAccuracyTrend([]);
+    expect(trend).toEqual({
+      daysScored: 0,
+      averageCaseAccuracyPct: 0,
+      chronicOver: [],
+      chronicUnder: [],
+    });
+  });
+
+  it("flags products over/under-predicted on at least two days (case-insensitive)", () => {
+    const trend = summarizeAccuracyTrend([
+      review("2026-06-17", 80, [
+        { label: "Tony's Pepperoni", predictedCases: 200, actualCases: 100, status: "over" },
+        { label: "Tony's Cheese", predictedCases: 50, actualCases: 120, status: "under" },
+      ]),
+      review("2026-06-16", 80, [
+        { label: "tony's pepperoni", predictedCases: 180, actualCases: 90, status: "over" },
+        { label: "Tony's Cheese", predictedCases: 60, actualCases: 130, status: "under" },
+      ]),
+    ]);
+    expect(trend.chronicOver).toEqual([
+      { label: "Tony's Pepperoni", daysOver: 2, daysUnder: 0, daysScored: 2 },
+    ]);
+    expect(trend.chronicUnder).toEqual([
+      { label: "Tony's Cheese", daysOver: 0, daysUnder: 2, daysScored: 2 },
+    ]);
+  });
+
+  it("does not flag a one-off miss or a hit", () => {
+    const trend = summarizeAccuracyTrend([
+      review("2026-06-17", 90, [
+        { label: "A B", predictedCases: 100, actualCases: 200, status: "under" },
+        { label: "C D", predictedCases: 100, actualCases: 105, status: "hit" },
+      ]),
+      review("2026-06-16", 90, [
+        { label: "C D", predictedCases: 100, actualCases: 100, status: "hit" },
+      ]),
+    ]);
+    expect(trend.chronicOver).toEqual([]);
+    expect(trend.chronicUnder).toEqual([]);
+  });
+
+  it("classifies by dominant direction when a product misses both ways", () => {
+    const trend = summarizeAccuracyTrend([
+      review("2026-06-18", 80, [
+        { label: "A B", predictedCases: 200, actualCases: 100, status: "over" },
+      ]),
+      review("2026-06-17", 80, [
+        { label: "A B", predictedCases: 200, actualCases: 100, status: "over" },
+      ]),
+      review("2026-06-16", 80, [
+        { label: "A B", predictedCases: 50, actualCases: 120, status: "under" },
+      ]),
+    ]);
+    expect(trend.chronicOver).toEqual([
+      { label: "A B", daysOver: 2, daysUnder: 1, daysScored: 3 },
+    ]);
+    expect(trend.chronicUnder).toEqual([]);
   });
 });
 

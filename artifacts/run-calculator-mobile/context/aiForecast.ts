@@ -80,6 +80,20 @@ export type ForecastAccuracyReview = {
   products: ForecastAccuracyProduct[];
 };
 
+export type ForecastAccuracyTrendProduct = {
+  label: string;
+  daysOver: number;
+  daysUnder: number;
+  daysScored: number;
+};
+
+export type ForecastAccuracyTrend = {
+  daysScored: number;
+  averageCaseAccuracyPct: number;
+  chronicOver: ForecastAccuracyTrendProduct[];
+  chronicUnder: ForecastAccuracyTrendProduct[];
+};
+
 export type ForecastAccuracyInput = {
   nowMs: number;
   history: ForecastHistoryDay[];
@@ -87,6 +101,7 @@ export type ForecastAccuracyInput = {
 
 export type ForecastAccuracyResult = {
   reviews: ForecastAccuracyReview[];
+  trend: ForecastAccuracyTrend;
   generatedAt: number;
   note?: string;
 };
