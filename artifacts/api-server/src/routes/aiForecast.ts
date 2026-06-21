@@ -302,7 +302,14 @@ export function sanitizeForecast(
 // model-friendly prompt. The aggregates do the pattern-finding so the model only
 // has to reason and explain; the instructions force it to be honest about
 // uncertainty and never invent demand that the history doesn't support.
-export function buildForecastPrompt(input: ForecastInput): {
+export function buildForecastPrompt(
+  input: ForecastInput,
+  // Optional compact summary of how recent forecasts actually performed (from
+  // forecastAccuracy.formatAccuracyGrounding). When present it's surfaced as its
+  // own prompt section so the model self-corrects known over-/under-prediction
+  // biases instead of leaving the signal buried in the generic memory dump.
+  accuracyGrounding?: string,
+): {
   system: string;
   user: string;
 } {
@@ -315,7 +322,10 @@ export function buildForecastPrompt(input: ForecastInput): {
     "upcoming day: which products to run, a rough case target for each, and a " +
     "reasonable production sequence (group by die type to minimise changeovers). " +
     "Ground every suggestion in the supplied history — especially what tends to " +
-    "run on the same weekday — and in the shared facility memory. Be explicit " +
+    "run on the same weekday — and in the shared facility memory. If a RECENT " +
+    "FORECAST ACCURACY section is provided, use it to correct yourself: scale " +
+    "back products you have consistently over-predicted and raise those you have " +
+    "consistently under-predicted. Be explicit " +
     "and HONEST about uncertainty: set confidence to \"low\" when history is thin " +
     "or inconsistent, and never invent demand, products, or quantities the data " +
     "does not support. If there is not enough history to predict responsibly, " +
@@ -381,6 +391,11 @@ export function buildForecastPrompt(input: ForecastInput): {
         )
         .join("\n"),
     );
+  }
+
+  if (accuracyGrounding && accuracyGrounding.trim()) {
+    lines.push("");
+    lines.push(accuracyGrounding.trim());
   }
 
   lines.push("");

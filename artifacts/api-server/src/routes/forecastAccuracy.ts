@@ -347,3 +347,48 @@ export function formatAccuracyFact(review: ForecastAccuracyReviewOut): string {
     `${review.confidence} confidence).`
   );
 }
+
+// At most this many chronically-mispredicted products are named per direction in
+// the forecast-prompt grounding, so the calibration hint stays concise.
+export const ACCURACY_GROUNDING_MAX_PRODUCTS = 8;
+
+// Turn the cross-day accuracy trend into a compact, plain-language grounding
+// block the demand forecaster can lean on to self-correct ("you keep
+// over-predicting Brand X"). Returns "" when there's nothing scored yet, so the
+// caller can simply skip an empty section. Pure and deterministic — unit-tested
+// alongside the rest of the scoring. NOTE: only the literal chronic over/under
+// products are named (same posture as summarizeAccuracyTrend), so the wording
+// stays literally true and never mislabels forecast gaps as mis-predictions.
+export function formatAccuracyGrounding(trend: AccuracyTrendOut): string {
+  if (trend.daysScored === 0) return "";
+
+  const lines: string[] = [];
+  lines.push(
+    "RECENT FORECAST ACCURACY (how past forecasts actually did — calibrate your " +
+      "case targets to correct these known biases):",
+  );
+  lines.push(
+    `- Average case accuracy over the last ${trend.daysScored} reviewed day(s): ` +
+      `${trend.averageCaseAccuracyPct}%.`,
+  );
+
+  if (trend.chronicOver.length) {
+    const list = trend.chronicOver
+      .slice(0, ACCURACY_GROUNDING_MAX_PRODUCTS)
+      .map((p) => `"${p.label}" (over on ${p.daysOver} of ${p.daysScored} day(s))`)
+      .join(", ");
+    lines.push(`- Consistently OVER-predicted — scale these DOWN: ${list}.`);
+  }
+  if (trend.chronicUnder.length) {
+    const list = trend.chronicUnder
+      .slice(0, ACCURACY_GROUNDING_MAX_PRODUCTS)
+      .map((p) => `"${p.label}" (under on ${p.daysUnder} of ${p.daysScored} day(s))`)
+      .join(", ");
+    lines.push(`- Consistently UNDER-predicted — raise these UP: ${list}.`);
+  }
+  if (!trend.chronicOver.length && !trend.chronicUnder.length) {
+    lines.push("- No single product is consistently over- or under-predicted yet.");
+  }
+
+  return lines.join("\n");
+}

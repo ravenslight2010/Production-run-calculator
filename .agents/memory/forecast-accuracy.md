@@ -30,6 +30,11 @@ Managers review how past demand forecasts held up vs. actual finished runs. Surf
 - The accuracy response carries a `trend` rollup (average accuracy + days scored + chronically over-/under-predicted products) alongside the per-day reviews. It is a required response field — the server ALWAYS sends it (empty defaults when nothing to score), so client types must require it too, not mirror it as optional.
 - "Chronic" means a product missed in the SAME direction on at least 2 reviewed days AND that direction strictly dominated the other. Deliberately counts only the literal `over`/`under` statuses, NOT `missed`/`unexpected`, so the highlight wording ("repeatedly over/under-predicted") stays literally true. **Why:** a one-bad-day flag is noise, and folding in missed/unexpected would mislabel forecast gaps as mis-predictions.
 
+## Feeding accuracy back into the forecaster
+- `/ai/forecast` grounds its prompt in recent accuracy: it recomputes the trend on the fly via `buildForecastReviews(knowledge, body.history)` → `summarizeAccuracyTrend` → `formatAccuracyGrounding`, then passes that string as the 2nd arg of `buildForecastPrompt`. It does NOT depend on the accuracy endpoint having been called — the forecast request already carries finished history, and recorded `plan:<date>` facts live in facility memory.
+- `formatAccuracyGrounding` names only the literal chronic over/under products (same posture as the trend) so the wording stays true; returns "" when nothing scored (caller skips the section). The system prompt explicitly tells the model to scale chronically-over products down / under products up.
+- **Why:** the raw `accuracy:<date>` day-total facts were already in the generic memory dump but invisible to the model as calibration signal; an explicit, per-product section makes the forecaster self-correct. Still advisory — no new auto-commit.
+
 ## Client/UI parity
 - Both clients reuse the SAME finished-history builder (`buildForecastHistory`) shared with the forecast input, so "actual" means identically the same thing in forecast and accuracy.
 - Accuracy input is just `{nowMs, history}` — the server reads recorded forecasts itself; clients never send forecasts.

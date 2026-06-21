@@ -10,8 +10,10 @@ import {
   buildForecastReviews,
   summarizeAccuracyTrend,
   formatAccuracyFact,
+  formatAccuracyGrounding,
   validateForecastAccuracyBody,
   ACCURACY_MAX_TOTAL_RUNS,
+  ACCURACY_GROUNDING_MAX_PRODUCTS,
   type ForecastAccuracyReviewOut,
 } from "./forecastAccuracy";
 
@@ -266,6 +268,63 @@ describe("formatAccuracyFact", () => {
     expect(text).toContain("predicted 100cs");
     expect(text).toContain("actual 90cs");
     expect(text).toContain("% case accuracy");
+  });
+});
+
+describe("formatAccuracyGrounding", () => {
+  it("returns an empty string when nothing has been scored yet", () => {
+    expect(
+      formatAccuracyGrounding({
+        daysScored: 0,
+        averageCaseAccuracyPct: 0,
+        chronicOver: [],
+        chronicUnder: [],
+      }),
+    ).toBe("");
+  });
+
+  it("names chronic over- and under-predicted products with day counts", () => {
+    const text = formatAccuracyGrounding({
+      daysScored: 4,
+      averageCaseAccuracyPct: 78,
+      chronicOver: [{ label: "Tony's Pepperoni", daysOver: 3, daysUnder: 0, daysScored: 4 }],
+      chronicUnder: [{ label: "Tony's Cheese", daysOver: 0, daysUnder: 2, daysScored: 2 }],
+    });
+    expect(text).toContain("RECENT FORECAST ACCURACY");
+    expect(text).toContain("4 reviewed day(s): 78%");
+    expect(text).toContain("OVER-predicted");
+    expect(text).toContain('"Tony\'s Pepperoni" (over on 3 of 4 day(s))');
+    expect(text).toContain("UNDER-predicted");
+    expect(text).toContain('"Tony\'s Cheese" (under on 2 of 2 day(s))');
+  });
+
+  it("notes when no product is consistently mispredicted but days were scored", () => {
+    const text = formatAccuracyGrounding({
+      daysScored: 2,
+      averageCaseAccuracyPct: 95,
+      chronicOver: [],
+      chronicUnder: [],
+    });
+    expect(text).toContain("2 reviewed day(s): 95%");
+    expect(text).toContain("No single product is consistently over- or under-predicted yet.");
+  });
+
+  it("caps the number of named products per direction", () => {
+    const many = Array.from({ length: ACCURACY_GROUNDING_MAX_PRODUCTS + 5 }, (_, i) => ({
+      label: `Brand ${i}`,
+      daysOver: 3,
+      daysUnder: 0,
+      daysScored: 3,
+    }));
+    const text = formatAccuracyGrounding({
+      daysScored: 3,
+      averageCaseAccuracyPct: 60,
+      chronicOver: many,
+      chronicUnder: [],
+    });
+    const overLine = text.split("\n").find((l) => l.includes("OVER-predicted"))!;
+    const named = overLine.split("\"").filter((_, i) => i % 2 === 1).length;
+    expect(named).toBe(ACCURACY_GROUNDING_MAX_PRODUCTS);
   });
 });
 

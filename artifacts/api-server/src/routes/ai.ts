@@ -80,6 +80,7 @@ import {
   summarizeAccuracyTrend,
   formatForecastFact,
   formatAccuracyFact,
+  formatAccuracyGrounding,
 } from "./forecastAccuracy";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
@@ -744,7 +745,16 @@ router.post(
     }
 
     const knowledge = await loadFacilityKnowledge(req.log);
-    const { system, user } = buildForecastPrompt(validation.data);
+    // Surface how recent forecasts actually performed (graded from previously-
+    // recorded forecasts vs. the finished history this request carries) as an
+    // explicit prompt section so the model self-corrects known over-/under-
+    // prediction biases instead of leaving the signal buried in the generic
+    // memory dump. Pure/deterministic and fail-safe — empty when nothing scored.
+    const accuracyTrend = summarizeAccuracyTrend(
+      buildForecastReviews(knowledge, validation.data.history),
+    );
+    const accuracyGrounding = formatAccuracyGrounding(accuracyTrend);
+    const { system, user } = buildForecastPrompt(validation.data, accuracyGrounding);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let content = "";
