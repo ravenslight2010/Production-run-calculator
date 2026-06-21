@@ -28,6 +28,8 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { signToken } from "../lib/auth";
+import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
+import { collectGetRoutePaths } from "../lib/routeScan";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -131,32 +133,48 @@ function expectNoStore(res: Response): void {
   expect(res.headers.get("expires")).toBe("0");
 }
 
-// Every shared, frequently-edited JSON GET that must never be cached. We assert
-// the header regardless of the response body — `noStore(res)` runs at the top of
-// each handler, so even a 404 (e.g. an absent incident) still carries it.
-const NO_STORE_GETS: string[] = [
-  "/api/production-rules",
-  "/api/inventory",
-  "/api/inventory/ledger",
-  "/api/inventory/settings",
-  "/api/me",
-  "/api/users",
-  "/api/password-reset-requests",
-  "/api/incidents",
-  "/api/incidents/unreviewed-count",
-  "/api/incidents/1",
-  "/api/runs",
-  "/api/photo-aliases",
-  "/api/import-aliases",
-  "/api/merge-aliases",
-  "/api/spec-import-aliases",
-  "/api/ai-corrections",
-  "/api/fill-missing-values",
-  "/api/denied-merges",
-];
+// The runtime no-store check is DERIVED, not hand-maintained: we scan the route
+// source files for every GET registration (the same way the structural guard in
+// cacheControlCoverage.test.ts does) and subtract the exclusion list. A brand-new
+// shared-list GET is therefore verified end-to-end automatically — no one has to
+// remember to add it here. We assert the header regardless of the response body:
+// noStoreMiddleware runs before the handler, so even a 404 (e.g. an absent
+// incident) still carries it.
+const routesDir = path.dirname(fileURLToPath(import.meta.url));
+
+// SSE streams stream forever and set their own streaming headers, so they need
+// special request handling (abort once headers arrive) in the exclusion suite.
+// Keyed by route pattern, matching CACHE_CONTROL_EXCLUSIONS keys.
+const SSE_EXCLUSIONS = new Set<string>(["/sync/events", "/inventory/events"]);
+
+// Representative concrete values for routes with required path params, so the
+// derived pattern can be hit at runtime. ":date" only ever appears on excluded
+// sync routes, but we cover it for completeness.
+function concretePath(pattern: string): string {
+  return pattern
+    .split("/")
+    .map((seg) => {
+      if (!seg.startsWith(":")) return seg;
+      return seg === ":date" ? "2026-06-21" : "1";
+    })
+    .join("/");
+}
+
+const excludedPatterns = new Set(Object.keys(CACHE_CONTROL_EXCLUSIONS));
+
+// Every GET route pattern that is NOT excluded → must be no-store at runtime.
+const NO_STORE_PATTERNS = collectGetRoutePaths(routesDir)
+  .filter((pattern) => !excludedPatterns.has(pattern))
+  .sort();
 
 describe("no-store cache headers on at-risk GET endpoints", () => {
-  for (const pathname of NO_STORE_GETS) {
+  // If the scan ever finds nothing, the suite would be silently vacuous.
+  it("derived at least one at-risk GET to check", () => {
+    expect(NO_STORE_PATTERNS.length).toBeGreaterThan(0);
+  });
+
+  for (const pattern of NO_STORE_PATTERNS) {
+    const pathname = `/api${concretePath(pattern)}`;
     it(`GET ${pathname} sends no-store`, async () => {
       const res = await get(pathname);
       expectNoStore(res);
@@ -167,18 +185,29 @@ describe("no-store cache headers on at-risk GET endpoints", () => {
 });
 
 describe("intentional no-store exclusions", () => {
-  // The health probe is public and must stay freely cacheable.
-  it("GET /api/healthz is NOT no-store", async () => {
-    const res = await fetch(`${baseUrl}/api/healthz`);
-    expect(res.headers.get("cache-control")).not.toBe("no-store, no-cache, must-revalidate");
-    await res.arrayBuffer();
-  });
+  // Non-streaming exclusions (health probe, username lookup, full-payload sync
+  // GETs) must stay freely cacheable — derived from CACHE_CONTROL_EXCLUSIONS so
+  // a newly-added exclusion is verified automatically.
+  const PLAIN_EXCLUSIONS = Object.keys(CACHE_CONTROL_EXCLUSIONS).filter(
+    (pattern) => !SSE_EXCLUSIONS.has(pattern),
+  );
+  for (const pattern of PLAIN_EXCLUSIONS) {
+    // username-available requires a query param; everything else ignores it.
+    const concrete = concretePath(pattern);
+    const pathname =
+      pattern === "/auth/username-available" ? `/api${concrete}?username=probe` : `/api${concrete}`;
+    it(`GET ${pathname} is NOT no-store`, async () => {
+      const res = await get(pathname);
+      expect(res.headers.get("cache-control")).not.toBe("no-store, no-cache, must-revalidate");
+      await res.arrayBuffer();
+    });
+  }
 
   // SSE streams set their own streaming headers (Cache-Control: no-cache, not
   // the full no-store triplet) and push payloads/nudges to clients, so they are
   // deliberately excluded — applying noStore here would be wrong.
-  const SSE_GETS: string[] = ["/api/sync/events", "/api/inventory/events"];
-  for (const pathname of SSE_GETS) {
+  for (const pattern of SSE_EXCLUSIONS) {
+    const pathname = `/api${pattern}`;
     it(`GET ${pathname} (SSE) is NOT no-store`, async () => {
       const controller = new AbortController();
       const res = await get(pathname, controller.signal);

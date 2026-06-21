@@ -17,35 +17,16 @@
 //
 // See `.agents/memory/no-store-cache-headers.md` for the sync-vs-inventory
 // (full-payload-SSE vs nudge-SSE) exclusion rationale.
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
+import { findRegistrations, listRouteSourceFiles } from "../lib/routeScan";
 
 const routesDir = path.dirname(fileURLToPath(import.meta.url));
 
-interface RouteRegistration {
-  method: string;
-  routePath: string;
-  startIndex: number;
-}
-
-// Find every `router.<method>("<path>", …)` registration in a file, with the
-// byte offset where it begins.
-function findRegistrations(source: string): RouteRegistration[] {
-  const re = /router\.(get|post|put|patch|delete|all)\s*\(\s*(["'`])([^"'`]+)\2/g;
-  const out: RouteRegistration[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) {
-    out.push({ method: m[1], routePath: m[3], startIndex: m.index });
-  }
-  return out;
-}
-
-const routeFiles = readdirSync(routesDir).filter(
-  (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && f !== "index.ts",
-);
+const routeFiles = listRouteSourceFiles(routesDir);
 
 describe("no-store is middleware-owned (structural guard)", () => {
   // Sanity check: the scan actually found the route files. If this ever reads 0
