@@ -141,7 +141,7 @@ async function writeReset(date: string, resetAtMs: number): Promise<void> {
     .insert(dailySyncTable)
     .values({ date, data: { dayState: { resetAt: resetAtMs } }, updatedAt: new Date() })
     .onConflictDoUpdate({
-      target: dailySyncTable.date,
+      target: [dailySyncTable.date, dailySyncTable.scope],
       set: { data: { dayState: { resetAt: resetAtMs } } },
     });
 }
