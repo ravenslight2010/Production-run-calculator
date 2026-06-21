@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, deniedMergesTable, type DeniedMerge as DeniedMergeRow } from "@workspace/db";
 import { SaveDeniedMergesBody, DeleteDeniedMergesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 import { deniedPairKey } from "@workspace/merge-suggest";
 
 const router: IRouter = Router();
@@ -36,7 +37,10 @@ function normalizePair(a: unknown, b: unknown): { nameA: string; nameB: string }
 }
 
 async function listAll(): Promise<ApiPair[]> {
-  const rows = await db.select().from(deniedMergesTable);
+  const rows = await db
+    .select()
+    .from(deniedMergesTable)
+    .where(eq(deniedMergesTable.scope, currentScope()));
   return rows.map(toApiPair);
 }
 
@@ -67,7 +71,10 @@ router.post("/denied-merges", async (req: Request, res: Response) => {
 
   try {
     if (byKey.size > 0) {
-      const existing = await db.select().from(deniedMergesTable);
+      const existing = await db
+        .select()
+        .from(deniedMergesTable)
+        .where(eq(deniedMergesTable.scope, currentScope()));
       const have = new Set<string>();
       for (const row of existing) {
         have.add(deniedPairKey(row.nameA, row.nameB));
@@ -77,7 +84,10 @@ router.post("/denied-merges", async (req: Request, res: Response) => {
         if (!have.has(key)) inserts.push(pair);
       }
       if (inserts.length > 0) {
-        await db.insert(deniedMergesTable).values(inserts).onConflictDoNothing();
+        await db
+          .insert(deniedMergesTable)
+          .values(inserts.map((p) => ({ ...p, scope: currentScope() })))
+          .onConflictDoNothing();
       }
     }
 
@@ -110,6 +120,7 @@ router.delete("/denied-merges", async (req: Request, res: Response) => {
           and(
             eq(deniedMergesTable.nameA, pair.nameA),
             eq(deniedMergesTable.nameB, pair.nameB),
+            eq(deniedMergesTable.scope, currentScope()),
           ),
         );
     }

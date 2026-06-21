@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, specImportAliasesTable, type SpecImportAlias as SpecImportAliasRow } from "@workspace/db";
 import { SaveSpecImportAliasesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 import { SPEC_ALIAS_KINDS, specAliasKey, type SpecAliasKind } from "@workspace/spec-import";
 
 const router: IRouter = Router();
@@ -35,7 +36,10 @@ function toApiAlias(row: SpecImportAliasRow): AliasRow | null {
 }
 
 async function listAll(): Promise<AliasRow[]> {
-  const rows = await db.select().from(specImportAliasesTable);
+  const rows = await db
+    .select()
+    .from(specImportAliasesTable)
+    .where(eq(specImportAliasesTable.scope, currentScope()));
   return rows.map(toApiAlias).filter((a): a is AliasRow => a !== null);
 }
 
@@ -72,7 +76,10 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(specImportAliasesTable);
+      const existing = await db
+        .select()
+        .from(specImportAliasesTable)
+        .where(eq(specImportAliasesTable.scope, currentScope()));
       const byKey = new Map<string, SpecImportAliasRow>();
       for (const row of existing) {
         byKey.set(specAliasKey(row.kind, row.externalName, row.context ?? null), row);
@@ -98,7 +105,9 @@ router.post("/spec-import-aliases", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(specImportAliasesTable).values(inserts);
+        await db
+          .insert(specImportAliasesTable)
+          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
       }
     }
 

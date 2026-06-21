@@ -1,5 +1,5 @@
 import { db, dailySyncTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 // The daily reset doubles as a session boundary: when a client performs the
 // midnight rollover it advances `dayState.resetAt` on today's `daily_sync` row
@@ -27,10 +27,13 @@ export async function getSessionBoundaryMs(): Promise<number> {
   const now = Date.now();
   if (now - cachedAt < CACHE_TTL_MS) return cachedBoundaryMs;
   try {
+    // Pinned to the live scope: the daily-reset boundary is a single global
+    // fence for the whole shift. (daily_sync is now keyed by date+scope, so an
+    // unscoped lookup would return multiple rows.)
     const [row] = await db
       .select()
       .from(dailySyncTable)
-      .where(eq(dailySyncTable.date, todayStr()));
+      .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, "live")));
     const data = row?.data as
       | { dayState?: { resetAt?: unknown } }
       | null

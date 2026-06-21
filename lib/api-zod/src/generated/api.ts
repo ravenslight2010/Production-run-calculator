@@ -76,7 +76,8 @@ export const SignInResponse = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 })
 
@@ -1847,7 +1848,8 @@ export const GetMeResponse = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 
 
@@ -1861,7 +1863,8 @@ export const MarkOnboardingSeenResponse = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 
 
@@ -1875,7 +1878,8 @@ export const MarkTourCompletedResponse = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 
 
@@ -1888,7 +1892,8 @@ export const ListStaffResponseItem = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 export const ListStaffResponse = zod.array(ListStaffResponseItem)
 
@@ -1910,7 +1915,8 @@ export const SetStaffRoleResponse = zod.object({
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
-  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).')
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.')
 })
 
 

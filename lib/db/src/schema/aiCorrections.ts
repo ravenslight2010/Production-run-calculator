@@ -13,9 +13,11 @@ import { z } from "zod/v4";
 // Additive by design: each helper keeps its own specialized alias table
 // (merge_aliases, import_aliases, ...); this is shared context layered on top.
 // Matched case-insensitively on (domain, fromText); fromText is the messy
-// name that was corrected, toText is the canonical name that was kept.
+// name that was corrected, toText is the canonical name that was kept. `scope`
+// isolates the sandbox account's corrections from live.
 export const aiCorrectionsTable = pgTable("ai_corrections", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   domain: text("domain").notNull(),
   fromText: text("from_text").notNull(),
   toText: text("to_text").notNull(),

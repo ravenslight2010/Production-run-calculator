@@ -437,6 +437,10 @@ export type StaffMember = {
   name: string | null;
   onboardingSeen: boolean;
   tourCompleted: boolean;
+  // True only for the seeded sandbox account, which operates in the isolated
+  // "sandbox" data scope. Clients show a persistent banner and a "Reset
+  // sandbox" action when this is set.
+  sandbox: boolean;
 };
 export const fetchMe = () => api<StaffMember>("/me");
 // Mark the first-login "Get Started" overview as seen. Returns the updated
@@ -478,6 +482,11 @@ export const changePasswordRequest = (
     method: "POST",
     body: JSON.stringify({ currentPassword, newPassword }),
   });
+
+// Re-copy live → sandbox. Only succeeds for a sandbox session (the server
+// returns 403 otherwise), so it can never touch live factory data.
+export const resetSandboxRequest = () =>
+  api<{ ok: true }>("/sandbox/reset", { method: "POST" });
 
 export const fetchStaff = () => api<StaffMember[]>("/users");
 export const setStaffRole = (userId: string, role: Role) =>

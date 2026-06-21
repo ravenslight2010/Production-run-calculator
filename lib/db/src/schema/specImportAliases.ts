@@ -13,9 +13,11 @@ import { z } from "zod/v4";
 // type, pepperoni type, or a recipe ingredient list). `externalName` is the raw
 // label from the spreadsheet (matched case-insensitively); `canonicalName` is
 // the app's saved name it resolves to; `context` disambiguates within a kind
-// (e.g. the canonical brand for a flavor alias), null when not needed.
+// (e.g. the canonical brand for a flavor alias), null when not needed. `scope`
+// isolates the sandbox account's aliases from live.
 export const specImportAliasesTable = pgTable("spec_import_aliases", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   kind: text("kind").notNull(),
   externalName: text("external_name").notNull(),
   canonicalName: text("canonical_name").notNull(),

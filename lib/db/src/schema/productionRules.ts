@@ -5,6 +5,7 @@ import {
   doublePrecision,
   jsonb,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // A bypass condition: when the current run's `field` equals `value`, the owning
@@ -17,29 +18,39 @@ type RuleBypassCondition = { field: string; value: string };
 // they live in their own relational table and are NOT part of the sync payload.
 // The shape is flat (one nullable column per type-specific setting) to mirror
 // the flat ProductionRule wire format in @workspace/production-rules. `id` is a
-// client-generated stable id so upserts are idempotent.
-export const productionRulesTable = pgTable("production_rules", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  type: text("type").notNull(), // "required-field" | "numeric-range" | "sequence"
-  enforcement: text("enforcement").notNull(), // "flexible" | "strict"
-  enabled: boolean("enabled").notNull().default(true),
-  // required-field / numeric-range
-  field: text("field"),
-  // numeric-range (null means "no bound on this side")
-  min: doublePrecision("min"),
-  max: doublePrecision("max"),
-  // sequence
-  attribute: text("attribute"),
-  before: text("before"),
-  after: text("after"),
-  // Exceptions (apply to any rule type). Variable-shape, so JSONB rather than
-  // flat columns: `bypass` is the list of waive-when conditions; `checklist` is
-  // the ordered list of step labels the operator must acknowledge.
-  bypass: jsonb("bypass").$type<RuleBypassCondition[]>(),
-  checklist: jsonb("checklist").$type<string[]>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// client-generated stable id so upserts are idempotent. `scope` isolates the
+// sandbox account's rules from live, enforced by a unique index (id, scope)
+// rather than a composite PRIMARY KEY: drizzle-kit push mis-orders DDL when a
+// freshly-added column is placed inside primaryKey({columns}) (it emits SET NOT
+// NULL before the column exists), breaking the non-interactive push-force path.
+// A unique index keeps the change purely additive and push-force-safe.
+export const productionRulesTable = pgTable(
+  "production_rules",
+  {
+    id: text("id").notNull(),
+    scope: text("scope").notNull().default("live"),
+    name: text("name").notNull(),
+    type: text("type").notNull(), // "required-field" | "numeric-range" | "sequence"
+    enforcement: text("enforcement").notNull(), // "flexible" | "strict"
+    enabled: boolean("enabled").notNull().default(true),
+    // required-field / numeric-range
+    field: text("field"),
+    // numeric-range (null means "no bound on this side")
+    min: doublePrecision("min"),
+    max: doublePrecision("max"),
+    // sequence
+    attribute: text("attribute"),
+    before: text("before"),
+    after: text("after"),
+    // Exceptions (apply to any rule type). Variable-shape, so JSONB rather than
+    // flat columns: `bypass` is the list of waive-when conditions; `checklist` is
+    // the ordered list of step labels the operator must acknowledge.
+    bypass: jsonb("bypass").$type<RuleBypassCondition[]>(),
+    checklist: jsonb("checklist").$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("production_rules_id_scope_idx").on(t.id, t.scope)],
+);
 
 export type ProductionRuleRow = typeof productionRulesTable.$inferSelect;

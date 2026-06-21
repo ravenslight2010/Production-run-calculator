@@ -8,12 +8,15 @@ import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 // defined across the web and mobile clients. `tourCompleted` mirrors it for the
 // opt-in guided tour: it flips true once the user reaches the tour's final step,
 // so the app can tell a brand-new user from one who already finished the tour.
+// `sandbox` marks the seeded test account: while signed in as it, every read and
+// write is routed to the isolated "sandbox" data scope instead of live.
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   onboardingSeen: boolean("onboarding_seen").notNull().default(false),
   tourCompleted: boolean("tour_completed").notNull().default(false),
+  sandbox: boolean("sandbox").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

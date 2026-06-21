@@ -1,5 +1,6 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, aiCorrectionsTable } from "@workspace/db";
+import { currentScope } from "../lib/requestScope";
 import {
   buildCorrectionsBlock,
   filterCorrectionsByDomain,
@@ -22,6 +23,7 @@ export async function loadCorrections(log: ContextLogger): Promise<AiCorrection[
     const rows = await db
       .select()
       .from(aiCorrectionsTable)
+      .where(eq(aiCorrectionsTable.scope, currentScope()))
       .orderBy(desc(aiCorrectionsTable.updatedAt));
     return normalizeCorrections(
       rows.map((r) => ({ domain: r.domain, fromText: r.fromText, toText: r.toText })),

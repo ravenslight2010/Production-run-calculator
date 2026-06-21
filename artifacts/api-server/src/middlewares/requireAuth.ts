@@ -2,12 +2,19 @@ import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
 import { getSessionBoundaryMs } from "../lib/sessionBoundary";
 import { userExists } from "../lib/userValidity";
+import { isSandboxUser } from "../lib/sandbox";
+import { runWithScope, type Scope } from "../lib/requestScope";
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       userId?: string;
+      // The authenticated user's data scope ("live" for everyone except the
+      // seeded sandbox account). Mirrors the AsyncLocalStorage value the DB
+      // helpers read via currentScope(); exposed on the request for handlers
+      // that need it explicitly (e.g. the sandbox-reset gate).
+      scope?: Scope;
     }
   }
 }
@@ -57,5 +64,11 @@ export async function requireAuth(
     return;
   }
   req.userId = verified.sub;
-  next();
+  // Route every read/write for the seeded sandbox account into the isolated
+  // "sandbox" scope; everyone else stays on "live". Running next() inside the
+  // AsyncLocalStorage store makes the scope visible to every DB helper invoked
+  // downstream (the store propagates across the handler's awaits).
+  const scope: Scope = (await isSandboxUser(verified.sub)) ? "sandbox" : "live";
+  req.scope = scope;
+  runWithScope(scope, () => next());
 }

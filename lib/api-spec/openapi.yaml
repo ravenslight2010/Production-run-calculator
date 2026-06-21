@@ -2513,6 +2513,7 @@ components:
         - name
         - onboardingSeen
         - tourCompleted
+        - sandbox
       properties:
         userId:
           type: string
@@ -2533,6 +2534,12 @@ components:
           description: >-
             Whether the user has finished the guided tour (reached its final
             step).
+        sandbox:
+          type: boolean
+          description: >-
+            Whether this is the seeded sandbox account, which operates in the
+            isolated "sandbox" data scope. Clients show a persistent sandbox
+            banner and offer a "Reset sandbox" action when true.
 
     StaffRoleUpdate:
       type: object

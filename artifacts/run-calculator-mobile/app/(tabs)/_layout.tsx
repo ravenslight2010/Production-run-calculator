@@ -1,9 +1,10 @@
 import { useAuth } from "@/context/auth";
 import { BlurView } from "expo-blur";
+import { reloadAppAsync } from "expo";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
@@ -14,8 +15,10 @@ import ReportIssueModal from "@/components/ReportIssueModal";
 import GetStartedModal from "@/components/GetStartedModal";
 import GuidedTour from "@/components/GuidedTour";
 import ProactiveAlertBanner from "@/components/ProactiveAlertBanner";
+import SandboxBanner from "@/components/SandboxBanner";
 import { useGetStartedOverview } from "@workspace/onboarding";
-import { useRun, todayStr } from "@/context/RunContext";
+import { resetSandboxRequest } from "@/context/inventoryShared";
+import { useRun, todayStr, clearLocalStateForSandboxReset } from "@/context/RunContext";
 import { buildOptimizeInput } from "@/context/aiOptimize";
 import { useProactiveAlert } from "@/context/aiProactive";
 
@@ -91,6 +94,34 @@ export default function TabLayout() {
         })),
       }),
   });
+
+  // Sandbox "Reset" — re-copy live → sandbox on the server, then drop this
+  // device's local day-state and relaunch so the fresh sandbox state is pulled
+  // from the server (the additive live-sync merge would otherwise hide it).
+  const doSandboxReset = () => {
+    Alert.alert(
+      "Reset sandbox",
+      "This replaces all sandbox data with a fresh copy of the live data. Live data is not affected. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              try {
+                await resetSandboxRequest();
+                await clearLocalStateForSandboxReset();
+              } catch {
+                // Best-effort: still relaunch so a partial reset re-pulls cleanly.
+              }
+              await reloadAppAsync().catch(() => {});
+            })();
+          },
+        },
+      ],
+    );
+  };
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;
@@ -214,6 +245,8 @@ export default function TabLayout() {
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />
         <Tabs.Screen name="settings" options={{ href: null, title: "Settings" }} />
       </Tabs>
+
+      <SandboxBanner visible={!!me?.sandbox} onReset={doSandboxReset} />
 
       <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
 
@@ -420,6 +453,44 @@ export default function TabLayout() {
                   </Text>
                   <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
                     Browse past quality checks and outcomes
+                  </Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+            {me?.sandbox && (
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
+                  doSandboxReset();
+                }}
+                style={({ pressed }) => [
+                  styles.menuItem,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.menuIcon,
+                    { backgroundColor: (colors.warning ?? colors.primary) + "22" },
+                  ]}
+                >
+                  <Feather
+                    name="rotate-ccw"
+                    size={18}
+                    color={colors.warning ?? colors.primary}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                    Reset sandbox
+                  </Text>
+                  <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                    Replace sandbox data with a fresh copy of live
                   </Text>
                 </View>
                 <Feather name="chevron-right" size={18} color={colors.mutedForeground} />

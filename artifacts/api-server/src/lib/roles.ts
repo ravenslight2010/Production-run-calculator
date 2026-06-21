@@ -69,6 +69,9 @@ export type StaffMember = {
   onboardingSeen: boolean;
   // Whether the user has finished the guided tour (reached its final step).
   tourCompleted: boolean;
+  // Whether this is the seeded sandbox account (operates in the isolated
+  // "sandbox" data scope). Clients use it to show the persistent sandbox banner.
+  sandbox: boolean;
 };
 
 async function managerCount(): Promise<number> {
@@ -123,6 +126,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
       tourCompleted: usersTable.tourCompleted,
+      sandbox: usersTable.sandbox,
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
@@ -133,6 +137,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     name: user?.username ?? null,
     onboardingSeen: user?.onboardingSeen ?? false,
     tourCompleted: user?.tourCompleted ?? false,
+    sandbox: user?.sandbox ?? false,
   };
 }
 
@@ -165,6 +170,7 @@ export async function listStaff(): Promise<StaffMember[]> {
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
       tourCompleted: usersTable.tourCompleted,
+      sandbox: usersTable.sandbox,
     })
     .from(userRolesTable)
     .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
@@ -176,6 +182,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     name: r.username,
     onboardingSeen: r.onboardingSeen,
     tourCompleted: r.tourCompleted,
+    sandbox: r.sandbox,
   }));
 }
 

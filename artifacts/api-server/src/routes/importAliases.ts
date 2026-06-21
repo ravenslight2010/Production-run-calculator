@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, importAliasesTable, type ImportAlias } from "@workspace/db";
 import { SaveImportAliasesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -36,7 +37,10 @@ function toApiAlias(row: ImportAlias): AliasRow {
 }
 
 async function listAll(): Promise<AliasRow[]> {
-  const rows = await db.select().from(importAliasesTable);
+  const rows = await db
+    .select()
+    .from(importAliasesTable)
+    .where(eq(importAliasesTable.scope, currentScope()));
   return rows.map(toApiAlias);
 }
 
@@ -75,7 +79,10 @@ router.post("/import-aliases", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(importAliasesTable);
+      const existing = await db
+        .select()
+        .from(importAliasesTable)
+        .where(eq(importAliasesTable.scope, currentScope()));
       const byKey = new Map<string, ImportAlias>();
       for (const row of existing) {
         byKey.set(aliasKey(row.type, row.externalName, row.brandContext ?? null), row);
@@ -101,7 +108,9 @@ router.post("/import-aliases", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(importAliasesTable).values(inserts);
+        await db
+          .insert(importAliasesTable)
+          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
       }
     }
 

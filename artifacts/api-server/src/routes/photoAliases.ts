@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, photoAliasesTable, type PhotoAlias } from "@workspace/db";
 import { SavePhotoAliasesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -29,7 +30,10 @@ function toApiAlias(row: PhotoAlias): AliasRow {
 }
 
 async function listAll(): Promise<AliasRow[]> {
-  const rows = await db.select().from(photoAliasesTable);
+  const rows = await db
+    .select()
+    .from(photoAliasesTable)
+    .where(eq(photoAliasesTable.scope, currentScope()));
   return rows.map(toApiAlias);
 }
 
@@ -61,7 +65,10 @@ router.post("/photo-aliases", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(photoAliasesTable);
+      const existing = await db
+        .select()
+        .from(photoAliasesTable)
+        .where(eq(photoAliasesTable.scope, currentScope()));
       const byKey = new Map<string, PhotoAlias>();
       for (const row of existing) {
         byKey.set(aliasKey(row.guessName), row);
@@ -86,7 +93,9 @@ router.post("/photo-aliases", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(photoAliasesTable).values(inserts);
+        await db
+          .insert(photoAliasesTable)
+          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
       }
     }
 

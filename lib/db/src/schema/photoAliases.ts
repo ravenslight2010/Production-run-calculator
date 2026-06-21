@@ -11,8 +11,10 @@ import { z } from "zod/v4";
 //
 // `guessName` is the raw name the vision model returned (matched
 // case-insensitively) and `itemKey` is the inventory item key it resolves to.
+// `scope` isolates the sandbox account's aliases from live.
 export const photoAliasesTable = pgTable("photo_aliases", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   guessName: text("guess_name").notNull(),
   itemKey: text("item_key").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

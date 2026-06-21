@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, mergeAliasesTable, type MergeAlias as MergeAliasRow } from "@workspace/db";
 import { SaveMergeAliasesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 import { mergeAliasKey } from "@workspace/merge-suggest";
 
 const router: IRouter = Router();
@@ -27,7 +28,10 @@ function toApiAlias(row: MergeAliasRow): AliasRow {
 }
 
 async function listAll(): Promise<AliasRow[]> {
-  const rows = await db.select().from(mergeAliasesTable);
+  const rows = await db
+    .select()
+    .from(mergeAliasesTable)
+    .where(eq(mergeAliasesTable.scope, currentScope()));
   return rows.map(toApiAlias);
 }
 
@@ -61,7 +65,10 @@ router.post("/merge-aliases", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(mergeAliasesTable);
+      const existing = await db
+        .select()
+        .from(mergeAliasesTable)
+        .where(eq(mergeAliasesTable.scope, currentScope()));
       const byKey = new Map<string, MergeAliasRow>();
       for (const row of existing) {
         byKey.set(mergeAliasKey(row.externalName), row);
@@ -87,7 +94,9 @@ router.post("/merge-aliases", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(mergeAliasesTable).values(inserts);
+        await db
+          .insert(mergeAliasesTable)
+          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
       }
     }
 

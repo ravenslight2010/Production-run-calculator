@@ -72,6 +72,16 @@ const SAUCE_SEED_KEY = "run-calc-mobile-sauce-v1";
 // One-time marker for seeding the imported cheese recipes + brand/flavor ties.
 const CHEESE_SEED_KEY = "run-calc-mobile-cheese-v1";
 
+// Used by the sandbox "Reset" action: wipe this device's locally-persisted
+// day-state so that, after the server re-copies live → sandbox, the app pulls
+// the fresh sandbox state from the server on the next launch instead of merging
+// stale local edits back in (the live-sync merge is additive/non-clobber, so a
+// reset would otherwise have no visible effect on this device). The one-time
+// seed markers are left intact so the additive spec/recipe seeds don't re-run.
+export async function clearLocalStateForSandboxReset(): Promise<void> {
+  await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+}
+
 // Live-sync tuning. Pushes are debounced so rapid edits collapse into one PUT;
 // incoming remote payloads are deferred briefly after a local edit so they don't
 // clobber a field the user is actively changing.

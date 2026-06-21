@@ -1,8 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, aiCorrectionsTable, type AiCorrectionRow } from "@workspace/db";
 import { SaveAiCorrectionsBody } from "@workspace/api-zod";
 import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -23,7 +24,10 @@ function toApi(row: AiCorrectionRow): AiCorrection {
 }
 
 async function listAll(): Promise<AiCorrection[]> {
-  const rows = await db.select().from(aiCorrectionsTable);
+  const rows = await db
+    .select()
+    .from(aiCorrectionsTable)
+    .where(eq(aiCorrectionsTable.scope, currentScope()));
   return rows.map(toApi);
 }
 
@@ -58,7 +62,10 @@ router.post("/ai-corrections", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(aiCorrectionsTable);
+      const existing = await db
+        .select()
+        .from(aiCorrectionsTable)
+        .where(eq(aiCorrectionsTable.scope, currentScope()));
       const byKey = new Map<string, AiCorrectionRow>();
       for (const row of existing) {
         byKey.set(correctionKey(row.domain, row.fromText), row);
@@ -84,7 +91,9 @@ router.post("/ai-corrections", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(aiCorrectionsTable).values(inserts);
+        await db
+          .insert(aiCorrectionsTable)
+          .values(inserts.map((c) => ({ ...c, scope: currentScope() })));
       }
     }
 

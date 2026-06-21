@@ -49,6 +49,7 @@ import {
   sortLotsForConsumption,
   type ConsumeLine,
 } from "./inventoryLogic";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -80,13 +81,16 @@ const wasteRateStore =
     : undefined;
 
 // ── SSE: any inventory change pings connected clients to refetch ──────────────
-type SseClient = { res: Response; clientId: string };
+type SseClient = { res: Response; clientId: string; scope: string };
 const clients = new Set<SseClient>();
 
-function broadcast(senderId: string): void {
+// Only ping clients watching the SAME data scope so a sandbox change never nudges
+// a live watcher to refetch (and vice-versa). The refetch itself is scoped too,
+// but keeping the ping scoped avoids needless cross-scope traffic.
+function broadcast(senderId: string, scope: string): void {
   const msg = `data: ${JSON.stringify({ type: "inventory", senderId })}\n\n`;
   for (const client of clients) {
-    if (client.clientId !== senderId) {
+    if (client.scope === scope && client.clientId !== senderId) {
       try {
         client.res.write(msg);
       } catch {
@@ -101,12 +105,12 @@ async function loadItemResponse(itemId: number) {
   const [item] = await db
     .select()
     .from(inventoryItemsTable)
-    .where(eq(inventoryItemsTable.id, itemId));
+    .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, currentScope())));
   if (!item) return null;
   const lots = await db
     .select()
     .from(inventoryLotsTable)
-    .where(eq(inventoryLotsTable.itemId, itemId));
+    .where(and(eq(inventoryLotsTable.itemId, itemId), eq(inventoryLotsTable.scope, currentScope())));
   const sortedLots = sortLotsForConsumption(lots);
   const onHand = lots.reduce((acc, l) => acc + l.qtyRemaining, 0);
   return { ...item, onHand, lots: sortedLots };
@@ -129,7 +133,11 @@ export async function drawDown(exec: Executor, itemId: number, qty: number): Pro
     .select()
     .from(inventoryLotsTable)
     .where(
-      and(eq(inventoryLotsTable.itemId, itemId), gt(inventoryLotsTable.qtyRemaining, 0)),
+      and(
+        eq(inventoryLotsTable.itemId, itemId),
+        eq(inventoryLotsTable.scope, currentScope()),
+        gt(inventoryLotsTable.qtyRemaining, 0),
+      ),
     )
     .for("update");
   const { consumed, updates } = planDrawDown(lots, qty);
@@ -148,8 +156,12 @@ router.get("/inventory", async (_req, res): Promise<void> => {
   const items = await db
     .select()
     .from(inventoryItemsTable)
+    .where(eq(inventoryItemsTable.scope, currentScope()))
     .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
-  const allLots = await db.select().from(inventoryLotsTable);
+  const allLots = await db
+    .select()
+    .from(inventoryLotsTable)
+    .where(eq(inventoryLotsTable.scope, currentScope()));
   const lotsByItem = new Map<number, InventoryLot[]>();
   for (const lot of allLots) {
     const arr = lotsByItem.get(lot.itemId) ?? [];
@@ -177,9 +189,9 @@ router.post("/inventory/items", requireRole("supervisor"), async (req, res): Pro
   const { key, category, name, unit, reorderThreshold } = parsed.data;
   const [item] = await db
     .insert(inventoryItemsTable)
-    .values({ key, category, name, unit, reorderThreshold: reorderThreshold ?? 0 })
+    .values({ key, category, name, unit, reorderThreshold: reorderThreshold ?? 0, scope: currentScope() })
     .onConflictDoUpdate({
-      target: inventoryItemsTable.key,
+      target: [inventoryItemsTable.key, inventoryItemsTable.scope],
       set: {
         name,
         unit,
@@ -189,7 +201,7 @@ router.post("/inventory/items", requireRole("supervisor"), async (req, res): Pro
       },
     })
     .returning();
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.status(201).json(await loadItemResponse(item.id));
 });
 
@@ -210,13 +222,13 @@ router.patch("/inventory/items/:id", requireRole("supervisor"), async (req, res)
   const [updated] = await db
     .update(inventoryItemsTable)
     .set(set)
-    .where(eq(inventoryItemsTable.id, id))
+    .where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.scope, currentScope())))
     .returning();
   if (!updated) {
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.json(await loadItemResponse(id));
 });
 
@@ -228,13 +240,13 @@ router.delete("/inventory/items/:id", requireRole("supervisor"), async (req, res
   }
   const [deleted] = await db
     .delete(inventoryItemsTable)
-    .where(eq(inventoryItemsTable.id, id))
+    .where(and(eq(inventoryItemsTable.id, id), eq(inventoryItemsTable.scope, currentScope())))
     .returning();
   if (!deleted) {
     res.status(404).json({ error: "Item not found" });
     return;
   }
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.sendStatus(204);
 });
 
@@ -259,7 +271,7 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
   let [item] = await db
     .select()
     .from(inventoryItemsTable)
-    .where(eq(inventoryItemsTable.key, itemKey));
+    .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
   if (!item) {
     const userId = req.userId;
     if (!userId) {
@@ -273,20 +285,21 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
     }
     [item] = await db
       .insert(inventoryItemsTable)
-      .values({ key: itemKey, category, name, unit })
-      .onConflictDoNothing({ target: inventoryItemsTable.key })
+      .values({ key: itemKey, category, name, unit, scope: currentScope() })
+      .onConflictDoNothing({ target: [inventoryItemsTable.key, inventoryItemsTable.scope] })
       .returning();
     if (!item) {
       [item] = await db
         .select()
         .from(inventoryItemsTable)
-        .where(eq(inventoryItemsTable.key, itemKey));
+        .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
     }
   }
   const [lot] = await db
     .insert(inventoryLotsTable)
     .values({
       itemId: item.id,
+      scope: currentScope(),
       lotNumber: lotNumber ?? "",
       qtyReceived: qty,
       qtyRemaining: qty,
@@ -296,12 +309,13 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
     .returning();
   await db.insert(inventoryLedgerTable).values({
     itemId: item.id,
+    scope: currentScope(),
     lotId: lot.id,
     type: "restock",
     qtyDelta: qty,
     note: lotNumber ? `Restock — lot ${lotNumber}` : "Restock",
   });
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.json(await loadItemResponse(item.id));
 });
 
@@ -563,8 +577,12 @@ router.post(
     const items = await db
       .select()
       .from(inventoryItemsTable)
+      .where(eq(inventoryItemsTable.scope, currentScope()))
       .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
-    const allLots = await db.select().from(inventoryLotsTable);
+    const allLots = await db
+      .select()
+      .from(inventoryLotsTable)
+      .where(eq(inventoryLotsTable.scope, currentScope()));
     const lotsByItem = new Map<number, InventoryLot[]>();
     for (const lot of allLots) {
       const arr = lotsByItem.get(lot.itemId) ?? [];
@@ -673,6 +691,7 @@ export async function adjustInventory(
         .insert(inventoryLotsTable)
         .values({
           itemId,
+          scope: currentScope(),
           lotNumber: "",
           qtyReceived: qtyDelta,
           qtyRemaining: qtyDelta,
@@ -687,6 +706,7 @@ export async function adjustInventory(
     }
     await tx.insert(inventoryLedgerTable).values({
       itemId,
+      scope: currentScope(),
       lotId,
       type: "adjust",
       qtyDelta: appliedDelta,
@@ -695,7 +715,7 @@ export async function adjustInventory(
     await tx
       .update(inventoryItemsTable)
       .set({ updatedAt: new Date() })
-      .where(eq(inventoryItemsTable.id, itemId));
+      .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, currentScope())));
     return { appliedDelta, lotId };
   });
 }
@@ -710,7 +730,7 @@ router.post("/inventory/adjust", async (req, res): Promise<void> => {
   const [item] = await db
     .select()
     .from(inventoryItemsTable)
-    .where(eq(inventoryItemsTable.id, itemId));
+    .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, currentScope())));
   if (!item) {
     res.status(404).json({ error: "Item not found" });
     return;
@@ -720,7 +740,7 @@ router.post("/inventory/adjust", async (req, res): Promise<void> => {
     return;
   }
   await adjustInventory(itemId, qtyDelta, note);
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.json(await loadItemResponse(itemId));
 });
 
@@ -743,8 +763,10 @@ export async function consumeRun(
         claimRun: async (rid) => {
           const [claim] = await tx
             .insert(inventoryConsumedRunsTable)
-            .values({ runId: rid })
-            .onConflictDoNothing({ target: inventoryConsumedRunsTable.runId })
+            .values({ runId: rid, scope: currentScope() })
+            .onConflictDoNothing({
+              target: [inventoryConsumedRunsTable.runId, inventoryConsumedRunsTable.scope],
+            })
             .returning();
           return Boolean(claim);
         },
@@ -752,13 +774,14 @@ export async function consumeRun(
           const [item] = await tx
             .select()
             .from(inventoryItemsTable)
-            .where(eq(inventoryItemsTable.key, itemKey));
+            .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
           return item ?? null;
         },
         drawDown: (itemId, qty) => drawDown(tx, itemId, qty),
         recordConsumption: async (itemId, consumed) => {
           await tx.insert(inventoryLedgerTable).values({
             itemId,
+            scope: currentScope(),
             lotId: null,
             type: "consume",
             qtyDelta: -consumed,
@@ -789,7 +812,7 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
     res.json({ applied: false, consumed: 0 });
     return;
   }
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.json({ applied: true, consumed: result.consumed });
 });
 
@@ -853,7 +876,7 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
       const [source] = await tx
         .select()
         .from(inventoryItemsTable)
-        .where(eq(inventoryItemsTable.key, fromKey));
+        .where(and(eq(inventoryItemsTable.key, fromKey), eq(inventoryItemsTable.scope, currentScope())));
       if (!source) {
         // nothing tracked under the source name
         results.push({
@@ -868,9 +891,9 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
       // tracked yet) and capture its id.
       const [target] = await tx
         .insert(inventoryItemsTable)
-        .values({ key: toKey, category: m.category, name: m.toName, unit: m.unit })
+        .values({ key: toKey, category: m.category, name: m.toName, unit: m.unit, scope: currentScope() })
         .onConflictDoUpdate({
-          target: inventoryItemsTable.key,
+          target: [inventoryItemsTable.key, inventoryItemsTable.scope],
           set: { name: m.toName, unit: m.unit, category: m.category, updatedAt: new Date() },
         })
         .returning();
@@ -890,6 +913,7 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
         .where(eq(inventoryLedgerTable.itemId, source.id));
       await tx.insert(inventoryLedgerTable).values({
         itemId: target.id,
+        scope: currentScope(),
         lotId: null,
         type: "adjust",
         qtyDelta: 0,
@@ -916,7 +940,7 @@ router.post("/inventory/merge", requireRole("manager"), async (req, res): Promis
     return;
   }
   const report = await mergeInventoryItems(parsed.data.merges);
-  if (report.merged > 0) broadcast(headerSenderId(req));
+  if (report.merged > 0) broadcast(headerSenderId(req), currentScope());
   res.json(report);
 });
 
@@ -927,35 +951,42 @@ router.get("/inventory/ledger", async (req, res): Promise<void> => {
     ? await db
         .select()
         .from(inventoryLedgerTable)
-        .where(eq(inventoryLedgerTable.itemId, itemId))
+        .where(and(eq(inventoryLedgerTable.itemId, itemId), eq(inventoryLedgerTable.scope, currentScope())))
         .orderBy(desc(inventoryLedgerTable.createdAt))
         .limit(500)
     : await db
         .select()
         .from(inventoryLedgerTable)
+        .where(eq(inventoryLedgerTable.scope, currentScope()))
         .orderBy(desc(inventoryLedgerTable.createdAt))
         .limit(500);
   res.json(rows);
 });
 
-// Global inventory settings live in a single row (id=1). Reads create the
-// default row on demand so a fresh install returns a safe default (7-day lead).
+// Global inventory settings live in a single row PER SCOPE. Reads create the
+// default row on demand so a fresh install (or a freshly reset sandbox) returns
+// a safe default (7-day lead).
+// inventory_settings keeps its original integer PK (a push-safe singleton id);
+// each scope gets a fixed distinct id so the live and sandbox rows never clash.
+const settingsRowId = (scope: string) => (scope === "sandbox" ? 2 : 1);
+
 async function loadSettings() {
+  const scope = currentScope();
   const [row] = await db
     .select()
     .from(inventorySettingsTable)
-    .where(eq(inventorySettingsTable.id, 1));
+    .where(eq(inventorySettingsTable.scope, scope));
   if (row) return row;
   const [created] = await db
     .insert(inventorySettingsTable)
-    .values({ id: 1 })
-    .onConflictDoNothing({ target: inventorySettingsTable.id })
+    .values({ id: settingsRowId(scope), scope })
+    .onConflictDoNothing({ target: inventorySettingsTable.scope })
     .returning();
   if (created) return created;
   const [existing] = await db
     .select()
     .from(inventorySettingsTable)
-    .where(eq(inventorySettingsTable.id, 1));
+    .where(eq(inventorySettingsTable.scope, scope));
   return existing;
 }
 
@@ -973,13 +1004,18 @@ router.put("/inventory/settings", requireRole("supervisor"), async (req, res): P
   const expirySoonDays = Math.max(0, Math.round(parsed.data.expirySoonDays));
   const [row] = await db
     .insert(inventorySettingsTable)
-    .values({ id: 1, expirySoonDays, updatedAt: new Date() })
+    .values({
+      id: settingsRowId(currentScope()),
+      scope: currentScope(),
+      expirySoonDays,
+      updatedAt: new Date(),
+    })
     .onConflictDoUpdate({
-      target: inventorySettingsTable.id,
+      target: inventorySettingsTable.scope,
       set: { expirySoonDays, updatedAt: new Date() },
     })
     .returning();
-  broadcast(headerSenderId(req));
+  broadcast(headerSenderId(req), currentScope());
   res.json({ expirySoonDays: row.expirySoonDays });
 });
 
@@ -992,7 +1028,7 @@ router.get("/inventory/events", async (req: Request, res: Response): Promise<voi
   res.flushHeaders();
   res.write(`data: ${JSON.stringify({ type: "inventory", senderId: null })}\n\n`);
 
-  const client: SseClient = { res, clientId };
+  const client: SseClient = { res, clientId, scope: currentScope() };
   clients.add(client);
   const heartbeat = setInterval(() => {
     try {

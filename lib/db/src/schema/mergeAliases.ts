@@ -12,9 +12,11 @@ import { z } from "zod/v4";
 // Unlike spec-import aliases this table is FLAT (no kind/context): the mergeable
 // universe is a single de-duplicated pool of ingredient + die names, matched
 // case-insensitively on `externalName`. `externalName` is the merged-away name;
-// `canonicalName` is the name that was kept.
+// `canonicalName` is the name that was kept. `scope` isolates the sandbox
+// account's aliases from live.
 export const mergeAliasesTable = pgTable("merge_aliases", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   externalName: text("external_name").notNull(),
   canonicalName: text("canonical_name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

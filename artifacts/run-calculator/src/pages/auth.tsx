@@ -186,7 +186,7 @@ function ConfirmPasswordHint({
 
 function AuthForm({ mode }: { mode: Mode }) {
   const [, setLocation] = useLocation();
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, signInAsTest } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -196,6 +196,18 @@ function AuthForm({ mode }: { mode: Mode }) {
   const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
   const isSignUp = mode === "sign-up";
   const usernameStatus = useUsernameAvailability(username, isSignUp);
+
+  async function handleTestLogin() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await signInAsTest();
+      setLocation("/");
+    } catch {
+      setError("Could not sign in to the sandbox. Please try again.");
+      setSubmitting(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -326,6 +338,18 @@ function AuthForm({ mode }: { mode: Mode }) {
                   ? "Create account"
                   : "Sign in"}
             </Button>
+
+            {!isSignUp && (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => void handleTestLogin()}
+                className="w-full font-semibold"
+              >
+                Log in as test user (sandbox)
+              </Button>
+            )}
           </div>
 
           <p className="mt-5 text-center text-sm text-muted-foreground">

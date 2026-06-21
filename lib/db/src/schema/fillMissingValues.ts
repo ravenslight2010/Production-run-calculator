@@ -12,8 +12,10 @@ import { z } from "zod/v4";
 // Matching is case-insensitive on brand + flavor (done in the route/clients).
 // `value` is always stored as a string (a plain number for number fields), the
 // same shape the AI suggestion endpoint returns, so clients coerce identically.
+// `scope` isolates the sandbox account's learned values from live.
 export const fillMissingValuesTable = pgTable("fill_missing_values", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   brand: text("brand").notNull(),
   flavor: text("flavor").notNull(),
   fieldKey: text("field_key").notNull(),

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db, facilityKnowledgeTable, aiConversationTurnsTable } from "@workspace/db";
+import { currentScope } from "../lib/requestScope";
 import {
   buildKnowledgeBlock,
   buildConversationBlock,
@@ -33,6 +34,7 @@ export async function loadFacilityKnowledge(log: ContextLogger): Promise<Facilit
     const rows = await db
       .select()
       .from(facilityKnowledgeTable)
+      .where(eq(facilityKnowledgeTable.scope, currentScope()))
       .orderBy(desc(facilityKnowledgeTable.updatedAt));
     return normalizeKnowledge(
       rows.map((r) => ({ domain: r.domain, key: r.key, fact: r.fact })),
@@ -144,7 +146,13 @@ export async function recordFacilityKnowledge(
       const [existing] = await db
         .select()
         .from(facilityKnowledgeTable)
-        .where(and(eq(facilityKnowledgeTable.domain, e.domain), eq(facilityKnowledgeTable.key, e.key)));
+        .where(
+          and(
+            eq(facilityKnowledgeTable.domain, e.domain),
+            eq(facilityKnowledgeTable.key, e.key),
+            eq(facilityKnowledgeTable.scope, currentScope()),
+          ),
+        );
       if (existing) {
         await db
           .update(facilityKnowledgeTable)
@@ -153,7 +161,7 @@ export async function recordFacilityKnowledge(
       } else {
         await db
           .insert(facilityKnowledgeTable)
-          .values({ domain: e.domain, key: e.key, fact: e.fact, source });
+          .values({ domain: e.domain, key: e.key, fact: e.fact, source, scope: currentScope() });
       }
     }
     await pruneFacilityKnowledge();
@@ -167,6 +175,7 @@ export async function listFacilityKnowledge(): Promise<FacilityKnowledge[]> {
   const rows = await db
     .select()
     .from(facilityKnowledgeTable)
+    .where(eq(facilityKnowledgeTable.scope, currentScope()))
     .orderBy(desc(facilityKnowledgeTable.updatedAt));
   return rows.map((r) => ({ domain: r.domain, key: r.key, fact: r.fact }));
 }
@@ -175,6 +184,7 @@ async function pruneFacilityKnowledge(): Promise<void> {
   const ids = await db
     .select({ id: facilityKnowledgeTable.id })
     .from(facilityKnowledgeTable)
+    .where(eq(facilityKnowledgeTable.scope, currentScope()))
     .orderBy(desc(facilityKnowledgeTable.updatedAt), desc(facilityKnowledgeTable.id));
   if (ids.length <= MAX_FACILITY_ROWS) return;
   const stale = ids.slice(MAX_FACILITY_ROWS).map((r) => r.id);

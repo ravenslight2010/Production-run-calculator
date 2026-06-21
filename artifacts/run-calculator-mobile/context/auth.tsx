@@ -78,6 +78,9 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   signIn: (username: string, password: string) => Promise<void>;
   signUp: (username: string, password: string) => Promise<void>;
+  // Shortcut that signs in as the seeded sandbox account ("test"/"test"), which
+  // operates in the isolated sandbox data scope.
+  signInAsTest: () => Promise<void>;
   signOut: () => Promise<void>;
   // Drop straight to the signed-out UI without discarding the token. Used by the
   // daily-reset rollover so the token survives long enough for the rollover's own
@@ -179,6 +182,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyToken],
   );
 
+  // Sign in as the seeded sandbox account. Credentials are intentionally the
+  // well-known "test"/"test" pair — this is a non-production demo shortcut.
+  const signInAsTest = useCallback(async () => {
+    const { token, user } = await signInRequest("test", "test");
+    await applyToken(token);
+    setMe(user);
+  }, [applyToken]);
+
   const signOut = useCallback(async () => {
     try {
       await signOutRequest();
@@ -254,6 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: me !== null,
         signIn,
         signUp,
+        signInAsTest,
         signOut,
         forceSignedOut,
         revalidate,

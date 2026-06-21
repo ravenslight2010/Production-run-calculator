@@ -13,9 +13,10 @@ import { z } from "zod/v4";
 // name it resolves to. Matching is case-insensitive (done in the route/clients).
 // For flavor aliases `brandContext` holds the canonical parent brand so the same
 // imported flavor under different brands can resolve differently; it is null for
-// brand aliases.
+// brand aliases. `scope` isolates the sandbox account's aliases from live.
 export const importAliasesTable = pgTable("import_aliases", {
   id: serial("id").primaryKey(),
+  scope: text("scope").notNull().default("live"),
   type: text("type").notNull(), // "brand" | "flavor"
   externalName: text("external_name").notNull(),
   canonicalName: text("canonical_name").notNull(),

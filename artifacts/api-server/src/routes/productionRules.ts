@@ -1,9 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db";
 import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
 import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
 import { requireRole } from "../middlewares/requireRole";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -40,6 +41,7 @@ function toApiRule(row: ProductionRuleRow): ProductionRule {
 function toDbValues(rule: ProductionRule) {
   return {
     id: rule.id,
+    scope: currentScope(),
     name: rule.name,
     type: rule.type,
     enforcement: rule.enforcement,
@@ -57,7 +59,10 @@ function toDbValues(rule: ProductionRule) {
 }
 
 async function listAll(): Promise<ProductionRule[]> {
-  const rows = await db.select().from(productionRulesTable);
+  const rows = await db
+    .select()
+    .from(productionRulesTable)
+    .where(eq(productionRulesTable.scope, currentScope()));
   return rows.map(toApiRule);
 }
 
@@ -100,7 +105,7 @@ router.post(
           .insert(productionRulesTable)
           .values(values)
           .onConflictDoUpdate({
-            target: productionRulesTable.id,
+            target: [productionRulesTable.id, productionRulesTable.scope],
             set: {
               name: values.name,
               type: values.type,
@@ -144,7 +149,14 @@ router.delete(
 
     try {
       if (ids.length > 0) {
-        await db.delete(productionRulesTable).where(inArray(productionRulesTable.id, ids));
+        await db
+          .delete(productionRulesTable)
+          .where(
+            and(
+              inArray(productionRulesTable.id, ids),
+              eq(productionRulesTable.scope, currentScope()),
+            ),
+          );
       }
       const rules = await listAll();
       res.json({ rules });

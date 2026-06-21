@@ -115,7 +115,7 @@ import {
   type VoiceCommandHandlers,
   type VoiceCommandResult,
 } from "@workspace/voice-commands";
-import { restockInventory, adjustInventory } from "../inventoryShared";
+import { restockInventory, adjustInventory, resetSandboxRequest } from "../inventoryShared";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
@@ -231,6 +231,8 @@ import {
   Sparkles,
   CalendarPlus,
   Compass,
+  RotateCcw,
+  FlaskConical,
   CalendarDays,
   ListChecks,
   PauseCircle,
@@ -7116,6 +7118,33 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Sandbox scope banner — persistent while signed in as the test user */}
+        {me?.sandbox && (
+          <div className="print:hidden mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs sm:text-sm font-medium text-amber-700 dark:text-amber-400">
+            <FlaskConical className="w-4 h-4 shrink-0" />
+            <span className="min-w-0">
+              Sandbox mode — changes here are isolated and never affect live data.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Reset the sandbox? This discards all sandbox changes and re-copies the current live data into the sandbox. Live factory data is not affected.",
+                  )
+                ) {
+                  resetSandboxRequest()
+                    .then(() => window.location.reload())
+                    .catch(() => {});
+                }
+              }}
+              className="ml-auto shrink-0 flex items-center gap-1 rounded border border-amber-500/50 px-2 py-1 font-semibold hover:bg-amber-500/20 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Reset sandbox
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <header className="flex items-center justify-between gap-2 print:mb-4">
           <div className="flex items-center gap-2 min-w-0">
@@ -7277,6 +7306,23 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setShowTour(true)}>
                   <Compass className="w-4 h-4 mr-2" /> Guided Tour
                 </DropdownMenuItem>
+                {me?.sandbox && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          "Reset the sandbox? This discards all sandbox changes and re-copies the current live data into the sandbox. Live factory data is not affected.",
+                        )
+                      ) {
+                        resetSandboxRequest()
+                          .then(() => window.location.reload())
+                          .catch(() => {});
+                      }
+                    }}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-2" /> Reset sandbox
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => { void signOut(); }}>
                   <LogOut className="w-4 h-4 mr-2" /> Sign out
                 </DropdownMenuItem>

@@ -16,6 +16,7 @@ import deniedMergesRouter from "./deniedMerges";
 import aiCorrectionsRouter from "./aiCorrections";
 import aiMemoryRouter from "./aiMemory";
 import productionRulesRouter from "./productionRules";
+import sandboxRouter from "./sandbox";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
 
@@ -54,5 +55,6 @@ router.use(deniedMergesRouter);
 router.use(aiCorrectionsRouter);
 router.use(aiMemoryRouter);
 router.use(productionRulesRouter);
+router.use(sandboxRouter);
 
 export default router;

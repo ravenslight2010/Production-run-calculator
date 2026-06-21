@@ -11,17 +11,19 @@ import { z } from "zod/v4";
 //
 // The pair is stored normalized: `nameA` and `nameB` are lowercased+trimmed and
 // sorted (nameA <= nameB) so a pair has one canonical row regardless of which
-// name was the suggestion's target. A unique index dedupes the pair.
+// name was the suggestion's target. A unique index dedupes the pair within a
+// scope; `scope` isolates the sandbox account's denials from live.
 export const deniedMergesTable = pgTable(
   "denied_merges",
   {
     id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
     nameA: text("name_a").notNull(),
     nameB: text("name_b").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    pairIdx: uniqueIndex("denied_merges_pair_idx").on(t.nameA, t.nameB),
+    pairIdx: uniqueIndex("denied_merges_pair_idx").on(t.nameA, t.nameB, t.scope),
   }),
 );
 

@@ -13,6 +13,7 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireRole } from "../middlewares/requireRole";
+import { currentScope } from "../lib/requestScope";
 import {
   buildOptimizePrompt,
   sanitizeRecommendations,
@@ -383,9 +384,13 @@ router.post(
       const items = await db
         .select()
         .from(inventoryItemsTable)
+        .where(eq(inventoryItemsTable.scope, currentScope()))
         .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
       // On-hand per item is the sum of its lots' remaining qty (no onHand column).
-      const lots = await db.select().from(inventoryLotsTable);
+      const lots = await db
+        .select()
+        .from(inventoryLotsTable)
+        .where(eq(inventoryLotsTable.scope, currentScope()));
       const onHandByItem = new Map<number, number>();
       for (const lot of lots) {
         onHandByItem.set(lot.itemId, (onHandByItem.get(lot.itemId) ?? 0) + lot.qtyRemaining);
@@ -526,14 +531,18 @@ async function loadFlaggedAtRiskStock(
     const [settingsRow] = await db
       .select()
       .from(inventorySettingsTable)
-      .where(eq(inventorySettingsTable.id, 1));
+      .where(eq(inventorySettingsTable.scope, currentScope()));
     const soonDays = settingsRow?.expirySoonDays ?? 7;
 
     const items = await db
       .select()
       .from(inventoryItemsTable)
+      .where(eq(inventoryItemsTable.scope, currentScope()))
       .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
-    const allLots = await db.select().from(inventoryLotsTable);
+    const allLots = await db
+      .select()
+      .from(inventoryLotsTable)
+      .where(eq(inventoryLotsTable.scope, currentScope()));
     const lotsByItem = new Map<number, InventoryLot[]>();
     for (const lot of allLots) {
       const arr = lotsByItem.get(lot.itemId) ?? [];

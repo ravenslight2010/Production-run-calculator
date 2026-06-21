@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, fillMissingValuesTable, type FillMissingValue } from "@workspace/db";
 import { SaveFillMissingValuesBody } from "@workspace/api-zod";
+import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
@@ -39,7 +40,10 @@ function toApiValue(row: FillMissingValue): ValueRow {
 }
 
 async function listAll(): Promise<ValueRow[]> {
-  const rows = await db.select().from(fillMissingValuesTable);
+  const rows = await db
+    .select()
+    .from(fillMissingValuesTable)
+    .where(eq(fillMissingValuesTable.scope, currentScope()));
   return rows.map(toApiValue);
 }
 
@@ -74,7 +78,10 @@ router.post("/fill-missing-values", async (req: Request, res: Response) => {
 
   try {
     if (incoming.length > 0) {
-      const existing = await db.select().from(fillMissingValuesTable);
+      const existing = await db
+        .select()
+        .from(fillMissingValuesTable)
+        .where(eq(fillMissingValuesTable.scope, currentScope()));
       const byKey = new Map<string, FillMissingValue>();
       for (const row of existing) {
         byKey.set(valueKey(row.brand, row.flavor, row.fieldKey), row);
@@ -99,7 +106,9 @@ router.post("/fill-missing-values", async (req: Request, res: Response) => {
         }
       }
       if (inserts.length > 0) {
-        await db.insert(fillMissingValuesTable).values(inserts);
+        await db
+          .insert(fillMissingValuesTable)
+          .values(inserts.map((v) => ({ ...v, scope: currentScope() })));
       }
     }
 

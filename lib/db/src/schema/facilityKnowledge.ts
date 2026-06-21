@@ -17,11 +17,13 @@ import { z } from "zod/v4";
 // feature re-recording the same observation UPDATES it in place instead of
 // piling up duplicates; matched case-insensitively on (domain, key) in the
 // route. `fact` is the durable observation. `source` is an optional, advisory
-// tag for which feature recorded it (never used for matching).
+// tag for which feature recorded it (never used for matching). `scope` isolates
+// the sandbox account's learned facts from live.
 export const facilityKnowledgeTable = pgTable(
   "facility_knowledge",
   {
     id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
     domain: text("domain").notNull(),
     key: text("key").notNull(),
     fact: text("fact").notNull(),
@@ -31,7 +33,9 @@ export const facilityKnowledgeTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [uniqueIndex("facility_knowledge_domain_key_idx").on(table.domain, table.key)],
+  (table) => [
+    uniqueIndex("facility_knowledge_domain_key_idx").on(table.domain, table.key, table.scope),
+  ],
 );
 
 export const insertFacilityKnowledgeSchema = createInsertSchema(facilityKnowledgeTable).omit({

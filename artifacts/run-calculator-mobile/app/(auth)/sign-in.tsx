@@ -25,7 +25,7 @@ export default function SignInScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { signIn, signInAsTest } = useAuth();
 
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
@@ -46,6 +46,18 @@ export default function SignInScreen() {
       } else {
         setError("Something went wrong. Please try again.");
       }
+      setBusy(false);
+    }
+  };
+
+  const handleTestLogin = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInAsTest();
+      router.replace("/(tabs)" as Href);
+    } catch {
+      setError("Could not sign in to the sandbox. Please try again.");
       setBusy(false);
     }
   };
@@ -120,6 +132,14 @@ export default function SignInScreen() {
             ) : (
               <Text style={styles.primaryBtnText}>Sign in</Text>
             )}
+          </Pressable>
+
+          <Pressable
+            style={[styles.secondaryBtn, busy && styles.btnDisabled]}
+            onPress={handleTestLogin}
+            disabled={busy}
+          >
+            <Text style={styles.secondaryBtnText}>Log in as test user (sandbox)</Text>
           </Pressable>
 
           <View style={styles.footer}>
@@ -209,6 +229,21 @@ function makeStyles(colors: ReturnType<typeof useColors>) {
       fontFamily: FONTS.semibold,
       fontSize: 16,
       color: colors.primaryForeground,
+    },
+    secondaryBtn: {
+      height: 48,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 10,
+    },
+    secondaryBtnText: {
+      fontFamily: FONTS.semibold,
+      fontSize: 15,
+      color: colors.foreground,
     },
     btnDisabled: { opacity: 0.5 },
     forgotWrap: { alignSelf: "flex-end", marginTop: -4, marginBottom: 12 },
