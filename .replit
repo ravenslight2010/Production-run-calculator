@@ -24,6 +24,10 @@ args = "test"
 task = "workflow.run"
 args = "test:client"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test:rules"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -42,6 +46,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/run-calculator run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "test:rules"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/production-rules run test"
 
 [workflows.workflow.metadata]
 isValidation = true
