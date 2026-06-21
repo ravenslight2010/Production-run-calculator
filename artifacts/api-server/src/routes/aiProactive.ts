@@ -67,6 +67,16 @@ export type ProactiveAlert = {
 export type { OptimizeInput };
 export { validateOptimizeBody };
 
+// A day is "active" once at least one run is started but not yet ended. The
+// behind-plan and break/changeover nudges only make sense during an active day;
+// the at-risk-stock nudge is useful even on an idle day (stock can expire
+// overnight or first thing in the morning, before any run begins). Computed
+// from the run statuses so both the route (cost short-circuit) and the prompt
+// (which kinds of nudge to allow) reason off one shared definition.
+export function isDayActive(input: OptimizeInput): boolean {
+  return input.runs.some((r) => r.status === "running");
+}
+
 const AlertSchema = z.object({
   key: z.coerce.string().optional(),
   category: z.coerce.string().optional(),
@@ -154,23 +164,43 @@ export function buildProactivePrompt(
   system: string;
   user: string;
 } {
-  const system =
+  const dayActive = isDayActive(input);
+
+  const role =
     "You are a proactive production-line watcher for a frozen-pizza factory. " +
-    "You run automatically every few minutes while a shift is in progress. " +
-    "Your job is to decide whether, RIGHT NOW, there is exactly ONE timely, " +
-    "actionable nudge worth interrupting a busy shift manager for. Only three " +
-    "kinds of nudge qualify: (1) the line is clearly falling behind the plan / " +
-    "target finish time and the manager should act; or (2) a natural break or " +
-    "changeover window is opening now, so a break/lunch can be taken without " +
-    "stalling the line; or (3) there is ingredient/packaging stock that is " +
-    "already expired or expiring very soon and today's production could be " +
-    "ordered to consume it first to avoid waste. The list of at-risk stock is " +
-    "given to you below — only raise a stock nudge when that list is non-empty, " +
-    "and never invent items or quantities. Be conservative: if nothing is " +
-    "clearly actionable at this exact moment, return no alert. Prioritize a " +
-    "behind-plan or break-window nudge over a stock nudge when more than one " +
-    "applies. Never nag about minor things, and never suggest formula or recipe " +
-    "changes.";
+    "You run automatically every few minutes. ";
+
+  // When a shift is running, all three kinds of nudge are in play. When the day
+  // is idle (no run started yet) the only thing worth interrupting a manager for
+  // is at-risk stock — behind-plan / break nudges make no sense with no live run
+  // — so the watcher is told to consider stock only.
+  const system = dayActive
+    ? role +
+      "A shift is currently in progress. Your job is to decide whether, RIGHT " +
+      "NOW, there is exactly ONE timely, actionable nudge worth interrupting a " +
+      "busy shift manager for. Only three kinds of nudge qualify: (1) the line " +
+      "is clearly falling behind the plan / target finish time and the manager " +
+      "should act; or (2) a natural break or changeover window is opening now, " +
+      "so a break/lunch can be taken without stalling the line; or (3) there is " +
+      "ingredient/packaging stock that is already expired or expiring very soon " +
+      "and today's production could be ordered to consume it first to avoid " +
+      "waste. The list of at-risk stock is given to you below — only raise a " +
+      "stock nudge when that list is non-empty, and never invent items or " +
+      "quantities. Be conservative: if nothing is clearly actionable at this " +
+      "exact moment, return no alert. Prioritize a behind-plan or break-window " +
+      "nudge over a stock nudge when more than one applies. Never nag about " +
+      "minor things, and never suggest formula or recipe changes."
+    : role +
+      "No shift is running yet — the day is idle. The ONLY kind of nudge you " +
+      "may raise right now is an at-risk-stock / waste-avoidance nudge: there " +
+      "is ingredient/packaging stock that is already expired or expiring very " +
+      "soon, and the manager should plan today's production to consume it first " +
+      "to avoid waste. NEVER raise a behind-plan or break/changeover nudge " +
+      "while the day is idle. The list of at-risk stock is given to you below — " +
+      "only raise a stock nudge when that list is non-empty, and never invent " +
+      "items or quantities. Be conservative: if there is no clearly at-risk " +
+      "stock, return no alert. Never nag about minor things, and never suggest " +
+      "formula or recipe changes.";
 
   const fmtRun = (r: OptimizeInput["runs"][number]): string => {
     const parts = [

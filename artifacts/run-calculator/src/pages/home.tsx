@@ -2618,13 +2618,14 @@ export default function Home() {
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
 
   // ── Proactive shift alerts ────────────────────────────────────────────────
-  // While a day is actively running (at least one run started but not ended),
-  // poll the server on a cadence for at most one timely, dismissible nudge.
-  // Manager-only; the hook owns cooldown + de-dup (see aiProactive.ts). Mirrors
-  // the mobile provider in (tabs)/_layout.tsx (replit.md parity).
-  const dayIsActive = dayState.runs.some((r) => r.startedAt && !r.endedAt);
+  // Poll the server on a cadence for at most one timely, dismissible nudge.
+  // Manager-only; runs even on an idle day so an expiring-stock heads-up can
+  // surface before any run begins (the server gates behind-plan/break nudges to
+  // an active day and skips the AI call when idle with no at-risk stock). The
+  // hook owns cooldown + de-dup (see aiProactive.ts). Mirrors the mobile
+  // provider in (tabs)/_layout.tsx (replit.md parity).
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
-    enabled: isManager && dayIsActive,
+    enabled: isManager,
     buildInput: () =>
       buildOptimizeInput({
         date: todayStr(),

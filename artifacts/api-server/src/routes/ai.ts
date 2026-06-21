@@ -42,6 +42,7 @@ import {
 import {
   buildProactivePrompt,
   clampProactiveSettings,
+  isDayActive,
   sanitizeProactiveAlert,
   validateOptimizeBody as validateProactiveBody,
 } from "./aiProactive";
@@ -573,8 +574,17 @@ router.post(
       return;
     }
 
-    const knowledge = await loadFacilityKnowledge(req.log);
     const flaggedAtRisk = await loadFlaggedAtRiskStock(req.log);
+
+    // On an idle day (no run started) the only nudge worth surfacing is at-risk
+    // stock. If there's none, skip the AI call entirely so an app left open
+    // overnight doesn't burn the cost cap polling for nothing.
+    if (!isDayActive(validation.data) && flaggedAtRisk.length === 0) {
+      res.json({ alert: null, generatedAt: Date.now() });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildProactivePrompt(validation.data, flaggedAtRisk);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 

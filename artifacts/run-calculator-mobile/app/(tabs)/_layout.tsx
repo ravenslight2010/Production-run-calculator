@@ -63,15 +63,16 @@ export default function TabLayout() {
   const attentionCount = pendingResetCount + unreviewedIncidentCount;
 
   // ── Proactive shift alerts ────────────────────────────────────────────────
-  // While a day is actively running (at least one run started but not ended),
-  // poll the server on a cadence for at most one timely, dismissible nudge.
-  // Manager-only; the hook owns cooldown + de-dup (see context/aiProactive.ts).
-  // Mounted here (persistent across tab switches) to mirror the web hook in
-  // home.tsx (replit.md parity).
+  // Poll the server on a cadence for at most one timely, dismissible nudge.
+  // Manager-only; runs even on an idle day so an expiring-stock heads-up can
+  // surface before any run begins (the server gates behind-plan/break nudges to
+  // an active day and skips the AI call when idle with no at-risk stock). The
+  // hook owns cooldown + de-dup (see context/aiProactive.ts). Mounted here
+  // (persistent across tab switches) to mirror the web hook in home.tsx
+  // (replit.md parity).
   const { allRuns, history, runToTime, scheduled } = useRun();
-  const dayIsActive = allRuns.some((r) => r.startedAt && !r.endedAt);
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
-    enabled: isManager && dayIsActive,
+    enabled: isManager,
     buildInput: () =>
       buildOptimizeInput({
         date: todayStr(),

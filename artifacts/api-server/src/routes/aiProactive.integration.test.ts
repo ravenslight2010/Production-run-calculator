@@ -235,6 +235,20 @@ function liveDayBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// An idle day: same shape as liveDayBody but every run is still "upcoming" (no
+// run started), so isDayActive() is false on the server.
+function idleDayBody(overrides: Record<string, unknown> = {}) {
+  const live = liveDayBody();
+  return {
+    ...live,
+    runs: (live.runs as Array<Record<string, unknown>>).map((r) => ({
+      ...r,
+      status: "upcoming",
+    })),
+    ...overrides,
+  };
+}
+
 const alertContent = (alert: Record<string, unknown>, note?: string) =>
   JSON.stringify(note ? { alert, note } : { alert });
 
@@ -290,6 +304,56 @@ describe("POST /ai/proactive-alert — decision branches", () => {
     const body = (await res.json()) as { alert: unknown; note?: string };
     expect(body.alert).toBeNull();
     expect(body.note).toBe("All runs on pace.");
+  });
+
+  it("skips the AI call on an idle day when no stock is at risk", async () => {
+    const mgr = await freshManager();
+    const before = mock.calls;
+    mock.nextContent = alertContent({
+      key: "behind-plan",
+      category: "run",
+      impact: "high",
+      title: "should never surface",
+      detail: "no run is active",
+    });
+
+    const res = await req(mgr, "POST", "/api/ai/proactive-alert", idleDayBody());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alert: unknown };
+    expect(body.alert).toBeNull();
+    // The model must not be hit at all — this is the cost-control short-circuit.
+    expect(mock.calls).toBe(before);
+  });
+
+  it("surfaces an expiring-stock nudge on an idle day (before any run begins)", async () => {
+    const mgr = await freshManager();
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({ key: "mozz", category: "ingredient", name: "Mozzarella", unit: "lbs" })
+      .returning();
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 100,
+      qtyRemaining: 60,
+      expirationDate: yesterday,
+    });
+
+    mock.nextContent = alertContent({
+      key: "stock-expiring",
+      category: "efficiency",
+      impact: "medium",
+      title: "Use expiring mozzarella first",
+      detail: "60 lbs of Mozzarella expired yesterday — plan today's runs to consume it first.",
+    });
+
+    const res = await req(mgr, "POST", "/api/ai/proactive-alert", idleDayBody());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alert: { key: string; category: string } | null };
+    expect(body.alert?.category).toBe("efficiency");
+    expect(body.alert?.key).toBe("stock-expiring");
+    // The idle-day prompt must forbid behind-plan/break and ground in the stock.
+    expect(mock.lastUserPrompt).toContain("Mozzarella");
   });
 
   it("returns a STABLE key for the same condition across repeated calls", async () => {

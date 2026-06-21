@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildProactivePrompt,
   clampProactiveSettings,
+  isDayActive,
   sanitizeProactiveAlert,
   slugifyKey,
   validateOptimizeBody,
@@ -260,5 +261,50 @@ describe("buildProactivePrompt", () => {
     ]);
     expect(user).toContain("- Mozzarella [Cheese] — 120 lb at risk, expires in 2d (2026-06-23)");
     expect(user).toContain("- Marinara [Sauce] — 8 gal at risk, expired 2d ago (2026-06-19)");
+  });
+
+  it("allows all three nudge kinds while a run is active", () => {
+    const { system } = buildProactivePrompt(baseInput());
+    expect(system).toMatch(/shift is currently in progress/i);
+    expect(system).toMatch(/falling behind/i);
+    expect(system).toMatch(/break or changeover/i);
+    expect(system).toMatch(/expir/i);
+  });
+
+  it("restricts to stock-only nudges when the day is idle (no run started)", () => {
+    const { system, user } = buildProactivePrompt(
+      baseInput({ runs: [{ ...baseInput().runs[0], status: "upcoming" }] }),
+    );
+    expect(system).toMatch(/the day is idle/i);
+    expect(system).toMatch(/never raise a behind-plan or break/i);
+    expect(system).toMatch(/at-risk-stock/i);
+    // The stock section + JSON contract are still present so a stock nudge can
+    // still be emitted on an idle day.
+    expect(user).toContain("AT-RISK STOCK (expired or expiring soon):");
+    expect(user).toContain("stock-expiring");
+  });
+});
+
+describe("isDayActive", () => {
+  it("is true when at least one run is running", () => {
+    expect(isDayActive(baseInput())).toBe(true);
+  });
+
+  it("is false when there are no runs", () => {
+    expect(isDayActive(baseInput({ runs: [] }))).toBe(false);
+  });
+
+  it("is false when every run is upcoming or finished", () => {
+    const r = baseInput().runs[0];
+    expect(
+      isDayActive(
+        baseInput({
+          runs: [
+            { ...r, id: "a", status: "upcoming" },
+            { ...r, id: "b", status: "finished" },
+          ],
+        }),
+      ),
+    ).toBe(false);
   });
 });
