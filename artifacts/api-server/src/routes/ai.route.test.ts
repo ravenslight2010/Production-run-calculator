@@ -60,9 +60,9 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
 // which lets the rate-limit tests vary the limiter's bucket key per request.
 // Without the header, userId stays undefined and the limiter falls back to
 // req.ip (same for every request here), matching the route's keyGenerator.
-vi.mock("../middlewares/requireRole", () => ({
+vi.mock("../middlewares/requireCapability", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  requireRole: () => (req: any, _res: unknown, next: () => void) => {
+  requireCapability: () => (req: any, _res: unknown, next: () => void) => {
     const u = req.headers?.["x-test-user"];
     if (typeof u === "string") req.userId = u;
     next();

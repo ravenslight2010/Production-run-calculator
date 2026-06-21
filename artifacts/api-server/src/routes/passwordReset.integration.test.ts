@@ -43,6 +43,8 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
 let passwordResetRequestsTable: DbModule["passwordResetRequestsTable"];
 
 let clearUserValidityCache: () => void;
@@ -93,6 +95,8 @@ beforeAll(async () => {
   pool = dbMod.pool;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
   passwordResetRequestsTable = dbMod.passwordResetRequestsTable;
 
   // Minimal app: the real router, behind a no-op req.log so handlers that log
@@ -138,8 +142,11 @@ beforeEach(async () => {
   // The user-existence cache is module-level and outlives a single test.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${passwordResetRequestsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${passwordResetRequestsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
+  // Seed the role catalog so requireCapability can resolve each user's role to a
+  // capability set (a manager with no seeded roles would resolve to zero caps).
+  await seedRoles();
   // A manager (issues codes) and an operator (forgets their password). Seeding
   // rows directly bypasses the first-user bootstrap so each test starts from a
   // known roster.

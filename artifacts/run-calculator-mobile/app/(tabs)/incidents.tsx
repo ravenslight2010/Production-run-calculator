@@ -215,15 +215,16 @@ function Field({
 export default function IncidentsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { isManager, isLoading: roleLoading } = useMe();
+  const { hasCapability, isLoading: roleLoading } = useMe();
+  const canReview = hasCapability("review-incidents");
   const { data, isLoading, error } = useQuery({
     queryKey: ["incidents"],
     queryFn: fetchIncidents,
-    enabled: isManager,
+    enabled: canReview,
     refetchInterval: 20_000,
   });
 
-  if (!roleLoading && !isManager) {
+  if (!roleLoading && !canReview) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Feather name="lock" size={28} color={colors.mutedForeground} />

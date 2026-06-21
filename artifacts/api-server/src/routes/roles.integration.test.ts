@@ -27,6 +27,31 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
 import { signToken, verifyPassword } from "../lib/auth";
+import type { Capability } from "../lib/roles";
+
+// The complete capability set, mirrored locally so the test never statically
+// imports lib/roles (which would bind @workspace/db's pool before beforeAll can
+// repoint DATABASE_URL at the throwaway DB). seedRoles is loaded dynamically.
+const ALL_CAPS: Capability[] = [
+  "manage-staff",
+  "manage-inventory",
+  "edit-production-rules",
+  "approve-password-resets",
+  "review-incidents",
+  "use-ai-tools",
+];
+
+// The capability set each seeded role grants (must match ROLE_SEEDS in
+// lib/roles). The tests derive expected allow/deny purely from this map.
+const ROLE_CAPS: Record<string, Capability[]> = {
+  manager: [...ALL_CAPS],
+  operator: [],
+  supervisor: ["review-incidents", "edit-production-rules"],
+  "qc-operator": ["use-ai-tools"],
+  "qc-manager": ["use-ai-tools", "review-incidents"],
+  warehouse: [],
+  inventory: ["manage-inventory"],
+};
 
 // Mock the OpenAI vision client so POST /inventory/identify-photo returns a
 // valid (empty) result without making a paid call.
@@ -52,7 +77,9 @@ let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let usersTable: DbModule["usersTable"];
+let rolesTable: DbModule["rolesTable"];
 
+let seedRoles: () => Promise<void>;
 let clearUserValidityCache: () => void;
 
 let adminPool: pg.Pool;
@@ -111,6 +138,9 @@ beforeAll(async () => {
   inventorySettingsTable = dbMod.inventorySettingsTable;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
+  rolesTable = dbMod.rolesTable;
+  const rolesMod = await import("../lib/roles");
+  seedRoles = rolesMod.seedRoles;
 
   // Minimal app: the real router, behind a no-op req.log so handlers that log
   // don't crash without pino-http. Mounted at /api to match production paths.
@@ -141,15 +171,22 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 beforeEach(async () => {
   // The user-existence cache is module-level and outlives a single test; fixed
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
+  // Seed the role catalog (manager/operator builtins + editable starters) so the
+  // capability middleware can resolve each user's role to a capability set. Plus
+  // a disposable, unassigned, non-builtin role for the delete-role happy path.
+  await seedRoles();
+  await db
+    .insert(rolesTable)
+    .values({ name: "disposable-role", capabilities: [], builtin: false });
   // A manager and an operator we have already "seen". Seeding rows directly
   // bypasses the first-user bootstrap so each test starts from a known roster.
   await db.insert(usersTable).values([
@@ -202,21 +239,23 @@ async function makeItem(key: string): Promise<number> {
 
 const validImage = "a".repeat(64);
 
-// Each manager-only route, with a body that would succeed once past the guard.
-// `setup` runs first (e.g. to create a target row) and returns path overrides.
+// Each gated route, tagged with the single capability it requires plus a body
+// and okStatus that would succeed once past the guard. The test derives expected
+// allow/deny for every role purely from whether the role holds `capability`.
 type GatedRoute = {
   name: string;
+  capability: Capability;
   method: string;
   path: (ctx: { itemId: number }) => string;
   body?: unknown;
   okStatus: number;
 };
 
-// Routes a supervisor (and above) may use: the three manager powers supervisors
-// gained — inventory-item CRUD, inventory settings, and password-reset approval.
-const SUPERVISOR_ROUTES: GatedRoute[] = [
+const ROUTES: GatedRoute[] = [
+  // --- manage-inventory ---
   {
     name: "POST /inventory/items",
+    capability: "manage-inventory",
     method: "POST",
     path: () => "/api/inventory/items",
     body: { key: "ingredient:New:lbs", category: "ingredient", name: "New", unit: "lbs" },
@@ -224,6 +263,7 @@ const SUPERVISOR_ROUTES: GatedRoute[] = [
   },
   {
     name: "PATCH /inventory/items/:id",
+    capability: "manage-inventory",
     method: "PATCH",
     path: ({ itemId }) => `/api/inventory/items/${itemId}`,
     body: { name: "Renamed" },
@@ -231,31 +271,16 @@ const SUPERVISOR_ROUTES: GatedRoute[] = [
   },
   {
     name: "DELETE /inventory/items/:id",
+    capability: "manage-inventory",
     method: "DELETE",
     path: ({ itemId }) => `/api/inventory/items/${itemId}`,
     okStatus: 204,
   },
   {
-    name: "PUT /inventory/settings",
-    method: "PUT",
-    path: () => "/api/inventory/settings",
-    body: { expirySoonDays: 14 },
-    okStatus: 200,
-  },
-  {
-    name: "GET /password-reset-requests",
-    method: "GET",
-    path: () => "/api/password-reset-requests",
-    okStatus: 200,
-  },
-];
-
-// Routes that stay manager-only — supervisors and QC roles are forbidden.
-const MANAGER_ROUTES: GatedRoute[] = [
-  {
     // A self-merge (fromKey === toKey) is a safe no-op that returns 200 once
     // past the guard, so it exercises authz without mutating real stock.
     name: "POST /inventory/merge",
+    capability: "manage-inventory",
     method: "POST",
     path: () => "/api/inventory/merge",
     body: {
@@ -272,40 +297,34 @@ const MANAGER_ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "PUT /inventory/settings",
+    capability: "manage-inventory",
+    method: "PUT",
+    path: () => "/api/inventory/settings",
+    body: { expirySoonDays: 14 },
+    okStatus: 200,
+  },
+  // --- use-ai-tools ---
+  {
     name: "POST /inventory/identify-photo",
+    capability: "use-ai-tools",
     method: "POST",
     path: () => "/api/inventory/identify-photo",
     body: { imageBase64: validImage },
     okStatus: 200,
   },
+  // --- review-incidents ---
   {
-    name: "GET /users",
+    name: "GET /incidents",
+    capability: "review-incidents",
     method: "GET",
-    path: () => "/api/users",
+    path: () => "/api/incidents",
     okStatus: 200,
   },
-  {
-    name: "PUT /users/:id/role",
-    method: "PUT",
-    path: () => `/api/users/${OPERATOR}/role`,
-    body: { role: "manager" },
-    okStatus: 200,
-  },
-  {
-    name: "PUT /users/:id/password",
-    method: "PUT",
-    path: () => `/api/users/${OPERATOR}/password`,
-    body: { newPassword: "fresh-password" },
-    okStatus: 204,
-  },
-  {
-    name: "DELETE /users/:id",
-    method: "DELETE",
-    path: () => `/api/users/${OPERATOR}`,
-    okStatus: 204,
-  },
+  // --- edit-production-rules ---
   {
     name: "POST /production-rules",
+    capability: "edit-production-rules",
     method: "POST",
     path: () => "/api/production-rules",
     body: { rules: [] },
@@ -313,18 +332,96 @@ const MANAGER_ROUTES: GatedRoute[] = [
   },
   {
     name: "DELETE /production-rules",
+    capability: "edit-production-rules",
     method: "DELETE",
     path: () => "/api/production-rules",
     body: { ids: [] },
     okStatus: 200,
   },
+  // --- approve-password-resets ---
+  {
+    name: "GET /password-reset-requests",
+    capability: "approve-password-resets",
+    method: "GET",
+    path: () => "/api/password-reset-requests",
+    okStatus: 200,
+  },
+  // --- manage-staff ---
+  {
+    name: "GET /roles",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/roles",
+    okStatus: 200,
+  },
+  {
+    name: "POST /roles",
+    capability: "manage-staff",
+    method: "POST",
+    path: () => "/api/roles",
+    body: { name: "brand-new-role", capabilities: [] },
+    okStatus: 201,
+  },
+  {
+    name: "PUT /roles/:name",
+    capability: "manage-staff",
+    method: "PUT",
+    path: () => "/api/roles/warehouse",
+    body: { capabilities: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /roles/:name",
+    capability: "manage-staff",
+    method: "DELETE",
+    path: () => "/api/roles/disposable-role",
+    okStatus: 204,
+  },
+  {
+    name: "GET /users",
+    capability: "manage-staff",
+    method: "GET",
+    path: () => "/api/users",
+    okStatus: 200,
+  },
+  {
+    name: "PUT /users/:id/role",
+    capability: "manage-staff",
+    method: "PUT",
+    path: () => `/api/users/${OPERATOR}/role`,
+    body: { role: "operator" },
+    okStatus: 200,
+  },
+  {
+    name: "PUT /users/:id/password",
+    capability: "manage-staff",
+    method: "PUT",
+    path: () => `/api/users/${OPERATOR}/password`,
+    body: { newPassword: "fresh-password" },
+    okStatus: 204,
+  },
+  {
+    name: "DELETE /users/:id",
+    capability: "manage-staff",
+    method: "DELETE",
+    path: () => `/api/users/${OPERATOR}`,
+    okStatus: 204,
+  },
 ];
 
-const ALL_ROUTES = [...SUPERVISOR_ROUTES, ...MANAGER_ROUTES];
+const USER_BY_ROLE: Record<string, string> = {
+  manager: MANAGER,
+  operator: OPERATOR,
+  supervisor: SUPERVISOR,
+  "qc-operator": QC_OPERATOR,
+  "qc-manager": QC_MANAGER,
+  warehouse: WAREHOUSE,
+  inventory: INVENTORY,
+};
 
-describe("role-based access control", () => {
+describe("capability-based access control", () => {
   describe("signed out → 401", () => {
-    for (const route of ALL_ROUTES) {
+    for (const route of ROUTES) {
       it(`rejects ${route.name} with 401`, async () => {
         const itemId = await makeItem("ingredient:Target:lbs");
         const res = await req(null, route.method, route.path({ itemId }), route.body);
@@ -333,61 +430,55 @@ describe("role-based access control", () => {
     }
   });
 
-  describe("operator → 403 (no elevated powers)", () => {
-    for (const route of ALL_ROUTES) {
-      it(`forbids ${route.name} with 403`, async () => {
-        const itemId = await makeItem("ingredient:Target:lbs");
-        const res = await req(OPERATOR, route.method, route.path({ itemId }), route.body);
-        expect(res.status).toBe(403);
-      });
-    }
-  });
-
-  // QC roles sit at operator level on the main ladder, so they get no elevated
-  // powers — forbidden on every gated route, supervisor and manager alike.
-  for (const qcUser of [QC_OPERATOR, QC_MANAGER]) {
-    describe(`${qcUser} → 403 (QC = operator-level on main ladder)`, () => {
-      for (const route of ALL_ROUTES) {
-        it(`forbids ${route.name} with 403`, async () => {
-          const itemId = await makeItem("ingredient:Target:lbs");
-          const res = await req(qcUser, route.method, route.path({ itemId }), route.body);
-          expect(res.status).toBe(403);
-        });
+  // For every seeded role, each gated route is allowed iff the role holds the
+  // route's capability — otherwise it must 403. This exhaustively verifies the
+  // capability map drives access (e.g. inventory CRUD works for the inventory
+  // role, AI tools for the QC roles, production rules for supervisors).
+  for (const [roleName, caps] of Object.entries(ROLE_CAPS)) {
+    const user = USER_BY_ROLE[roleName];
+    describe(`${roleName}`, () => {
+      for (const route of ROUTES) {
+        const allowed = caps.includes(route.capability);
+        if (allowed) {
+          it(`allows ${route.name} (${route.okStatus})`, async () => {
+            const itemId = await makeItem("ingredient:Target:lbs");
+            const res = await req(user, route.method, route.path({ itemId }), route.body);
+            expect(res.status).toBe(route.okStatus);
+          });
+        } else {
+          it(`forbids ${route.name} with 403`, async () => {
+            const itemId = await makeItem("ingredient:Target:lbs");
+            const res = await req(user, route.method, route.path({ itemId }), route.body);
+            expect(res.status).toBe(403);
+          });
+        }
       }
     });
   }
+});
 
-  // warehouse and inventory are flat operator-level roles — they get no elevated
-  // powers, so they are forbidden on every gated route, supervisor and manager
-  // alike (exactly like a plain operator).
-  for (const flatUser of [WAREHOUSE, INVENTORY]) {
-    describe(`${flatUser} → 403 (flat operator-level role)`, () => {
-      for (const route of ALL_ROUTES) {
-        it(`forbids ${route.name} with 403`, async () => {
-          const itemId = await makeItem("ingredient:Target:lbs");
-          const res = await req(flatUser, route.method, route.path({ itemId }), route.body);
-          expect(res.status).toBe(403);
-        });
-      }
-    });
-  }
-
-  // warehouse and inventory get operator-level access: an ungated route every
-  // signed-in user (including a plain operator) may call must admit them. GET /me
-  // is the canonical such route — it returns the caller's own StaffMember.
-  for (const flatUser of [WAREHOUSE, INVENTORY]) {
-    it(`admits ${flatUser} on the ungated GET /me (operator-level access)`, async () => {
-      const res = await req(flatUser, "GET", "/api/me");
+describe("identity and role assignment", () => {
+  // GET /me is ungated; it returns the caller's role and resolved capability set
+  // so the clients can show/hide controls. Every role must read back correctly.
+  for (const roleName of Object.keys(ROLE_CAPS)) {
+    it(`GET /me reports ${roleName}'s role and capabilities`, async () => {
+      const user = USER_BY_ROLE[roleName];
+      const res = await req(user, "GET", "/api/me");
       expect(res.status).toBe(200);
-      const body = (await res.json()) as { userId: string; role: string };
-      expect(body.userId).toBe(flatUser);
-      expect(body.role).toBe(flatUser === WAREHOUSE ? "warehouse" : "inventory");
+      const body = (await res.json()) as {
+        userId: string;
+        role: string;
+        capabilities: string[];
+      };
+      expect(body.userId).toBe(user);
+      expect(body.role).toBe(roleName);
+      expect([...body.capabilities].sort()).toEqual([...ROLE_CAPS[roleName]].sort());
     });
   }
 
-  // A manager can assign the two new roles through the change-role route, and the
-  // role persists — proving warehouse/inventory validate against the full set.
-  for (const role of ["warehouse", "inventory"] as const) {
+  // A manager (who holds every capability) can assign any seeded role, and it
+  // persists.
+  for (const role of ["warehouse", "inventory", "supervisor", "qc-manager"] as const) {
     it(`lets a manager assign ${role} via PUT /users/:id/role (→ 200)`, async () => {
       const res = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, { role });
       expect(res.status).toBe(200);
@@ -400,35 +491,100 @@ describe("role-based access control", () => {
       expect(row.role).toBe(role);
     });
   }
+});
 
-  describe("supervisor → allowed on supervisor routes", () => {
-    for (const route of SUPERVISOR_ROUTES) {
-      it(`allows ${route.name} (${route.okStatus})`, async () => {
-        const itemId = await makeItem("ingredient:Target:lbs");
-        const res = await req(SUPERVISOR, route.method, route.path({ itemId }), route.body);
-        expect(res.status).toBe(route.okStatus);
-      });
-    }
+describe("role administration", () => {
+  it("creates a role and a manager can then assign it (end-to-end)", async () => {
+    const create = await req(MANAGER, "POST", "/api/roles", {
+      name: "line-lead",
+      capabilities: ["manage-inventory"],
+    });
+    expect(create.status).toBe(201);
+
+    const assign = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, {
+      role: "line-lead",
+    });
+    expect(assign.status).toBe(200);
+
+    const me = await req(OPERATOR, "GET", "/api/me");
+    const body = (await me.json()) as { role: string; capabilities: string[] };
+    expect(body.role).toBe("line-lead");
+    expect(body.capabilities).toContain("manage-inventory");
   });
 
-  describe("supervisor → 403 on manager-only routes", () => {
-    for (const route of MANAGER_ROUTES) {
-      it(`forbids ${route.name} with 403`, async () => {
-        const itemId = await makeItem("ingredient:Target:lbs");
-        const res = await req(SUPERVISOR, route.method, route.path({ itemId }), route.body);
-        expect(res.status).toBe(403);
-      });
-    }
+  it("refuses to create a role that already exists (409)", async () => {
+    const res = await req(MANAGER, "POST", "/api/roles", {
+      name: "supervisor",
+      capabilities: [],
+    });
+    expect(res.status).toBe(409);
   });
 
-  describe("manager → allowed on every route", () => {
-    for (const route of ALL_ROUTES) {
-      it(`allows ${route.name} (${route.okStatus})`, async () => {
-        const itemId = await makeItem("ingredient:Target:lbs");
-        const res = await req(MANAGER, route.method, route.path({ itemId }), route.body);
-        expect(res.status).toBe(route.okStatus);
+  it("refuses to strip manage-staff from the built-in manager role (400)", async () => {
+    const res = await req(MANAGER, "PUT", "/api/roles/manager", {
+      capabilities: ["use-ai-tools"],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to delete a built-in role (400)", async () => {
+    const res = await req(MANAGER, "DELETE", "/api/roles/operator");
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to delete a role that is still assigned to staff (400)", async () => {
+    // The 'inventory' role is held by the INVENTORY user in the seed roster.
+    const res = await req(MANAGER, "DELETE", "/api/roles/inventory");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/assigned/i);
+  });
+});
+
+// The privilege-escalation guard is enforced not just on role create/edit but
+// on role ASSIGNMENT too. To exercise it over HTTP we need an actor who holds
+// manage-staff (so they pass the route gate) but lacks other capabilities —
+// a custom "junior-admin" role. They then can't grant capabilities they lack.
+describe("privilege-escalation guard", () => {
+  beforeEach(async () => {
+    // Create a manage-staff-only role and put the operator on it.
+    await db.insert(rolesTable).values({
+      name: "junior-admin",
+      capabilities: ["manage-staff"],
+      builtin: false,
+    });
+    await db
+      .insert(userRolesTable)
+      .values({ userId: OPERATOR, role: "junior-admin" })
+      .onConflictDoUpdate({
+        target: userRolesTable.userId,
+        set: { role: "junior-admin" },
       });
-    }
+    clearUserValidityCache();
+  });
+
+  it("lets the junior-admin create a role with no capabilities (201)", async () => {
+    const res = await req(OPERATOR, "POST", "/api/roles", {
+      name: "plain-role",
+      capabilities: [],
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("forbids the junior-admin granting a capability they lack on create (403)", async () => {
+    const res = await req(OPERATOR, "POST", "/api/roles", {
+      name: "sneaky-role",
+      capabilities: ["use-ai-tools"],
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("forbids the junior-admin assigning a role with capabilities they lack (403)", async () => {
+    // qc-operator carries use-ai-tools, which junior-admin does not hold.
+    const res = await req(OPERATOR, "PUT", `/api/users/${WAREHOUSE}/role`, {
+      role: "qc-operator",
+    });
+    expect(res.status).toBe(403);
   });
 });
 
@@ -448,7 +604,7 @@ describe("last-manager guard", () => {
       const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, { role });
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toMatch(/last manager/i);
+      expect(body.error).toMatch(/last staff manager/i);
 
       // The manager is unchanged — still a manager.
       const [row] = await db
@@ -483,7 +639,7 @@ describe("last-manager guard", () => {
     const res = await req(MANAGER, "DELETE", `/api/users/${MANAGER}`);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/last manager/i);
+    expect(body.error).toMatch(/last staff manager/i);
 
     // The manager still exists.
     const [row] = await db

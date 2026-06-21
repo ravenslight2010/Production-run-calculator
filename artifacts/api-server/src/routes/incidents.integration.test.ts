@@ -61,6 +61,8 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
 let incidentsTable: DbModule["incidentsTable"];
 let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
 
@@ -107,6 +109,8 @@ beforeAll(async () => {
   pool = dbMod.pool;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
   incidentsTable = dbMod.incidentsTable;
   facilityKnowledgeTable = dbMod.facilityKnowledgeTable;
 
@@ -136,7 +140,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 beforeEach(async () => {
   clearUserValidityCache();
@@ -148,8 +152,11 @@ beforeEach(async () => {
   mock.calls = 0;
   mock.lastUserPrompt = "";
   await db.execute(
-    sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
+  // Seed the role catalog so requireCapability can resolve each user's role to a
+  // capability set (a manager with no seeded roles would resolve to zero caps).
+  await seedRoles();
   await db.insert(usersTable).values([
     { id: MANAGER, username: "manager", passwordHash: "x" },
     { id: OPERATOR, username: "operator", passwordHash: "x" },

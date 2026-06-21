@@ -22,7 +22,7 @@ import {
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
-import { requireRole } from "../middlewares/requireRole";
+import { requireCapability } from "../middlewares/requireCapability";
 import { getOrCreateUserRole, getStaffMember } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 import {
@@ -179,7 +179,7 @@ router.get("/inventory", async (_req, res): Promise<void> => {
   res.json(out);
 });
 
-router.post("/inventory/items", requireRole("supervisor"), async (req, res): Promise<void> => {
+router.post("/inventory/items", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const parsed = CreateInventoryItemBody.safeParse(req.body);
   if (!parsed.success) {
     req.log.warn({ errors: parsed.error.message }, "Invalid inventory item body");
@@ -205,7 +205,7 @@ router.post("/inventory/items", requireRole("supervisor"), async (req, res): Pro
   res.status(201).json(await loadItemResponse(item.id));
 });
 
-router.patch("/inventory/items/:id", requireRole("supervisor"), async (req, res): Promise<void> => {
+router.patch("/inventory/items/:id", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -232,7 +232,7 @@ router.patch("/inventory/items/:id", requireRole("supervisor"), async (req, res)
   res.json(await loadItemResponse(id));
 });
 
-router.delete("/inventory/items/:id", requireRole("supervisor"), async (req, res): Promise<void> => {
+router.delete("/inventory/items/:id", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -329,7 +329,7 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
 
 router.post(
   "/inventory/identify-photo",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -415,7 +415,7 @@ router.post(
 // the vision provider.
 router.post(
   "/inventory/quality-photo",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -484,7 +484,7 @@ router.post(
 // ./qualityChecks so they can be unit-tested without a DB.
 router.post(
   "/inventory/quality-checks",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   async (req, res): Promise<void> => {
     const validation = validateRecordQualityCheckBody(req.body);
     if (!validation.ok) {
@@ -528,7 +528,7 @@ router.post(
 // ignored rather than erroring so a stray query param never breaks the view.
 router.get(
   "/inventory/quality-checks",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   async (req, res): Promise<void> => {
     const filter = parseHistoryFilter(req.query);
     const conditions = [];
@@ -556,7 +556,7 @@ router.get(
 // future grounding; a write failure never fails the request.
 router.post(
   "/inventory/waste-insight",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PHOTO_RATE_WINDOW_MS,
     max: PHOTO_RATE_MAX,
@@ -933,7 +933,7 @@ export async function mergeInventoryItems(merges: MergeSpec[]): Promise<MergeRep
   return { merged, results };
 }
 
-router.post("/inventory/merge", requireRole("manager"), async (req, res): Promise<void> => {
+router.post("/inventory/merge", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const parsed = MergeInventoryBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -995,7 +995,7 @@ router.get("/inventory/settings", async (_req, res): Promise<void> => {
   res.json({ expirySoonDays: row.expirySoonDays });
 });
 
-router.put("/inventory/settings", requireRole("supervisor"), async (req, res): Promise<void> => {
+router.put("/inventory/settings", requireCapability("manage-inventory"), async (req, res): Promise<void> => {
   const parsed = UpdateInventorySettingsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

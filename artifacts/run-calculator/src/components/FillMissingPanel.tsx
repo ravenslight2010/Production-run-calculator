@@ -83,7 +83,8 @@ export default function FillMissingPanel({
   canEdit: boolean;
   onCommit: (key: string, value: string | number) => void;
 }) {
-  const { isManager } = useMe();
+  const { hasCapability } = useMe();
+  const isManager = hasCapability("use-ai-tools");
   const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [aiLoading, setAiLoading] = useState(false);

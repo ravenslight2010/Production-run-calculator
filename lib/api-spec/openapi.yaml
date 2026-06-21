@@ -1695,6 +1695,96 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffMember"
 
+  /roles:
+    get:
+      operationId: listRoles
+      tags: [roles]
+      summary: List all defined roles and their capabilities (manage-staff)
+      responses:
+        "200":
+          description: Role catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoleDefinition"
+        "403":
+          description: Missing capability
+    post:
+      operationId: createRole
+      tags: [roles]
+      summary: Create a new role (manage-staff)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRole"
+      responses:
+        "201":
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleDefinition"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing capability or attempt to grant a capability you lack
+        "409":
+          description: A role with that name already exists
+
+  /roles/{name}:
+    put:
+      operationId: updateRole
+      tags: [roles]
+      summary: Update a role's capabilities (manage-staff)
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoleCapabilitiesUpdate"
+      responses:
+        "200":
+          description: Updated role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleDefinition"
+        "400":
+          description: Invalid input
+        "403":
+          description: Missing capability or attempt to grant a capability you lack
+        "404":
+          description: Role not found
+    delete:
+      operationId: deleteRole
+      tags: [roles]
+      summary: Delete a role (manage-staff)
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Role deleted
+        "400":
+          description: Built-in role or role still assigned to users
+        "403":
+          description: Missing capability
+        "404":
+          description: Role not found
+
   /users:
     get:
       operationId: listStaff
@@ -2504,11 +2594,72 @@ components:
           minLength: 6
           maxLength: 200
 
+    Capability:
+      type: string
+      enum:
+        - manage-staff
+        - manage-inventory
+        - edit-production-rules
+        - approve-password-resets
+        - review-incidents
+        - use-ai-tools
+      description: >-
+        A discrete permission. A role grants a set of capabilities, and a user
+        holds the union of their role's capabilities.
+
+    RoleDefinition:
+      type: object
+      required:
+        - name
+        - capabilities
+        - builtin
+      properties:
+        name:
+          type: string
+          description: Unique role name (also its identifier).
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+        builtin:
+          type: boolean
+          description: >-
+            Whether this is a built-in role. The "manager" role is protected
+            (cannot be deleted and must keep the manage-staff capability) and
+            "operator" is the default no-capability role. Built-in roles cannot
+            be deleted.
+
+    CreateRole:
+      type: object
+      required:
+        - name
+        - capabilities
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+
+    RoleCapabilitiesUpdate:
+      type: object
+      required:
+        - capabilities
+      properties:
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+
     StaffMember:
       type: object
       required:
         - userId
         - role
+        - capabilities
         - email
         - name
         - onboardingSeen
@@ -2519,7 +2670,12 @@ components:
           type: string
         role:
           type: string
-          enum: [operator, supervisor, manager, qc-operator, qc-manager, warehouse, inventory]
+          description: The name of the role assigned to this user.
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Capability"
+          description: The capabilities granted by this user's role.
         email:
           type: [string, "null"]
         name:
@@ -2548,7 +2704,7 @@ components:
       properties:
         role:
           type: string
-          enum: [operator, supervisor, manager, qc-operator, qc-manager, warehouse, inventory]
+          description: The name of the role to assign to the user.
 
     ResetStaffPassword:
       type: object

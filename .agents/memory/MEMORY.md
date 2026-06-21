@@ -29,7 +29,7 @@
 - [Profile clobber by blank-form autosave](profile-clobber-blank-form.md) — web profiles zeroed by autosave before profile loads; saveProfile guard + seed self-heal; no numeric-scan for real-data.
 - [Excel import/export + QuickBooks CSV](excel-import-export.md) — export totals must use one shared formula (not platform calc engines); import must merge full day payload (no clobber).
 - [Auth gating](clerk-auth-gating.md) — self-contained username+password (Clerk removed); web auths via httpOnly cookie, mobile threads bearer into client+SSE+REST; requireAuth gates all /api except /healthz + public /auth; first user→manager.
-- [Role gating](role-gating.md) — manager/operator: gate only requireRole-protected endpoints (item CRUD, AI photo, settings, staff admin); never gate /sync day-state (recipes, master-data) — can't role-split + breaks parity.
+- [Role gating](role-gating.md) — roles are DB rows (name+capabilities+builtin); requireCapability resolves caps from rolesTable (tests MUST seedRoles); 6 caps, escalation/last-manager guards; never gate /sync.
 - [Daily-reset auth boundary](daily-reset-auth-boundary.md) — stateless HMAC tokens force-expired at midnight via today's resetAt; client-pushed boundary, mobile forcedOutRef latch, reactive 401 bounce.
 - [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).
 - [Password reset relay](password-reset-relay.md) — no-email forgot-password = manager approves & relays one-time code; enumeration-safe; /auth/* exempt from 401 bounce.

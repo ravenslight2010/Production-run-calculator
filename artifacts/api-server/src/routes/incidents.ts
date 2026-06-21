@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
-import { requireRole } from "../middlewares/requireRole";
+import { requireCapability } from "../middlewares/requireCapability";
 import { getStaffMember } from "../lib/roles";
 import {
   countUnreviewedIncidents,
@@ -51,13 +51,11 @@ const reportRateStore =
     : undefined;
 
 // POST /incidents — report an issue (or auto-submit a crash) and get an AI
-// diagnosis. Open to ANY signed-in user (requireRole("operator") admits all
-// roles and also resolves req.role / bootstraps the user's row). We persist the
-// incident first so it's never lost even if the AI call fails, then attach the
-// diagnosis.
+// diagnosis. Open to ANY signed-in user (the router already requires auth; no
+// capability is needed to report a problem). We persist the incident first so
+// it's never lost even if the AI call fails, then attach the diagnosis.
 router.post(
   "/incidents",
-  requireRole("operator"),
   rateLimit({
     windowMs: REPORT_RATE_WINDOW_MS,
     max: REPORT_RATE_MAX,
@@ -179,7 +177,7 @@ router.post(
 );
 
 // GET /incidents — manager-only review list (newest first).
-router.get("/incidents", requireRole("manager"), async (_req, res): Promise<void> => {
+router.get("/incidents", requireCapability("review-incidents"), async (_req, res): Promise<void> => {
   res.json(await listIncidents());
 });
 
@@ -187,14 +185,14 @@ router.get("/incidents", requireRole("manager"), async (_req, res): Promise<void
 // "/incidents/:id" route so "unreviewed-count" isn't captured as an id.
 router.get(
   "/incidents/unreviewed-count",
-  requireRole("manager"),
+  requireCapability("review-incidents"),
   async (_req, res): Promise<void> => {
     res.json({ count: await countUnreviewedIncidents() });
   },
 );
 
 // GET /incidents/:id — manager-only single incident.
-router.get("/incidents/:id", requireRole("manager"), async (req, res): Promise<void> => {
+router.get("/incidents/:id", requireCapability("review-incidents"), async (req, res): Promise<void> => {
   const incident = await getIncident(pathId(req.params.id));
   if (!incident) {
     res.status(404).json({ error: "No incident with that id" });
@@ -206,7 +204,7 @@ router.get("/incidents/:id", requireRole("manager"), async (req, res): Promise<v
 // POST /incidents/:id/review — manager marks an incident reviewed.
 router.post(
   "/incidents/:id/review",
-  requireRole("manager"),
+  requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
     const incident = await markIncidentReviewed(pathId(req.params.id));
     if (!incident) {
@@ -220,7 +218,7 @@ router.post(
 // POST /incidents/:id/resolve — manager marks an incident resolved (fixed).
 router.post(
   "/incidents/:id/resolve",
-  requireRole("manager"),
+  requireCapability("review-incidents"),
   async (req, res): Promise<void> => {
     const incident = await markIncidentResolved(pathId(req.params.id));
     if (!incident) {

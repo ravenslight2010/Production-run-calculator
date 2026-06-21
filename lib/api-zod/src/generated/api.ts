@@ -72,7 +72,8 @@ export const SignInResponse = zod.object({
   "token": zod.string(),
   "user": zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1844,7 +1845,8 @@ export const ResolveIncidentResponse = zod.object({
  */
 export const GetMeResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1859,7 +1861,8 @@ export const GetMeResponse = zod.object({
  */
 export const MarkOnboardingSeenResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1874,7 +1877,8 @@ export const MarkOnboardingSeenResponse = zod.object({
  */
 export const MarkTourCompletedResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1884,11 +1888,62 @@ export const MarkTourCompletedResponse = zod.object({
 
 
 /**
+ * @summary List all defined roles and their capabilities (manage-staff)
+ */
+export const ListRolesResponseItem = zod.object({
+  "name": zod.string().describe('Unique role name (also its identifier).'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The \"manager\" role is protected (cannot be deleted and must keep the manage-staff capability) and \"operator\" is the default no-capability role. Built-in roles cannot be deleted.')
+})
+export const ListRolesResponse = zod.array(ListRolesResponseItem)
+
+
+/**
+ * @summary Create a new role (manage-staff)
+ */
+export const createRoleBodyNameMax = 60;
+
+
+
+export const CreateRoleBody = zod.object({
+  "name": zod.string().min(1).max(createRoleBodyNameMax),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
+})
+
+
+/**
+ * @summary Update a role's capabilities (manage-staff)
+ */
+export const UpdateRoleParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+export const UpdateRoleBody = zod.object({
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
+})
+
+export const UpdateRoleResponse = zod.object({
+  "name": zod.string().describe('Unique role name (also its identifier).'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "builtin": zod.boolean().describe('Whether this is a built-in role. The \"manager\" role is protected (cannot be deleted and must keep the manage-staff capability) and \"operator\" is the default no-capability role. Built-in roles cannot be deleted.')
+})
+
+
+/**
+ * @summary Delete a role (manage-staff)
+ */
+export const DeleteRoleParams = zod.object({
+  "name": zod.coerce.string()
+})
+
+
+/**
  * @summary List staff members and their roles (manager only)
  */
 export const ListStaffResponseItem = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1906,12 +1961,13 @@ export const SetStaffRoleParams = zod.object({
 })
 
 export const SetStaffRoleBody = zod.object({
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory'])
+  "role": zod.string().describe('The name of the role to assign to the user.')
 })
 
 export const SetStaffRoleResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),

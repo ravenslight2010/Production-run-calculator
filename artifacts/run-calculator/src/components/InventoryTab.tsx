@@ -106,7 +106,11 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
   const [showAdd, setShowAdd] = useState(false);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
-  const { isManager, isSupervisorOrAbove } = useMe();
+  const { hasCapability } = useMe();
+  const canManageInventory = hasCapability("manage-inventory");
+  const canUseAiTools = hasCapability("use-ai-tools");
+  const canEditRules = hasCapability("edit-production-rules");
+  const canManageStaff = hasCapability("manage-staff");
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -235,8 +239,8 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         </Card>
       )}
 
-      {/* Add item (supervisor or above: inventory-item master-data write) */}
-      {isSupervisorOrAbove && (
+      {/* Add item (manage-inventory: inventory-item master-data write) */}
+      {canManageInventory && (
         <Card className="bg-card/50 border-border/50 shadow-md">
           <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between gap-2">
@@ -266,12 +270,12 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         </Card>
       )}
 
-      {/* Photo stock intake (manager only: paid AI action) */}
-      {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+      {/* Photo stock intake (use-ai-tools: paid AI action) */}
+      {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
 
-      {isManager && <QualityCheckCard />}
+      {canUseAiTools && <QualityCheckCard />}
 
-      {isManager && <WasteInsightCard />}
+      {canUseAiTools && <WasteInsightCard />}
 
       {loading && <p className="text-xs text-muted-foreground italic px-1">Loading inventory…</p>}
       {error && <p className="text-xs text-red-500 px-1">{error}</p>}
@@ -304,8 +308,8 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         />
       )}
 
-      {/* Settings: configurable expiry lead time (supervisor or above) */}
-      {isSupervisorOrAbove && (
+      {/* Settings: configurable expiry lead time (manage-inventory) */}
+      {canManageInventory && (
         <Card className="bg-card/50 border-border/50 shadow-md">
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -338,18 +342,19 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         </Card>
       )}
 
-      {/* Proactive-alert tuning (manager only) */}
-      {isManager && <ProactiveAlertSettingsCard />}
+      {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
+      {canUseAiTools && <ProactiveAlertSettingsCard />}
 
       {/* Account self-service (any signed-in user) */}
       <ChangePasswordCard />
 
-      {/* Production rules (manager only) */}
-      {isManager && <ProductionRulesManager />}
+      {/* Production rules (edit-production-rules) */}
+      {canEditRules && <ProductionRulesManager />}
 
-      {/* Staff & roles. Visible to supervisor-or-above for the password-reset
-          approval queue; the staff roster inside is manager-only. */}
-      {isSupervisorOrAbove && <StaffRolesCard />}
+      {/* Staff & roles. Visible to anyone who can approve password resets (for
+          the approval queue) or manage staff (for the roster + roles editor);
+          each section inside gates itself on the precise capability. */}
+      {(canManageStaff || hasCapability("approve-password-resets")) && <StaffRolesCard />}
     </div>
   );
 }
@@ -430,7 +435,8 @@ function ItemRow({
 }
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
-  const { isSupervisorOrAbove } = useMe();
+  const { hasCapability } = useMe();
+  const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -491,10 +497,10 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </div>
 
-      {/* Reorder threshold (editing is an inventory-item write → supervisor or above) */}
+      {/* Reorder threshold (editing is an inventory-item write → manage-inventory) */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">Reorder at</span>
-        {!isSupervisorOrAbove ? (
+        {!canManageInventory ? (
           <span className="text-xs font-mono tabular-nums text-foreground">
             {fmtQty(item.reorderThreshold)} {item.unit}
           </span>
@@ -561,7 +567,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </div>
       )}
 
-      {isSupervisorOrAbove && (
+      {canManageInventory && (
         <>
           <Separator className="bg-border/40" />
           <button

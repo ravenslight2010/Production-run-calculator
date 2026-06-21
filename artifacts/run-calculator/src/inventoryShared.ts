@@ -429,17 +429,36 @@ export function applyPhotoAliases(
 }
 
 // ── Staff roles / access control ─────────────────────────────────────────────
-export type Role =
-  | "operator"
-  | "supervisor"
-  | "manager"
-  | "qc-operator"
-  | "qc-manager"
-  | "warehouse"
-  | "inventory";
+// Roles are now data-driven: a role is just a name plus a set of capabilities.
+// The server seeds built-in + default editable roles and managers can create,
+// edit, and delete roles. Access is gated on capabilities, not role names.
+export type Role = string;
+export const CAPABILITIES = [
+  "manage-staff",
+  "manage-inventory",
+  "edit-production-rules",
+  "approve-password-resets",
+  "review-incidents",
+  "use-ai-tools",
+] as const;
+export type Capability = (typeof CAPABILITIES)[number];
+export const CAPABILITY_LABELS: Record<Capability, string> = {
+  "manage-staff": "Manage staff & roles",
+  "manage-inventory": "Manage inventory",
+  "edit-production-rules": "Edit production rules",
+  "approve-password-resets": "Approve password resets",
+  "review-incidents": "Review incidents",
+  "use-ai-tools": "Use AI tools",
+};
+export type RoleDefinition = {
+  name: string;
+  capabilities: Capability[];
+  builtin: boolean;
+};
 export type StaffMember = {
   userId: string;
   role: Role;
+  capabilities: Capability[];
   email: string | null;
   name: string | null;
   onboardingSeen: boolean;
@@ -508,6 +527,22 @@ export const resetStaffPassword = (userId: string, newPassword: string) =>
   });
 export const deleteStaffMember = (userId: string) =>
   api<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+
+// Role catalog management (manage-staff). Managers list/create/edit/delete the
+// roles that can be assigned to staff.
+export const fetchRoles = () => api<RoleDefinition[]>("/roles");
+export const createRoleRequest = (name: string, capabilities: Capability[]) =>
+  api<RoleDefinition>("/roles", {
+    method: "POST",
+    body: JSON.stringify({ name, capabilities }),
+  });
+export const updateRoleRequest = (name: string, capabilities: Capability[]) =>
+  api<RoleDefinition>(`/roles/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify({ capabilities }),
+  });
+export const deleteRoleRequest = (name: string) =>
+  api<null>(`/roles/${encodeURIComponent(name)}`, { method: "DELETE" });
 
 // ── Forgot-password recovery (manager-approved) ──────────────────────────────
 // There is no email/SMS channel, so a locked-out user requests a reset, a

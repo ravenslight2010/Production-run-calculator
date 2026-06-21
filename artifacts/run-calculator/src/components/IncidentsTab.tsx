@@ -198,11 +198,12 @@ function IncidentRow({ incident }: { incident: Incident }) {
 // Manager-only review queue of reported issues and auto-captured crashes, each
 // with its stored AI diagnosis + workaround. Operators never see this tab.
 export default function IncidentsTab() {
-  const { isManager, isLoading: roleLoading } = useMe();
+  const { hasCapability, isLoading: roleLoading } = useMe();
+  const canReview = hasCapability("review-incidents");
   const { data, isLoading, error } = useQuery({
     queryKey: ["incidents"],
     queryFn: fetchIncidents,
-    enabled: isManager,
+    enabled: canReview,
     refetchInterval: 20_000,
   });
 
@@ -222,7 +223,7 @@ export default function IncidentsTab() {
     [incidents, status, platform, source],
   );
 
-  if (!roleLoading && !isManager) {
+  if (!roleLoading && !canReview) {
     return (
       <Card>
         <CardContent className="py-10 flex flex-col items-center text-center gap-2">

@@ -7,6 +7,9 @@ import {
   KeyRound,
   Trash2,
   ShieldCheck,
+  Shield,
+  Plus,
+  Pencil,
   Eye,
   EyeOff,
 } from "lucide-react";
@@ -14,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,16 +44,24 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   approvePasswordReset,
+  CAPABILITIES,
+  CAPABILITY_LABELS,
+  createRoleRequest,
   declinePasswordReset,
+  deleteRoleRequest,
   deleteStaffMember,
   fetchPasswordResetRequests,
+  fetchRoles,
   fetchStaff,
   InventoryApiError,
   resetStaffPassword,
   setStaffRole,
+  updateRoleRequest,
   type ApproveResetResult,
+  type Capability,
   type PasswordResetRequestItem,
   type Role,
+  type RoleDefinition,
   type StaffMember,
 } from "../inventoryShared";
 import { useMe } from "../useRole";
@@ -60,6 +72,15 @@ function serverMessage(error: unknown, fallback: string): string {
   return error instanceof InventoryApiError && error.serverMessage
     ? error.serverMessage
     : fallback;
+}
+
+// Turn a stored role name ("qc-manager") into a friendly label ("Qc Manager").
+function roleLabel(name: string): string {
+  return name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 function PasswordInput(props: React.ComponentProps<typeof Input>) {
@@ -86,20 +107,30 @@ function PasswordInput(props: React.ComponentProps<typeof Input>) {
 }
 
 // Staff & Roles card. The staff roster (view members, change roles, reset a
-// forgotten password, remove a departed member) is MANAGER-ONLY. The password-
-// reset approval queue is shown to supervisor-or-above (the card is only mounted
-// for them), matching the server gates. The server enforces a last-manager
-// guard, so failures (demoting or removing the only remaining manager) are
-// surfaced inline.
+// forgotten password, remove a departed member) plus the role editor are gated
+// to the manage-staff capability. The password-reset approval queue is gated to
+// approve-password-resets. The card is mounted whenever the user has EITHER
+// capability; each section gates itself precisely. The server enforces the
+// guardrails (last manage-staff holder, can't-grant-capabilities-you-lack,
+// can't-delete-an-assigned-role), so failures are surfaced inline.
 export default function StaffRolesCard() {
   const qc = useQueryClient();
-  const { me, isManager } = useMe();
+  const { me, capabilities, hasCapability } = useMe();
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["staff"],
     queryFn: fetchStaff,
-    // The roster endpoint (GET /users) is manager-only; supervisors viewing the
-    // card for the reset queue must not fire it (it would 403).
-    enabled: isManager,
+    // The roster endpoint (GET /users) needs manage-staff; users mounting the
+    // card only for the reset queue must not fire it (it would 403).
+    enabled: canManageStaff,
+  });
+
+  const rolesQuery = useQuery({
+    queryKey: ["roles"],
+    queryFn: fetchRoles,
+    enabled: canManageStaff,
   });
 
   const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
@@ -112,10 +143,20 @@ export default function StaffRolesCard() {
     null,
   );
 
+  // Role editor dialog state. `editing` is the role being edited, or "new" for
+  // a fresh role, or null when closed.
+  const [editing, setEditing] = useState<RoleDefinition | "new" | null>(null);
+  const [roleName, setRoleName] = useState("");
+  const [roleCaps, setRoleCaps] = useState<Capability[]>([]);
+  const [roleClientError, setRoleClientError] = useState<string | null>(null);
+  const [deleteRoleTarget, setDeleteRoleTarget] =
+    useState<RoleDefinition | null>(null);
+
   const resetRequestsQuery = useQuery({
     queryKey: ["passwordResetRequests"],
     queryFn: fetchPasswordResetRequests,
-    // Poll so a manager sees new requests without manually refreshing.
+    // Poll so an approver sees new requests without manually refreshing.
+    enabled: canApproveResets,
     refetchInterval: 20_000,
   });
 
@@ -162,13 +203,81 @@ export default function StaffRolesCard() {
     },
   });
 
+  const saveRoleMutation = useMutation({
+    mutationFn: ({
+      mode,
+      name,
+      caps,
+    }: {
+      mode: "new" | "edit";
+      name: string;
+      caps: Capability[];
+    }) =>
+      mode === "new"
+        ? createRoleRequest(name, caps)
+        : updateRoleRequest(name, caps),
+    onSuccess: () => {
+      closeRoleEditor();
+      qc.invalidateQueries({ queryKey: ["roles"] });
+      qc.invalidateQueries({ queryKey: ["staff"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: (name: string) => deleteRoleRequest(name),
+    onSuccess: () => {
+      setDeleteRoleTarget(null);
+      qc.invalidateQueries({ queryKey: ["roles"] });
+    },
+  });
+
   const staff: StaffMember[] = data ?? [];
+  const roles: RoleDefinition[] = rolesQuery.data ?? [];
 
   function closeReset() {
     setResetTarget(null);
     setNewPassword("");
     setConfirmPassword("");
     setResetClientError(null);
+  }
+
+  function openRoleEditor(target: RoleDefinition | "new") {
+    saveRoleMutation.reset();
+    setRoleClientError(null);
+    setEditing(target);
+    if (target === "new") {
+      setRoleName("");
+      setRoleCaps([]);
+    } else {
+      setRoleName(target.name);
+      setRoleCaps([...target.capabilities]);
+    }
+  }
+
+  function closeRoleEditor() {
+    setEditing(null);
+    setRoleName("");
+    setRoleCaps([]);
+    setRoleClientError(null);
+  }
+
+  function toggleRoleCap(cap: Capability) {
+    setRoleCaps((prev) =>
+      prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap],
+    );
+  }
+
+  function submitRole(e: React.FormEvent) {
+    e.preventDefault();
+    setRoleClientError(null);
+    const mode = editing === "new" ? "new" : "edit";
+    const name = mode === "new" ? roleName.trim() : roleName;
+    if (mode === "new" && !name) {
+      setRoleClientError("Role name is required.");
+      return;
+    }
+    saveRoleMutation.mutate({ mode, name, caps: roleCaps });
   }
 
   function submitReset(e: React.FormEvent) {
@@ -188,6 +297,10 @@ export default function StaffRolesCard() {
     resetMutation.mutate({ userId: resetTarget.userId, password: newPassword });
   }
 
+  // The manager role must always keep manage-staff; reflect that in the editor.
+  const editingIsManagerRole =
+    editing !== null && editing !== "new" && editing.builtin && editing.name === "manager";
+
   return (
     <Card className="bg-card/50 border-border/50 shadow-md">
       <CardHeader className="pb-2 pt-4 px-5">
@@ -196,7 +309,7 @@ export default function StaffRolesCard() {
         </CardTitle>
       </CardHeader>
       <CardContent className="px-4 pb-4 space-y-2">
-        {(resetRequestsQuery.data ?? []).length > 0 && (
+        {canApproveResets && (resetRequestsQuery.data ?? []).length > 0 && (
           <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
             <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
               <ShieldCheck className="w-3.5 h-3.5" /> Password reset requests
@@ -266,7 +379,7 @@ export default function StaffRolesCard() {
             )}
           </div>
         )}
-        {isManager && (
+        {canManageStaff && (
           <>
         {isLoading && (
           <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
@@ -326,13 +439,16 @@ export default function StaffRolesCard() {
                     })
                   }
                 >
-                  <option value="operator">Operator</option>
-                  <option value="supervisor">Supervisor</option>
-                  <option value="manager">Manager</option>
-                  <option value="qc-operator">QC Operator</option>
-                  <option value="qc-manager">QC Manager</option>
-                  <option value="warehouse">Warehouse</option>
-                  <option value="inventory">Inventory</option>
+                  {/* If the member's current role isn't in the catalog yet
+                      (still loading), keep it as a valid option. */}
+                  {!roles.some((r) => r.name === member.role) && (
+                    <option value={member.role}>{roleLabel(member.role)}</option>
+                  )}
+                  {roles.map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {roleLabel(r.name)}
+                    </option>
+                  ))}
                 </select>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -369,9 +485,217 @@ export default function StaffRolesCard() {
             </div>
           );
         })}
+
+        {/* Roles editor — create/edit/delete the roles that can be assigned. */}
+        <div className="pt-2 mt-2 border-t border-border/40 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5" /> Roles
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => openRoleEditor("new")}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" /> New role
+            </Button>
+          </div>
+          {rolesQuery.isLoading && (
+            <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading roles…
+            </p>
+          )}
+          {deleteRoleMutation.isError && (
+            <p className="text-xs text-red-500">
+              {serverMessage(deleteRoleMutation.error, "Could not delete role.")}
+            </p>
+          )}
+          {roles.map((r) => (
+            <div
+              key={r.name}
+              className="flex items-start justify-between gap-3 rounded-md border border-border/40 bg-muted/10 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  {roleLabel(r.name)}
+                  {r.builtin && (
+                    <span className="text-[10px] font-bold uppercase text-muted-foreground border border-border/60 rounded px-1">
+                      Built-in
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {r.capabilities.length === 0
+                    ? "No special capabilities"
+                    : r.capabilities
+                        .map((c) => CAPABILITY_LABELS[c])
+                        .join(", ")}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label={`Edit ${r.name}`}
+                  onClick={() => openRoleEditor(r)}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+                {!r.builtin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-red-600 hover:text-red-600"
+                    aria-label={`Delete ${r.name}`}
+                    onClick={() => {
+                      deleteRoleMutation.reset();
+                      setDeleteRoleTarget(r);
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
           </>
         )}
       </CardContent>
+
+      {/* Role create/edit dialog */}
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open) closeRoleEditor();
+        }}
+      >
+        <DialogContent>
+          <form onSubmit={submitRole}>
+            <DialogHeader>
+              <DialogTitle>
+                {editing === "new" ? "New role" : `Edit ${roleLabel(roleName)}`}
+              </DialogTitle>
+              <DialogDescription>
+                Choose the capabilities this role grants. You can only grant
+                capabilities you have yourself.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              {editing === "new" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="role-name" className="text-xs">
+                    Role name
+                  </Label>
+                  <Input
+                    id="role-name"
+                    value={roleName}
+                    onChange={(e) => setRoleName(e.target.value)}
+                    placeholder="e.g. Line Lead"
+                    maxLength={60}
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label className="text-xs">Capabilities</Label>
+                {CAPABILITIES.map((cap) => {
+                  const actorHas = capabilities.includes(cap);
+                  const lockManageStaff =
+                    editingIsManagerRole && cap === "manage-staff";
+                  return (
+                    <label
+                      key={cap}
+                      className={`flex items-center gap-2 text-sm ${
+                        actorHas && !lockManageStaff
+                          ? ""
+                          : "opacity-50"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={roleCaps.includes(cap)}
+                        disabled={!actorHas || lockManageStaff}
+                        onCheckedChange={() => toggleRoleCap(cap)}
+                      />
+                      <span>{CAPABILITY_LABELS[cap]}</span>
+                      {lockManageStaff && (
+                        <span className="text-[10px] text-muted-foreground">
+                          (required for manager)
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+              {roleClientError && (
+                <p className="text-xs text-red-500">{roleClientError}</p>
+              )}
+              {saveRoleMutation.isError && (
+                <p className="text-xs text-red-500">
+                  {serverMessage(saveRoleMutation.error, "Could not save role.")}
+                </p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={closeRoleEditor}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={saveRoleMutation.isPending}>
+                {saveRoleMutation.isPending && (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+                )}
+                {editing === "new" ? "Create role" : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete role confirmation */}
+      <AlertDialog
+        open={deleteRoleTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteRoleTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete role?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the{" "}
+              <span className="font-medium text-foreground">
+                {deleteRoleTarget ? roleLabel(deleteRoleTarget.name) : ""}
+              </span>{" "}
+              role. You can't delete a role that is still assigned to someone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteRoleMutation.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              onClick={(e) => {
+                e.preventDefault();
+                if (deleteRoleTarget)
+                  deleteRoleMutation.mutate(deleteRoleTarget.name);
+              }}
+              disabled={deleteRoleMutation.isPending}
+            >
+              {deleteRoleMutation.isPending && (
+                <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" />
+              )}
+              Delete role
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Reset password dialog */}
       <Dialog

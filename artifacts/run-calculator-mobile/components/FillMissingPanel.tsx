@@ -61,7 +61,8 @@ type RowState = { draft: string; applied: boolean; skipped: boolean };
 
 export default function FillMissingPanel() {
   const colors = useColors();
-  const { isManager } = useMe();
+  const { hasCapability } = useMe();
+  const isManager = hasCapability("use-ai-tools");
   const { run, brandProfiles, updateSettings } = useRun();
   const [proposals, setProposals] = useState<ReviewedProposal[] | null>(null);
   const [rows, setRows] = useState<Record<string, RowState>>({});

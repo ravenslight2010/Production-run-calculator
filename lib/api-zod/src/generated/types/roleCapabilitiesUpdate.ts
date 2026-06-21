@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { Capability } from './capability';
 
-export interface StaffRoleUpdate {
-  /** The name of the role to assign to the user. */
-  role: string;
+export interface RoleCapabilitiesUpdate {
+  capabilities: Capability[];
 }

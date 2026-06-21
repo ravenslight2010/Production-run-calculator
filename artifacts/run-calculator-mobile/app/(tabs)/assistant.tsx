@@ -1365,7 +1365,8 @@ function AccuracySection({ buildAccuracy }: { buildAccuracy: () => ForecastAccur
 export default function AssistantScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { isManager, isLoading: roleLoading } = useMe();
+  const { isManager, hasCapability, isLoading: roleLoading } = useMe();
+  const canUseAiTools = hasCapability("use-ai-tools");
   const {
     run,
     allRuns,
@@ -1915,7 +1916,7 @@ export default function AssistantScreen() {
         defaultTargetId={run?.id ?? ""}
       />
 
-      {!isManager ? null : (
+      {!canUseAiTools ? null : (
       <>
       <ForecastSection buildForecast={buildForecast} onApplyForecast={applyForecast} />
 

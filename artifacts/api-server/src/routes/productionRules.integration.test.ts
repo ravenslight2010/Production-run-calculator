@@ -35,6 +35,8 @@ let pool: DbModule["pool"];
 let productionRulesTable: DbModule["productionRulesTable"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
+let rolesTable: DbModule["rolesTable"];
+let seedRoles: () => Promise<void>;
 
 let clearUserValidityCache: () => void;
 
@@ -79,6 +81,8 @@ beforeAll(async () => {
   productionRulesTable = dbMod.productionRulesTable;
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
+  rolesTable = dbMod.rolesTable;
+  seedRoles = (await import("../lib/roles")).seedRoles;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -106,13 +110,16 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 beforeEach(async () => {
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${productionRulesTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${productionRulesTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
+  // Seed the role catalog so requireCapability can resolve the manager's role to
+  // its capability set (a manager with no seeded roles would resolve to zero caps).
+  await seedRoles();
   // A single manager so POST /production-rules (manager-gated) is allowed.
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager", passwordHash: "x" }]);
   await db.insert(userRolesTable).values([{ userId: MANAGER, role: "manager" }]);

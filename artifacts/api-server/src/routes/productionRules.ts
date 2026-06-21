@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db";
 import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
 import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
-import { requireRole } from "../middlewares/requireRole";
+import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 
 const router: IRouter = Router();
@@ -82,7 +82,7 @@ router.get("/production-rules", async (req: Request, res: Response) => {
 
 router.post(
   "/production-rules",
-  requireRole("manager"),
+  requireCapability("edit-production-rules"),
   async (req: Request, res: Response) => {
     const parsed = SaveProductionRulesBody.safeParse(req.body);
     if (!parsed.success) {
@@ -134,7 +134,7 @@ router.post(
 
 router.delete(
   "/production-rules",
-  requireRole("manager"),
+  requireCapability("edit-production-rules"),
   async (req: Request, res: Response) => {
     const parsed = DeleteProductionRulesBody.safeParse(req.body);
     if (!parsed.success) {

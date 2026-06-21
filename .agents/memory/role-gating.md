@@ -1,77 +1,64 @@
 ---
-name: Role gating (7 roles, two ladders + flat ops roles)
-description: The role model (operator/supervisor/manager + qc-operator/qc-manager + warehouse/inventory), what each tier can do, and what must never be gated.
+name: Role gating (data-driven capabilities)
+description: Roles are now DB rows = name + capability set + builtin flag; how access is gated by capability, the admin/guardrail rules, and what must never be gated.
 ---
 
-# Role gating
+# Role gating (capability model)
 
-Roles live in the DB (`user_roles.role`, free-text — adding roles needs NO
-migration) keyed by userId. First user to be seen bootstraps as **manager**,
-every new account is **operator**. The role-resolution helper creates the row on
-first sight, so the `/me`-style role hook also bootstraps.
+Roles are **data-driven**: a role is a DB row with a name, a set of capabilities,
+and a `builtin` flag. There is NO hardcoded role ladder anymore. A user's access
+is the union of their assigned role's capabilities. First user seen bootstraps as
+**manager**; new accounts default to **operator**.
 
-## The role model — two ladders + flat operator-level roles (7 total)
-- **Main ladder (rank-ordered):** operator < supervisor < manager. `mainRank()`
-  drives `requireRole(min)` — a caller passes when `mainRank(role) >= mainRank(min)`.
-- **QC track:** qc-operator < qc-manager. QC roles sit at **operator level on the
-  main ladder** (mainRank == operator), so today they get NO elevated main-ladder
-  powers. `requireQcRole` plumbing exists but is unused — reserved for future QC
-  powers. Don't wire QC powers without a real requirement.
-- **Flat operator-level roles:** `warehouse` and `inventory`. mainRank == 1
-  (operator), qcRank == 0 (off the QC track). They are pure job labels — same
-  access as a plain operator (run needs, restock/incoming counts, consume/adjust,
-  low-stock alerts) and NOTHING gated. No new booleans in the `useRole` hooks:
-  they resolve to isManager=false / isSupervisorOrAbove=false / isQc=false, i.e.
-  operator-level by omission. Don't grant them item CRUD, reorder-threshold, or
-  inventory settings — the user explicitly chose flat roles.
+## The 6 capabilities
+`manage-staff`, `manage-inventory`, `edit-production-rules`,
+`approve-password-resets`, `review-incidents`, `use-ai-tools`.
 
-**Why:** lets QC and warehouse/inventory be tracked/labeled independently without
-granting production authority. Adding a flat role = extend `Role`/`ROLES` + both
-rank maps (mainRank 1, qcRank 0) + both OpenAPI enums (StaffMember.role +
-StaffRoleUpdate) + the `Role` type in each app's inventoryShared + the role
-pickers (web `<option>`s, mobile `ROLE_OPTIONS`). No requireRole/guard edits and
-no DB migration needed.
+## Seeded roles (only created if absent — additive seed)
+- **manager** — all capabilities, builtin + protected.
+- **operator** — no capabilities, builtin.
+- **supervisor** — review-incidents + edit-production-rules (editable).
+- **qc-operator** — use-ai-tools.
+- **qc-manager** — use-ai-tools + review-incidents.
+- **warehouse** — none.
+- **inventory** — manage-inventory.
 
-## What IS gated
-**Supervisor-or-above** (the 3 manager powers supervisors gained):
-- inventory item create / metadata-edit / delete (includes reorder-threshold edit)
-- inventory settings (expiry lead time)
-- password-reset approval queue (GET/approve/decline password-reset-requests)
+## Server resolution — the test gotcha
+`requireCapability` resolves a user's capabilities by looking up their role NAME
+in the **roles table** (not from a static map). So an integration test that inserts
+a `user_roles` row WITHOUT also seeding the roles table gives even a "manager" zero
+capabilities → 403. **Any integration test exercising a capability-gated route must
+`await seedRoles()` in `beforeEach`** (dynamic-import it; never static-import
+`lib/roles`, which binds the @workspace/db pool before DATABASE_URL is repointed).
+Also add the roles table to the test TRUNCATE set.
 
-**Manager-only** (unchanged):
-- staff roster admin (list users, change role, reset password, remove member)
-- AI paid actions (photo intake, merge, optimize, forecast, etc.)
-- production rules CRUD, incidents review
+## Capability → UI gate map (web + mobile parity)
+- **manage-inventory:** inventory add/settings/delete/reorder-threshold.
+- **approve-password-resets:** `usePendingResetCount`, StaffRolesCard reset queue.
+- **manage-staff:** StaffRolesCard roster + the roles editor; also the `isManager`
+  alias used for OUT-OF-SCOPE /sync gates (mobile ExcelImportModal, master-data,
+  configure) + web home PIN bypass.
+- **review-incidents:** `useUnreviewedIncidentCount`, incidents tab/badge.
+- **use-ai-tools:** assistant advanced, quality, fill-missing bulk, voice advanced.
+- `isManager` is now an alias for `hasCapability("manage-staff")`.
 
-UI gating is by capability on BOTH web and mobile (parity): `isSupervisorOrAbove`
-for the 3 supervisor powers, `isManager` for the rest. **`usePendingResetCount`
-is gated `isSupervisorOrAbove`** (matches the endpoint).
-
-### StaffRolesCard is split internally
-The card renders for `isSupervisorOrAbove` (so supervisors see the reset queue),
-but the **staff roster section is wrapped in `isManager`** and the roster query
-(`GET /users`) is `enabled: isManager` — a supervisor firing it would 403. The
-role picker offers all 5 roles (web `<select>`; mobile is a wrapping multi-button
-toggle driven by `ROLE_OPTIONS`, not the old binary operator/manager toggle).
-
-## Last-manager guard
-Blocks demoting OR deleting the only manager to ANY non-manager role (guard is
-`role !== "manager"`, not `role === "operator"`) — so supervisor/qc-operator/
-qc-manager are all rejected too. Two managers must exist before one can be moved.
+## Role administration (manager = has manage-staff)
+CRUD on roles via `/roles` (GET/POST/PUT/DELETE). Managers can create/edit/delete
+roles and assign any role. Guardrails:
+- **Privilege-escalation guard:** you can't grant a capability you don't hold —
+  applied to role create, role edit, AND user-role assignment (`setUserRole`).
+- Can't delete a role that is assigned to any user.
+- Can't remove the **last `manage-staff` holder** (error: "Cannot remove the last
+  staff manager — assign someone else first.") — covers demotion and deletion.
+- The builtin **manager** role must always keep `manage-staff`.
 
 ## Collision to avoid
 Web `home.tsx` has an UNRELATED client-side PIN "supervisor mode" (local state
-`role`/`isSupervisor`). That is NOT the staff role — never conflate it with the
-server `supervisor` role / `isSupervisorOrAbove` capability.
+`role`/`isSupervisor`). NOT the staff role/capability — never conflate.
 
 ## What is NOT gated — and must NOT be
-Anything flowing through the shared `/sync` day-state blob (recipe editing,
-mobile master-data lists like brands/flavors/recipe ingredients/saved mixes).
-Restock/adjust/consume stay operator-allowed but must be quantity-only (never a
-master-data backdoor — gate any insert/update of master fields).
-
-**Why:** day-state is one shared blob, not per-user role-checkable endpoints, so
-it can't be cleanly role-split; gating it would break strict web/mobile parity.
-
-**How to apply:** gate a new control only if it hits a role-protected endpoint.
-If it writes via /sync, leave it operator-accessible.
+Anything flowing through the shared `/sync` day-state blob (recipe editing, mobile
+master-data lists). It is one shared blob, not per-user role-checkable endpoints,
+so it can't be cleanly capability-split and gating it would break web/mobile parity.
+Restock/adjust/consume stay operator-allowed but quantity-only (never a master-data
+backdoor).

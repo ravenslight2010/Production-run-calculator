@@ -1,20 +1,30 @@
 import { Router, type IRouter } from "express";
-import { ResetStaffPasswordBody, SetStaffRoleBody } from "@workspace/api-zod";
 import {
+  CreateRoleBody,
+  ResetStaffPasswordBody,
+  SetStaffRoleBody,
+  UpdateRoleBody,
+} from "@workspace/api-zod";
+import {
+  createRole,
+  deleteRole,
   deleteUser,
   getStaffMember,
+  listRoles,
   listStaff,
   markOnboardingSeen,
   markTourCompleted,
   resetUserPassword,
   setUserRole,
+  updateRoleCapabilities,
+  type Capability,
 } from "../lib/roles";
 import {
   approveResetRequest,
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
-import { requireRole } from "../middlewares/requireRole";
+import { requireCapability } from "../middlewares/requireCapability";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
@@ -45,15 +55,92 @@ router.post("/me/tour-completed", async (req, res): Promise<void> => {
   res.json(await markTourCompleted(userId));
 });
 
-// Staff roster — manager only. Lists every account so a manager can
-// promote/demote them.
-router.get("/users", requireRole("manager"), async (_req, res): Promise<void> => {
+// ---------------------------------------------------------------------------
+// Role administration (manage-staff capability)
+// ---------------------------------------------------------------------------
+
+// List all defined roles with their capability sets. Gated to manage-staff
+// because only the staff-admin surface needs the full role catalog.
+router.get("/roles", requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+  res.json(await listRoles());
+});
+
+// Create a new role. Refuses to grant capabilities the actor lacks.
+router.post("/roles", requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const parsed = CreateRoleBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const result = await createRole(
+    parsed.data.name,
+    parsed.data.capabilities,
+    (req.capabilities ?? []) as Capability[],
+  );
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.status(201).json(result.row);
+});
+
+// Edit a role's capabilities. Refuses to grant capabilities the actor lacks,
+// to strip manage-staff from the manager role, or to strand the last admin.
+router.put("/roles/:name", requireCapability("manage-staff"), async (req, res): Promise<void> => {
+  const name = pathUserId(req.params.name);
+  if (!name) {
+    res.status(400).json({ error: "Invalid role name" });
+    return;
+  }
+  const parsed = UpdateRoleBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const result = await updateRoleCapabilities(
+    name,
+    parsed.data.capabilities,
+    (req.capabilities ?? []) as Capability[],
+  );
+  if (!result.ok) {
+    res.status(result.status).json({ error: result.error });
+    return;
+  }
+  res.json(result.row);
+});
+
+// Delete a role. Refuses to delete built-in roles or roles still assigned.
+router.delete(
+  "/roles/:name",
+  requireCapability("manage-staff"),
+  async (req, res): Promise<void> => {
+    const name = pathUserId(req.params.name);
+    if (!name) {
+      res.status(400).json({ error: "Invalid role name" });
+      return;
+    }
+    const result = await deleteRole(name);
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
+// Staff roster — manage-staff only. Lists every account so a manager can
+// reassign roles.
+router.get("/users", requireCapability("manage-staff"), async (_req, res): Promise<void> => {
   res.json(await listStaff());
 });
 
-// Change a staff member's role — manager only. Refuses to remove the last
-// manager so the team can't lock itself out.
-router.put("/users/:userId/role", requireRole("manager"), async (req, res): Promise<void> => {
+// Change a staff member's role — manage-staff only. Refuses to remove the last
+// manage-staff holder so the team can't lock itself out, and refuses to grant a
+// role with capabilities the actor lacks.
+router.put(
+  "/users/:userId/role",
+  requireCapability("manage-staff"),
+  async (req, res): Promise<void> => {
   const targetUserId = pathUserId(req.params.userId);
   if (!targetUserId) {
     res.status(400).json({ error: "Invalid user id" });
@@ -64,7 +151,11 @@ router.put("/users/:userId/role", requireRole("manager"), async (req, res): Prom
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const result = await setUserRole(targetUserId, parsed.data.role);
+  const result = await setUserRole(
+    targetUserId,
+    parsed.data.role,
+    (req.capabilities ?? []) as Capability[],
+  );
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });
     return;
@@ -76,7 +167,7 @@ router.put("/users/:userId/role", requireRole("manager"), async (req, res): Prom
 // locked-out operator; no current password is required.
 router.put(
   "/users/:userId/password",
-  requireRole("manager"),
+  requireCapability("manage-staff"),
   async (req, res): Promise<void> => {
     const targetUserId = pathUserId(req.params.userId);
     if (!targetUserId) {
@@ -101,7 +192,7 @@ router.put(
 // staff members waiting for approval of a reset and a relay code.
 router.get(
   "/password-reset-requests",
-  requireRole("supervisor"),
+  requireCapability("approve-password-resets"),
   async (_req, res): Promise<void> => {
     res.json(await listPendingResetRequests());
   },
@@ -111,7 +202,7 @@ router.get(
 // code and returns it so it can be relayed to the locked-out staff member.
 router.post(
   "/password-reset-requests/:id/approve",
-  requireRole("supervisor"),
+  requireCapability("approve-password-resets"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
     if (!id) {
@@ -135,7 +226,7 @@ router.post(
 // it drops off the list without ever issuing a code.
 router.post(
   "/password-reset-requests/:id/decline",
-  requireRole("supervisor"),
+  requireCapability("approve-password-resets"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
     if (!id) {
@@ -153,7 +244,7 @@ router.post(
 
 // Remove a staff member — manager only. Refuses to delete the last remaining
 // manager so the team can't lock itself out.
-router.delete("/users/:userId", requireRole("manager"), async (req, res): Promise<void> => {
+router.delete("/users/:userId", requireCapability("manage-staff"), async (req, res): Promise<void> => {
   const targetUserId = pathUserId(req.params.userId);
   if (!targetUserId) {
     res.status(400).json({ error: "Invalid user id" });

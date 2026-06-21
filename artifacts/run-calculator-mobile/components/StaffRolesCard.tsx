@@ -4,6 +4,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,31 +17,29 @@ import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import {
   approvePasswordReset,
+  CAPABILITIES,
+  CAPABILITY_LABELS,
+  createRoleRequest,
   declinePasswordReset,
+  deleteRoleRequest,
   deleteStaffMember,
   fetchPasswordResetRequests,
+  fetchRoles,
   fetchStaff,
   InventoryApiError,
   resetStaffPassword,
   setStaffRole,
+  updateRoleRequest,
   type ApproveResetResult,
+  type Capability,
   type PasswordResetRequestItem,
   type Role,
+  type RoleDefinition,
   type StaffMember,
 } from "@/context/inventoryShared";
 import { useMe } from "@/hooks/useRole";
 
 const MIN_PASSWORD_LENGTH = 6;
-
-const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: "operator", label: "Operator" },
-  { value: "supervisor", label: "Supervisor" },
-  { value: "manager", label: "Manager" },
-  { value: "qc-operator", label: "QC Op" },
-  { value: "qc-manager", label: "QC Mgr" },
-  { value: "warehouse", label: "Warehouse" },
-  { value: "inventory", label: "Inventory" },
-];
 
 function serverMessage(error: unknown, fallback: string): string {
   return error instanceof InventoryApiError && error.serverMessage
@@ -48,22 +47,42 @@ function serverMessage(error: unknown, fallback: string): string {
     : fallback;
 }
 
+// Turn a stored role name ("qc-manager") into a friendly label ("Qc Manager").
+function roleLabel(name: string): string {
+  return name
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 // Staff & Roles card. The staff roster (view members, change roles, reset a
-// forgotten password, remove a departed member) is MANAGER-ONLY. The password-
-// reset approval queue is shown to supervisor-or-above (the card is only mounted
-// for them), matching the server gates. The server enforces a last-manager
-// guard, so failures (demoting or removing the only remaining manager) are
-// surfaced inline. Mirrors the web StaffRolesCard.
+// forgotten password, remove a departed member) plus the role editor are gated
+// to the manage-staff capability. The password-reset approval queue is gated to
+// approve-password-resets. The card is mounted whenever the user has EITHER
+// capability; each section gates itself precisely. The server enforces the
+// guardrails (last manage-staff holder, can't-grant-capabilities-you-lack,
+// can't-delete-an-assigned-role), so failures are surfaced inline. Mirrors the
+// web StaffRolesCard.
 export default function StaffRolesCard() {
   const colors = useColors();
   const qc = useQueryClient();
-  const { me, isManager } = useMe();
+  const { me, capabilities, hasCapability } = useMe();
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["staff"],
     queryFn: fetchStaff,
-    // The roster endpoint (GET /users) is manager-only; supervisors viewing the
-    // card for the reset queue must not fire it (it would 403).
-    enabled: isManager,
+    // The roster endpoint (GET /users) needs manage-staff; users mounting the
+    // card only for the reset queue must not fire it (it would 403).
+    enabled: canManageStaff,
+  });
+
+  const rolesQuery = useQuery({
+    queryKey: ["roles"],
+    queryFn: fetchRoles,
+    enabled: canManageStaff,
   });
 
   const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
@@ -77,10 +96,18 @@ export default function StaffRolesCard() {
     null,
   );
 
+  // Role editor state. `editing` is the role being edited, or "new" for a fresh
+  // role, or null when closed.
+  const [editing, setEditing] = useState<RoleDefinition | "new" | null>(null);
+  const [roleName, setRoleName] = useState("");
+  const [roleCaps, setRoleCaps] = useState<Capability[]>([]);
+  const [roleError, setRoleError] = useState<string | null>(null);
+
   const resetRequestsQuery = useQuery({
     queryKey: ["passwordResetRequests"],
     queryFn: fetchPasswordResetRequests,
-    // Poll so a manager sees new requests without manually refreshing.
+    // Poll so an approver sees new requests without manually refreshing.
+    enabled: canApproveResets,
     refetchInterval: 20_000,
   });
 
@@ -152,13 +179,95 @@ export default function StaffRolesCard() {
       Alert.alert("Could not remove", serverMessage(e, "Could not remove staff member.")),
   });
 
+  const saveRoleMutation = useMutation({
+    mutationFn: ({
+      mode,
+      name,
+      caps,
+    }: {
+      mode: "new" | "edit";
+      name: string;
+      caps: Capability[];
+    }) =>
+      mode === "new"
+        ? createRoleRequest(name, caps)
+        : updateRoleRequest(name, caps),
+    onSuccess: () => {
+      closeRoleEditor();
+      qc.invalidateQueries({ queryKey: ["roles"] });
+      qc.invalidateQueries({ queryKey: ["staff"] });
+      qc.invalidateQueries({ queryKey: ["me"] });
+    },
+    onError: (e) => setRoleError(serverMessage(e, "Could not save role.")),
+  });
+
+  const deleteRoleMutation = useMutation({
+    mutationFn: (name: string) => deleteRoleRequest(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
+    onError: (e) =>
+      Alert.alert("Could not delete", serverMessage(e, "Could not delete role.")),
+  });
+
   const staff: StaffMember[] = data ?? [];
+  const roles: RoleDefinition[] = rolesQuery.data ?? [];
 
   function closeReset() {
     setResetTarget(null);
     setNewPassword("");
     setConfirmPassword("");
     setResetError(null);
+  }
+
+  function openRoleEditor(target: RoleDefinition | "new") {
+    saveRoleMutation.reset();
+    setRoleError(null);
+    setEditing(target);
+    if (target === "new") {
+      setRoleName("");
+      setRoleCaps([]);
+    } else {
+      setRoleName(target.name);
+      setRoleCaps([...target.capabilities]);
+    }
+  }
+
+  function closeRoleEditor() {
+    setEditing(null);
+    setRoleName("");
+    setRoleCaps([]);
+    setRoleError(null);
+  }
+
+  function toggleRoleCap(cap: Capability) {
+    setRoleCaps((prev) =>
+      prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap],
+    );
+  }
+
+  function submitRole() {
+    setRoleError(null);
+    const mode = editing === "new" ? "new" : "edit";
+    const name = mode === "new" ? roleName.trim() : roleName;
+    if (mode === "new" && !name) {
+      setRoleError("Role name is required.");
+      return;
+    }
+    saveRoleMutation.mutate({ mode, name, caps: roleCaps });
+  }
+
+  function confirmDeleteRole(role: RoleDefinition) {
+    Alert.alert(
+      "Delete role?",
+      `This permanently removes the ${roleLabel(role.name)} role. You can't delete a role that is still assigned to someone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => deleteRoleMutation.mutate(role.name),
+        },
+      ],
+    );
   }
 
   function submitReset() {
@@ -192,9 +301,16 @@ export default function StaffRolesCard() {
 
   const pendingRequests = resetRequestsQuery.data ?? [];
 
+  // The manager role must always keep manage-staff; reflect that in the editor.
+  const editingIsManagerRole =
+    editing !== null &&
+    editing !== "new" &&
+    editing.builtin &&
+    editing.name === "manager";
+
   return (
     <Card title="Staff & Roles" icon="users" style={{ marginBottom: 16 }}>
-      {pendingRequests.length > 0 && (
+      {canApproveResets && pendingRequests.length > 0 && (
         <View
           style={[
             styles.requestsBox,
@@ -242,7 +358,7 @@ export default function StaffRolesCard() {
           ))}
         </View>
       )}
-      {isManager && (
+      {canManageStaff && (
         <>
       {isLoading && (
         <View style={styles.loadingRow}>
@@ -269,6 +385,11 @@ export default function StaffRolesCard() {
       <View style={{ gap: 8 }}>
         {staff.map((member) => {
           const isSelf = me?.userId === member.userId;
+          // The role catalog drives the toggle list. If the member's current
+          // role isn't in the catalog yet (still loading), keep it selectable.
+          const roleNames = roles.some((r) => r.name === member.role)
+            ? roles.map((r) => r.name)
+            : [member.role, ...roles.map((r) => r.name)];
           return (
             <View
               key={member.userId}
@@ -287,7 +408,7 @@ export default function StaffRolesCard() {
                   ) : null}
                 </View>
                 <View style={styles.toggle}>
-                  {ROLE_OPTIONS.map(({ value, label }) => {
+                  {roleNames.map((value) => {
                     const active = member.role === value;
                     return (
                       <Pressable
@@ -309,7 +430,7 @@ export default function StaffRolesCard() {
                             { color: active ? colors.primaryForeground : colors.mutedForeground },
                           ]}
                         >
-                          {label}
+                          {roleLabel(value)}
                         </Text>
                       </Pressable>
                     );
@@ -342,8 +463,158 @@ export default function StaffRolesCard() {
           );
         })}
       </View>
+
+      {/* Roles editor — create/edit/delete the roles that can be assigned. */}
+      <View style={[styles.rolesSection, { borderTopColor: colors.border }]}>
+        <View style={styles.rolesHeader}>
+          <View style={styles.requestsHeader}>
+            <Feather name="shield" size={13} color={colors.mutedForeground} />
+            <Text style={[styles.requestsTitle, { color: colors.mutedForeground }]}>Roles</Text>
+          </View>
+          <Button label="New role" icon="plus" variant="outline" size="sm" onPress={() => openRoleEditor("new")} />
+        </View>
+        {rolesQuery.isLoading && (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={colors.mutedForeground} />
+            <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading roles…</Text>
+          </View>
+        )}
+        <View style={{ gap: 8 }}>
+          {roles.map((r) => (
+            <View
+              key={r.name}
+              style={[styles.row, { borderColor: colors.border, backgroundColor: colors.background }]}
+            >
+              <View style={styles.topRow}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.name, { color: colors.foreground }]}>
+                    {roleLabel(r.name)}
+                    {r.builtin ? "  · Built-in" : ""}
+                  </Text>
+                  <Text style={[styles.sub, { color: colors.mutedForeground }]}>
+                    {r.capabilities.length === 0
+                      ? "No special capabilities"
+                      : r.capabilities.map((c) => CAPABILITY_LABELS[c]).join(", ")}
+                  </Text>
+                </View>
+                <View style={styles.requestActions}>
+                  <Pressable
+                    onPress={() => openRoleEditor(r)}
+                    style={[styles.iconBtn, { borderColor: colors.border }]}
+                    accessibilityLabel={`Edit ${r.name}`}
+                  >
+                    <Feather name="edit-2" size={13} color={colors.mutedForeground} />
+                  </Pressable>
+                  {!r.builtin && (
+                    <Pressable
+                      onPress={() => confirmDeleteRole(r)}
+                      disabled={deleteRoleMutation.isPending}
+                      style={[styles.iconBtn, { borderColor: colors.border, opacity: deleteRoleMutation.isPending ? 0.5 : 1 }]}
+                      accessibilityLabel={`Delete ${r.name}`}
+                    >
+                      <Feather name="trash-2" size={13} color={colors.destructive} />
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
         </>
       )}
+
+      {/* Role create/edit modal */}
+      <Modal
+        visible={editing !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeRoleEditor}
+      >
+        <View style={styles.backdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>
+              {editing === "new" ? "New role" : `Edit ${roleLabel(roleName)}`}
+            </Text>
+            <Text style={[styles.modalDesc, { color: colors.mutedForeground }]}>
+              Choose the capabilities this role grants. You can only grant
+              capabilities you have yourself.
+            </Text>
+            {editing === "new" && (
+              <View style={styles.fieldGroup}>
+                <Text style={[styles.label, { color: colors.mutedForeground }]}>Role name</Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
+                  ]}
+                  value={roleName}
+                  onChangeText={setRoleName}
+                  placeholder="e.g. Line Lead"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="words"
+                  maxLength={60}
+                />
+              </View>
+            )}
+            <ScrollView style={{ maxHeight: 260 }}>
+              <View style={{ gap: 6 }}>
+                {CAPABILITIES.map((cap) => {
+                  const actorHas = capabilities.includes(cap);
+                  const lockManageStaff = editingIsManagerRole && cap === "manage-staff";
+                  const checked = roleCaps.includes(cap);
+                  const disabled = !actorHas || lockManageStaff;
+                  return (
+                    <Pressable
+                      key={cap}
+                      disabled={disabled}
+                      onPress={() => toggleRoleCap(cap)}
+                      style={[styles.capRow, { opacity: disabled ? 0.5 : 1 }]}
+                    >
+                      <View
+                        style={[
+                          styles.capBox,
+                          {
+                            borderColor: colors.border,
+                            backgroundColor: checked ? colors.primary : "transparent",
+                          },
+                        ]}
+                      >
+                        {checked && (
+                          <Feather name="check" size={12} color={colors.primaryForeground} />
+                        )}
+                      </View>
+                      <Text style={[styles.capLabel, { color: colors.foreground }]}>
+                        {CAPABILITY_LABELS[cap]}
+                        {lockManageStaff ? "  (required for manager)" : ""}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </ScrollView>
+            {roleError ? (
+              <Text style={[styles.msg, { color: colors.destructive }]}>{roleError}</Text>
+            ) : null}
+            <View style={styles.modalActions}>
+              <Button label="Cancel" variant="outline" size="sm" onPress={closeRoleEditor} />
+              <Button
+                label={
+                  saveRoleMutation.isPending
+                    ? "Saving…"
+                    : editing === "new"
+                      ? "Create role"
+                      : "Save changes"
+                }
+                icon="check"
+                size="sm"
+                onPress={submitRole}
+                disabled={saveRoleMutation.isPending}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={resetTarget !== null}
@@ -513,6 +784,36 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   actionText: { fontSize: 11, fontFamily: FONTS.medium },
+  iconBtn: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rolesSection: {
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 12,
+    gap: 8,
+  },
+  rolesHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  capRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  capBox: {
+    width: 20,
+    height: 20,
+    borderWidth: 1,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  capLabel: { fontSize: 13, fontFamily: FONTS.regular, flex: 1 },
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",

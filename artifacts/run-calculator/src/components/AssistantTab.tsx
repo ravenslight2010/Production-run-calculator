@@ -1372,7 +1372,8 @@ export default function AssistantTab({
   onApplyForecast: (plan: ForecastPlan) => void;
   buildAccuracy: () => ForecastAccuracyInput;
 }) {
-  const { isManager, isLoading: roleLoading } = useMe();
+  const { hasCapability, isLoading: roleLoading } = useMe();
+  const canUseAiTools = hasCapability("use-ai-tools");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<
@@ -1417,7 +1418,7 @@ export default function AssistantTab({
         defaultTargetId={recipeDefaultTargetId}
       />
 
-      {!isManager ? null : (
+      {!canUseAiTools ? null : (
       <>
       <ForecastSection buildForecast={buildForecast} onApplyForecast={onApplyForecast} />
 

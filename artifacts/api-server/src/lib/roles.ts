@@ -1,121 +1,198 @@
-import { and, eq, ne, sql } from "drizzle-orm";
-import { db, userRolesTable, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
 import { revokeUser } from "./userValidity";
 
-// All staff roles. Two tracks share one free-text column (user_roles.role):
-//   • Main ladder: operator < supervisor < manager.
-//   • QC track:    qc-operator < qc-manager.
-// QC roles sit at operator level on the MAIN ladder for now (no new powers yet);
-// their dedicated rank lets a future QC-only gate admit them without touching
-// the main-ladder gates.
-// warehouse and inventory are FLAT operator-level roles: they exist only to
-// designate staff by their job (run needs, incoming counts, low-stock signals —
-// all work an operator already does) and grant NO elevated powers. They rank as
-// operators on the main ladder and sit off the QC track entirely.
-export type Role =
-  | "operator"
-  | "supervisor"
-  | "manager"
-  | "qc-operator"
-  | "qc-manager"
-  | "warehouse"
-  | "inventory";
-
-// The three main-ladder levels a route can require. QC roles are never used as a
-// main-ladder minimum (they rank as operators there); a future QC gate uses the
-// separate qcRank below.
-export type MainRole = "operator" | "supervisor" | "manager";
-
-export const ROLES: readonly Role[] = [
-  "operator",
-  "supervisor",
-  "manager",
-  "qc-operator",
-  "qc-manager",
-  "warehouse",
-  "inventory",
+// ---------------------------------------------------------------------------
+// Capabilities
+// ---------------------------------------------------------------------------
+// Access control is data-driven: a role is a NAME plus a set of capabilities.
+// Routes gate on a single capability (see requireCapability middleware) and the
+// clients show/hide controls by the same capability. These six are the complete
+// set of gated powers in the app.
+export const CAPABILITIES = [
+  "manage-staff",
+  "manage-inventory",
+  "edit-production-rules",
+  "approve-password-resets",
+  "review-incidents",
+  "use-ai-tools",
 ] as const;
 
-export function isRole(value: unknown): value is Role {
-  return (ROLES as readonly string[]).includes(value as string);
+export type Capability = (typeof CAPABILITIES)[number];
+
+export function isCapability(value: unknown): value is Capability {
+  return (CAPABILITIES as readonly string[]).includes(value as string);
 }
 
-// Main-ladder rank: operator < supervisor < manager. QC roles are pinned at
-// operator level here so they get operator-level access until QC powers exist.
-const MAIN_RANK: Record<Role, number> = {
-  operator: 1,
-  "qc-operator": 1,
-  "qc-manager": 1,
-  // warehouse and inventory are flat operator-level roles — same access as an
-  // operator on the main ladder, no elevated powers.
-  warehouse: 1,
-  inventory: 1,
-  supervisor: 2,
-  manager: 3,
+// Role names are now free-text (created by managers). Kept as a string alias so
+// call sites read clearly; there is no longer a fixed union.
+export type Role = string;
+
+// ---------------------------------------------------------------------------
+// Seeded roles
+// ---------------------------------------------------------------------------
+// Two built-in roles (cannot be deleted): manager (all capabilities, the admin
+// role) and operator (none, the default for new staff). The remaining five are
+// editable starter roles that preserve the powers the old hardcoded roles had.
+export type RoleSeed = {
+  name: string;
+  capabilities: Capability[];
+  builtin: boolean;
 };
 
-export function mainRank(role: Role): number {
-  return MAIN_RANK[role] ?? 0;
+export const ROLE_SEEDS: readonly RoleSeed[] = [
+  { name: "manager", capabilities: [...CAPABILITIES], builtin: true },
+  { name: "operator", capabilities: [], builtin: true },
+  {
+    name: "supervisor",
+    capabilities: ["review-incidents", "edit-production-rules"],
+    builtin: false,
+  },
+  { name: "qc-operator", capabilities: ["use-ai-tools"], builtin: false },
+  {
+    name: "qc-manager",
+    capabilities: ["use-ai-tools", "review-incidents"],
+    builtin: false,
+  },
+  { name: "warehouse", capabilities: [], builtin: false },
+  { name: "inventory", capabilities: ["manage-inventory"], builtin: false },
+] as const;
+
+// Seed the roles table additively. onConflictDoNothing keeps an admin's later
+// edits to a role's capabilities — we never overwrite an existing role on boot.
+export async function seedRoles(): Promise<void> {
+  await db
+    .insert(rolesTable)
+    .values(
+      ROLE_SEEDS.map((r) => ({
+        name: r.name,
+        capabilities: r.capabilities,
+        builtin: r.builtin,
+      })),
+    )
+    .onConflictDoNothing({ target: rolesTable.name });
 }
 
-// QC-track rank: qc-operator < qc-manager. Non-QC roles are 0 (off the track),
-// so a QC-track gate admits only the QC roles. Plumbing only — no route gates on
-// this yet.
-const QC_RANK: Record<Role, number> = {
-  operator: 0,
-  supervisor: 0,
-  manager: 0,
-  // warehouse and inventory are off the QC track entirely.
-  warehouse: 0,
-  inventory: 0,
-  "qc-operator": 1,
-  "qc-manager": 2,
+// ---------------------------------------------------------------------------
+// Role definitions
+// ---------------------------------------------------------------------------
+export type RoleDefinition = {
+  name: string;
+  capabilities: Capability[];
+  builtin: boolean;
 };
 
-export function qcRank(role: Role): number {
-  return QC_RANK[role] ?? 0;
+function toRoleDefinition(row: {
+  name: string;
+  capabilities: string[];
+  builtin: boolean;
+}): RoleDefinition {
+  return {
+    name: row.name,
+    capabilities: (row.capabilities ?? []).filter(isCapability),
+    builtin: row.builtin,
+  };
 }
 
+export async function listRoles(): Promise<RoleDefinition[]> {
+  const rows = await db
+    .select({
+      name: rolesTable.name,
+      capabilities: rolesTable.capabilities,
+      builtin: rolesTable.builtin,
+    })
+    .from(rolesTable)
+    .orderBy(rolesTable.name);
+  return rows.map(toRoleDefinition);
+}
+
+export async function getRole(name: string): Promise<RoleDefinition | undefined> {
+  const [row] = await db
+    .select({
+      name: rolesTable.name,
+      capabilities: rolesTable.capabilities,
+      builtin: rolesTable.builtin,
+    })
+    .from(rolesTable)
+    .where(eq(rolesTable.name, name));
+  return row ? toRoleDefinition(row) : undefined;
+}
+
+async function roleCapabilityMap(): Promise<Map<string, Capability[]>> {
+  const rows = await db
+    .select({ name: rolesTable.name, capabilities: rolesTable.capabilities })
+    .from(rolesTable);
+  const map = new Map<string, Capability[]>();
+  for (const r of rows) {
+    map.set(r.name, (r.capabilities ?? []).filter(isCapability));
+  }
+  return map;
+}
+
+// Every user's (userId, role) assignment.
+async function listAssignments(): Promise<{ userId: string; role: string }[]> {
+  return db
+    .select({ userId: userRolesTable.userId, role: userRolesTable.role })
+    .from(userRolesTable);
+}
+
+// Resolve a user's capabilities by looking up their role's capability set.
+export async function getUserCapabilities(userId: string): Promise<Capability[]> {
+  const { role } = await getOrCreateUserRole(userId);
+  const def = await getRole(role);
+  return def?.capabilities ?? [];
+}
+
+// User ids that currently hold a given capability (via their assigned role).
+async function userIdsWithCapability(cap: Capability): Promise<string[]> {
+  const [assignments, capsByRole] = await Promise.all([
+    listAssignments(),
+    roleCapabilityMap(),
+  ]);
+  return assignments
+    .filter((a) => (capsByRole.get(a.role) ?? []).includes(cap))
+    .map((a) => a.userId);
+}
+
+// ---------------------------------------------------------------------------
+// Staff identity
+// ---------------------------------------------------------------------------
 // StaffMember as exposed by the API. `name` carries the username and `email` is
 // always null — the shape is kept stable so the OpenAPI contract and both
-// roster UIs are unchanged from the Clerk era.
+// roster UIs are unchanged from the Clerk era. `capabilities` is resolved from
+// the user's role so clients can gate UI without re-deriving from role names.
 export type StaffMember = {
   userId: string;
   role: Role;
+  capabilities: Capability[];
   email: string | null;
   name: string | null;
-  // Whether the user has dismissed the first-login "Get Started" overview.
   onboardingSeen: boolean;
-  // Whether the user has finished the guided tour (reached its final step).
   tourCompleted: boolean;
-  // Whether this is the seeded sandbox account (operates in the isolated
-  // "sandbox" data scope). Clients use it to show the persistent sandbox banner.
   sandbox: boolean;
 };
 
-async function managerCount(): Promise<number> {
-  const [row] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(userRolesTable)
-    .where(eq(userRolesTable.role, "manager"));
-  return row?.count ?? 0;
+// Whether anyone currently holds manage-staff. Used for the bootstrap rule
+// (first user becomes the admin) and for the last-admin guards.
+async function manageStaffHolders(): Promise<string[]> {
+  return userIdsWithCapability("manage-staff");
 }
 
 // Resolve the current user's role, creating their row on first sight.
 //
-// Bootstrap rule: the very first user (when no manager exists yet) becomes the
-// manager so a fresh install has an admin without any out-of-band setup. The
-// role row is normally created at sign-up, but this keeps a race-safe fallback
-// for any user row that predates its role row.
+// Bootstrap rule: the very first user (when no one holds manage-staff yet)
+// becomes the manager so a fresh install has an admin without any out-of-band
+// setup. The role row is normally created at sign-up; this keeps a race-safe
+// fallback for any user row that predates its role row.
 export async function getOrCreateUserRole(userId: string): Promise<{ role: Role }> {
   const [existing] = await db
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
-  if (existing) return { role: existing.role as Role };
+  if (existing) return { role: existing.role };
 
-  const role: Role = (await managerCount()) === 0 ? "manager" : "operator";
+  const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
   await db
     .insert(userRolesTable)
     .values({ userId, role })
@@ -125,13 +202,13 @@ export async function getOrCreateUserRole(userId: string): Promise<{ role: Role 
     .select({ role: userRolesTable.role })
     .from(userRolesTable)
     .where(eq(userRolesTable.userId, userId));
-  return { role: (row?.role as Role) ?? role };
+  return { role: row?.role ?? role };
 }
 
-// Assign a role at account creation. First account (no managers yet) becomes the
+// Assign a role at account creation. First account (no admin yet) becomes the
 // manager; everyone after defaults to operator.
 export async function createRoleForNewUser(userId: string): Promise<Role> {
-  const role: Role = (await managerCount()) === 0 ? "manager" : "operator";
+  const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
   await db
     .insert(userRolesTable)
     .values({ userId, role })
@@ -141,6 +218,7 @@ export async function createRoleForNewUser(userId: string): Promise<Role> {
 
 export async function getStaffMember(userId: string): Promise<StaffMember> {
   const { role } = await getOrCreateUserRole(userId);
+  const def = await getRole(role);
   const [user] = await db
     .select({
       username: usersTable.username,
@@ -153,6 +231,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
   return {
     userId,
     role,
+    capabilities: def?.capabilities ?? [],
     email: null,
     name: user?.username ?? null,
     onboardingSeen: user?.onboardingSeen ?? false,
@@ -183,21 +262,25 @@ export async function markTourCompleted(userId: string): Promise<StaffMember> {
 }
 
 export async function listStaff(): Promise<StaffMember[]> {
-  const rows = await db
-    .select({
-      userId: userRolesTable.userId,
-      role: userRolesTable.role,
-      username: usersTable.username,
-      onboardingSeen: usersTable.onboardingSeen,
-      tourCompleted: usersTable.tourCompleted,
-      sandbox: usersTable.sandbox,
-    })
-    .from(userRolesTable)
-    .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
-    .orderBy(usersTable.username);
+  const [rows, capsByRole] = await Promise.all([
+    db
+      .select({
+        userId: userRolesTable.userId,
+        role: userRolesTable.role,
+        username: usersTable.username,
+        onboardingSeen: usersTable.onboardingSeen,
+        tourCompleted: usersTable.tourCompleted,
+        sandbox: usersTable.sandbox,
+      })
+      .from(userRolesTable)
+      .innerJoin(usersTable, eq(usersTable.id, userRolesTable.userId))
+      .orderBy(usersTable.username),
+    roleCapabilityMap(),
+  ]);
   return rows.map((r) => ({
     userId: r.userId,
-    role: r.role as Role,
+    role: r.role,
+    capabilities: capsByRole.get(r.role) ?? [],
     email: null,
     name: r.username,
     onboardingSeen: r.onboardingSeen,
@@ -206,27 +289,31 @@ export async function listStaff(): Promise<StaffMember[]> {
   }));
 }
 
-// Set a user's role, ensuring at least one manager always remains so the team
-// can never lock itself out of the manager-only controls.
+// ---------------------------------------------------------------------------
+// Assigning roles to users
+// ---------------------------------------------------------------------------
+// Set a user's role. Guards:
+//  • the role must exist;
+//  • the actor cannot grant a role whose capabilities exceed their own
+//    (no privilege escalation);
+//  • the change must never strand the team without a manage-staff holder.
 export async function setUserRole(
   targetUserId: string,
   role: Role,
+  actorCapabilities: Capability[],
 ): Promise<{ ok: true; row: StaffMember } | { ok: false; status: number; error: string }> {
-  // Demoting to ANY non-manager role (operator, supervisor, or either QC role)
-  // must never strand the team without a manager.
-  if (role !== "manager") {
-    const [other] = await db
-      .select({ id: userRolesTable.userId })
-      .from(userRolesTable)
-      .where(and(eq(userRolesTable.role, "manager"), ne(userRolesTable.userId, targetUserId)))
-      .limit(1);
-    if (!other) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Cannot remove the last manager — promote someone else first.",
-      };
-    }
+  const def = await getRole(role);
+  if (!def) {
+    return { ok: false, status: 400, error: "Unknown role" };
+  }
+
+  const missing = def.capabilities.filter((c) => !actorCapabilities.includes(c));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: 403,
+      error: `You can't assign a role with capabilities you don't have: ${missing.join(", ")}`,
+    };
   }
 
   const [user] = await db
@@ -235,6 +322,20 @@ export async function setUserRole(
     .where(eq(usersTable.id, targetUserId));
   if (!user) {
     return { ok: false, status: 404, error: "User not found" };
+  }
+
+  // Last-admin guard: if this change would leave nobody with manage-staff,
+  // refuse. Compute the holder set after the hypothetical change.
+  if (!def.capabilities.includes("manage-staff")) {
+    const holders = await manageStaffHolders();
+    const remaining = holders.filter((id) => id !== targetUserId);
+    if (remaining.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Cannot remove the last staff manager — assign someone else first.",
+      };
+    }
   }
 
   await db
@@ -267,8 +368,8 @@ export async function resetUserPassword(
 }
 
 // Remove a staff member entirely. The role row is removed via the ON DELETE
-// CASCADE on user_roles. Mirrors the last-manager guard so deleting the only
-// remaining manager can never lock the team out of the manager-only controls.
+// CASCADE on user_roles. Mirrors the last-admin guard so deleting the only
+// remaining manage-staff holder can never lock the team out.
 export async function deleteUser(
   targetUserId: string,
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
@@ -280,21 +381,14 @@ export async function deleteUser(
     return { ok: false, status: 404, error: "User not found" };
   }
 
-  const [targetRole] = await db
-    .select({ role: userRolesTable.role })
-    .from(userRolesTable)
-    .where(eq(userRolesTable.userId, targetUserId));
-  if (targetRole?.role === "manager") {
-    const [other] = await db
-      .select({ id: userRolesTable.userId })
-      .from(userRolesTable)
-      .where(and(eq(userRolesTable.role, "manager"), ne(userRolesTable.userId, targetUserId)))
-      .limit(1);
-    if (!other) {
+  const holders = await manageStaffHolders();
+  if (holders.includes(targetUserId)) {
+    const remaining = holders.filter((id) => id !== targetUserId);
+    if (remaining.length === 0) {
       return {
         ok: false,
         status: 400,
-        error: "Cannot remove the last manager — promote someone else first.",
+        error: "Cannot remove the last staff manager — assign someone else first.",
       };
     }
   }
@@ -306,3 +400,136 @@ export async function deleteUser(
   revokeUser(targetUserId);
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Role administration (create / edit / delete roles)
+// ---------------------------------------------------------------------------
+function sanitizeCapabilities(input: unknown): Capability[] {
+  if (!Array.isArray(input)) return [];
+  const out: Capability[] = [];
+  for (const c of input) {
+    if (isCapability(c) && !out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+// Create a new role. Guards: name must be non-empty and unique; the actor
+// cannot grant capabilities they don't have themselves.
+export async function createRole(
+  name: string,
+  capabilities: unknown,
+  actorCapabilities: Capability[],
+): Promise<{ ok: true; row: RoleDefinition } | { ok: false; status: number; error: string }> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400, error: "Role name is required" };
+  }
+  const caps = sanitizeCapabilities(capabilities);
+  const missing = caps.filter((c) => !actorCapabilities.includes(c));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: 403,
+      error: `You can't grant capabilities you don't have: ${missing.join(", ")}`,
+    };
+  }
+  const existing = await getRole(trimmed);
+  if (existing) {
+    return { ok: false, status: 409, error: "A role with that name already exists" };
+  }
+  await db
+    .insert(rolesTable)
+    .values({ name: trimmed, capabilities: caps, builtin: false })
+    .onConflictDoNothing({ target: rolesTable.name });
+  const def = await getRole(trimmed);
+  return { ok: true, row: def! };
+}
+
+// Edit a role's capabilities. Guards: role must exist; the actor cannot grant
+// capabilities they lack; the manager role must keep manage-staff; the change
+// must never strand the team without a manage-staff holder.
+export async function updateRoleCapabilities(
+  name: string,
+  capabilities: unknown,
+  actorCapabilities: Capability[],
+): Promise<{ ok: true; row: RoleDefinition } | { ok: false; status: number; error: string }> {
+  const def = await getRole(name);
+  if (!def) {
+    return { ok: false, status: 404, error: "Role not found" };
+  }
+  const caps = sanitizeCapabilities(capabilities);
+  const missing = caps.filter((c) => !actorCapabilities.includes(c));
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      status: 403,
+      error: `You can't grant capabilities you don't have: ${missing.join(", ")}`,
+    };
+  }
+
+  // The built-in manager role must always retain manage-staff so the admin
+  // surface can never be locked away.
+  if (name === "manager" && !caps.includes("manage-staff")) {
+    return {
+      ok: false,
+      status: 400,
+      error: "The manager role must keep the Manage staff & roles capability.",
+    };
+  }
+
+  // Last-admin guard: if removing manage-staff from this role would leave the
+  // team with no manage-staff holder, refuse.
+  if (def.capabilities.includes("manage-staff") && !caps.includes("manage-staff")) {
+    const [assignments, holders] = await Promise.all([
+      listAssignments(),
+      manageStaffHolders(),
+    ]);
+    const usersOnThisRole = new Set(
+      assignments.filter((a) => a.role === name).map((a) => a.userId),
+    );
+    const remaining = holders.filter((id) => !usersOnThisRole.has(id));
+    if (remaining.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Cannot remove the last staff manager — keep manage-staff on a role someone holds.",
+      };
+    }
+  }
+
+  await db
+    .update(rolesTable)
+    .set({ capabilities: caps, updatedAt: new Date() })
+    .where(eq(rolesTable.name, name));
+  const updated = await getRole(name);
+  return { ok: true, row: updated! };
+}
+
+// Delete a role. Guards: built-in roles can't be deleted; a role currently
+// assigned to any user can't be deleted.
+export async function deleteRole(
+  name: string,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const def = await getRole(name);
+  if (!def) {
+    return { ok: false, status: 404, error: "Role not found" };
+  }
+  if (def.builtin) {
+    return { ok: false, status: 400, error: "Built-in roles can't be deleted." };
+  }
+  const [assigned] = await db
+    .select({ id: userRolesTable.userId })
+    .from(userRolesTable)
+    .where(eq(userRolesTable.role, name))
+    .limit(1);
+  if (assigned) {
+    return {
+      ok: false,
+      status: 400,
+      error: "This role is assigned to staff — reassign them before deleting it.",
+    };
+  }
+  await db.delete(rolesTable).where(eq(rolesTable.name, name));
+  return { ok: true };
+}
+

@@ -435,22 +435,27 @@ export interface AuthCredentials {
   password: string;
 }
 
-export type StaffMemberRole = typeof StaffMemberRole[keyof typeof StaffMemberRole];
+/**
+ * A discrete permission. A role grants a set of capabilities, and a user holds the union of their role's capabilities.
+ */
+export type Capability = typeof Capability[keyof typeof Capability];
 
 
-export const StaffMemberRole = {
-  operator: 'operator',
-  supervisor: 'supervisor',
-  manager: 'manager',
-  'qc-operator': 'qc-operator',
-  'qc-manager': 'qc-manager',
-  warehouse: 'warehouse',
-  inventory: 'inventory',
+export const Capability = {
+  'manage-staff': 'manage-staff',
+  'manage-inventory': 'manage-inventory',
+  'edit-production-rules': 'edit-production-rules',
+  'approve-password-resets': 'approve-password-resets',
+  'review-incidents': 'review-incidents',
+  'use-ai-tools': 'use-ai-tools',
 } as const;
 
 export interface StaffMember {
   userId: string;
-  role: StaffMemberRole;
+  /** The name of the role assigned to this user. */
+  role: string;
+  /** The capabilities granted by this user's role. */
+  capabilities: Capability[];
   /** @nullable */
   email: string | null;
   /** @nullable */
@@ -481,21 +486,30 @@ export interface ChangePasswordCredentials {
   newPassword: string;
 }
 
-export type StaffRoleUpdateRole = typeof StaffRoleUpdateRole[keyof typeof StaffRoleUpdateRole];
+export interface RoleDefinition {
+  /** Unique role name (also its identifier). */
+  name: string;
+  capabilities: Capability[];
+  /** Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted. */
+  builtin: boolean;
+}
 
+export interface CreateRole {
+  /**
+     * @minLength 1
+     * @maxLength 60
+     */
+  name: string;
+  capabilities: Capability[];
+}
 
-export const StaffRoleUpdateRole = {
-  operator: 'operator',
-  supervisor: 'supervisor',
-  manager: 'manager',
-  'qc-operator': 'qc-operator',
-  'qc-manager': 'qc-manager',
-  warehouse: 'warehouse',
-  inventory: 'inventory',
-} as const;
+export interface RoleCapabilitiesUpdate {
+  capabilities: Capability[];
+}
 
 export interface StaffRoleUpdate {
-  role: StaffRoleUpdateRole;
+  /** The name of the role to assign to the user. */
+  role: string;
 }
 
 export interface ResetStaffPassword {

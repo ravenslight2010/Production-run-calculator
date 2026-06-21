@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { seedRoles } from "./lib/roles";
 import { seedSandboxUser } from "./lib/sandbox";
 
 const rawPort = process.env["PORT"];
@@ -23,6 +24,12 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+
+  // Seed the built-in and default editable roles (additive, only-if-absent) so
+  // capability gating has a role catalog to resolve against. Best-effort.
+  seedRoles().catch((err) => {
+    logger.error({ err }, "Failed to seed roles");
+  });
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort: a seeding failure must not take the server

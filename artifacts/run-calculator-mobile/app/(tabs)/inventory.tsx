@@ -85,7 +85,11 @@ export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { allRuns } = useRun();
-  const { isManager, isSupervisorOrAbove } = useMe();
+  const { hasCapability } = useMe();
+  const canManageInventory = hasCapability("manage-inventory");
+  const canUseAiTools = hasCapability("use-ai-tools");
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -245,8 +249,8 @@ export default function InventoryScreen() {
           </Card>
         )}
 
-        {/* Add item (supervisor or above: inventory-item master-data write) */}
-        {isSupervisorOrAbove && (
+        {/* Add item (manage-inventory: inventory-item master-data write) */}
+        {canManageInventory && (
           <Card title="Add Item" icon="plus-square" style={{ marginBottom: 16 }}>
             <Pressable
               onPress={() => setShowAdd((v) => !v)}
@@ -274,14 +278,14 @@ export default function InventoryScreen() {
           </Card>
         )}
 
-        {/* Photo stock intake (manager only: paid AI action) */}
-        {isManager && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+        {/* Photo stock intake (use-ai-tools: paid AI action) */}
+        {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
 
-        {/* AI quality/defect photo check (manager only: paid AI action) */}
-        {isManager && <QualityCheckCard />}
+        {/* AI quality/defect photo check (use-ai-tools: paid AI action) */}
+        {canUseAiTools && <QualityCheckCard />}
 
-        {/* AI expiry & waste insight (manager only: paid AI action) */}
-        {isManager && <WasteInsightCard />}
+        {/* AI expiry & waste insight (use-ai-tools: paid AI action) */}
+        {canUseAiTools && <WasteInsightCard />}
 
         {loading && (
           <Text style={[styles.muted, { color: colors.mutedForeground }]}>Loading inventory…</Text>
@@ -316,8 +320,8 @@ export default function InventoryScreen() {
           />
         )}
 
-        {/* Settings: configurable expiry lead time (supervisor or above) */}
-        {isSupervisorOrAbove && (
+        {/* Settings: configurable expiry lead time (manage-inventory) */}
+        {canManageInventory && (
           <Card title="Settings" icon="settings" style={{ marginBottom: 16 }}>
             <View style={styles.settingsRow}>
               <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
@@ -342,15 +346,16 @@ export default function InventoryScreen() {
           </Card>
         )}
 
-        {/* Proactive-alert tuning (manager only) */}
-        {isManager && <ProactiveAlertSettingsCard />}
+        {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
+        {canUseAiTools && <ProactiveAlertSettingsCard />}
 
         {/* Account self-service (any signed-in user) */}
         <ChangePasswordCard />
 
-        {/* Staff & roles. Visible to supervisor-or-above for the password-reset
-            approval queue; the staff roster inside is manager-only. */}
-        {isSupervisorOrAbove && <StaffRolesCard />}
+        {/* Staff & roles. Visible to anyone who can approve password resets (for
+            the approval queue) or manage staff (for the roster + roles editor);
+            each section inside gates itself on the precise capability. */}
+        {(canManageStaff || canApproveResets) && <StaffRolesCard />}
       </ScrollView>
     </View>
   );
@@ -440,7 +445,8 @@ function ItemRow({
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
   const colors = useColors();
-  const { isSupervisorOrAbove } = useMe();
+  const { hasCapability } = useMe();
+  const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -518,10 +524,10 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </View>
 
-      {/* Reorder threshold (editing is an inventory-item write → supervisor or above) */}
+      {/* Reorder threshold (editing is an inventory-item write → manage-inventory) */}
       <View style={styles.thresholdRow}>
         <Text style={[styles.detailInline, { color: colors.mutedForeground }]}>Reorder at</Text>
-        {!isSupervisorOrAbove ? (
+        {!canManageInventory ? (
           <Text style={[styles.thresholdValText, { color: colors.foreground }]}>
             {fmtQty(item.reorderThreshold)} {item.unit}
           </Text>
@@ -599,7 +605,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </View>
       )}
 
-      {isSupervisorOrAbove && (
+      {canManageInventory && (
         <>
           <View style={[styles.sep, { backgroundColor: colors.border }]} />
           <Button

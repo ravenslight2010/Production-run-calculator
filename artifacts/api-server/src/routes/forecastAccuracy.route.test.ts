@@ -32,9 +32,9 @@ vi.mock("./aiMemoryContext", () => ({
   recordConversationTurns: async () => {},
 }));
 
-vi.mock("../middlewares/requireRole", () => ({
+vi.mock("../middlewares/requireCapability", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  requireRole: () => (_req: any, _res: unknown, next: () => void) => next(),
+  requireCapability: () => (_req: any, _res: unknown, next: () => void) => next(),
 }));
 
 let server: Server;
@@ -78,7 +78,11 @@ describe("POST /ai/forecast-accuracy — trend glue", () => {
   it("always returns a trend with empty defaults when there is nothing to score", async () => {
     const res = await post({ nowMs: Date.now(), history: [] });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as {
+      reviews: unknown[];
+      trend: unknown;
+      note: unknown;
+    };
     expect(body.reviews).toEqual([]);
     expect(body.trend).toEqual({
       daysScored: 0,
@@ -116,7 +120,10 @@ describe("POST /ai/forecast-accuracy — trend glue", () => {
       ],
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as {
+      reviews: { date: string }[];
+      trend: { daysScored: number; chronicOver: unknown[] };
+    };
     expect(body.reviews.map((r: { date: string }) => r.date)).toEqual([
       "2026-06-17",
       "2026-06-16",

@@ -4,17 +4,19 @@ import { useMe } from "@/hooks/useRole";
 
 // Number of pending password reset requests awaiting approval. Polls in the
 // background (independent of the Staff & Roles card) so approvers see a nav badge
-// the moment a locked-out staff member asks for help. Gated to supervisor-or-
-// above because the endpoint is too; operators never fire the request. Shares the
-// ["passwordResetRequests"] cache key with the card, so approving a request
-// there clears the badge here too. Mirrors the web usePendingResetCount.
+// the moment a locked-out staff member asks for help. Gated to the
+// approve-password-resets capability because the endpoint is too; users without
+// it never fire the request. Shares the ["passwordResetRequests"] cache key with
+// the card, so approving a request there clears the badge here too. Mirrors the
+// web usePendingResetCount.
 export function usePendingResetCount(): number {
-  const { isSupervisorOrAbove } = useMe();
+  const { hasCapability } = useMe();
+  const canApprove = hasCapability("approve-password-resets");
   const { data } = useQuery({
     queryKey: ["passwordResetRequests"],
     queryFn: fetchPasswordResetRequests,
-    enabled: isSupervisorOrAbove,
+    enabled: canApprove,
     refetchInterval: 20_000,
   });
-  return isSupervisorOrAbove ? (data ?? []).length : 0;
+  return canApprove ? (data ?? []).length : 0;
 }

@@ -12,7 +12,7 @@ import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
-import { requireRole } from "../middlewares/requireRole";
+import { requireCapability } from "../middlewares/requireCapability";
 import { currentScope } from "../lib/requestScope";
 import {
   buildOptimizePrompt,
@@ -194,7 +194,7 @@ const forecastRateStore =
 
 router.post(
   "/ai/optimize",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: OPTIMIZE_RATE_WINDOW_MS,
     max: OPTIMIZE_RATE_MAX,
@@ -571,7 +571,7 @@ async function loadFlaggedAtRiskStock(
 // while a day is running; the client owns de-dup/cooldown via the returned key.
 router.post(
   "/ai/proactive-alert",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PROACTIVE_RATE_WINDOW_MS,
     max: PROACTIVE_RATE_MAX,
@@ -697,7 +697,7 @@ router.get("/ai/proactive-settings", async (_req, res): Promise<void> => {
 
 router.put(
   "/ai/proactive-settings",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   async (req, res): Promise<void> => {
     const parsed = UpdateProactiveAlertSettingsBody.safeParse(req.body);
     if (!parsed.success) {
@@ -727,7 +727,7 @@ router.put(
 // committed; the manager reviews the suggestion into the editable schedule.
 router.post(
   "/ai/forecast",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: FORECAST_RATE_WINDOW_MS,
     max: FORECAST_RATE_MAX,
@@ -828,7 +828,7 @@ router.post(
 // future forecast prompts learn from past misses.
 router.post(
   "/ai/forecast-accuracy",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   async (req, res): Promise<void> => {
     const validation = validateForecastAccuracyBody(req.body);
     if (!validation.ok) {
@@ -871,7 +871,7 @@ router.post(
 
 router.post(
   "/ai/fill-missing",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: FILL_MISSING_RATE_WINDOW_MS,
     max: FILL_MISSING_RATE_MAX,
@@ -954,7 +954,7 @@ router.post(
 
 router.post(
   "/ai/match-import",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: MATCH_IMPORT_RATE_WINDOW_MS,
     max: MATCH_IMPORT_RATE_MAX,
@@ -1043,7 +1043,7 @@ router.post(
 
 router.post(
   "/ai/parse-spec-sheet",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: PARSE_SPEC_RATE_WINDOW_MS,
     max: PARSE_SPEC_RATE_MAX,
@@ -1132,7 +1132,7 @@ router.post(
 
 router.post(
   "/ai/suggest-merges",
-  requireRole("manager"),
+  requireCapability("use-ai-tools"),
   rateLimit({
     windowMs: SUGGEST_MERGES_RATE_WINDOW_MS,
     max: SUGGEST_MERGES_RATE_MAX,

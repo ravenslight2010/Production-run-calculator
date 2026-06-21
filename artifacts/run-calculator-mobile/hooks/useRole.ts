@@ -1,21 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { fetchMe, type Role, type StaffMember } from "../context/inventoryShared";
+import {
+  fetchMe,
+  type Capability,
+  type Role,
+  type StaffMember,
+} from "../context/inventoryShared";
 
-// Current signed-in user's role, fetched from the API (/me). The server creates
-// the row on first sight, so this also bootstraps the first user as manager.
-// While loading we default to the more restrictive operator view rather than
-// briefly flashing manager-only controls.
+// Current signed-in user's identity, role, and capabilities, fetched from /me.
+// The server creates the row on first sight, so this also bootstraps the first
+// user as manager. While loading we return no capabilities so callers default to
+// the most restrictive view rather than briefly flashing privileged controls.
 export function useMe(): {
   me: StaffMember | null;
   role: Role | null;
+  capabilities: Capability[];
+  hasCapability: (cap: Capability) => boolean;
+  // Convenience alias for the manage-staff capability. Kept ONLY for the
+  // out-of-scope /sync gates; prefer hasCapability for everything else.
   isManager: boolean;
-  // Main-ladder capability: supervisor OR manager. Gates the powers supervisors
-  // share with managers (inventory-item CRUD, inventory settings, password-reset
-  // approval). Distinct from the local PIN "supervisor mode" elsewhere.
-  isSupervisorOrAbove: boolean;
-  // On the QC track (qc-operator or qc-manager).
-  isQc: boolean;
-  isQcManager: boolean;
   isLoading: boolean;
 } {
   const { data, isLoading } = useQuery({
@@ -24,13 +26,14 @@ export function useMe(): {
     staleTime: 60_000,
   });
   const role = data?.role ?? null;
+  const capabilities = data?.capabilities ?? [];
+  const hasCapability = (cap: Capability): boolean => capabilities.includes(cap);
   return {
     me: data ?? null,
     role,
-    isManager: role === "manager",
-    isSupervisorOrAbove: role === "supervisor" || role === "manager",
-    isQc: role === "qc-operator" || role === "qc-manager",
-    isQcManager: role === "qc-manager",
+    capabilities,
+    hasCapability,
+    isManager: hasCapability("manage-staff"),
     isLoading,
   };
 }

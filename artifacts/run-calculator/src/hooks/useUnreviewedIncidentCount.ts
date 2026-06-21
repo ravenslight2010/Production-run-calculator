@@ -4,16 +4,17 @@ import { useMe } from "../useRole";
 
 // Number of reported issues / crashes a manager hasn't reviewed yet. Polls in
 // the background so managers see a nav badge soon after staff report a problem.
-// Gated to managers because the endpoint is manager-only; operators never fire
-// the request. Shares the ["unreviewedIncidentCount"] cache key so reviewing an
-// incident elsewhere clears the badge here too.
+// Gated to the review-incidents capability because the endpoint is too; users
+// without it never fire the request. Shares the ["unreviewedIncidentCount"]
+// cache key so reviewing an incident elsewhere clears the badge here too.
 export function useUnreviewedIncidentCount(): number {
-  const { isManager } = useMe();
+  const { hasCapability } = useMe();
+  const canReview = hasCapability("review-incidents");
   const { data } = useQuery({
     queryKey: ["unreviewedIncidentCount"],
     queryFn: fetchUnreviewedIncidentCount,
-    enabled: isManager,
+    enabled: canReview,
     refetchInterval: 20_000,
   });
-  return isManager ? (data?.count ?? 0) : 0;
+  return canReview ? (data?.count ?? 0) : 0;
 }

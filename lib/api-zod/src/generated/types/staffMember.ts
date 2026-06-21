@@ -5,11 +5,14 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { StaffMemberRole } from './staffMemberRole';
+import type { Capability } from './capability';
 
 export interface StaffMember {
   userId: string;
-  role: StaffMemberRole;
+  /** The name of the role assigned to this user. */
+  role: string;
+  /** The capabilities granted by this user's role. */
+  capabilities: Capability[];
   /** @nullable */
   email: string | null;
   /** @nullable */

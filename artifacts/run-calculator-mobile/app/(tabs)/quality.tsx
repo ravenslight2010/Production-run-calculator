@@ -125,13 +125,14 @@ function QualityCard({ check }: { check: QualityCheckRecord }) {
 export default function QualityScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { isManager, isLoading: roleLoading } = useMe();
+  const { hasCapability, isLoading: roleLoading } = useMe();
+  const canUseAiTools = hasCapability("use-ai-tools");
   const [product, setProduct] = useState<ProductFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["qualityChecks", product, status],
-    enabled: isManager,
+    enabled: canUseAiTools,
     queryFn: () =>
       fetchQualityChecks({
         productType: product === "all" ? undefined : product,
@@ -139,7 +140,7 @@ export default function QualityScreen() {
       }),
   });
 
-  if (!roleLoading && !isManager) {
+  if (!roleLoading && !canUseAiTools) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Feather name="lock" size={28} color={colors.mutedForeground} />
