@@ -61,3 +61,4 @@
 - [Production Rules](production-rules.md) — manager-editable factory-wide run rules (required-field/numeric-range/sequence), flexible=warn/strict=block-Start; server-persisted (NOT in sync), POST/DELETE manager-only; web+mobile field-map + numeric-range seed gotcha.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
 - [Merge tombstones](merge-tombstones.md) — merges need a synced `mergedAway` tombstone to survive additive live-sync union (filter EVERY list incl. one-off ingredientTypes; push-before-reload on web); union semantics = cross-peer re-add tradeoff.
+- [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert is no-op on Expo web; reload after login to load rules; 10-iteration cap (keep mobile plans minimal); clear today's daily_sync first.
