@@ -93,6 +93,7 @@
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",
     "@workspace/production-rules": "workspace:*",
+    "@workspace/recipe-apply": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/voice-commands": "workspace:*"
   }

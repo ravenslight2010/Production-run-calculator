@@ -130,10 +130,10 @@ import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   buildRecipeAssistContext,
-  RECIPE_FIELD_IDS,
   type RecipeAssistSuggestion,
   type RecipeFieldId,
 } from "../aiRecipe";
+import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
@@ -3986,21 +3986,6 @@ export default function Home() {
     s: RecipeAssistSuggestion,
     runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
-    if (!(RECIPE_FIELD_IDS as readonly string[]).includes(s.recipeId)) {
-      return { ok: false, message: "Unknown recipe" };
-    }
-    const targetId = runId ?? currentRunId;
-    if (!targetId || !dayState.runs.some((r) => r.id === targetId)) {
-      return { ok: false, message: "Run no longer exists" };
-    }
-
-    const rows = (s.rows ?? [])
-      .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
-      .filter((r) => r.ingredient);
-    if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
-
-    const isCurrent = targetId === currentRunId;
-
     // Field-array writers for the current run's live form.
     const formWriters: Record<RecipeFieldId, (rows: { ingredient: string; lbs: number }[]) => void> = {
       doughRecipe: (next) => {
@@ -4029,31 +4014,32 @@ export default function Home() {
       },
     };
 
-    // Read prior rows defensively from the correct source (live form for the
-    // current run, persisted values for any other run).
-    const prevSource = isCurrent
-      ? (form.getValues() as Record<string, unknown>)
-      : (loadRunValues(targetId) as unknown as Record<string, unknown>);
-    const prevRaw = prevSource[s.recipeId];
-    const prev = (Array.isArray(prevRaw) ? prevRaw : []) as { ingredient: string; lbs: number }[];
-    const prevRows = prev.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
-
-    const write = (next: { ingredient: string; lbs: number }[]) => {
-      if (isCurrent) {
-        formWriters[s.recipeId as RecipeFieldId](next);
-        saveRunValues(currentRunId, form.getValues());
-      } else {
-        const vals = { ...DEFAULT_VALUES, ...loadRunValues(targetId), [s.recipeId]: next };
-        saveRunValues(targetId, vals as FormValues);
-      }
-      schedulePush(dayStateRef.current, 0);
-    };
-    write(rows);
-    return {
-      ok: true,
-      message: s.kind === "scale" ? "Recipe scaled" : "Substitution applied",
-      undo: () => write(prevRows),
-    };
+    return applyRecipeSuggestionShared(s, runId, {
+      // Default to the current run, validate it still exists.
+      resolveTargetId: (id) => {
+        const targetId = id ?? currentRunId;
+        return targetId && dayState.runs.some((r) => r.id === targetId) ? targetId : null;
+      },
+      // Read prior rows defensively from the correct source (live form for the
+      // current run, persisted values for any other run).
+      readPrevRows: (targetId, recipeId) =>
+        (targetId === currentRunId
+          ? (form.getValues() as Record<string, unknown>)
+          : (loadRunValues(targetId) as unknown as Record<string, unknown>))[recipeId],
+      // The current run writes through the live form + field-array path (so the
+      // open form reflects it); other runs write through saveRunValues — both are
+      // EXISTING per-run write paths, no new write surface.
+      write: (targetId, recipeId, next) => {
+        if (targetId === currentRunId) {
+          formWriters[recipeId](next);
+          saveRunValues(currentRunId, form.getValues());
+        } else {
+          const vals = { ...DEFAULT_VALUES, ...loadRunValues(targetId), [recipeId]: next };
+          saveRunValues(targetId, vals as FormValues);
+        }
+        schedulePush(dayStateRef.current, 0);
+      },
+    });
   }
 
   function flashSaved() {

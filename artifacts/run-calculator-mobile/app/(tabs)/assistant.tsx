@@ -44,11 +44,11 @@ import {
   buildRecipeAssistContext,
   recipeAssistErrorMessage,
   requestRecipeAssist,
-  RECIPE_FIELD_IDS,
   type RecipeAssistInput,
   type RecipeAssistSuggestion,
   type RecipeApplyTarget,
 } from "@/context/aiRecipe";
+import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { requestCommand, commandErrorMessage } from "@/context/aiCommand";
 import { restockInventory, adjustInventory } from "@/context/inventoryShared";
@@ -1464,32 +1464,24 @@ export default function AssistantScreen() {
     s: RecipeAssistSuggestion,
     runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
-    if (!(RECIPE_FIELD_IDS as readonly string[]).includes(s.recipeId)) {
-      return { ok: false, message: "Unknown recipe" };
-    }
-    const targetId = runId ?? run?.id;
-    const target = targetId ? allRuns.find((r) => r.id === targetId) : null;
-    if (!targetId || !target) return { ok: false, message: "Run no longer exists" };
-
-    const rows = (s.rows ?? [])
-      .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
-      .filter((r) => r.ingredient);
-    if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
-
-    const prevRaw = (target.settings as unknown as Record<string, unknown>)?.[s.recipeId];
-    const prev = (Array.isArray(prevRaw) ? prevRaw : ([] as { ingredient: string; lbs: number }[])).map(
-      (r) => ({ ingredient: r.ingredient, lbs: r.lbs }),
-    );
-
-    const write = (next: { ingredient: string; lbs: number }[]) => {
-      updateRunSettingsById(targetId, { [s.recipeId]: next } as Partial<RunSettings>);
-    };
-    write(rows);
-    return {
-      ok: true,
-      message: s.kind === "scale" ? "Recipe scaled" : "Substitution applied",
-      undo: () => write(prev),
-    };
+    return applyRecipeSuggestionShared(s, runId, {
+      // Default to the current run, validate it still exists.
+      resolveTargetId: (id) => {
+        const targetId = id ?? run?.id;
+        const target = targetId ? allRuns.find((r) => r.id === targetId) : null;
+        return targetId && target ? targetId : null;
+      },
+      // Prior rows come from the persisted run settings (any shape — normalized
+      // by the shared logic) so Undo restores them exactly.
+      readPrevRows: (targetId, recipeId) =>
+        (allRuns.find((r) => r.id === targetId)?.settings as unknown as Record<string, unknown>)?.[
+          recipeId
+        ],
+      // Routes through the existing updateRunSettingsById path — no new write surface.
+      write: (targetId, recipeId, next) => {
+        updateRunSettingsById(targetId, { [recipeId]: next } as Partial<RunSettings>);
+      },
+    });
   }
 
   // Build the platform handlers for dispatched voice commands. Each forwards to

@@ -43,6 +43,9 @@
       "path": "./lib/ai-review"
     },
     {
+      "path": "./lib/recipe-apply"
+    },
+    {
       "path": "./lib/integrations-openai-ai-server"
     }
   ]
