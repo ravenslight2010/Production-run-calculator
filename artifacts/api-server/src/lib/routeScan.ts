@@ -122,23 +122,16 @@ function buildPrefixProbe(source: string): string | undefined {
   return probe;
 }
 
-// Reconstruct the mount prefix (e.g. `/admin`, `/org/:orgId`) for a sub-router
-// layer, or "" when there is no prefix (root mount). Returns "" on anything we
-// cannot confidently reconstruct, which preserves the prior root-only behavior.
-function reconstructMountPrefix(layer: LayerLike): string {
-  // Root mount: matches everything, strips nothing -> no prefix.
-  if (layer.slash) return "";
-  const matchers = layer.matchers;
-  if (!matchers || matchers.length === 0) return "";
-  // A layer may carry several matchers (array mount path); the first reflects
-  // the primary mount prefix, which is all the cache guard needs.
-  const matcher = matchers[0];
+// Reconstruct the mount prefix (e.g. `/admin`, `/org/:orgId`) for a single
+// matcher, or undefined on anything we cannot confidently reconstruct (which
+// preserves the prior root-only behavior by skipping that matcher).
+function reconstructMatcherPrefix(matcher: Matcher): string | undefined {
   const regexp = captureMatcherRegExp(matcher);
-  if (!regexp) return "";
+  if (!regexp) return undefined;
   const probe = buildPrefixProbe(regexp.source);
-  if (probe === undefined) return "";
+  if (probe === undefined) return undefined;
   const matched = matcher(probe);
-  if (!matched) return "";
+  if (!matched) return undefined;
   // `matched.path` is the concrete prefix with sentinels in place of params;
   // `matched.params` maps each param *name* to the sentinel value it captured.
   // Swap each sentinel back to `:name` (longest first so `MOUNTPARAM1` can't
@@ -152,6 +145,30 @@ function reconstructMountPrefix(layer: LayerLike): string {
   }
   // Normalize a trailing slash so joining with nested paths can't double up.
   return prefix === "/" ? "" : prefix.replace(/\/$/, "");
+}
+
+// Reconstruct every mount prefix a sub-router layer is reachable under. A layer
+// mounted with an array of paths (`router.use(["/a", "/b"], sub)`) carries one
+// matcher per declared mount path, and the sub-router's routes are reachable
+// under *each* of them — so the cache guard must check every variant, not just
+// the first. Returns `[""]` for a root mount (no prefix). Matchers we cannot
+// confidently reconstruct are skipped; if none remain we fall back to `[""]` so
+// the nested routes are still reported (under no prefix) rather than dropped.
+function reconstructMountPrefixes(layer: LayerLike): string[] {
+  // Root mount: matches everything, strips nothing -> no prefix.
+  if (layer.slash) return [""];
+  const matchers = layer.matchers;
+  if (!matchers || matchers.length === 0) return [""];
+  const prefixes: string[] = [];
+  const seen = new Set<string>();
+  for (const matcher of matchers) {
+    const prefix = reconstructMatcherPrefix(matcher);
+    if (prefix !== undefined && !seen.has(prefix)) {
+      seen.add(prefix);
+      prefixes.push(prefix);
+    }
+  }
+  return prefixes.length > 0 ? prefixes : [""];
 }
 
 // Join a mount prefix with a route path declared inside the sub-router. A
@@ -186,10 +203,15 @@ export function collectGetRoutePathsFromRouter(router: IRouter): string[] {
           }
         }
       } else if (hasStack(layer.handle) && !visited.has(layer.handle)) {
-        // A mounted sub-router: recurse into its own layer stack, carrying the
-        // reconstructed mount prefix so nested paths report their full path.
+        // A mounted sub-router: recurse into its own layer stack once per mount
+        // prefix so nested paths report their full path under every prefix the
+        // sub-router is reachable at (a layer mounted with an array of paths
+        // carries one matcher per prefix).
         visited.add(layer.handle);
-        walk(layer.handle.stack, joinPath(prefix, reconstructMountPrefix(layer)));
+        const handle = layer.handle;
+        for (const mountPrefix of reconstructMountPrefixes(layer)) {
+          walk(handle.stack, joinPath(prefix, mountPrefix));
+        }
       }
     }
   };

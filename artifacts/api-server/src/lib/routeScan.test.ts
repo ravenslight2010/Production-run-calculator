@@ -82,6 +82,25 @@ describe("collectGetRoutePathsFromRouter", () => {
     expect(found).toContain("/outer/inner/leaf");
   });
 
+  it("reports every nested path once per prefix for a sub-router mounted under multiple prefixes", () => {
+    const root = Router();
+
+    // A sub-router mounted under an *array* of prefixes is reachable under each
+    // one, so its routes must be reported under both `/a` and `/b` — not just
+    // the first. Otherwise the cache guard could miss the `/b` variant.
+    const sub = Router();
+    sub.get("/thing", (_req, res) => res.end());
+    sub.get("/thing/:id", (_req, res) => res.end());
+    root.use(["/a", "/b"], sub);
+
+    const found = collectGetRoutePathsFromRouter(root).sort();
+
+    expect(found).toContain("/a/thing");
+    expect(found).toContain("/a/thing/:id");
+    expect(found).toContain("/b/thing");
+    expect(found).toContain("/b/thing/:id");
+  });
+
   it("still reports root-mounted sub-router paths without a spurious prefix", () => {
     const root = Router();
     const sub = Router();
