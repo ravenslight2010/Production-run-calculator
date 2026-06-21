@@ -110,6 +110,7 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
+import RolesManager from "../components/RolesManager";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import AssistantTab from "../components/AssistantTab";
 import {
@@ -208,6 +209,7 @@ import {
   BarChart2,
   CheckCircle2,
   Lock,
+  Shield,
   ShieldCheck,
   Settings,
   Download,
@@ -7344,6 +7346,11 @@ export default function Home() {
                     <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
                   </DropdownMenuItem>
                 )}
+                {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("roles")}>
+                    <Shield className="w-4 h-4 mr-2" /> Roles &amp; access
+                  </DropdownMenuItem>
+                )}
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -8600,6 +8607,12 @@ export default function Home() {
 
               <TabsContent value="quality">
                 <QualityHistoryTab />
+              </TabsContent>
+
+              <TabsContent value="roles">
+                <div className="max-w-2xl mx-auto p-4">
+                  <RolesManager />
+                </div>
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>

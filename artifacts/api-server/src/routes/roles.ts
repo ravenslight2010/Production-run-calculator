@@ -101,6 +101,7 @@ router.put("/roles/:name", requireCapability("manage-staff"), async (req, res): 
     name,
     parsed.data.capabilities,
     (req.capabilities ?? []) as Capability[],
+    parsed.data.name,
   );
   if (!result.ok) {
     res.status(result.status).json({ error: result.error });

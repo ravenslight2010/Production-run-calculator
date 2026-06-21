@@ -464,13 +464,19 @@ export async function createRole(
   return { ok: true, row: def! };
 }
 
-// Edit a role's capabilities. Guards: role must exist; the actor cannot grant
-// capabilities they lack; the manager role must keep manage-staff; the change
-// must never strand the team without a manage-staff holder.
+// Edit a role's capabilities and, optionally, rename it. Guards: role must
+// exist; the actor cannot grant capabilities they lack; the manager role must
+// keep manage-staff; the change must never strand the team without a
+// manage-staff holder. Rename guards: built-in roles can't be renamed, the new
+// name must be non-empty and not collide with another role. Because user_roles
+// stores the role NAME (free text, no FK), a rename rewrites both the roles row
+// and every staff assignment in one transaction so no one is left pointing at a
+// name that no longer exists.
 export async function updateRoleCapabilities(
   name: string,
   capabilities: unknown,
   actorCapabilities: Capability[],
+  newName?: string,
 ): Promise<{ ok: true; row: RoleDefinition } | { ok: false; status: number; error: string }> {
   const def = await getRole(name);
   if (!def) {
@@ -514,6 +520,40 @@ export async function updateRoleCapabilities(
         error: "Cannot remove the last staff manager — keep manage-staff on a role someone holds.",
       };
     }
+  }
+
+  // Resolve an optional rename. Only act when a new name is supplied that
+  // actually differs from the current one.
+  const trimmedNew = newName?.trim();
+  const isRename = trimmedNew !== undefined && trimmedNew !== "" && trimmedNew !== name;
+  if (newName !== undefined && (trimmedNew ?? "") === "") {
+    return { ok: false, status: 400, error: "Role name is required" };
+  }
+  if (isRename) {
+    if (def.builtin) {
+      return { ok: false, status: 400, error: "Built-in roles can't be renamed." };
+    }
+    const clash = await getRole(trimmedNew!);
+    if (clash) {
+      return { ok: false, status: 409, error: "A role with that name already exists" };
+    }
+  }
+
+  if (isRename) {
+    // Rewrite the role row and every staff assignment together so a partial
+    // failure can't strand users on the old name.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(rolesTable)
+        .set({ name: trimmedNew!, capabilities: caps, updatedAt: new Date() })
+        .where(eq(rolesTable.name, name));
+      await tx
+        .update(userRolesTable)
+        .set({ role: trimmedNew!, updatedAt: new Date() })
+        .where(eq(userRolesTable.role, name));
+    });
+    const updated = await getRole(trimmedNew!);
+    return { ok: true, row: updated! };
   }
 
   await db

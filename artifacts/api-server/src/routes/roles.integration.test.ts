@@ -539,6 +539,74 @@ describe("role administration", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/assigned/i);
   });
+
+  it("renames a custom role and reassigns its holders (end-to-end)", async () => {
+    // Create a custom role and put the operator on it.
+    const create = await req(MANAGER, "POST", "/api/roles", {
+      name: "line-lead",
+      capabilities: ["manage-inventory"],
+    });
+    expect(create.status).toBe(201);
+    const assign = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, {
+      role: "line-lead",
+    });
+    expect(assign.status).toBe(200);
+
+    // Rename it via PUT /roles/:name with a new `name` in the body.
+    const rename = await req(MANAGER, "PUT", "/api/roles/line-lead", {
+      name: "shift-lead",
+      capabilities: ["manage-inventory"],
+    });
+    expect(rename.status).toBe(200);
+
+    // The role catalog reflects the new name (old name gone).
+    const list = await req(MANAGER, "GET", "/api/roles");
+    const roles = (await list.json()) as { name: string }[];
+    const names = roles.map((r) => r.name);
+    expect(names).toContain("shift-lead");
+    expect(names).not.toContain("line-lead");
+
+    // The holder was carried over to the renamed role.
+    const me = await req(OPERATOR, "GET", "/api/me");
+    const body = (await me.json()) as { role: string; capabilities: string[] };
+    expect(body.role).toBe("shift-lead");
+    expect(body.capabilities).toContain("manage-inventory");
+  });
+
+  it("refuses to rename a built-in role (400)", async () => {
+    const res = await req(MANAGER, "PUT", "/api/roles/operator", {
+      name: "associate",
+      capabilities: [],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to rename to a blank name (400)", async () => {
+    const create = await req(MANAGER, "POST", "/api/roles", {
+      name: "temp-role",
+      capabilities: [],
+    });
+    expect(create.status).toBe(201);
+    const res = await req(MANAGER, "PUT", "/api/roles/temp-role", {
+      name: "   ",
+      capabilities: [],
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("refuses to rename onto an existing role name (409)", async () => {
+    const create = await req(MANAGER, "POST", "/api/roles", {
+      name: "renamable-role",
+      capabilities: [],
+    });
+    expect(create.status).toBe(201);
+    // 'supervisor' is a built-in role that already exists.
+    const res = await req(MANAGER, "PUT", "/api/roles/renamable-role", {
+      name: "supervisor",
+      capabilities: [],
+    });
+    expect(res.status).toBe(409);
+  });
 });
 
 // The privilege-escalation guard is enforced not just on role create/edit but

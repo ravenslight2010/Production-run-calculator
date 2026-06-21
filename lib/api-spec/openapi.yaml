@@ -2653,6 +2653,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Capability"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: >-
+            Optional new name for the role (rename). When present and different
+            from the path name, the role is renamed and every staff assignment
+            is moved to the new name. Built-in roles cannot be renamed.
 
     StaffMember:
       type: object

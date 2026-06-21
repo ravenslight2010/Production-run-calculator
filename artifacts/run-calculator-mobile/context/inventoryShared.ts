@@ -367,10 +367,21 @@ export const createRoleRequest = (name: string, capabilities: Capability[]) =>
     method: "POST",
     body: JSON.stringify({ name, capabilities }),
   });
-export const updateRoleRequest = (name: string, capabilities: Capability[]) =>
+// Edit a role's capabilities and, optionally, rename it. Pass `newName` (the
+// role's new name) to rename; the server rewrites the role and every staff
+// assignment together. Built-in roles can't be renamed.
+export const updateRoleRequest = (
+  name: string,
+  capabilities: Capability[],
+  newName?: string,
+) =>
   api<RoleDefinition>(`/roles/${encodeURIComponent(name)}`, {
     method: "PUT",
-    body: JSON.stringify({ capabilities }),
+    body: JSON.stringify(
+      newName !== undefined && newName !== name
+        ? { capabilities, name: newName }
+        : { capabilities },
+    ),
   });
 export const deleteRoleRequest = (name: string) =>
   api<null>(`/roles/${encodeURIComponent(name)}`, { method: "DELETE" });

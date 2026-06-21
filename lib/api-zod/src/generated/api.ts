@@ -1926,8 +1926,13 @@ export const UpdateRoleParams = zod.object({
   "name": zod.coerce.string()
 })
 
+export const updateRoleBodyNameMax = 60;
+
+
+
 export const UpdateRoleBody = zod.object({
-  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.'))
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')),
+  "name": zod.string().min(1).max(updateRoleBodyNameMax).optional().describe('Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.')
 })
 
 export const UpdateRoleResponse = zod.object({

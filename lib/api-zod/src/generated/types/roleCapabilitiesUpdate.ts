@@ -9,4 +9,10 @@ import type { Capability } from './capability';
 
 export interface RoleCapabilitiesUpdate {
   capabilities: Capability[];
+  /**
+     * Optional new name for the role (rename). When present and different from the path name, the role is renamed and every staff assignment is moved to the new name. Built-in roles cannot be renamed.
+     * @minLength 1
+     * @maxLength 60
+     */
+  name?: string;
 }
