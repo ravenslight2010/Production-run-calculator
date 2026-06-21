@@ -540,7 +540,7 @@ function AskChat({
 // rows are shown first so they confirm exactly what they're applying. After
 // applying, a short Undo window restores the previous rows. Mirrors the web
 // SuggestionCard + RecCard (replit.md parity).
-function SuggestionCard({
+export function SuggestionCard({
   suggestion,
   onApply,
   applyTargets,

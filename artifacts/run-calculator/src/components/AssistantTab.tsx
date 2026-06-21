@@ -539,7 +539,7 @@ function AskChat({
 // recipe or a substitution). Nothing changes until the worker taps Apply; the
 // rows are shown first so they confirm exactly what they're applying. After
 // applying, a short Undo window restores the previous rows. Mirrors RecCard.
-function SuggestionCard({
+export function SuggestionCard({
   suggestion,
   onApply,
   applyTargets,

@@ -22,6 +22,21 @@ future web↔mobile parity test of a byte-identical shared module.
 assert identical output, satisfying the replit.md parity rule, without standing
 up a second RN-capable test runner.
 
+### Rendering a mobile RN *component* (not just pure logic) through the harness
+To exercise a mobile React-Native component's behavior in jsdom, strip its
+imports, transpile to **CommonJS**, and run it via `new Function("exports",
+"require", "React", PRELUDE + outputText)` — inject the test's OWN React (same
+instance @testing-library/react renders with; a 2nd copy breaks the hook
+dispatcher) and a PRELUDE of tiny host-element stubs for the RN/custom UI the
+stripped imports used to provide (`View/Card -> div`, `Text -> span`, `Button ->
+real <button>` wired to `onPress` so `fireEvent.click` drives it, the rest ->
+null). Export the inner component (e.g. `SuggestionCard`) so it's reachable on
+`exports`. Gotcha: every symbol referenced at **module-eval time** must be in the
+prelude — `const styles = StyleSheet.create({ ... fontFamily: FONTS.x })` touches
+both `StyleSheet` AND `FONTS`, so stub `FONTS` as a `new Proxy({}, { get: () =>
+"System" })`. Symbols used only inside un-called functions stay harmless free
+identifiers under strict mode. See `recipeAssistApply.test.tsx`.
+
 ## Contention is the enemy, not logic
 Validation runs **alongside the 4 dev workflows**, which starves Vitest. With
 defaults this produced two non-logic failures: a `beforeAll` hook hitting the
