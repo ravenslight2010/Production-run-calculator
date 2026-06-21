@@ -1230,6 +1230,13 @@ const PRESET_MAP_KEY: Record<
   mix: "mixRecipePresets",
 };
 
+// A revertible snapshot of just the run list + focused index, used by the voice
+// Undo path to restore the exact prior state of a structural change.
+export interface RunsSnapshot {
+  runs: RunState[];
+  currentIndex: number;
+}
+
 interface RunContextValue {
   run: RunState;
   runIndex: number;
@@ -1264,6 +1271,14 @@ interface RunContextValue {
   deleteRun: (index: number) => void;
   moveRun: (fromIdx: number, toIdx: number) => void;
   updateRunSettingsById: (runId: string, partial: Partial<RunSettings>) => void;
+  // Capture / restore the full run list + focused index so a structural change
+  // (finish run, remove run, start/end stoppage) can be cleanly reverted to its
+  // exact prior state — including a removed run's ORIGINAL position. Mirrors the
+  // web voice handlers' setDayState(prevDs) snapshot-restore so the mobile Undo
+  // safety net reaches parity. The two ops these don't change (master data,
+  // schedule, etc.) are deliberately left untouched.
+  captureRunsSnapshot: () => RunsSnapshot;
+  restoreRunsSnapshot: (snap: RunsSnapshot) => void;
   resetRun: () => void;
   shiftNotes: string;
   setShiftNotes: (notes: string) => void;
@@ -2140,6 +2155,33 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const runs = [...prev.runs];
         runs[idx] = { ...runs[idx], settings: { ...runs[idx].settings, ...partial } };
         const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  // Snapshot just the run list + focused index (the only state the voice
+  // structural commands touch). Reads the live ref, so within a multi-action
+  // utterance this captures the START-of-command state — exact parity with the
+  // web handlers, whose dayStateRef also lags mid-loop.
+  const captureRunsSnapshot = useCallback(
+    (): RunsSnapshot => ({
+      runs: appStateRef.current.runs,
+      currentIndex: appStateRef.current.currentIndex,
+    }),
+    [],
+  );
+
+  // Restore a previously captured run snapshot. Putting the exact prior `runs`
+  // array back restores a removed run at its ORIGINAL position (no drift) and
+  // un-does finish-run / start-/end-stoppage content changes. Inventory that a
+  // finish already consumed stays consumed (idempotent) — same as web's undo.
+  const restoreRunsSnapshot = useCallback(
+    (snap: RunsSnapshot) => {
+      setAppState((prev) => {
+        const next = { ...prev, runs: snap.runs, currentIndex: snap.currentIndex };
         persist(next);
         return next;
       });
@@ -3035,6 +3077,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         deleteRun,
         moveRun,
         updateRunSettingsById,
+        captureRunsSnapshot,
+        restoreRunsSnapshot,
         resetRun,
         shiftNotes: appState.shiftNotes,
         setShiftNotes,

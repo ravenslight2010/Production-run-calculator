@@ -1330,6 +1330,8 @@ export default function AssistantScreen() {
     addStoppage: ctxAddStoppage,
     endActiveStoppage: ctxEndActiveStoppage,
     rolloverDay: ctxRolloverDay,
+    captureRunsSnapshot,
+    restoreRunsSnapshot,
   } = useRun();
 
   const [loading, setLoading] = React.useState(false);
@@ -1437,9 +1439,11 @@ export default function AssistantScreen() {
   // resolved ids are validated again here (the run may have changed since
   // classification). EXACT parity with the web buildVoiceHandlers in
   // artifacts/run-calculator/src/pages/home.tsx — same kinds, same arguments
-  // through dispatchVoiceCommand. The few structural ops mobile's context can't
-  // cleanly reverse (finish run, remove run, start/end stoppage) execute
-  // identically but omit the Undo button.
+  // through dispatchVoiceCommand. The structural ops (finish run, remove run,
+  // start/end stoppage) now offer Undo too, via captureRunsSnapshot /
+  // restoreRunsSnapshot — mirroring web's setDayState(prevDs) restore, so a
+  // removed run comes back at its ORIGINAL position. Only rollover is
+  // irreversible by design (manager-only, no undo).
   function buildVoiceHandlers(): VoiceCommandHandlers {
     // --- Live, synchronously-updated shadow of run ordering + current index ---
     // dispatchVoiceCommand runs a command's actions in sequence within a single
@@ -1529,20 +1533,17 @@ export default function AssistantScreen() {
           return { ok: false, message: "Can't remove a started or finished run" };
         }
         if (liveRuns.length <= 1) return { ok: false, message: "Can't remove the only run" };
-        const prevSettings = target?.settings;
+        // Snapshot the full run list BEFORE removing so Undo restores the run at
+        // its ORIGINAL position (fixes the old "re-add at the end" drift).
+        const snapshot = captureRunsSnapshot();
         ctxDeleteRun(idx);
         // Mirror RunContext.deleteRun: drop the run, clamp currentIndex.
         liveRuns.splice(idx, 1);
         liveIdx = Math.min(liveIdx, liveRuns.length - 1);
-        // Re-add restores the run's data (un-started, so only settings matter);
-        // it reappears at the end rather than its original slot.
         return {
           ok: true,
           message: "Run removed",
-          undo: () => {
-            ctxAddRun();
-            if (prevSettings) ctxUpdateSettings(prevSettings);
-          },
+          undo: () => restoreRunsSnapshot(snapshot),
         };
       },
       switchRun(runId) {
@@ -1580,32 +1581,44 @@ export default function AssistantScreen() {
         const target = snapAt(idx);
         if (target?.endedAt) return { ok: false, message: "Run already finished" };
         if (target && !target.startedAt) return { ok: false, message: "Run hasn't started yet" };
+        const snapshot = captureRunsSnapshot();
         if (idx !== liveIdx) {
           ctxSwitchRun(idx);
           liveIdx = idx;
         }
         ctxEndRun();
-        // No un-finish primitive on mobile (endRun also consumes inventory
-        // idempotently), so no Undo — the command itself runs at web parity.
-        return { ok: true, message: "Run finished" };
+        // endRun also consumes inventory idempotently; like web's undo, reverting
+        // only restores the run's open/running state — consumed stock stays
+        // consumed (re-finishing later deducts nothing extra).
+        return {
+          ok: true,
+          message: "Run finished",
+          undo: () => restoreRunsSnapshot(snapshot),
+        };
       },
       startStoppage(runId, reason, stoppageType) {
         const targetIdx = runId ? findIdx(runId) : liveIdx;
         if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        // Snapshot before switching/adding so Undo reverts both the new
+        // stoppage and any run switch this command made.
+        const snapshot = captureRunsSnapshot();
         if (targetIdx !== liveIdx) {
           ctxSwitchRun(targetIdx);
           liveIdx = targetIdx;
         }
         ctxAddStoppage(stoppageType, reason);
-        // Mobile has no remove-stoppage primitive, so no Undo button.
         return {
           ok: true,
           message: reason ? `Stoppage started: ${reason}` : "Stoppage started",
+          undo: () => restoreRunsSnapshot(snapshot),
         };
       },
       endStoppage(runId) {
         const targetIdx = runId ? findIdx(runId) : liveIdx;
         if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        // Snapshot at the top so Undo restores the still-open stoppage (and any
+        // run switch) to its exact prior state.
+        const snapshot = captureRunsSnapshot();
         if (targetIdx !== liveIdx) {
           ctxSwitchRun(targetIdx);
           liveIdx = targetIdx;
@@ -1615,8 +1628,11 @@ export default function AssistantScreen() {
           return { ok: false, message: "No active stoppage" };
         }
         ctxEndActiveStoppage();
-        // No reopen-stoppage primitive on mobile, so no Undo button.
-        return { ok: true, message: "Stoppage ended" };
+        return {
+          ok: true,
+          message: "Stoppage ended",
+          undo: () => restoreRunsSnapshot(snapshot),
+        };
       },
       setRunProgress(runId, progress) {
         const idx = findIdx(runId);

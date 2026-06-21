@@ -36,12 +36,19 @@ MAX_COMMAND_ACTIONS, fills item category/name/unit from the resolved item, and
 normalizes free-text stoppage category → fixed StoppageKind. A "command" with zero
 surviving actions collapses to `none` so the client never claims a no-op success.
 
-## Mobile Undo drift (documented in code, accepted at parity)
-Mobile RunContext lacks reverse primitives for some ops, so `finish_run`,
-partial `remove_run`, `start_stoppage`, `end_stoppage` execute (full parity) but
-omit the Undo button on mobile; `remove_run` undo re-adds at the END (position
-drift). Mobile has no MAX_RUNS check (web does). Mobile `Stoppage.type` IS
-`StoppageKind`, so pass `stoppageType` straight to `ctxAddStoppage`.
+## Mobile Undo now at parity (drift closed)
+`finish_run`, `remove_run`, `start_stoppage`, `end_stoppage` now offer Undo on
+mobile too, via RunContext `captureRunsSnapshot()` / `restoreRunsSnapshot()`
+(snapshot = `{runs, currentIndex}` only). This mirrors web's
+`setDayState(prevDs)` restore: putting the exact prior `runs` array back brings a
+removed run back at its ORIGINAL position (no more END-append drift). Capture
+reads `appStateRef.current`, which lags mid dispatch loop EXACTLY like web's
+`dayStateRef`, so both capture start-of-command state (multi-action structural
+sequences in one utterance share the same documented limitation). Finish-run undo
+restores open/running state only — consumed inventory stays consumed (idempotent),
+same as web. Only `rollover` stays irreversible (manager-only). Mobile still has
+no MAX_RUNS check (web does). Mobile `Stoppage.type` IS `StoppageKind`, so pass
+`stoppageType` straight to `ctxAddStoppage`.
 
 ## Multi-action commands need a live shadow, NOT the captured snapshot
 `dispatchVoiceCommand` awaits each action but they all run in ONE task before
