@@ -11,6 +11,7 @@ import {
   DEFAULT_PEP_TYPES,
   type RecipeRow,
 } from "@/context/RunContext";
+import RecipeSubstitutionBadge from "@/components/RecipeSubstitutionBadge";
 import { useColors } from "@/hooks/useColors";
 
 function RecipeCard({
@@ -65,7 +66,7 @@ function RecipeCard({
 export default function FrontlineScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run } = useRun();
+  const { run, substitutions } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -136,6 +137,17 @@ export default function FrontlineScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <RecipeSubstitutionBadge
+          substitutions={substitutions}
+          recipes={[
+            s.frontlineRecipe,
+            s.app1CheeseRecipe,
+            s.app2CheeseRecipe,
+            s.app3CheeseRecipe,
+            s.app4CheeseRecipe,
+          ]}
+          typeValues={[s.app1Type, s.app2Type, s.app3Type, s.app4Type, s.pep1Type, s.pep2Type]}
+        />
         <Card title="Batches Needed" icon="box" accent>
           <Text style={[styles.basis, { color: colors.mutedForeground }]}>
             Based on{" "}

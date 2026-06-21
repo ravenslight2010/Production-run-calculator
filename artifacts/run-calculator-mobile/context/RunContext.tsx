@@ -45,7 +45,9 @@ import {
   consumeRunInventory,
   fetchInventory,
   mergeInventory,
+  overlaySettings,
   type MergeInventoryLine,
+  type IngredientSubstitution,
 } from "./inventoryShared";
 import { useAuth } from "./auth";
 import {
@@ -442,12 +444,15 @@ function closeOutRun(run: RunState, boundaryMs: number): RunState {
 // Auto-deduct inventory for every open run closed by a day rollover, matching
 // endRun. consume is idempotent per runId, so runs already deducted via endRun
 // won't double-count.
-function consumeOpenRunsForRollover(runs: RunState[]): void {
+function consumeOpenRunsForRollover(
+  runs: RunState[],
+  subs: IngredientSubstitution[] = [],
+): void {
   for (const r of runs) {
     if (r.startedAt != null && r.endedAt == null) {
       void consumeRunInventory(
         r.id,
-        computeRunConsumptionLines(r.settings),
+        computeRunConsumptionLines(overlaySettings(r.settings, subs)),
       ).catch(() => {});
     }
   }
@@ -469,6 +474,7 @@ function buildNextDayState(cur: AppState, today: string): AppState {
     runs: [makeNewRun()],
     currentIndex: 0,
     shiftNotes: "",
+    substitutions: [],
     date: today,
     resetAt: boundaryMs,
     history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -498,8 +504,16 @@ export function sauceBarrelBreakdown(
   return { batchesPerBarrel, totalBarrels };
 }
 
-export function computeCalc(state: RunState, nowMs: number): RunCalc {
-  const { settings: s, progress: p } = state;
+export function computeCalc(
+  state: RunState,
+  nowMs: number,
+  subs: IngredientSubstitution[] = [],
+): RunCalc {
+  // Overlay today's temporary substitutions onto the recipes/types so material
+  // totals reflect the swap/add/remove. Pure clone (reverts when subs cleared).
+  // Default [] keeps the 2-arg call sites (history, parity test) unaffected.
+  const s = subs.length > 0 ? overlaySettings(state.settings, subs) : state.settings;
+  const { progress: p } = state;
 
   const casesLeft = Math.max(
     0,
@@ -883,6 +897,8 @@ interface AppState {
   // Tombstones: ingredient/die names merged away. Synced so the additive list
   // union in live-sync can't resurrect a merged-away name from a stale peer.
   mergedAway: string[];
+  // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
+  substitutions: IngredientSubstitution[];
   stopReasons: string[];
   // Per-product profiles, keyed by `${brand}__${flavor}` (lowercased/trimmed)
   brandProfiles: Record<string, RunProfile>;
@@ -1292,6 +1308,11 @@ interface RunContextValue {
   resetRun: () => void;
   shiftNotes: string;
   setShiftNotes: (notes: string) => void;
+  // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
+  substitutions: IngredientSubstitution[];
+  addSubstitution: (sub: IngredientSubstitution) => void;
+  removeSubstitution: (id: string) => void;
+  clearSubstitutions: () => void;
   templates: RunTemplate[];
   history: HistoryDay[];
   saveTemplate: (name: string) => void;
@@ -1400,6 +1421,7 @@ const INITIAL_STATE: AppState = {
     ]),
   ],
   mergedAway: [],
+  substitutions: [],
   stopReasons: [...DEFAULT_STOP_REASONS],
   brandProfiles: {},
   doughRecipePresets: {},
@@ -1535,6 +1557,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         ]),
       ],
     mergedAway: parsed.mergedAway ?? [],
+    substitutions: parsed.substitutions ?? [],
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
     brandProfiles: Object.fromEntries(
       Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [
@@ -1607,7 +1630,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
                 runs: parsed.runs.map(normalizeRun),
                 history,
               };
-              consumeOpenRunsForRollover(current.runs);
+              consumeOpenRunsForRollover(current.runs, current.substitutions ?? []);
               const next = buildNextDayState(current, today);
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -1645,7 +1668,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       const cur = appStateRef.current;
       const today = todayStr();
       if (!cur.date || cur.date === today) return;
-      consumeOpenRunsForRollover(cur.runs);
+      consumeOpenRunsForRollover(cur.runs, cur.substitutions ?? []);
       const next = buildNextDayState(cur, today);
       setAppState(next);
       void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -1926,7 +1949,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           if (i !== prev.currentIndex && r.startedAt != null && r.endedAt == null) {
             void consumeRunInventory(
               r.id,
-              computeRunConsumptionLines(r.settings),
+              computeRunConsumptionLines(overlaySettings(r.settings, prev.substitutions ?? [])),
             ).catch(() => {});
           }
         });
@@ -1948,10 +1971,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     () =>
       updateCurrentRun((r) => {
         // Auto-deduct this run's planned usage from inventory (idempotent by
-        // run id; no-op for unknown item keys / when sync is disabled).
-        void consumeRunInventory(r.id, computeRunConsumptionLines(r.settings)).catch(
-          () => {},
-        );
+        // run id; no-op for unknown item keys / when sync is disabled). Overlay
+        // today's substitutions so the substitute is drawn down, not the short item.
+        void consumeRunInventory(
+          r.id,
+          computeRunConsumptionLines(overlaySettings(r.settings, appStateRef.current.substitutions ?? [])),
+        ).catch(() => {});
         return { ...r, isRunning: false, endedAt: Date.now() };
       }),
     [updateCurrentRun],
@@ -2071,7 +2096,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // to voice as a manager-only command. Mirrors web's voice rollover handler.
   const rolloverDay = useCallback(() => {
     const cur = appStateRef.current;
-    consumeOpenRunsForRollover(cur.runs);
+    consumeOpenRunsForRollover(cur.runs, cur.substitutions ?? []);
     const now = Date.now();
     const archived: HistoryDay = {
       date: cur.date,
@@ -2082,6 +2107,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       runs: [makeNewRun()],
       currentIndex: 0,
       shiftNotes: "",
+      substitutions: [],
       date: todayStr(),
       resetAt: now,
       history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -2213,6 +2239,45 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     },
     [persist],
   );
+
+  // Temporary substitutions: one active overlay per affected ingredient, so
+  // adding for the same ingredient replaces the prior one (case-insensitive).
+  const addSubstitution = useCallback(
+    (sub: IngredientSubstitution) => {
+      setAppState((prev) => {
+        const target = sub.ingredient.trim().toLowerCase();
+        const others = (prev.substitutions ?? []).filter(
+          (s) => s.ingredient.trim().toLowerCase() !== target,
+        );
+        const next = { ...prev, substitutions: [...others, sub] };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const removeSubstitution = useCallback(
+    (id: string) => {
+      setAppState((prev) => {
+        const next = {
+          ...prev,
+          substitutions: (prev.substitutions ?? []).filter((s) => s.id !== id),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const clearSubstitutions = useCallback(() => {
+    setAppState((prev) => {
+      const next = { ...prev, substitutions: [] };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
 
   const saveTemplate = useCallback(
     (name: string) => {
@@ -2972,7 +3037,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     if (!r?.isRunning) return;
     const nowMs = Date.now();
     if (nowMs < autoSuppressRef.current) return;
-    const c = computeCalc(r, nowMs);
+    const c = computeCalc(r, nowMs, appState.substitutions ?? []);
     if (
       c.ppm <= 0 ||
       r.settings.casesPerSkid <= 0 ||
@@ -3059,7 +3124,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   }, [tick]);
 
   const activeStoppage = currentRun?.stoppages?.find((s) => s.endedAt == null) ?? null;
-  const calc = computeCalc(currentRun ?? makeNewRun(), Date.now());
+  const calc = computeCalc(currentRun ?? makeNewRun(), Date.now(), appState.substitutions ?? []);
 
   // The main context value excludes the per-second clock fields and is memoized
   // so its identity stays stable across ticks. Every callback below is
@@ -3092,6 +3157,10 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         resetRun,
         shiftNotes: appState.shiftNotes,
         setShiftNotes,
+        substitutions: appState.substitutions,
+        addSubstitution,
+        removeSubstitution,
+        clearSubstitutions,
         templates: appState.templates,
         history: appState.history,
         saveTemplate,

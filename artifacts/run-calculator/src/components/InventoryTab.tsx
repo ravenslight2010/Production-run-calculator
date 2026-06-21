@@ -66,6 +66,8 @@ import {
 } from "../inventoryShared";
 import { saveFacilityKnowledge } from "../aiMemory";
 import { useMe } from "../useRole";
+import type { IngredientSubstitution } from "@workspace/inventory-math";
+import SubstitutionsManager from "./SubstitutionsManager";
 import StaffRolesCard from "./StaffRolesCard";
 import ProductionRulesManager from "./ProductionRulesManager";
 import ChangePasswordCard from "./ChangePasswordCard";
@@ -98,12 +100,27 @@ function expiryClass(status: ReturnType<typeof lotExpiryStatus>): string {
   return "text-muted-foreground";
 }
 
-export default function InventoryTab({ candidates }: { candidates: CandidateItem[] }) {
+export default function InventoryTab({
+  candidates,
+  substitutions,
+  substitutionOptions,
+  onAddSubstitution,
+  onRemoveSubstitution,
+  onClearSubstitutions,
+}: {
+  candidates: CandidateItem[];
+  substitutions: IngredientSubstitution[];
+  substitutionOptions: string[];
+  onAddSubstitution: (sub: IngredientSubstitution) => void;
+  onRemoveSubstitution: (id: string) => void;
+  onClearSubstitutions: () => void;
+}) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [subPrefill, setSubPrefill] = useState<string | null>(null);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
   const { hasCapability } = useMe();
@@ -230,14 +247,34 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
             {alerts.low.map((item) => (
               <div key={`low-${item.id}`} className="flex items-center justify-between gap-2">
                 <span className="text-amber-500 truncate">{item.name} — low stock</span>
-                <span className="text-amber-500 font-medium tabular-nums whitespace-nowrap">
-                  {fmtQty(item.onHand)} / {fmtQty(item.reorderThreshold)} {item.unit}
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <span className="text-amber-500 font-medium tabular-nums">
+                    {fmtQty(item.onHand)} / {fmtQty(item.reorderThreshold)} {item.unit}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSubPrefill(item.name)}
+                    className="shrink-0 px-2 py-0.5 rounded border border-amber-500/50 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 transition-colors"
+                  >
+                    Substitute
+                  </button>
                 </span>
               </div>
             ))}
           </CardContent>
         </Card>
       )}
+
+      {/* Temporary substitutions overlay (day-state, reverts at daily reset) */}
+      <SubstitutionsManager
+        substitutions={substitutions}
+        ingredientOptions={substitutionOptions}
+        onAdd={onAddSubstitution}
+        onRemove={onRemoveSubstitution}
+        onClearAll={onClearSubstitutions}
+        prefillIngredient={subPrefill}
+        onPrefillConsumed={() => setSubPrefill(null)}
+      />
 
       {/* Add item (manage-inventory: inventory-item master-data write) */}
       {canManageInventory && (

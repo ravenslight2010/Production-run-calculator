@@ -74,3 +74,4 @@
 - [Isolated env stale workspace links](isolated-env-stale-workspace-links.md) — task env may miss @workspace/* node_modules symlinks → "cannot find module"/build fails; fix with `pnpm install` (+ typecheck:libs), not code changes.
 - [Voice commands](voice-commands.md) — spoken phrase → /ai/command classifies question vs command; actions run via EXISTING handlers (no confirm, Undo safety net); parity in @workspace/voice-commands dispatch; server grounds fuzzy refs; mobile Undo drift accepted.
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
+- [Temp ingredient substitutions](temp-substitutions.md) — day-state overlay (swap/add/remove) for today's recipes; overlay BOTH totals + consumption keys (type fields by value); shared @workspace/inventory-math; web+mobile parity.

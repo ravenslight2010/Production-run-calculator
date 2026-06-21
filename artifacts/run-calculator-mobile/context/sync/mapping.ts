@@ -37,6 +37,7 @@ import type {
   WebStoppage,
 } from "./payloadTypes";
 import { normalizeAllergen } from "@workspace/allergen";
+import type { IngredientSubstitution } from "@workspace/inventory-math";
 
 // The slice of AppState that participates in sync.
 export interface SyncableState {
@@ -54,6 +55,7 @@ export interface SyncableState {
   doughIngredients: string[];
   frontlineIngredients: string[];
   mergedAway: string[];
+  substitutions: IngredientSubstitution[];
 }
 
 export type SyncableStatePatch = Partial<SyncableState>;
@@ -331,6 +333,7 @@ export function appStateToPayload(
       runToTime: state.runToTime,
       resetAt: state.resetAt,
       date: todayStr(),
+      substitutions: state.substitutions ?? [],
     },
     runValues,
     brands: state.brands,
@@ -422,6 +425,9 @@ export function applyPayloadToState(
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;
     if (ds.runToTime !== undefined) patch.runToTime = ds.runToTime;
+    // Substitutions are a today-only overlay: when the remote day is accepted,
+    // adopt its substitution list wholesale (web parity — replaced, not merged).
+    patch.substitutions = Array.isArray(ds.substitutions) ? ds.substitutions : [];
     patch.resetAt = Math.max(prev.resetAt, remoteResetAt);
     patch.date = todayStr();
   }

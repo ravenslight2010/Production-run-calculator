@@ -255,7 +255,7 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
 }
 
 export function freshDayState(): DayState {
-  return { runs: [{ id: genId(), brand: "", flavor: "" }], currentIndex: 0, date: todayStr() };
+  return { runs: [{ id: genId(), brand: "", flavor: "" }], currentIndex: 0, date: todayStr(), substitutions: [] };
 }
 
 export function loadDayState(): DayState {

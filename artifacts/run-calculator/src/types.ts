@@ -1,4 +1,7 @@
 import * as z from "zod";
+import type { IngredientSubstitution } from "@workspace/inventory-math";
+
+export type { IngredientSubstitution };
 
 export const formSchema = z.object({
   casesNeeded: z.coerce.number().min(0).default(384),
@@ -202,10 +205,14 @@ export type DayState = {
   shiftNotes?: string;
   runToTime?: string;
   resetAt?: number;
+  // Temporary ingredient substitutions overlaid on ALL of today's runs (swap /
+  // add / remove). Lives in synced day-state, NOT master data; auto-reverts at
+  // the daily reset (freshDayState) or when manually cleared.
+  substitutions?: IngredientSubstitution[];
 };
 
 export type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[] };
   runValues: Record<string, FormValues>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;

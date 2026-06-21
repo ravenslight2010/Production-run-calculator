@@ -227,6 +227,170 @@ export function computeRunConsumptionLines(
   return computeRunLines(vals, defaultPepTypes).map((l) => ({ itemKey: l.key, qty: l.qty }));
 }
 
+// ── Temporary recipe substitutions (day-state overlay) ───────────────────────
+//
+// When an ingredient runs low/out, floor staff overlay today's recipes with a
+// temporary substitution that applies to ALL of today's runs containing the
+// affected ingredient. The overlay is PURE and SHARED so material totals and
+// inventory consumption keys are computed from the substituted recipe
+// identically on web and mobile (replit.md parity). Substitutions live in the
+// synced day-state (not master data), so they auto-revert at the daily reset.
+//
+// An overlay can target two surfaces of a run's settings:
+//   1. Recipe rows ({ingredient, lbs}) in doughRecipe / frontlineRecipe /
+//      app1..4CheeseRecipe — matched by row ingredient name.
+//   2. Applicator / pepperoni TYPE fields (app1..4Type, pep1Type, pep2Type) —
+//      matched by field value. Swapping a type changes the inventory
+//      consumption key so the substitute is drawn down and the short item is not.
+
+export type SubstitutionAction = "swap" | "add" | "remove";
+
+export type IngredientSubstitution = {
+  id: string;
+  /** The affected (short) ingredient name, matched case-insensitively. */
+  ingredient: string;
+  action: SubstitutionAction;
+  /** For swap/add: the replacement / supplemental ingredient name. */
+  substitute?: string;
+  /** For swap/add: the substitute's amount (lbs) on a recipe row. */
+  amount?: number;
+};
+
+// Applicator + pepperoni type fields an overlay can rewrite (changing the
+// consumption key for that slot).
+export const SUBSTITUTION_TYPE_FIELDS = [
+  "app1Type",
+  "app2Type",
+  "app3Type",
+  "app4Type",
+  "pep1Type",
+  "pep2Type",
+] as const;
+
+// Recipe-row arrays an overlay can rewrite.
+export const SUBSTITUTION_RECIPE_FIELDS = [
+  "doughRecipe",
+  "frontlineRecipe",
+  "app1CheeseRecipe",
+  "app2CheeseRecipe",
+  "app3CheeseRecipe",
+  "app4CheeseRecipe",
+] as const;
+
+function normSubName(s: unknown): string {
+  return typeof s === "string" ? s.trim().toLowerCase() : "";
+}
+
+/** Active substitutions whose affected ingredient matches `name` (case-insensitive). */
+export function substitutionsForIngredient(
+  subs: readonly IngredientSubstitution[] | undefined,
+  name: string,
+): IngredientSubstitution[] {
+  const target = normSubName(name);
+  if (!target) return [];
+  return (subs ?? []).filter((s) => normSubName(s.ingredient) === target);
+}
+
+/**
+ * Apply the day's substitutions to a single recipe-row array. Pure; returns the
+ * effective rows plus whether anything changed (for "temporary override" labels).
+ *   - swap:   matching row → { substitute, amount ?? original lbs }
+ *   - add:    keep the row, append { substitute, amount }
+ *   - remove: drop the row
+ */
+export function applyRecipeSubstitutions(
+  rows: readonly RecipeRow[] | undefined,
+  subs: readonly IngredientSubstitution[] | undefined,
+): { rows: RecipeRow[]; changed: boolean } {
+  const list = rows ?? [];
+  if (!subs || subs.length === 0) return { rows: list.map((r) => ({ ...r })), changed: false };
+  let changed = false;
+  const out: RecipeRow[] = [];
+  for (const row of list) {
+    const matches = substitutionsForIngredient(subs, row.ingredient);
+    if (matches.length === 0) {
+      out.push({ ...row });
+      continue;
+    }
+    // Apply each matching substitution to this row, in order. Once a swap/remove
+    // rewrites the row's identity it no longer matches later subs for the
+    // original name, which is the intended single-overlay behavior.
+    let current: RecipeRow | null = { ...row };
+    const supplements: RecipeRow[] = [];
+    for (const sub of matches) {
+      if (sub.action === "remove") {
+        current = null;
+        changed = true;
+        break;
+      }
+      if (sub.action === "swap" && current) {
+        const subName = (sub.substitute ?? "").trim();
+        if (subName) {
+          current = { ingredient: subName, lbs: numOr(sub.amount, current.lbs) };
+          changed = true;
+        }
+      } else if (sub.action === "add") {
+        const subName = (sub.substitute ?? "").trim();
+        if (subName) {
+          supplements.push({ ingredient: subName, lbs: numOr(sub.amount, 0) });
+          changed = true;
+        }
+      }
+    }
+    if (current) out.push(current);
+    out.push(...supplements);
+  }
+  return { rows: out, changed };
+}
+
+function numOr(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function hasName(v: unknown): boolean {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+/**
+ * Apply the day's substitutions to a run's settings/values object, returning a
+ * shallow clone with substituted recipe arrays AND type fields. Drives BOTH the
+ * material totals (computeSummaryStats) and the consumption keys (computeRunLines)
+ * so the substitute is drawn down and the short item is not. Pure — never mutates
+ * the input, so the overlay reverts cleanly when the substitution is cleared.
+ */
+export function applySubstitutions<T extends Record<string, unknown>>(
+  vals: T,
+  subs: readonly IngredientSubstitution[] | undefined,
+): T {
+  if (!subs || subs.length === 0) return vals;
+  const out: Record<string, unknown> = { ...vals };
+  // Recipe-row arrays
+  for (const field of SUBSTITUTION_RECIPE_FIELDS) {
+    const arr = out[field];
+    if (!Array.isArray(arr)) continue;
+    const { rows, changed } = applyRecipeSubstitutions(arr as RecipeRow[], subs);
+    if (changed) out[field] = rows;
+  }
+  // Applicator / pepperoni type fields — swap rewrites the key, remove clears it.
+  // "add" never rewrites a type slot (a single slot can't hold a supplement).
+  for (const field of SUBSTITUTION_TYPE_FIELDS) {
+    const cur = out[field];
+    if (typeof cur !== "string" || !cur.trim()) continue;
+    const matches = substitutionsForIngredient(subs, cur);
+    for (const sub of matches) {
+      if (sub.action === "remove") {
+        out[field] = "";
+        break;
+      }
+      if (sub.action === "swap" && hasName(sub.substitute)) {
+        out[field] = sub.substitute!.trim();
+      }
+    }
+  }
+  return out as T;
+}
+
 // Distinct candidate items across the given runs, for the "add from production"
 // picker. Deduped by stable key; quantities are dropped.
 export function deriveCandidateItems(

@@ -1,6 +1,7 @@
 import type { FormValues, RunMeta } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
 import { computeSummaryStats as computeSummaryStatsShared } from "@workspace/inventory-math";
+import { withSubstitutions } from "./substitutionState";
 
 export function fmtElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -56,7 +57,7 @@ export function runLabel(r: RunMeta): string {
 // single-arg signature; the formulas live in @workspace/inventory-math (shared
 // with mobile). DEFAULT_PEP_TYPES is injected because it is owned per-app.
 export function computeSummaryStats(vals: FormValues) {
-  return computeSummaryStatsShared(vals, DEFAULT_PEP_TYPES);
+  return computeSummaryStatsShared(withSubstitutions(vals), DEFAULT_PEP_TYPES);
 }
 
 export function sauceBarrelBreakdown(

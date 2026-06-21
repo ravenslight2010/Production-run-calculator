@@ -17,10 +17,13 @@ import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
   deriveCandidateItems as deriveCandidateItemsShared,
+  applySubstitutions as applySubstitutionsShared,
   type InventoryCategory,
   type ConsumeLine,
   type CandidateItem,
   type RunLine,
+  type IngredientSubstitution,
+  type SubstitutionAction,
 } from "@workspace/inventory-math";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 import { notifyUnauthorized } from "./authEvents";
@@ -31,7 +34,22 @@ import { notifyUnauthorized } from "./authEvents";
 // imported above for use within this file). RunSettings already uses the lib's
 // canonical `doughballWeightOz` field name, so it is passed straight through;
 // only DEFAULT_PEP_TYPES is injected (owned per-app).
-export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine };
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, IngredientSubstitution, SubstitutionAction };
+
+// Overlay today's temporary substitutions onto a run's settings before computing
+// totals/consumption. Pure (clones) so the override reverts cleanly when subs are
+// cleared. Recipe arrays + type fields share the lib's field-name contract, so
+// RunSettings is passed straight through (cast around the generic constraint).
+export function overlaySettings(
+  settings: RunSettings,
+  subs: IngredientSubstitution[] | undefined,
+): RunSettings {
+  if (!subs || subs.length === 0) return settings;
+  return applySubstitutionsShared(
+    settings as unknown as Record<string, unknown>,
+    subs,
+  ) as unknown as RunSettings;
+}
 
 // ── Types (mirror the API server's inventory responses) ──────────────────────
 

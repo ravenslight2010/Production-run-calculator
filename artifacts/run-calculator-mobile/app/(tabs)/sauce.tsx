@@ -4,12 +4,13 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, ReadOnlyRecipe, StatRow } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
 import { useRun, computeCalc, sauceBarrelBreakdown } from "@/context/RunContext";
+import RecipeSubstitutionBadge from "@/components/RecipeSubstitutionBadge";
 import { useColors } from "@/hooks/useColors";
 
 export default function SauceScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run } = useRun();
+  const { run, substitutions } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -32,6 +33,11 @@ export default function SauceScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <RecipeSubstitutionBadge
+          substitutions={substitutions}
+          recipes={[run.settings.frontlineRecipe]}
+          typeValues={[]}
+        />
         <Card title="Sauce Needs" icon="droplet" style={{ marginBottom: 16 }}>
           {hasSauce ? (
             <StatRow label="Sauce" value={sauceValue} />

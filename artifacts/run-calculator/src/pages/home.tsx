@@ -48,6 +48,7 @@ import {
   MAX_HISTORY_DAYS,
   type MasterDataChange,
   type MasterDataChangeType,
+  type IngredientSubstitution,
 } from "../types";
 import {
   fmtElapsed,
@@ -61,6 +62,7 @@ import {
   todayStr,
   runLabel,
 } from "../utils";
+import { setActiveSubstitutions } from "../substitutionState";
 import {
   freshDayState,
   loadDayState,
@@ -108,6 +110,7 @@ import {
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
+import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import AssistantTab from "../components/AssistantTab";
 import {
   dispatchVoiceCommand,
@@ -2619,6 +2622,11 @@ export default function Home() {
 
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
+  // Mirror today's substitution overlay into the shared-calc module so every
+  // call site (calc useMemo, warehouse roll-up, consumeRun, schedule/history
+  // totals) overlays it without threading it through each call. See
+  // substitutionState.ts. Runs synchronously enough for the next render's calc.
+  useEffect(() => { setActiveSubstitutions(dayState.substitutions ?? []); }, [dayState.substitutions]);
 
   // ── Proactive shift alerts ────────────────────────────────────────────────
   // Poll the server on a cadence for at most one timely, dismissible nudge.
@@ -2683,6 +2691,11 @@ export default function Home() {
             shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
             runToTime: payload.dayState.runToTime ?? prev.runToTime,
             resetAt: remoteResetAt > 0 ? remoteResetAt : prev.resetAt,
+            // Substitutions are an authoritative whole-day overlay: when we accept
+            // the remote day, accept its full substitution list (including an
+            // empty one, which is a remote "clear"). Don't merge — last writer of
+            // the accepted day wins, same as runs.
+            substitutions: payload.dayState.substitutions ?? [],
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -2979,7 +2992,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now() };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [] };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -3069,7 +3082,7 @@ export default function Home() {
       }
     }
     return {
-      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr() },
+      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [] },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
@@ -3159,6 +3172,34 @@ export default function Home() {
     const openStop = dayState.runs[newIndex].stoppages?.find(s => !s.endedAt);
     setActiveStopId(openStop?.id ?? null);
     setConfirmDeleteStopId(null);
+  }
+
+  // ── Temporary ingredient substitutions (day-state overlay) ─────────────────
+  // Floor staff overlay today's recipes when an ingredient is low/out. These
+  // never touch master data or the editable run recipes — they live in the
+  // synced day-state and auto-revert at the daily reset (freshDayState clears
+  // them) or when cleared here. The shared calc/consumption engine applies them
+  // via substitutionState (mirrored by the effect above).
+  function persistSubstitutions(subs: IngredientSubstitution[]) {
+    const newDs = { ...dayStateRef.current, substitutions: subs };
+    setDayState(newDs);
+    saveDayState(newDs);
+    setActiveSubstitutions(subs);
+    lastLocalEditRef.current = Date.now();
+    schedulePush(newDs, 0);
+  }
+  function addSubstitution(sub: IngredientSubstitution) {
+    const existing = dayStateRef.current.substitutions ?? [];
+    // One active substitution per affected ingredient — replace if it exists.
+    const next = [...existing.filter(s => s.ingredient !== sub.ingredient), sub];
+    persistSubstitutions(next);
+  }
+  function removeSubstitution(id: string) {
+    const existing = dayStateRef.current.substitutions ?? [];
+    persistSubstitutions(existing.filter(s => s.id !== id));
+  }
+  function clearSubstitutions() {
+    persistSubstitutions([]);
   }
 
   function addRun() {
@@ -4488,7 +4529,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now() };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [] };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -8396,7 +8437,28 @@ export default function Home() {
               <TabsContent value="inventory">
                 {(() => {
                   const valsList = dayState.runs.map(r => r.id === currentRunId ? form.getValues() : loadRunValues(r.id));
-                  return <InventoryTab candidates={deriveCandidateItems(valsList)} />;
+                  const candidates = deriveCandidateItems(valsList);
+                  // Suggestions for the substitution pickers: consumption-key names
+                  // (cheese/pep types, Dough, Sauce, packaging) plus every recipe-row
+                  // ingredient and non-empty type value across today's runs, so staff
+                  // can target a recipe ingredient (e.g. Flour) too. Free text allowed.
+                  const optSet = new Set<string>(candidates.map(c => c.name));
+                  for (const v of valsList) {
+                    const recipes = [
+                      v.doughRecipe, v.frontlineRecipe,
+                      v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe,
+                    ];
+                    for (const rows of recipes) for (const r of rows ?? []) if (r?.ingredient) optSet.add(r.ingredient);
+                    for (const t of [v.app1Type, v.app2Type, v.app3Type, v.app4Type, v.pep1Type, v.pep2Type]) if (t) optSet.add(t);
+                  }
+                  return <InventoryTab
+                    candidates={candidates}
+                    substitutions={dayState.substitutions ?? []}
+                    substitutionOptions={[...optSet].sort()}
+                    onAddSubstitution={addSubstitution}
+                    onRemoveSubstitution={removeSubstitution}
+                    onClearSubstitutions={clearSubstitutions}
+                  />;
                 })()}
               </TabsContent>
 
@@ -8805,6 +8867,11 @@ export default function Home() {
                   );
                 })()}
 
+                <RecipeSubstitutionBadge
+                  substitutions={dayState.substitutions ?? []}
+                  recipes={[v.doughRecipe, v.frontlineRecipe, v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe]}
+                  typeValues={[v.app1Type, v.app2Type, v.app3Type, v.app4Type, v.pep1Type, v.pep2Type]}
+                />
                 <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 {doughSubTab === "dough" && (
                 <DoughRecipeCard

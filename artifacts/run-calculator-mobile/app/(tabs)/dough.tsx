@@ -15,6 +15,7 @@ import {
   computeDoughSupply,
   type DoughSupplyMode,
 } from "@/context/RunContext";
+import RecipeSubstitutionBadge from "@/components/RecipeSubstitutionBadge";
 import { useColors } from "@/hooks/useColors";
 
 const MAX_TRAYS = 74;
@@ -26,7 +27,7 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateProgress } = useRun();
+  const { run, updateProgress, substitutions } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
@@ -50,6 +51,11 @@ export default function DoughScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        <RecipeSubstitutionBadge
+          substitutions={substitutions}
+          recipes={[run.settings.doughRecipe]}
+          typeValues={[]}
+        />
         {/* Mode toggle */}
         {supplyConfigured ? (
           <View style={styles.supplyHeader}>

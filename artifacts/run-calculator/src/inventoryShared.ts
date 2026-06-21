@@ -1,5 +1,6 @@
 import type { FormValues } from "./types";
 import { DEFAULT_PEP_TYPES } from "./types";
+import { withSubstitutions } from "./substitutionState";
 import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
@@ -20,7 +21,11 @@ export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine };
 // Web `FormValues` uses `targetDoughballWeight`; the shared lib's canonical
 // field name is `doughballWeightOz`. Map it here so the formulas stay shared.
 function toRunLinesInput(vals: FormValues): RunLinesInput {
-  return { ...vals, doughballWeightOz: vals.targetDoughballWeight };
+  // Overlay today's substitutions (if any) BEFORE mapping to the shared input,
+  // so consumption keys (ingredient:<Name>:lbs|batches) reflect the swap/add/
+  // remove for every run that contains the affected ingredient.
+  const v = withSubstitutions(vals);
+  return { ...v, doughballWeightOz: v.targetDoughballWeight };
 }
 
 // ── Types (mirror the API server's inventory responses) ──────────────────────

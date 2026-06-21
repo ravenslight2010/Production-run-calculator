@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, Button } from "@/components/UI";
 import { useRun } from "@/context/RunContext";
+import SubstitutionsManager from "@/components/SubstitutionsManager";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import {
@@ -84,7 +85,8 @@ function fmtDateTime(iso: string): string {
 export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns } = useRun();
+  const { allRuns, substitutions, addSubstitution, removeSubstitution, clearSubstitutions } =
+    useRun();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
@@ -158,6 +160,32 @@ export default function InventoryScreen() {
     () => deriveCandidateItems(allRuns.map((r) => r.settings)),
     [allRuns],
   );
+
+  const [subPrefill, setSubPrefill] = useState<string | null>(null);
+
+  // Options for the substitution pickers: consumption-key names (cheese/pep
+  // types, Dough, Sauce, packaging) plus every recipe-row ingredient and
+  // non-empty type value across today's runs. Mirrors web's optSet. Free text
+  // is still allowed via the picker's add row.
+  const substitutionOptions = useMemo(() => {
+    const set = new Set<string>(candidates.map((c) => c.name));
+    for (const r of allRuns) {
+      const s = r.settings;
+      const recipes = [
+        s.doughRecipe,
+        s.frontlineRecipe,
+        s.app1CheeseRecipe,
+        s.app2CheeseRecipe,
+        s.app3CheeseRecipe,
+        s.app4CheeseRecipe,
+      ];
+      for (const rows of recipes)
+        for (const row of rows ?? []) if (row?.ingredient) set.add(row.ingredient);
+      for (const t of [s.app1Type, s.app2Type, s.app3Type, s.app4Type, s.pep1Type, s.pep2Type])
+        if (t) set.add(t);
+    }
+    return [...set].sort();
+  }, [candidates, allRuns]);
 
   const alerts = useMemo(() => {
     const low: InventoryItem[] = [];
@@ -237,9 +265,16 @@ export default function InventoryScreen() {
               ))}
               {alerts.low.map((item) => (
                 <View key={`low-${item.id}`} style={styles.alertRow}>
-                  <Text style={[styles.alertText, { color: colors.warning }]} numberOfLines={1}>
-                    {item.name} — low stock
-                  </Text>
+                  <Pressable
+                    onPress={() => setSubPrefill(item.name)}
+                    hitSlop={6}
+                    style={styles.subPrefillBtn}
+                  >
+                    <Feather name="repeat" size={12} color={colors.warning} />
+                    <Text style={[styles.subPrefillText, { color: colors.warning }]} numberOfLines={1}>
+                      {item.name} — low stock
+                    </Text>
+                  </Pressable>
                   <Text style={[styles.alertValue, { color: colors.warning }]} numberOfLines={1}>
                     {fmtQty(item.onHand)} / {fmtQty(item.reorderThreshold)} {item.unit}
                   </Text>
@@ -248,6 +283,17 @@ export default function InventoryScreen() {
             </View>
           </Card>
         )}
+
+        {/* Temporary substitutions overlay (day-state, reverts at daily reset) */}
+        <SubstitutionsManager
+          substitutions={substitutions}
+          ingredientOptions={substitutionOptions}
+          onAdd={addSubstitution}
+          onRemove={removeSubstitution}
+          onClearAll={clearSubstitutions}
+          prefillIngredient={subPrefill}
+          onPrefillConsumed={() => setSubPrefill(null)}
+        />
 
         {/* Add item (manage-inventory: inventory-item master-data write) */}
         {canManageInventory && (
@@ -1975,6 +2021,8 @@ const styles = StyleSheet.create({
   },
   alertText: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular },
   alertValue: { fontSize: 13, fontFamily: FONTS.medium, flexShrink: 0 },
+  subPrefillBtn: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 1 },
+  subPrefillText: { fontSize: 13, flexShrink: 1, fontFamily: FONTS.regular, textDecorationLine: "underline" },
 
   settingsRow: {
     flexDirection: "row",
