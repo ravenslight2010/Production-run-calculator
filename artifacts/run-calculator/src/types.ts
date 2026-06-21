@@ -1,7 +1,7 @@
 import * as z from "zod";
-import type { IngredientSubstitution } from "@workspace/inventory-math";
+import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 
-export type { IngredientSubstitution };
+export type { IngredientSubstitution, SubstitutionLogEntry };
 
 export const formSchema = z.object({
   casesNeeded: z.coerce.number().min(0).default(384),
@@ -209,10 +209,14 @@ export type DayState = {
   // add / remove). Lives in synced day-state, NOT master data; auto-reverts at
   // the daily reset (freshDayState) or when manually cleared.
   substitutions?: IngredientSubstitution[];
+  // Read-only timestamped trail of substitution add/clear actions for shift
+  // handoffs and end-of-day review. Synced alongside substitutions; cleared at
+  // the daily reset. Never feeds the calc — purely an audit log.
+  substitutionLog?: SubstitutionLogEntry[];
 };
 
 export type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[] };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[] };
   runValues: Record<string, FormValues>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;

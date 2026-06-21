@@ -256,6 +256,32 @@ export type IngredientSubstitution = {
   amount?: number;
 };
 
+// Plain-language description of a single substitution, shown in the manage
+// panel, the recipe badge, and the activity log. Shared so web and mobile read
+// identically (replit.md parity).
+export function describeSubstitution(s: IngredientSubstitution): string {
+  const amt = s.amount != null && s.amount > 0 ? ` (${s.amount} lbs)` : "";
+  if (s.action === "remove") return `Remove ${s.ingredient}`;
+  if (s.action === "add") return `Add ${s.substitute ?? ""}${amt} alongside ${s.ingredient}`;
+  return `Swap ${s.ingredient} → ${s.substitute ?? ""}${amt}`;
+}
+
+// A timestamped record of a substitution being added or cleared during the day,
+// for shift handoffs and end-of-day review. Lives in the synced day-state
+// alongside the active substitutions and auto-clears at the daily reset. Purely
+// a read-only audit trail — it never feeds the calc/consumption engine.
+export type SubstitutionLogEntry = {
+  id: string;
+  /** Epoch ms when the action happened. */
+  ts: number;
+  /** Whether a substitution was added/replaced or removed/cleared. */
+  kind: "added" | "cleared";
+  /** Plain-language summary of the substitution (see describeSubstitution). */
+  description: string;
+  /** Username of whoever performed the action, when known. */
+  user?: string;
+};
+
 // Applicator + pepperoni type fields an overlay can rewrite (changing the
 // consumption key for that slot).
 export const SUBSTITUTION_TYPE_FIELDS = [

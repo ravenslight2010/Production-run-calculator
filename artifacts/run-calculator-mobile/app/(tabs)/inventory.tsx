@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, Button } from "@/components/UI";
 import { useRun } from "@/context/RunContext";
 import SubstitutionsManager from "@/components/SubstitutionsManager";
+import SubstitutionLog from "@/components/SubstitutionLog";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import {
@@ -85,8 +86,14 @@ function fmtDateTime(iso: string): string {
 export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, substitutions, addSubstitution, removeSubstitution, clearSubstitutions } =
-    useRun();
+  const {
+    allRuns,
+    substitutions,
+    substitutionLog,
+    addSubstitution,
+    removeSubstitution,
+    clearSubstitutions,
+  } = useRun();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
@@ -294,6 +301,9 @@ export default function InventoryScreen() {
           prefillIngredient={subPrefill}
           onPrefillConsumed={() => setSubPrefill(null)}
         />
+
+        {/* Read-only activity log of today's substitution adds/clears */}
+        <SubstitutionLog entries={substitutionLog} />
 
         {/* Add item (manage-inventory: inventory-item master-data write) */}
         {canManageInventory && (

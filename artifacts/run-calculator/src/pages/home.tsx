@@ -49,6 +49,7 @@ import {
   type MasterDataChange,
   type MasterDataChangeType,
   type IngredientSubstitution,
+  type SubstitutionLogEntry,
 } from "../types";
 import {
   fmtElapsed,
@@ -112,6 +113,7 @@ import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
+import { describeSubstitution } from "../components/SubstitutionsManager";
 import AssistantTab from "../components/AssistantTab";
 import {
   dispatchVoiceCommand,
@@ -2727,8 +2729,9 @@ export default function Home() {
             // Substitutions are an authoritative whole-day overlay: when we accept
             // the remote day, accept its full substitution list (including an
             // empty one, which is a remote "clear"). Don't merge — last writer of
-            // the accepted day wins, same as runs.
+            // the accepted day wins, same as runs. The activity log rides along.
             substitutions: payload.dayState.substitutions ?? [],
+            substitutionLog: payload.dayState.substitutionLog ?? [],
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -3025,7 +3028,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [] };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [] };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -3115,7 +3118,7 @@ export default function Home() {
       }
     }
     return {
-      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [] },
+      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [] },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
@@ -3213,26 +3216,48 @@ export default function Home() {
   // synced day-state and auto-revert at the daily reset (freshDayState clears
   // them) or when cleared here. The shared calc/consumption engine applies them
   // via substitutionState (mirrored by the effect above).
-  function persistSubstitutions(subs: IngredientSubstitution[]) {
-    const newDs = { ...dayStateRef.current, substitutions: subs };
+  function persistSubstitutions(
+    subs: IngredientSubstitution[],
+    logEntries: SubstitutionLogEntry[] = [],
+  ) {
+    const prevLog = dayStateRef.current.substitutionLog ?? [];
+    const nextLog = logEntries.length ? [...prevLog, ...logEntries] : prevLog;
+    const newDs = { ...dayStateRef.current, substitutions: subs, substitutionLog: nextLog };
     setDayState(newDs);
     saveDayState(newDs);
     setActiveSubstitutions(subs);
     lastLocalEditRef.current = Date.now();
     schedulePush(newDs, 0);
   }
+  // Build a timestamped audit-trail entry for the substitution activity log.
+  function makeSubLogEntry(kind: SubstitutionLogEntry["kind"], description: string): SubstitutionLogEntry {
+    return { id: genId(), ts: Date.now(), kind, description, ...(me?.name ? { user: me.name } : {}) };
+  }
   function addSubstitution(sub: IngredientSubstitution) {
     const existing = dayStateRef.current.substitutions ?? [];
     // One active substitution per affected ingredient — replace if it exists.
     const next = [...existing.filter(s => s.ingredient !== sub.ingredient), sub];
-    persistSubstitutions(next);
+    persistSubstitutions(next, [makeSubLogEntry("added", describeSubstitution(sub))]);
   }
   function removeSubstitution(id: string) {
     const existing = dayStateRef.current.substitutions ?? [];
-    persistSubstitutions(existing.filter(s => s.id !== id));
+    const removed = existing.find(s => s.id === id);
+    persistSubstitutions(
+      existing.filter(s => s.id !== id),
+      removed ? [makeSubLogEntry("cleared", describeSubstitution(removed))] : [],
+    );
   }
   function clearSubstitutions() {
-    persistSubstitutions([]);
+    const existing = dayStateRef.current.substitutions ?? [];
+    if (existing.length === 0) {
+      persistSubstitutions([]);
+      return;
+    }
+    const description =
+      existing.length === 1
+        ? describeSubstitution(existing[0])
+        : `All substitutions (${existing.length})`;
+    persistSubstitutions([], [makeSubLogEntry("cleared", description)]);
   }
 
   function addRun() {
@@ -4548,7 +4573,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [] };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [] };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -8523,6 +8548,7 @@ export default function Home() {
                   return <InventoryTab
                     candidates={candidates}
                     substitutions={dayState.substitutions ?? []}
+                    substitutionLog={dayState.substitutionLog ?? []}
                     substitutionOptions={[...optSet].sort()}
                     onAddSubstitution={addSubstitution}
                     onRemoveSubstitution={removeSubstitution}

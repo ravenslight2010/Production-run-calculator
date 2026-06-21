@@ -4,7 +4,7 @@
 // web client reads/writes. Keep field names in sync with the web `FormValues`,
 // `RunMeta`, and `SyncPayload` — they are the source of truth for the contract.
 
-import type { IngredientSubstitution } from "@workspace/inventory-math";
+import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 
 export interface WebRecipeRow {
   ingredient: string;
@@ -117,6 +117,8 @@ export interface SyncDayState {
   date?: string;
   // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
   substitutions?: IngredientSubstitution[];
+  // Read-only timestamped activity log of substitution adds/clears (today-only).
+  substitutionLog?: SubstitutionLogEntry[];
 }
 
 // The full daily payload. Mobile owns/maps a subset of these fields; any field

@@ -24,6 +24,7 @@ import {
   type RunLine,
   type IngredientSubstitution,
   type SubstitutionAction,
+  type SubstitutionLogEntry,
 } from "@workspace/inventory-math";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
 import { notifyUnauthorized } from "./authEvents";
@@ -34,7 +35,7 @@ import { notifyUnauthorized } from "./authEvents";
 // imported above for use within this file). RunSettings already uses the lib's
 // canonical `doughballWeightOz` field name, so it is passed straight through;
 // only DEFAULT_PEP_TYPES is injected (owned per-app).
-export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, IngredientSubstitution, SubstitutionAction };
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, IngredientSubstitution, SubstitutionAction, SubstitutionLogEntry };
 
 // Overlay today's temporary substitutions onto a run's settings before computing
 // totals/consumption. Pure (clones) so the override reverts cleanly when subs are

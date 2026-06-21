@@ -37,3 +37,20 @@ and accepted wholesale from a remote day (authoritative whole-day overlay).
 (read-only, on each recipe screen) exist in both apps. Low-stock alert rows have a
 "Substitute" prefill shortcut. One active substitution per affected ingredient
 (case-insensitive replace on add).
+
+## Activity log
+A read-only timestamped trail of substitution adds/clears (`SubstitutionLogEntry`)
+lives in the SAME synced day-state as the active overlay and MUST clear at every
+reset/rollover path that clears `substitutions` — keep the two in lockstep or the log
+outlives the substitutions it describes.
+
+**Why the `user` field differs per app:** the signer's display name comes from
+different fields — web `me.username`, mobile `me.name`. The mobile `StaffMember` type
+has NO `username` field (and the generated web `StaffMember` lacks it too), so guessing
+`username` on mobile fails typecheck. Resolve display name per-app, don't copy the web
+field name.
+
+**`describeSubstitution` is shared** (in `@workspace/inventory-math`), re-exported by
+both `SubstitutionsManager` components for the badge/home call sites — do NOT re-add a
+per-app copy (it was verbatim-duplicated before and drifted-prone). Putting it in the
+lib also avoids a circular import when RunContext needs it.

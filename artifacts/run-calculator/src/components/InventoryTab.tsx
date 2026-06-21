@@ -66,8 +66,9 @@ import {
 } from "../inventoryShared";
 import { saveFacilityKnowledge } from "../aiMemory";
 import { useMe } from "../useRole";
-import type { IngredientSubstitution } from "@workspace/inventory-math";
+import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import SubstitutionsManager from "./SubstitutionsManager";
+import SubstitutionLog from "./SubstitutionLog";
 import StaffRolesCard from "./StaffRolesCard";
 import ProductionRulesManager from "./ProductionRulesManager";
 import ChangePasswordCard from "./ChangePasswordCard";
@@ -102,18 +103,20 @@ function expiryClass(status: ReturnType<typeof lotExpiryStatus>): string {
 
 export default function InventoryTab({
   candidates,
-  substitutions,
-  substitutionOptions,
-  onAddSubstitution,
-  onRemoveSubstitution,
-  onClearSubstitutions,
+  substitutions = [],
+  substitutionLog = [],
+  substitutionOptions = [],
+  onAddSubstitution = () => {},
+  onRemoveSubstitution = () => {},
+  onClearSubstitutions = () => {},
 }: {
   candidates: CandidateItem[];
-  substitutions: IngredientSubstitution[];
-  substitutionOptions: string[];
-  onAddSubstitution: (sub: IngredientSubstitution) => void;
-  onRemoveSubstitution: (id: string) => void;
-  onClearSubstitutions: () => void;
+  substitutions?: IngredientSubstitution[];
+  substitutionLog?: SubstitutionLogEntry[];
+  substitutionOptions?: string[];
+  onAddSubstitution?: (sub: IngredientSubstitution) => void;
+  onRemoveSubstitution?: (id: string) => void;
+  onClearSubstitutions?: () => void;
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -275,6 +278,9 @@ export default function InventoryTab({
         prefillIngredient={subPrefill}
         onPrefillConsumed={() => setSubPrefill(null)}
       />
+
+      {/* Read-only activity log of today's substitution add/clear actions */}
+      <SubstitutionLog entries={substitutionLog} />
 
       {/* Add item (manage-inventory: inventory-item master-data write) */}
       {canManageInventory && (

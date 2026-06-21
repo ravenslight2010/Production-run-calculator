@@ -48,7 +48,9 @@ import {
   overlaySettings,
   type MergeInventoryLine,
   type IngredientSubstitution,
+  type SubstitutionLogEntry,
 } from "./inventoryShared";
+import { describeSubstitution } from "@workspace/inventory-math";
 import { useAuth } from "./auth";
 import {
   buildMergeMap,
@@ -475,6 +477,7 @@ function buildNextDayState(cur: AppState, today: string): AppState {
     currentIndex: 0,
     shiftNotes: "",
     substitutions: [],
+    substitutionLog: [],
     date: today,
     resetAt: boundaryMs,
     history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -899,6 +902,9 @@ interface AppState {
   mergedAway: string[];
   // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
   substitutions: IngredientSubstitution[];
+  // Read-only timestamped trail of substitution add/clear actions (audit log
+  // for shift handoffs); synced alongside substitutions, cleared at daily reset.
+  substitutionLog: SubstitutionLogEntry[];
   stopReasons: string[];
   // Per-product profiles, keyed by `${brand}__${flavor}` (lowercased/trimmed)
   brandProfiles: Record<string, RunProfile>;
@@ -1310,6 +1316,8 @@ interface RunContextValue {
   setShiftNotes: (notes: string) => void;
   // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
   substitutions: IngredientSubstitution[];
+  // Read-only audit trail of substitution add/clear actions for shift handoffs.
+  substitutionLog: SubstitutionLogEntry[];
   addSubstitution: (sub: IngredientSubstitution) => void;
   removeSubstitution: (id: string) => void;
   clearSubstitutions: () => void;
@@ -1422,6 +1430,7 @@ const INITIAL_STATE: AppState = {
   ],
   mergedAway: [],
   substitutions: [],
+  substitutionLog: [],
   stopReasons: [...DEFAULT_STOP_REASONS],
   brandProfiles: {},
   doughRecipePresets: {},
@@ -1558,6 +1567,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
       ],
     mergedAway: parsed.mergedAway ?? [],
     substitutions: parsed.substitutions ?? [],
+    substitutionLog: parsed.substitutionLog ?? [],
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
     brandProfiles: Object.fromEntries(
       Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [
@@ -1603,9 +1613,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
   // Auth hooks read through refs so the boot/sync effects (which run with stable
   // deps) always see the latest callbacks without re-subscribing.
-  const { forceSignedOut, revalidate } = useAuth();
+  const { forceSignedOut, revalidate, me } = useAuth();
   const forceSignedOutRef = useRef(forceSignedOut);
   forceSignedOutRef.current = forceSignedOut;
+  // Username for the substitution activity log, read through a ref so the
+  // stable add/clear callbacks always see the current signer without re-binding.
+  const meUsernameRef = useRef<string | undefined>(me?.name ?? undefined);
+  meUsernameRef.current = me?.name ?? undefined;
   const revalidateRef = useRef(revalidate);
   revalidateRef.current = revalidate;
 
@@ -2108,6 +2122,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       currentIndex: 0,
       shiftNotes: "",
       substitutions: [],
+      substitutionLog: [],
       date: todayStr(),
       resetAt: now,
       history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -2240,6 +2255,21 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Build a timestamped audit-trail entry for the substitution activity log.
+  const makeSubLogEntry = useCallback(
+    (kind: SubstitutionLogEntry["kind"], description: string): SubstitutionLogEntry => {
+      const user = meUsernameRef.current;
+      return {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        ts: Date.now(),
+        kind,
+        description,
+        ...(user ? { user } : {}),
+      };
+    },
+    [],
+  );
+
   // Temporary substitutions: one active overlay per affected ingredient, so
   // adding for the same ingredient replaces the prior one (case-insensitive).
   const addSubstitution = useCallback(
@@ -2249,35 +2279,62 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const others = (prev.substitutions ?? []).filter(
           (s) => s.ingredient.trim().toLowerCase() !== target,
         );
-        const next = { ...prev, substitutions: [...others, sub] };
-        persist(next);
-        return next;
-      });
-    },
-    [persist],
-  );
-
-  const removeSubstitution = useCallback(
-    (id: string) => {
-      setAppState((prev) => {
         const next = {
           ...prev,
-          substitutions: (prev.substitutions ?? []).filter((s) => s.id !== id),
+          substitutions: [...others, sub],
+          substitutionLog: [
+            ...(prev.substitutionLog ?? []),
+            makeSubLogEntry("added", describeSubstitution(sub)),
+          ],
         };
         persist(next);
         return next;
       });
     },
-    [persist],
+    [persist, makeSubLogEntry],
+  );
+
+  const removeSubstitution = useCallback(
+    (id: string) => {
+      setAppState((prev) => {
+        const removed = (prev.substitutions ?? []).find((s) => s.id === id);
+        const next = {
+          ...prev,
+          substitutions: (prev.substitutions ?? []).filter((s) => s.id !== id),
+          substitutionLog: removed
+            ? [
+                ...(prev.substitutionLog ?? []),
+                makeSubLogEntry("cleared", describeSubstitution(removed)),
+              ]
+            : (prev.substitutionLog ?? []),
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist, makeSubLogEntry],
   );
 
   const clearSubstitutions = useCallback(() => {
     setAppState((prev) => {
-      const next = { ...prev, substitutions: [] };
+      const existing = prev.substitutions ?? [];
+      const log =
+        existing.length === 0
+          ? (prev.substitutionLog ?? [])
+          : [
+              ...(prev.substitutionLog ?? []),
+              makeSubLogEntry(
+                "cleared",
+                existing.length === 1
+                  ? describeSubstitution(existing[0])
+                  : `All substitutions (${existing.length})`,
+              ),
+            ];
+      const next = { ...prev, substitutions: [], substitutionLog: log };
       persist(next);
       return next;
     });
-  }, [persist]);
+  }, [persist, makeSubLogEntry]);
 
   const saveTemplate = useCallback(
     (name: string) => {
@@ -3158,6 +3215,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         shiftNotes: appState.shiftNotes,
         setShiftNotes,
         substitutions: appState.substitutions,
+        substitutionLog: appState.substitutionLog,
         addSubstitution,
         removeSubstitution,
         clearSubstitutions,

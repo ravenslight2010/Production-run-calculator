@@ -4,22 +4,18 @@ import { Feather } from "@expo/vector-icons";
 import { Card, Button, SelectField } from "@/components/UI";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
-import type {
-  IngredientSubstitution,
-  SubstitutionAction,
+import {
+  describeSubstitution,
+  type IngredientSubstitution,
+  type SubstitutionAction,
 } from "@workspace/inventory-math";
+
+// Re-exported for existing call sites (recipe badge). The plain-language
+// description now lives in the shared lib so web and mobile read identically.
+export { describeSubstitution };
 
 function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
-
-// Plain-language description of a single active substitution, shown in the list
-// and in the recipe badge. Verbatim mirror of web's describeSubstitution.
-export function describeSubstitution(s: IngredientSubstitution): string {
-  const amt = s.amount != null && s.amount > 0 ? ` (${s.amount} lbs)` : "";
-  if (s.action === "remove") return `Remove ${s.ingredient}`;
-  if (s.action === "add") return `Add ${s.substitute ?? ""}${amt} alongside ${s.ingredient}`;
-  return `Swap ${s.ingredient} → ${s.substitute ?? ""}${amt}`;
 }
 
 const ACTIONS: { value: SubstitutionAction; label: string }[] = [
