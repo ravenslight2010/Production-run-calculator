@@ -944,6 +944,71 @@ export const SaveAiCorrectionsResponse = zod.object({
 
 
 /**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Available to any signed-in user.
+ * @summary List the shared facility-wide AI knowledge pool
+ */
+export const ListFacilityKnowledgeResponse = zod.object({
+  "knowledge": zod.array(zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.'))
+})
+
+
+/**
+ * Persists a batch of durable operational facts into the shared facility-knowledge pool. Existing entries (matched case-insensitively on domain + key) are updated in place; new ones are inserted. This is the single shared write path AI features use to record observations back into facility memory. Available to any signed-in user.
+ * @summary Record facility knowledge (case-insensitive upsert by domain + key)
+ */
+export const SaveFacilityKnowledgeBody = zod.object({
+  "knowledge": zod.array(zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.')).describe('The batch of facility-knowledge facts to upsert into the shared pool')
+})
+
+export const SaveFacilityKnowledgeResponse = zod.object({
+  "knowledge": zod.array(zod.object({
+  "domain": zod.string().describe('Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)'),
+  "key": zod.string().describe('Stable identity within a domain (matched case-insensitively for upsert)'),
+  "fact": zod.string().describe('The durable observation in plain language')
+}).describe('A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.'))
+})
+
+
+/**
+ * Returns the signed-in user's most recent AI conversation turns (oldest first), a rolling per-user window so follow-up questions keep context. Scoped to the caller only — never another user's history.
+ * @summary Get the current user's recent AI conversation turns
+ */
+export const GetConversationHistoryResponse = zod.object({
+  "turns": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
+  "text": zod.string().describe('The message text')
+}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
+})
+
+
+/**
+ * Appends one or more turns (user and/or assistant messages) to the signed-in user's conversation memory, then trims to the rolling window so the log never grows without bound. Scoped to the caller only.
+ * @summary Append turns to the current user's AI conversation memory
+ */
+export const AppendConversationBody = zod.object({
+  "turns": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
+  "text": zod.string().describe('The message text')
+}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('One or more turns to append to the current user\'s conversation memory')
+})
+
+export const AppendConversationResponse = zod.object({
+  "turns": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
+  "text": zod.string().describe('The message text')
+}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The user\'s recent conversation turns, oldest first')
+})
+
+
+/**
  * Returns every learned spec-import alias — a saved mapping from a raw spreadsheet label to the app's canonical name it resolves to, across all name-kinds (brand, flavor, applicator type, pepperoni type, recipe ingredients). Clients supply these to the AI parser and apply them deterministically. Available to any signed-in user (operators included).
  * @summary List learned spec-import aliases (messy label -> canonical name)
  */

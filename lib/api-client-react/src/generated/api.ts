@@ -22,6 +22,7 @@ import type {
 import type {
   AdjustInput,
   AiCorrectionList,
+  AppendConversationInput,
   ApprovePasswordResetResult,
   AuthCredentials,
   AuthResponse,
@@ -29,9 +30,11 @@ import type {
   CheckUsernameAvailableParams,
   ConsumeInput,
   ConsumeResult,
+  ConversationHistory,
   CreateInventoryItemInput,
   DeleteProductionRulesInput,
   DeniedMergeList,
+  FacilityKnowledgeList,
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
@@ -67,6 +70,7 @@ import type {
   RestockInput,
   SaveAiCorrectionsInput,
   SaveDeniedMergesInput,
+  SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
@@ -3105,6 +3109,306 @@ export const useSaveAiCorrections = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveAiCorrectionsMutationOptions(options));
+    }
+
+export const getListFacilityKnowledgeUrl = () => {
+
+
+
+
+  return `/api/ai-memory/facility`
+}
+
+/**
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Available to any signed-in user.
+ * @summary List the shared facility-wide AI knowledge pool
+ */
+export const listFacilityKnowledge = async ( options?: RequestInit): Promise<FacilityKnowledgeList> => {
+
+  return customFetch<FacilityKnowledgeList>(getListFacilityKnowledgeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFacilityKnowledgeQueryKey = () => {
+    return [
+    `/api/ai-memory/facility`
+    ] as const;
+    }
+
+
+export const getListFacilityKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFacilityKnowledgeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFacilityKnowledge>>> = ({ signal }) => listFacilityKnowledge({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFacilityKnowledgeQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilityKnowledge>>>
+export type ListFacilityKnowledgeQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the shared facility-wide AI knowledge pool
+ */
+
+export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFacilityKnowledgeQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveFacilityKnowledgeUrl = () => {
+
+
+
+
+  return `/api/ai-memory/facility`
+}
+
+/**
+ * Persists a batch of durable operational facts into the shared facility-knowledge pool. Existing entries (matched case-insensitively on domain + key) are updated in place; new ones are inserted. This is the single shared write path AI features use to record observations back into facility memory. Available to any signed-in user.
+ * @summary Record facility knowledge (case-insensitive upsert by domain + key)
+ */
+export const saveFacilityKnowledge = async (saveFacilityKnowledgeInput: SaveFacilityKnowledgeInput, options?: RequestInit): Promise<FacilityKnowledgeList> => {
+
+  return customFetch<FacilityKnowledgeList>(getSaveFacilityKnowledgeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveFacilityKnowledgeInput,)
+  }
+);}
+
+
+
+
+export const getSaveFacilityKnowledgeMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFacilityKnowledge>>, TError,{data: BodyType<SaveFacilityKnowledgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveFacilityKnowledge>>, TError,{data: BodyType<SaveFacilityKnowledgeInput>}, TContext> => {
+
+const mutationKey = ['saveFacilityKnowledge'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveFacilityKnowledge>>, {data: BodyType<SaveFacilityKnowledgeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveFacilityKnowledge(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveFacilityKnowledgeMutationResult = NonNullable<Awaited<ReturnType<typeof saveFacilityKnowledge>>>
+    export type SaveFacilityKnowledgeMutationBody = BodyType<SaveFacilityKnowledgeInput>
+    export type SaveFacilityKnowledgeMutationError = ErrorType<void>
+
+    /**
+ * @summary Record facility knowledge (case-insensitive upsert by domain + key)
+ */
+export const useSaveFacilityKnowledge = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFacilityKnowledge>>, TError,{data: BodyType<SaveFacilityKnowledgeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveFacilityKnowledge>>,
+        TError,
+        {data: BodyType<SaveFacilityKnowledgeInput>},
+        TContext
+      > => {
+      return useMutation(getSaveFacilityKnowledgeMutationOptions(options));
+    }
+
+export const getGetConversationHistoryUrl = () => {
+
+
+
+
+  return `/api/ai-memory/conversation`
+}
+
+/**
+ * Returns the signed-in user's most recent AI conversation turns (oldest first), a rolling per-user window so follow-up questions keep context. Scoped to the caller only — never another user's history.
+ * @summary Get the current user's recent AI conversation turns
+ */
+export const getConversationHistory = async ( options?: RequestInit): Promise<ConversationHistory> => {
+
+  return customFetch<ConversationHistory>(getGetConversationHistoryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationHistoryQueryKey = () => {
+    return [
+    `/api/ai-memory/conversation`
+    ] as const;
+    }
+
+
+export const getGetConversationHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getConversationHistory>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationHistoryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversationHistory>>> = ({ signal }) => getConversationHistory({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConversationHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getConversationHistory>>>
+export type GetConversationHistoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current user's recent AI conversation turns
+ */
+
+export function useGetConversationHistory<TData = Awaited<ReturnType<typeof getConversationHistory>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConversationHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConversationHistoryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getAppendConversationUrl = () => {
+
+
+
+
+  return `/api/ai-memory/conversation`
+}
+
+/**
+ * Appends one or more turns (user and/or assistant messages) to the signed-in user's conversation memory, then trims to the rolling window so the log never grows without bound. Scoped to the caller only.
+ * @summary Append turns to the current user's AI conversation memory
+ */
+export const appendConversation = async (appendConversationInput: AppendConversationInput, options?: RequestInit): Promise<ConversationHistory> => {
+
+  return customFetch<ConversationHistory>(getAppendConversationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      appendConversationInput,)
+  }
+);}
+
+
+
+
+export const getAppendConversationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,{data: BodyType<AppendConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,{data: BodyType<AppendConversationInput>}, TContext> => {
+
+const mutationKey = ['appendConversation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof appendConversation>>, {data: BodyType<AppendConversationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  appendConversation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AppendConversationMutationResult = NonNullable<Awaited<ReturnType<typeof appendConversation>>>
+    export type AppendConversationMutationBody = BodyType<AppendConversationInput>
+    export type AppendConversationMutationError = ErrorType<void>
+
+    /**
+ * @summary Append turns to the current user's AI conversation memory
+ */
+export const useAppendConversation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof appendConversation>>, TError,{data: BodyType<AppendConversationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof appendConversation>>,
+        TError,
+        {data: BodyType<AppendConversationInput>},
+        TContext
+      > => {
+      return useMutation(getAppendConversationMutationOptions(options));
     }
 
 export const getListSpecImportAliasesUrl = () => {

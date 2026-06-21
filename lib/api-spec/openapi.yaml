@@ -26,6 +26,8 @@ tags:
     description: Learned spec-sheet / recipe import aliases
   - name: productionRules
     description: Manager-defined factory-wide production rules
+  - name: aiMemory
+    description: Shared AI memory (facility knowledge + per-user conversation history)
 paths:
   /healthz:
     get:
@@ -913,6 +915,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AiCorrectionList"
+        "400":
+          description: Invalid input
+
+  /ai-memory/facility:
+    get:
+      operationId: listFacilityKnowledge
+      tags: [aiMemory]
+      summary: List the shared facility-wide AI knowledge pool
+      description: >-
+        Returns every durable operational fact in the shared facility-knowledge
+        pool (domain-tagged plain-language observations the whole team and every
+        AI feature have learned over time). Distinct from the name-corrections
+        pool. AI helpers fold this into their prompts via a shared context
+        builder, so a pattern learned in one feature is visible to all. Available
+        to any signed-in user.
+      responses:
+        "200":
+          description: All shared facility knowledge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilityKnowledgeList"
+    post:
+      operationId: saveFacilityKnowledge
+      tags: [aiMemory]
+      summary: Record facility knowledge (case-insensitive upsert by domain + key)
+      description: >-
+        Persists a batch of durable operational facts into the shared
+        facility-knowledge pool. Existing entries (matched case-insensitively on
+        domain + key) are updated in place; new ones are inserted. This is the
+        single shared write path AI features use to record observations back into
+        facility memory. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFacilityKnowledgeInput"
+      responses:
+        "200":
+          description: The full updated knowledge pool after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FacilityKnowledgeList"
+        "400":
+          description: Invalid input
+
+  /ai-memory/conversation:
+    get:
+      operationId: getConversationHistory
+      tags: [aiMemory]
+      summary: Get the current user's recent AI conversation turns
+      description: >-
+        Returns the signed-in user's most recent AI conversation turns (oldest
+        first), a rolling per-user window so follow-up questions keep context.
+        Scoped to the caller only — never another user's history.
+      responses:
+        "200":
+          description: The current user's recent conversation turns
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationHistory"
+    post:
+      operationId: appendConversation
+      tags: [aiMemory]
+      summary: Append turns to the current user's AI conversation memory
+      description: >-
+        Appends one or more turns (user and/or assistant messages) to the
+        signed-in user's conversation memory, then trims to the rolling window so
+        the log never grows without bound. Scoped to the caller only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppendConversationInput"
+      responses:
+        "200":
+          description: The current user's recent conversation turns after appending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationHistory"
         "400":
           description: Invalid input
 
@@ -2522,6 +2609,89 @@ components:
           description: The batch of confirmed corrections to upsert into the shared pool
           items:
             $ref: "#/components/schemas/AiCorrection"
+
+    FacilityKnowledge:
+      type: object
+      description: >-
+        A durable, plain-language operational fact in the shared facility-wide AI
+        knowledge pool. Tagged by domain (a coarse topic such as downtime,
+        throughput, incident, ingredient, general) with a stable key so
+        re-recording the same observation updates it in place. Read by every AI
+        feature, so a pattern learned once is known everywhere.
+      required:
+        - domain
+        - key
+        - fact
+      properties:
+        domain:
+          type: string
+          description: Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general)
+        key:
+          type: string
+          description: Stable identity within a domain (matched case-insensitively for upsert)
+        fact:
+          type: string
+          description: The durable observation in plain language
+
+    FacilityKnowledgeList:
+      type: object
+      required:
+        - knowledge
+      properties:
+        knowledge:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacilityKnowledge"
+
+    SaveFacilityKnowledgeInput:
+      type: object
+      required:
+        - knowledge
+      properties:
+        knowledge:
+          type: array
+          description: The batch of facility-knowledge facts to upsert into the shared pool
+          items:
+            $ref: "#/components/schemas/FacilityKnowledge"
+
+    ConversationTurn:
+      type: object
+      description: >-
+        One turn in a user's AI conversation memory — a single message either
+        from the user or the assistant.
+      required:
+        - role
+        - text
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+          description: Who produced this turn
+        text:
+          type: string
+          description: The message text
+
+    ConversationHistory:
+      type: object
+      required:
+        - turns
+      properties:
+        turns:
+          type: array
+          description: The user's recent conversation turns, oldest first
+          items:
+            $ref: "#/components/schemas/ConversationTurn"
+
+    AppendConversationInput:
+      type: object
+      required:
+        - turns
+      properties:
+        turns:
+          type: array
+          description: One or more turns to append to the current user's conversation memory
+          items:
+            $ref: "#/components/schemas/ConversationTurn"
 
     MergeAlias:
       type: object

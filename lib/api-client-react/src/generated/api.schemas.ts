@@ -712,6 +712,58 @@ export interface SaveAiCorrectionsInput {
 }
 
 /**
+ * A durable, plain-language operational fact in the shared facility-wide AI knowledge pool. Tagged by domain (a coarse topic such as downtime, throughput, incident, ingredient, general) with a stable key so re-recording the same observation updates it in place. Read by every AI feature, so a pattern learned once is known everywhere.
+ */
+export interface FacilityKnowledge {
+  /** Coarse topic tag (e.g. downtime, throughput, incident, ingredient, general) */
+  domain: string;
+  /** Stable identity within a domain (matched case-insensitively for upsert) */
+  key: string;
+  /** The durable observation in plain language */
+  fact: string;
+}
+
+export interface FacilityKnowledgeList {
+  knowledge: FacilityKnowledge[];
+}
+
+export interface SaveFacilityKnowledgeInput {
+  /** The batch of facility-knowledge facts to upsert into the shared pool */
+  knowledge: FacilityKnowledge[];
+}
+
+/**
+ * Who produced this turn
+ */
+export type ConversationTurnRole = typeof ConversationTurnRole[keyof typeof ConversationTurnRole];
+
+
+export const ConversationTurnRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+/**
+ * One turn in a user's AI conversation memory — a single message either from the user or the assistant.
+ */
+export interface ConversationTurn {
+  /** Who produced this turn */
+  role: ConversationTurnRole;
+  /** The message text */
+  text: string;
+}
+
+export interface ConversationHistory {
+  /** The user's recent conversation turns, oldest first */
+  turns: ConversationTurn[];
+}
+
+export interface AppendConversationInput {
+  /** One or more turns to append to the current user's conversation memory */
+  turns: ConversationTurn[];
+}
+
+/**
  * A learned mapping from a merged-away ingredient name to the kept name.
  */
 export interface MergeAlias {

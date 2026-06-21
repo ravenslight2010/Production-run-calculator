@@ -31,6 +31,7 @@ import {
 } from "./aiSuggestMerges";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
+import { loadFacilityKnowledge, appendFacilityMemoryBlock } from "./aiMemoryContext";
 
 const router: IRouter = Router();
 
@@ -100,7 +101,9 @@ router.post(
       return;
     }
 
+    const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildOptimizePrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let content = "";
     try {
@@ -110,7 +113,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       content = response.choices[0]?.message?.content ?? "";
@@ -171,15 +174,15 @@ router.post(
       return;
     }
 
-    const corrections = await loadCorrections(req.log);
-    const { system, user } = buildFillMissingPrompt(validation.data);
-    const userPrompt = appendCorrectionsBlock(user, corrections, [
-      "brand",
-      "flavor",
-      "die",
-      "item",
-      "ingredient",
+    const [corrections, knowledge] = await Promise.all([
+      loadCorrections(req.log),
+      loadFacilityKnowledge(req.log),
     ]);
+    const { system, user } = buildFillMissingPrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(
+      appendCorrectionsBlock(user, corrections, ["brand", "flavor", "die", "item", "ingredient"]),
+      knowledge,
+    );
 
     let content = "";
     try {
@@ -254,9 +257,15 @@ router.post(
       return;
     }
 
-    const corrections = await loadCorrections(req.log);
+    const [corrections, knowledge] = await Promise.all([
+      loadCorrections(req.log),
+      loadFacilityKnowledge(req.log),
+    ]);
     const { system, user } = buildMatchImportPrompt(validation.data);
-    const userPrompt = appendCorrectionsBlock(user, corrections, ["brand", "flavor"]);
+    const userPrompt = appendFacilityMemoryBlock(
+      appendCorrectionsBlock(user, corrections, ["brand", "flavor"]),
+      knowledge,
+    );
 
     let content = "";
     try {
@@ -337,14 +346,15 @@ router.post(
       return;
     }
 
-    const corrections = await loadCorrections(req.log);
-    const { system, user } = buildParseSpecSheetPrompt(validation.data);
-    const userPrompt = appendCorrectionsBlock(user, corrections, [
-      "brand",
-      "flavor",
-      "die",
-      "ingredient",
+    const [corrections, knowledge] = await Promise.all([
+      loadCorrections(req.log),
+      loadFacilityKnowledge(req.log),
     ]);
+    const { system, user } = buildParseSpecSheetPrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(
+      appendCorrectionsBlock(user, corrections, ["brand", "flavor", "die", "ingredient"]),
+      knowledge,
+    );
 
     let content = "";
     try {
@@ -425,9 +435,15 @@ router.post(
       return;
     }
 
-    const corrections = await loadCorrections(req.log);
+    const [corrections, knowledge] = await Promise.all([
+      loadCorrections(req.log),
+      loadFacilityKnowledge(req.log),
+    ]);
     const { system, user } = buildSuggestMergesPrompt(validation.data);
-    const userPrompt = appendCorrectionsBlock(user, corrections, ["ingredient", "die"]);
+    const userPrompt = appendFacilityMemoryBlock(
+      appendCorrectionsBlock(user, corrections, ["ingredient", "die"]),
+      knowledge,
+    );
 
     let content = "";
     try {

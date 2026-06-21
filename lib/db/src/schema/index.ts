@@ -32,4 +32,6 @@ export * from "./specImportAliases";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
 export * from "./aiCorrections";
+export * from "./facilityKnowledge";
+export * from "./aiConversationTurns";
 export * from "./productionRules";

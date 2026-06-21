@@ -20,6 +20,7 @@ import {
   sanitizeDiagnosis,
   validateReportBody,
 } from "./incidentsAi";
+import { loadFacilityKnowledge, appendFacilityMemoryBlock } from "./aiMemoryContext";
 
 const router: IRouter = Router();
 
@@ -89,6 +90,8 @@ router.post(
       appVersion: data.appVersion ?? null,
       context,
     });
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let diagnosis = FALLBACK_DIAGNOSIS;
     let workaround = FALLBACK_WORKAROUND;
@@ -99,7 +102,7 @@ router.post(
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
-          { role: "user", content: user },
+          { role: "user", content: userPrompt },
         ],
       });
       const content = response.choices[0]?.message?.content ?? "";

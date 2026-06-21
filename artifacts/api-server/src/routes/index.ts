@@ -14,6 +14,7 @@ import specImportAliasesRouter from "./specImportAliases";
 import mergeAliasesRouter from "./mergeAliases";
 import deniedMergesRouter from "./deniedMerges";
 import aiCorrectionsRouter from "./aiCorrections";
+import aiMemoryRouter from "./aiMemory";
 import productionRulesRouter from "./productionRules";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
@@ -51,6 +52,7 @@ router.use(specImportAliasesRouter);
 router.use(mergeAliasesRouter);
 router.use(deniedMergesRouter);
 router.use(aiCorrectionsRouter);
+router.use(aiMemoryRouter);
 router.use(productionRulesRouter);
 
 export default router;
