@@ -28,3 +28,17 @@ banner above `<Tabs>` inside `<Form>`. Mobile: hook + banner in
 
 **Why:** Radix `TabsContent` unmounts inactive tabs on web; a hook mounted only in
 the assistant tab would stop polling the moment the manager navigates away.
+
+**Manager-tunable cadence/cooldown/on-off (factory-wide):** the 4min poll and
+30min cooldown are no longer constants — they're a server-persisted single-row
+setting (`proactive_alert_settings` id=1; `GET` open to any authed user, `PUT`
+manager-only) editable from a "Proactive Alerts" card in the Inventory/Settings
+area (web `InventoryTab`, mobile `inventory.tsx`), both manager-gated. Clamp/bounds
+(poll 30–3600s, cooldown 0–86400s) live in the db-FREE `aiProactive.ts`
+(`clampProactiveSettings`), NOT the db-bound `ai.ts`, so they stay unit-testable
+without binding the pool (same rule as the integration-test DB-binding gotcha).
+The hook now uses a recursive `setTimeout` (not `setInterval`) that re-`fetchProactiveSettings()`
+each cycle, so cadence/cooldown/on-off changes take effect next cycle with no
+reload; cooldown is read via a ref so the evaluate closure stays stable. When
+disabled the timer keeps ticking on the DEFAULT cadence so a re-enable is picked
+up. UI inputs are in MINUTES (persist as seconds). Web+mobile parity required.

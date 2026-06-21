@@ -67,6 +67,7 @@ import { useMe } from "../useRole";
 import StaffRolesCard from "./StaffRolesCard";
 import ProductionRulesManager from "./ProductionRulesManager";
 import ChangePasswordCard from "./ChangePasswordCard";
+import ProactiveAlertSettingsCard from "./ProactiveAlertSettingsCard";
 
 function fmtQty(n: number): string {
   const r = Math.round(n * 100) / 100;
@@ -334,6 +335,9 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
           </CardContent>
         </Card>
       )}
+
+      {/* Proactive-alert tuning (manager only) */}
+      {isManager && <ProactiveAlertSettingsCard />}
 
       {/* Account self-service (any signed-in user) */}
       <ChangePasswordCard />

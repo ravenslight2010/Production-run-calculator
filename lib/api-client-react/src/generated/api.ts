@@ -66,6 +66,7 @@ import type {
   PasswordResetRequest,
   PhotoAliasList,
   ProactiveAlertResult,
+  ProactiveAlertSettings,
   ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
@@ -94,6 +95,7 @@ import type {
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
   UpdateInventorySettingsInput,
+  UpdateProactiveAlertSettingsInput,
   UsernameAvailability,
   WasteInsightInput,
   WasteInsightResult
@@ -2448,6 +2450,154 @@ export const useAiProactiveAlert = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiProactiveAlertMutationOptions(options));
+    }
+
+export const getGetProactiveAlertSettingsUrl = () => {
+
+
+
+
+  return `/api/ai/proactive-settings`
+}
+
+/**
+ * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
+ */
+export const getProactiveAlertSettings = async ( options?: RequestInit): Promise<ProactiveAlertSettings> => {
+
+  return customFetch<ProactiveAlertSettings>(getGetProactiveAlertSettingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProactiveAlertSettingsQueryKey = () => {
+    return [
+    `/api/ai/proactive-settings`
+    ] as const;
+    }
+
+
+export const getGetProactiveAlertSettingsQueryOptions = <TData = Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProactiveAlertSettingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProactiveAlertSettings>>> = ({ signal }) => getProactiveAlertSettings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProactiveAlertSettingsQueryResult = NonNullable<Awaited<ReturnType<typeof getProactiveAlertSettings>>>
+export type GetProactiveAlertSettingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
+ */
+
+export function useGetProactiveAlertSettings<TData = Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProactiveAlertSettings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProactiveAlertSettingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateProactiveAlertSettingsUrl = () => {
+
+
+
+
+  return `/api/ai/proactive-settings`
+}
+
+/**
+ * @summary Update global proactive-alert settings (manager only)
+ */
+export const updateProactiveAlertSettings = async (updateProactiveAlertSettingsInput: UpdateProactiveAlertSettingsInput, options?: RequestInit): Promise<ProactiveAlertSettings> => {
+
+  return customFetch<ProactiveAlertSettings>(getUpdateProactiveAlertSettingsUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      updateProactiveAlertSettingsInput,)
+  }
+);}
+
+
+
+
+export const getUpdateProactiveAlertSettingsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,{data: BodyType<UpdateProactiveAlertSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,{data: BodyType<UpdateProactiveAlertSettingsInput>}, TContext> => {
+
+const mutationKey = ['updateProactiveAlertSettings'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, {data: BodyType<UpdateProactiveAlertSettingsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateProactiveAlertSettings(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateProactiveAlertSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateProactiveAlertSettings>>>
+    export type UpdateProactiveAlertSettingsMutationBody = BodyType<UpdateProactiveAlertSettingsInput>
+    export type UpdateProactiveAlertSettingsMutationError = ErrorType<void>
+
+    /**
+ * @summary Update global proactive-alert settings (manager only)
+ */
+export const useUpdateProactiveAlertSettings = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateProactiveAlertSettings>>, TError,{data: BodyType<UpdateProactiveAlertSettingsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateProactiveAlertSettings>>,
+        TError,
+        {data: BodyType<UpdateProactiveAlertSettingsInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateProactiveAlertSettingsMutationOptions(options));
     }
 
 export const getAiForecastUrl = () => {

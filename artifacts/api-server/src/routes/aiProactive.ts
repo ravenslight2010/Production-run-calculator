@@ -16,6 +16,42 @@ export const PROACTIVE_MAX_TITLE_CHARS = 100;
 export const PROACTIVE_MAX_DETAIL_CHARS = 400;
 export const PROACTIVE_MAX_KEY_CHARS = 64;
 
+// Factory-wide knobs that let a manager tune how aggressive the watcher is.
+// Bounds keep the cadence sane so a misconfig can't hammer the (cost-capped) AI
+// endpoint nor leave it effectively never polling. Kept in lockstep with the
+// client defaults/bounds in each app's aiProactive.ts. Lives here (not in the
+// db-bound ai.ts) so it stays unit-testable without binding the Postgres pool.
+export const PROACTIVE_POLL_SECONDS_MIN = 30;
+export const PROACTIVE_POLL_SECONDS_MAX = 3600;
+export const PROACTIVE_COOLDOWN_SECONDS_MIN = 0;
+export const PROACTIVE_COOLDOWN_SECONDS_MAX = 86_400;
+
+export type ProactiveAlertSettingsInput = {
+  enabled: boolean;
+  pollSeconds: number;
+  cooldownSeconds: number;
+};
+
+export function clampInt(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+// Coerce a validated settings body into safe, in-bounds integers before
+// persisting. Used by PUT /ai/proactive-settings.
+export function clampProactiveSettings(
+  input: ProactiveAlertSettingsInput,
+): ProactiveAlertSettingsInput {
+  return {
+    enabled: input.enabled,
+    pollSeconds: clampInt(input.pollSeconds, PROACTIVE_POLL_SECONDS_MIN, PROACTIVE_POLL_SECONDS_MAX),
+    cooldownSeconds: clampInt(
+      input.cooldownSeconds,
+      PROACTIVE_COOLDOWN_SECONDS_MIN,
+      PROACTIVE_COOLDOWN_SECONDS_MAX,
+    ),
+  };
+}
+
 export type ProactiveAlert = {
   // Stable lowercase slug describing the *kind* of nudge (e.g. "behind-plan",
   // "break-window"). The same situation should reuse the same key so the client

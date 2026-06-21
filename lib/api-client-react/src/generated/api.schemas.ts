@@ -175,6 +175,18 @@ export interface UpdateInventorySettingsInput {
   expirySoonDays: number;
 }
 
+export interface ProactiveAlertSettings {
+  enabled: boolean;
+  pollSeconds: number;
+  cooldownSeconds: number;
+}
+
+export interface UpdateProactiveAlertSettingsInput {
+  enabled: boolean;
+  pollSeconds: number;
+  cooldownSeconds: number;
+}
+
 export interface PhotoCandidate {
   key: string;
   category: string;

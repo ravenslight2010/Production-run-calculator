@@ -1,12 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
   buildProactivePrompt,
+  clampProactiveSettings,
   sanitizeProactiveAlert,
   slugifyKey,
   validateOptimizeBody,
   PROACTIVE_MAX_TITLE_CHARS,
   PROACTIVE_MAX_DETAIL_CHARS,
   PROACTIVE_MAX_KEY_CHARS,
+  PROACTIVE_POLL_SECONDS_MIN,
+  PROACTIVE_POLL_SECONDS_MAX,
+  PROACTIVE_COOLDOWN_SECONDS_MIN,
+  PROACTIVE_COOLDOWN_SECONDS_MAX,
   type OptimizeInput,
 } from "./aiProactive";
 
@@ -59,6 +64,44 @@ describe("slugifyKey", () => {
   it("clamps overly long keys", () => {
     const long = "x".repeat(200);
     expect(slugifyKey(long, "run").length).toBeLessThanOrEqual(PROACTIVE_MAX_KEY_CHARS);
+  });
+});
+
+describe("clampProactiveSettings", () => {
+  it("passes through in-range values, rounding to integers", () => {
+    expect(
+      clampProactiveSettings({ enabled: true, pollSeconds: 240, cooldownSeconds: 1800 }),
+    ).toEqual({ enabled: true, pollSeconds: 240, cooldownSeconds: 1800 });
+    expect(
+      clampProactiveSettings({ enabled: false, pollSeconds: 120.6, cooldownSeconds: 600.4 }),
+    ).toEqual({ enabled: false, pollSeconds: 121, cooldownSeconds: 600 });
+  });
+
+  it("clamps the poll cadence into its bounds", () => {
+    expect(
+      clampProactiveSettings({ enabled: true, pollSeconds: 1, cooldownSeconds: 1800 }).pollSeconds,
+    ).toBe(PROACTIVE_POLL_SECONDS_MIN);
+    expect(
+      clampProactiveSettings({ enabled: true, pollSeconds: 999999, cooldownSeconds: 1800 })
+        .pollSeconds,
+    ).toBe(PROACTIVE_POLL_SECONDS_MAX);
+  });
+
+  it("clamps the cooldown into its bounds (0 allowed)", () => {
+    expect(
+      clampProactiveSettings({ enabled: true, pollSeconds: 240, cooldownSeconds: -50 })
+        .cooldownSeconds,
+    ).toBe(PROACTIVE_COOLDOWN_SECONDS_MIN);
+    expect(
+      clampProactiveSettings({ enabled: true, pollSeconds: 240, cooldownSeconds: 999999 })
+        .cooldownSeconds,
+    ).toBe(PROACTIVE_COOLDOWN_SECONDS_MAX);
+  });
+
+  it("preserves the enabled flag verbatim", () => {
+    expect(
+      clampProactiveSettings({ enabled: false, pollSeconds: 240, cooldownSeconds: 1800 }).enabled,
+    ).toBe(false);
   });
 });
 

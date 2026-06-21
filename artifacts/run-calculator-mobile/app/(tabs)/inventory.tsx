@@ -60,6 +60,7 @@ import { getOrCreateClientId } from "@/context/sync/client";
 import { useMe } from "@/hooks/useRole";
 import StaffRolesCard from "@/components/StaffRolesCard";
 import ChangePasswordCard from "@/components/ChangePasswordCard";
+import ProactiveAlertSettingsCard from "@/components/ProactiveAlertSettingsCard";
 import { saveFacilityKnowledge } from "@/context/aiMemory";
 
 function fmtQty(n: number): string {
@@ -338,6 +339,9 @@ export default function InventoryScreen() {
             </Text>
           </Card>
         )}
+
+        {/* Proactive-alert tuning (manager only) */}
+        {isManager && <ProactiveAlertSettingsCard />}
 
         {/* Account self-service (any signed-in user) */}
         <ChangePasswordCard />

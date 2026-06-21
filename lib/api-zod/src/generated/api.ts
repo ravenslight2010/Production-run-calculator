@@ -797,6 +797,32 @@ export const AiProactiveAlertResponse = zod.object({
 
 
 /**
+ * @summary Get global proactive-alert settings (cadence, cooldown, on/off)
+ */
+export const GetProactiveAlertSettingsResponse = zod.object({
+  "enabled": zod.boolean(),
+  "pollSeconds": zod.number(),
+  "cooldownSeconds": zod.number()
+})
+
+
+/**
+ * @summary Update global proactive-alert settings (manager only)
+ */
+export const UpdateProactiveAlertSettingsBody = zod.object({
+  "enabled": zod.boolean(),
+  "pollSeconds": zod.number(),
+  "cooldownSeconds": zod.number()
+})
+
+export const UpdateProactiveAlertSettingsResponse = zod.object({
+  "enabled": zod.boolean(),
+  "pollSeconds": zod.number(),
+  "cooldownSeconds": zod.number()
+})
+
+
+/**
  * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
  * @summary Predict an upcoming day's run plan (AI); read-only
  */

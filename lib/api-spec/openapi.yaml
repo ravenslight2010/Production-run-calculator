@@ -741,6 +741,38 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/proactive-settings:
+    get:
+      operationId: getProactiveAlertSettings
+      tags: [ai]
+      summary: Get global proactive-alert settings (cadence, cooldown, on/off)
+      responses:
+        "200":
+          description: Proactive-alert settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProactiveAlertSettings"
+    put:
+      operationId: updateProactiveAlertSettings
+      tags: [ai]
+      summary: Update global proactive-alert settings (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProactiveAlertSettingsInput"
+      responses:
+        "200":
+          description: Updated proactive-alert settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProactiveAlertSettings"
+        "400":
+          description: Invalid input
+
   /ai/forecast:
     post:
       operationId: aiForecast
@@ -1986,6 +2018,34 @@ components:
         - expirySoonDays
       properties:
         expirySoonDays:
+          type: integer
+
+    ProactiveAlertSettings:
+      type: object
+      required:
+        - enabled
+        - pollSeconds
+        - cooldownSeconds
+      properties:
+        enabled:
+          type: boolean
+        pollSeconds:
+          type: integer
+        cooldownSeconds:
+          type: integer
+
+    UpdateProactiveAlertSettingsInput:
+      type: object
+      required:
+        - enabled
+        - pollSeconds
+        - cooldownSeconds
+      properties:
+        enabled:
+          type: boolean
+        pollSeconds:
+          type: integer
+        cooldownSeconds:
           type: integer
 
     PhotoCandidate:

@@ -1,4 +1,7 @@
 import { Router, type IRouter } from "express";
+import { eq } from "drizzle-orm";
+import { db, proactiveAlertSettingsTable } from "@workspace/db";
+import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
@@ -31,6 +34,7 @@ import {
 } from "./aiSuggestMerges";
 import {
   buildProactivePrompt,
+  clampProactiveSettings,
   sanitizeProactiveAlert,
   validateOptimizeBody as validateProactiveBody,
 } from "./aiProactive";
@@ -437,6 +441,70 @@ router.post(
       alert,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
+    });
+  },
+);
+
+// ── Proactive-alert settings (cadence / cooldown / on-off) ───────────────────
+// The proactive-alert settings live in a single row (id=1) outside the per-day
+// sync payload, like the other global settings. Bounds/clamping live in the
+// db-free aiProactive.ts module (clampProactiveSettings) so they stay
+// unit-testable; this route just persists the clamped values.
+
+// Reads the single settings row, seeding the default on first access so a fresh
+// install returns safe defaults (enabled, 4-min poll, 30-min cooldown).
+async function loadProactiveSettings() {
+  const [row] = await db
+    .select()
+    .from(proactiveAlertSettingsTable)
+    .where(eq(proactiveAlertSettingsTable.id, 1));
+  if (row) return row;
+  const [created] = await db
+    .insert(proactiveAlertSettingsTable)
+    .values({ id: 1 })
+    .onConflictDoNothing({ target: proactiveAlertSettingsTable.id })
+    .returning();
+  if (created) return created;
+  const [existing] = await db
+    .select()
+    .from(proactiveAlertSettingsTable)
+    .where(eq(proactiveAlertSettingsTable.id, 1));
+  return existing;
+}
+
+// Open to any signed-in user (the watcher only polls for managers, but reading
+// the config is harmless and keeps the hook simple).
+router.get("/ai/proactive-settings", async (_req, res): Promise<void> => {
+  const row = await loadProactiveSettings();
+  res.json({
+    enabled: row.enabled,
+    pollSeconds: row.pollSeconds,
+    cooldownSeconds: row.cooldownSeconds,
+  });
+});
+
+router.put(
+  "/ai/proactive-settings",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const parsed = UpdateProactiveAlertSettingsBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const { enabled, pollSeconds, cooldownSeconds } = clampProactiveSettings(parsed.data);
+    const [row] = await db
+      .insert(proactiveAlertSettingsTable)
+      .values({ id: 1, enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: proactiveAlertSettingsTable.id,
+        set: { enabled, pollSeconds, cooldownSeconds, updatedAt: new Date() },
+      })
+      .returning();
+    res.json({
+      enabled: row.enabled,
+      pollSeconds: row.pollSeconds,
+      cooldownSeconds: row.cooldownSeconds,
     });
   },
 );
