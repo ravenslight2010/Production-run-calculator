@@ -52,3 +52,13 @@ identical (`RECIPE_FIELD_IDS`, exported from both `aiRecipe.ts`), both gate on i
 return an undo restoring the prior rows — so behavior stays identical without sharing the writer.
 Read prior rows defensively (`Array.isArray` before `.map`); persisted state isn't guaranteed
 to be an array.
+
+**Run-target rule:** a suggestion applies to a CHOSEN run, not implicitly the current one.
+`applyRecipeSuggestion(s, runId?)` defaults runId to the current run but validates it against
+the day's runs and bails with "Run no longer exists" otherwise. Shared type `RecipeApplyTarget
+= { id; label }` (exported from both `aiRecipe.ts`) feeds a run picker the SuggestionCard renders
+ONLY when >1 run. Web's current-run path must still use the live form writers + saveRunValues
+(not a blind persisted overwrite) — only OTHER runs go through `{ ...DEFAULT_VALUES,
+...loadRunValues(targetId), [recipeId]: next }` + saveRunValues(targetId). Mobile uses
+`updateRunSettingsById(targetId, ...)` for any run (current or not). Undo restores the chosen
+run's prior rows on both.

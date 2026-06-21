@@ -127,6 +127,7 @@ import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
 import {
   buildRecipeAssistContext,
+  RECIPE_FIELD_IDS,
   type RecipeAssistSuggestion,
   type RecipeFieldId,
 } from "../aiRecipe";
@@ -3930,55 +3931,78 @@ export default function Home() {
   const applyVoiceCommand = (actions: VoiceCommandAction[]): Promise<VoiceCommandResult[]> =>
     dispatchVoiceCommand(actions, buildVoiceHandlers(), isManager);
 
-  // Apply a confirm-first recipe suggestion from the AI helper (a scaled recipe
-  // or a substitution) to the CURRENT run's matching recipe rows. Routes through
-  // the same form + field-array + save/push path used everywhere else — no new
-  // write surface. The worker already tapped Apply; we return an undo that
-  // restores the previous rows. The AI never reaches here on its own.
+  // Apply a confirm-first recipe suggestion (a scaled recipe or substitution) to
+  // a CHOSEN run's matching recipe rows. The target defaults to the current run
+  // but the worker may pick any of the day's runs from the SuggestionCard. The
+  // suggestion only names a recipe field (recipeId); the run is passed here.
+  // The current run writes through the live form + field-array path (so the open
+  // form reflects it); other runs write through saveRunValues — both are EXISTING
+  // per-run write paths, no new write surface. Undo restores the chosen run's
+  // previous rows. Mirrored verbatim on mobile (replit.md parity).
   function applyRecipeSuggestion(
     s: RecipeAssistSuggestion,
+    runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
-    const writers: Record<RecipeFieldId, (rows: { ingredient: string; lbs: number }[]) => void> = {
-      doughRecipe: (rows) => {
-        form.setValue("doughRecipe", rows, { shouldDirty: true });
-        replaceDough(rows);
-      },
-      frontlineRecipe: (rows) => {
-        form.setValue("frontlineRecipe", rows, { shouldDirty: true });
-        replaceFrontline(rows);
-      },
-      app1CheeseRecipe: (rows) => {
-        form.setValue("app1CheeseRecipe", rows, { shouldDirty: true });
-        replaceCheese1(rows);
-      },
-      app2CheeseRecipe: (rows) => {
-        form.setValue("app2CheeseRecipe", rows, { shouldDirty: true });
-        replaceCheese2(rows);
-      },
-      app3CheeseRecipe: (rows) => {
-        form.setValue("app3CheeseRecipe", rows, { shouldDirty: true });
-        replaceCheese3(rows);
-      },
-      app4CheeseRecipe: (rows) => {
-        form.setValue("app4CheeseRecipe", rows, { shouldDirty: true });
-        replaceCheese4(rows);
-      },
-    };
-    const writer = writers[s.recipeId as RecipeFieldId];
-    if (!writer) return { ok: false, message: "Unknown recipe" };
+    if (!(RECIPE_FIELD_IDS as readonly string[]).includes(s.recipeId)) {
+      return { ok: false, message: "Unknown recipe" };
+    }
+    const targetId = runId ?? currentRunId;
+    if (!targetId || !dayState.runs.some((r) => r.id === targetId)) {
+      return { ok: false, message: "Run no longer exists" };
+    }
 
     const rows = (s.rows ?? [])
       .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
       .filter((r) => r.ingredient);
     if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
 
-    const prevRaw = (form.getValues() as Record<string, unknown>)[s.recipeId];
+    const isCurrent = targetId === currentRunId;
+
+    // Field-array writers for the current run's live form.
+    const formWriters: Record<RecipeFieldId, (rows: { ingredient: string; lbs: number }[]) => void> = {
+      doughRecipe: (next) => {
+        form.setValue("doughRecipe", next, { shouldDirty: true });
+        replaceDough(next);
+      },
+      frontlineRecipe: (next) => {
+        form.setValue("frontlineRecipe", next, { shouldDirty: true });
+        replaceFrontline(next);
+      },
+      app1CheeseRecipe: (next) => {
+        form.setValue("app1CheeseRecipe", next, { shouldDirty: true });
+        replaceCheese1(next);
+      },
+      app2CheeseRecipe: (next) => {
+        form.setValue("app2CheeseRecipe", next, { shouldDirty: true });
+        replaceCheese2(next);
+      },
+      app3CheeseRecipe: (next) => {
+        form.setValue("app3CheeseRecipe", next, { shouldDirty: true });
+        replaceCheese3(next);
+      },
+      app4CheeseRecipe: (next) => {
+        form.setValue("app4CheeseRecipe", next, { shouldDirty: true });
+        replaceCheese4(next);
+      },
+    };
+
+    // Read prior rows defensively from the correct source (live form for the
+    // current run, persisted values for any other run).
+    const prevSource = isCurrent
+      ? (form.getValues() as Record<string, unknown>)
+      : (loadRunValues(targetId) as unknown as Record<string, unknown>);
+    const prevRaw = prevSource[s.recipeId];
     const prev = (Array.isArray(prevRaw) ? prevRaw : []) as { ingredient: string; lbs: number }[];
     const prevRows = prev.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
 
     const write = (next: { ingredient: string; lbs: number }[]) => {
-      writer(next);
-      saveRunValues(currentRunId, form.getValues());
+      if (isCurrent) {
+        formWriters[s.recipeId as RecipeFieldId](next);
+        saveRunValues(currentRunId, form.getValues());
+      } else {
+        const vals = { ...DEFAULT_VALUES, ...loadRunValues(targetId), [s.recipeId]: next };
+        saveRunValues(targetId, vals as FormValues);
+      }
       schedulePush(dayStateRef.current, 0);
     };
     write(rows);
@@ -8365,6 +8389,11 @@ export default function Home() {
                     )
                   }
                   onApplyRecipeSuggestion={applyRecipeSuggestion}
+                  recipeApplyTargets={dayState.runs.map((r, i) => ({
+                    id: r.id,
+                    label: `Run ${i + 1} · ${runLabel(r)}`,
+                  }))}
+                  recipeDefaultTargetId={currentRunId}
                   onApplyAction={applyOptimizeAction}
                   onApplyVoiceCommand={applyVoiceCommand}
                   buildForecast={(targetDate) =>

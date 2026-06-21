@@ -11,10 +11,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, Card } from "@/components/UI";
+import { Button, Card, SelectField } from "@/components/UI";
 import ReviewBadge from "@/components/ReviewBadge";
 import { FONTS } from "@/constants/fonts";
-import { todayStr, useRun, type RunSettings } from "@/context/RunContext";
+import { runLabel, todayStr, useRun, type RunSettings } from "@/context/RunContext";
 import {
   buildOptimizeInput,
   optimizeErrorMessage,
@@ -47,6 +47,7 @@ import {
   RECIPE_FIELD_IDS,
   type RecipeAssistInput,
   type RecipeAssistSuggestion,
+  type RecipeApplyTarget,
 } from "@/context/aiRecipe";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { requestCommand, commandErrorMessage } from "@/context/aiCommand";
@@ -542,14 +543,28 @@ function AskChat({
 function SuggestionCard({
   suggestion,
   onApply,
+  applyTargets,
+  defaultTargetId,
 }: {
   suggestion: RecipeAssistSuggestion;
-  onApply: (s: RecipeAssistSuggestion) => { ok: boolean; message: string; undo?: () => void };
+  onApply: (
+    s: RecipeAssistSuggestion,
+    runId: string,
+  ) => { ok: boolean; message: string; undo?: () => void };
+  applyTargets: RecipeApplyTarget[];
+  defaultTargetId: string;
 }) {
   const colors = useColors();
   const [applied, setApplied] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [undo, setUndo] = React.useState<(() => void) | null>(null);
   const undoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which run the suggestion will be applied to. Defaults to the current run, but
+  // the worker may target any run queued for the day. Fall back to the first
+  // target if the default isn't in the list (e.g. the run was removed).
+  const [targetId, setTargetId] = React.useState<string>(() => {
+    if (applyTargets.some((t) => t.id === defaultTargetId)) return defaultTargetId;
+    return applyTargets[0]?.id ?? "";
+  });
 
   React.useEffect(
     () => () => {
@@ -566,7 +581,7 @@ function SuggestionCard({
   }
 
   function handleApply() {
-    const result = onApply(suggestion);
+    const result = onApply(suggestion, targetId);
     setApplied(result);
     if (result.ok && result.undo) {
       const fn = result.undo;
@@ -587,6 +602,8 @@ function SuggestionCard({
     suggestion.summary?.trim() ||
     (suggestion.kind === "scale" ? "Apply scaled recipe" : "Apply substitution");
   const title = suggestion.recipeName?.trim();
+  const multipleRuns = applyTargets.length > 1;
+  const labelOf = (id: string) => applyTargets.find((t) => t.id === id)?.label ?? id;
 
   return (
     <View style={[styles.suggestionCard, { backgroundColor: colors.background, borderColor: colors.primary }]}>
@@ -609,6 +626,18 @@ function SuggestionCard({
           </View>
         ))}
       </View>
+      {multipleRuns ? (
+        <View style={{ marginTop: 8 }}>
+          <SelectField
+            label="Apply to"
+            value={targetId}
+            onChange={setTargetId}
+            options={applyTargets.map((t) => t.id)}
+            optionLabel={labelOf}
+            allowAdd={false}
+          />
+        </View>
+      ) : null}
       <View style={styles.actionRow}>
         <Button
           label={applied?.ok ? "Applied" : label}
@@ -641,11 +670,16 @@ function SuggestionCard({
 function RecipeAssistChat({
   buildContext,
   onApplySuggestion,
+  applyTargets,
+  defaultTargetId,
 }: {
   buildContext: () => Omit<RecipeAssistInput, "question">;
   onApplySuggestion: (
     s: RecipeAssistSuggestion,
+    runId: string,
   ) => { ok: boolean; message: string; undo?: () => void };
+  applyTargets: RecipeApplyTarget[];
+  defaultTargetId: string;
 }) {
   const colors = useColors();
   const [turns, setTurns] = React.useState<
@@ -733,7 +767,12 @@ function RecipeAssistChat({
                 <Text style={[styles.bubbleText, { color: colors.foreground }]}>{t.text}</Text>
               </View>
               {t.role === "assistant" && t.suggestion ? (
-                <SuggestionCard suggestion={t.suggestion} onApply={onApplySuggestion} />
+                <SuggestionCard
+                  suggestion={t.suggestion}
+                  onApply={onApplySuggestion}
+                  applyTargets={applyTargets}
+                  defaultTargetId={defaultTargetId}
+                />
               ) : null}
             </View>
           ))
@@ -1351,32 +1390,37 @@ export default function AssistantScreen() {
     };
   }
 
-  // Apply a confirm-first recipe suggestion from the AI helper (a scaled recipe
-  // or a substitution) to the CURRENT run's matching recipe rows. Routes through
-  // the existing updateRunSettingsById path — no new write surface. The worker
-  // already tapped Apply; we return an undo that restores the previous rows.
-  // EXACT mirror of the web applyRecipeSuggestion (replit.md parity).
+  // Apply a confirm-first recipe suggestion (a scaled recipe or substitution) to
+  // a CHOSEN run's matching recipe rows. The target defaults to the current run
+  // but the worker may pick any of the day's runs from the SuggestionCard. The
+  // suggestion only names a recipe field (recipeId); the run is passed here.
+  // Routes through the existing updateRunSettingsById path — no new write surface.
+  // The worker already tapped Apply; we return an undo that restores the chosen
+  // run's previous rows. EXACT mirror of the web applyRecipeSuggestion
+  // (replit.md parity).
   function applyRecipeSuggestion(
     s: RecipeAssistSuggestion,
+    runId?: string,
   ): { ok: boolean; message: string; undo?: () => void } {
     if (!(RECIPE_FIELD_IDS as readonly string[]).includes(s.recipeId)) {
       return { ok: false, message: "Unknown recipe" };
     }
-    const runId = run?.id;
-    if (!runId) return { ok: false, message: "No active run" };
+    const targetId = runId ?? run?.id;
+    const target = targetId ? allRuns.find((r) => r.id === targetId) : null;
+    if (!targetId || !target) return { ok: false, message: "Run no longer exists" };
 
     const rows = (s.rows ?? [])
       .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
       .filter((r) => r.ingredient);
     if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
 
-    const prevRaw = (run?.settings as unknown as Record<string, unknown>)?.[s.recipeId];
+    const prevRaw = (target.settings as unknown as Record<string, unknown>)?.[s.recipeId];
     const prev = (Array.isArray(prevRaw) ? prevRaw : ([] as { ingredient: string; lbs: number }[])).map(
       (r) => ({ ingredient: r.ingredient, lbs: r.lbs }),
     );
 
     const write = (next: { ingredient: string; lbs: number }[]) => {
-      updateRunSettingsById(runId, { [s.recipeId]: next } as Partial<RunSettings>);
+      updateRunSettingsById(targetId, { [s.recipeId]: next } as Partial<RunSettings>);
     };
     write(rows);
     return {
@@ -1789,6 +1833,11 @@ export default function AssistantScreen() {
       <RecipeAssistChat
         buildContext={buildRecipeContext}
         onApplySuggestion={applyRecipeSuggestion}
+        applyTargets={allRuns.map((r, i) => ({
+          id: r.id,
+          label: `Run ${i + 1} · ${runLabel(r, i)}`,
+        }))}
+        defaultTargetId={run?.id ?? ""}
       />
 
       {!isManager ? null : (

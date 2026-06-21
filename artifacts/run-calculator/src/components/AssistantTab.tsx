@@ -23,6 +23,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   type OptimizeInput,
   type OptimizeRecommendation,
   type OptimizeCategory,
@@ -39,6 +46,7 @@ import { useSpeechOutput } from "../useSpeechOutput";
 import {
   type RecipeAssistInput,
   type RecipeAssistSuggestion,
+  type RecipeApplyTarget,
   requestRecipeAssist,
   recipeAssistErrorMessage,
 } from "../aiRecipe";
@@ -534,13 +542,27 @@ function AskChat({
 function SuggestionCard({
   suggestion,
   onApply,
+  applyTargets,
+  defaultTargetId,
 }: {
   suggestion: RecipeAssistSuggestion;
-  onApply: (s: RecipeAssistSuggestion) => { ok: boolean; message: string; undo?: () => void };
+  onApply: (
+    s: RecipeAssistSuggestion,
+    runId: string,
+  ) => { ok: boolean; message: string; undo?: () => void };
+  applyTargets: RecipeApplyTarget[];
+  defaultTargetId: string;
 }) {
   const [applied, setApplied] = useState<{ ok: boolean; message: string } | null>(null);
   const [undo, setUndo] = useState<(() => void) | null>(null);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which run the suggestion will be applied to. Defaults to the current run, but
+  // the worker may target any run queued for the day. Fall back to the first
+  // target if the default isn't in the list (e.g. the run was removed).
+  const [targetId, setTargetId] = useState<string>(() => {
+    if (applyTargets.some((t) => t.id === defaultTargetId)) return defaultTargetId;
+    return applyTargets[0]?.id ?? "";
+  });
 
   useEffect(() => () => {
     if (undoTimer.current) clearTimeout(undoTimer.current);
@@ -554,7 +576,7 @@ function SuggestionCard({
   }
 
   function handleApply() {
-    const result = onApply(suggestion);
+    const result = onApply(suggestion, targetId);
     setApplied(result);
     if (result.ok && result.undo) {
       const fn = result.undo;
@@ -575,6 +597,7 @@ function SuggestionCard({
     suggestion.summary?.trim() ||
     (suggestion.kind === "scale" ? "Apply scaled recipe" : "Apply substitution");
   const title = suggestion.recipeName?.trim();
+  const multipleRuns = applyTargets.length > 1;
 
   return (
     <div
@@ -597,6 +620,26 @@ function SuggestionCard({
           </li>
         ))}
       </ul>
+      {multipleRuns && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Apply to</span>
+          <Select value={targetId} onValueChange={setTargetId} disabled={!!applied?.ok}>
+            <SelectTrigger
+              className="h-7 flex-1 text-xs"
+              data-testid="select-recipe-suggestion-run"
+            >
+              <SelectValue placeholder="Choose a run" />
+            </SelectTrigger>
+            <SelectContent>
+              {applyTargets.map((t) => (
+                <SelectItem key={t.id} value={t.id} className="text-xs">
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <Button
           size="sm"
@@ -642,11 +685,16 @@ function SuggestionCard({
 function RecipeAssistChat({
   buildContext,
   onApplySuggestion,
+  applyTargets,
+  defaultTargetId,
 }: {
   buildContext: () => Omit<RecipeAssistInput, "question">;
   onApplySuggestion: (
     s: RecipeAssistSuggestion,
+    runId: string,
   ) => { ok: boolean; message: string; undo?: () => void };
+  applyTargets: RecipeApplyTarget[];
+  defaultTargetId: string;
 }) {
   const [turns, setTurns] = useState<
     { role: "user" | "assistant"; text: string; suggestion?: RecipeAssistSuggestion }[]
@@ -750,7 +798,12 @@ function RecipeAssistChat({
                 </div>
                 {t.role === "assistant" && t.suggestion && (
                   <div className="w-[85%]">
-                    <SuggestionCard suggestion={t.suggestion} onApply={onApplySuggestion} />
+                    <SuggestionCard
+                      suggestion={t.suggestion}
+                      onApply={onApplySuggestion}
+                      applyTargets={applyTargets}
+                      defaultTargetId={defaultTargetId}
+                    />
                   </div>
                 )}
               </div>
@@ -1246,6 +1299,8 @@ export default function AssistantTab({
   buildInput,
   buildRecipeContext,
   onApplyRecipeSuggestion,
+  recipeApplyTargets,
+  recipeDefaultTargetId,
   onApplyAction,
   onApplyVoiceCommand,
   buildForecast,
@@ -1256,7 +1311,10 @@ export default function AssistantTab({
   buildRecipeContext: () => Omit<RecipeAssistInput, "question">;
   onApplyRecipeSuggestion: (
     s: RecipeAssistSuggestion,
+    runId: string,
   ) => { ok: boolean; message: string; undo?: () => void };
+  recipeApplyTargets: RecipeApplyTarget[];
+  recipeDefaultTargetId: string;
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
   onApplyVoiceCommand: (actions: VoiceCommandAction[]) => Promise<VoiceCommandResult[]>;
   buildForecast: (targetDate: string) => ForecastInput;
@@ -1304,6 +1362,8 @@ export default function AssistantTab({
       <RecipeAssistChat
         buildContext={buildRecipeContext}
         onApplySuggestion={onApplyRecipeSuggestion}
+        applyTargets={recipeApplyTargets}
+        defaultTargetId={recipeDefaultTargetId}
       />
 
       {!isManager ? null : (

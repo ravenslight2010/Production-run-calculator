@@ -46,6 +46,12 @@ export type RecipeAssistSuggestion = {
   rows: RecipeAssistRow[];
 };
 
+// A run the worker can target when applying a suggestion. The label mirrors the
+// run pickers used elsewhere in the app. The suggestion itself is run-agnostic
+// (it only names a recipe field via recipeId), so the chosen target run is passed
+// separately at apply time. Identical on web + mobile (replit.md parity).
+export type RecipeApplyTarget = { id: string; label: string };
+
 export type RecipeAssistContext = {
   brand?: string;
   flavor?: string;
