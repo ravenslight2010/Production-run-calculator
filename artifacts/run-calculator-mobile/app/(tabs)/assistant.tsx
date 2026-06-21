@@ -1,6 +1,13 @@
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card } from "@/components/UI";
 import ReviewBadge from "@/components/ReviewBadge";
@@ -13,9 +20,12 @@ import {
   type OptimizeAction,
   type OptimizeCategory,
   type OptimizeImpact,
+  type OptimizeInput,
   type OptimizeRecommendation,
   type OptimizeResult,
 } from "@/context/aiOptimize";
+import { askErrorMessage, requestAsk } from "@/context/aiAsk";
+import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 
@@ -133,6 +143,139 @@ function RecCard({
   );
 }
 
+// Free-form "ask the AI about the day" chat. Available to every signed-in
+// worker (not manager-gated). Answers are grounded strictly in the day's real
+// data; the server keeps per-user follow-up memory and returns the updated
+// conversation window on each reply, which we render as the thread. Mirrors the
+// web AskChat (replit.md parity).
+function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
+  const colors = useColors();
+  const [turns, setTurns] = React.useState<ConversationTurn[]>([]);
+  const [question, setQuestion] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
+  const scrollRef = React.useRef<ScrollView | null>(null);
+
+  // Load this user's prior conversation on mount (best-effort).
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchConversationHistory()
+      .then((t) => {
+        if (!cancelled) setTurns(t);
+      })
+      .catch(() => {
+        /* treat as empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    return () => clearTimeout(id);
+  }, [turns, loading]);
+
+  async function send() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    setNote(null);
+    const prevTurns = turns;
+    // Optimistically show the question; server truth replaces it on reply.
+    setTurns([...turns, { role: "user", text: q }]);
+    setQuestion("");
+    try {
+      const res = await requestAsk(q, buildInput());
+      if (res.turns.length) setTurns(res.turns);
+      if (res.note) setNote(res.note);
+    } catch (e) {
+      setTurns(prevTurns);
+      setQuestion(q);
+      setError(askErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card title="Ask about the day" icon="message-circle" accent>
+      <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+        Ask a plain-language question about today&apos;s runs, the schedule, and recent history —
+        e.g. &ldquo;can we finish by 2pm?&rdquo;. Answers come only from real data.
+      </Text>
+      <ScrollView
+        ref={scrollRef}
+        style={[styles.thread, { borderColor: colors.border, backgroundColor: colors.background }]}
+        contentContainerStyle={{ gap: 8, padding: 10 }}
+        nestedScrollEnabled
+      >
+        {turns.length === 0 && !loading ? (
+          <Text style={[styles.threadEmpty, { color: colors.mutedForeground }]}>
+            No questions yet. Ask anything about today&apos;s production.
+          </Text>
+        ) : (
+          turns.map((t, i) => (
+            <View
+              key={i}
+              style={[
+                styles.bubble,
+                t.role === "user"
+                  ? { alignSelf: "flex-end", backgroundColor: "rgba(14,165,233,0.18)" }
+                  : { alignSelf: "flex-start", backgroundColor: colors.muted },
+              ]}
+            >
+              <Text style={[styles.bubbleText, { color: colors.foreground }]}>{t.text}</Text>
+            </View>
+          ))
+        )}
+        {loading ? (
+          <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted, flexDirection: "row", alignItems: "center", gap: 8 }]}>
+            <ActivityIndicator size="small" color={colors.mutedForeground} />
+            <Text style={[styles.bubbleText, { color: colors.mutedForeground }]}>Thinking…</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {note ? (
+        <View style={[styles.errorBox, { borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.1)" }]}>
+          <Feather name="alert-triangle" size={14} color="#fbbf24" />
+          <Text style={[styles.errorText, { color: "#fbbf24" }]}>{note}</Text>
+        </View>
+      ) : null}
+      {error ? (
+        <View style={[styles.errorBox, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" }]}>
+          <Feather name="alert-triangle" size={14} color="#f87171" />
+          <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.inputRow}>
+        <TextInput
+          style={[
+            styles.input,
+            { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
+          ]}
+          value={question}
+          onChangeText={setQuestion}
+          placeholder="Ask about today's runs…"
+          placeholderTextColor={colors.mutedForeground}
+          multiline
+          editable={!loading}
+        />
+        <Button
+          label="Send"
+          icon="send"
+          onPress={send}
+          disabled={loading || !question.trim()}
+        />
+      </View>
+    </Card>
+  );
+}
+
 export default function AssistantScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -205,28 +348,33 @@ export default function AssistantScreen() {
     };
   }
 
+  // Shared day-state builder used by both the chat box and the optimize button,
+  // so both send the model identically-shaped data.
+  const buildInput = React.useCallback((): OptimizeInput => {
+    const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
+      date,
+      runs: runs.map((r) => ({
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesNeeded,
+        dieType: r.dieType,
+      })),
+    }));
+    return buildOptimizeInput({
+      date: todayStr(),
+      nowMs: Date.now(),
+      runToTime,
+      runs: allRuns,
+      history,
+      scheduledDays,
+    });
+  }, [scheduled, runToTime, allRuns, history]);
+
   async function analyze() {
     setLoading(true);
     setError(null);
     try {
-      const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
-        date,
-        runs: runs.map((r) => ({
-          brand: r.brand,
-          flavor: r.flavor,
-          casesNeeded: r.casesNeeded,
-          dieType: r.dieType,
-        })),
-      }));
-      const input = buildOptimizeInput({
-        date: todayStr(),
-        nowMs: Date.now(),
-        runToTime,
-        runs: allRuns,
-        history,
-        scheduledDays,
-      });
-      const res = await requestOptimize(input);
+      const res = await requestOptimize(buildInput());
       setResult(res);
     } catch (e) {
       setError(optimizeErrorMessage(e));
@@ -247,28 +395,15 @@ export default function AssistantScreen() {
     );
   }
 
-  if (!isManager) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: 16 }]}>
-        <Card>
-          <View style={styles.emptyBox}>
-            <Feather name="lock" size={22} color={colors.mutedForeground} />
-            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Managers only</Text>
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              The AI assistant is available to managers. Ask a manager to review optimization
-              recommendations.
-            </Text>
-          </View>
-        </Card>
-      </View>
-    );
-  }
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120, gap: 14 }}
     >
+      <AskChat buildInput={buildInput} />
+
+      {!isManager ? null : (
+      <>
       <Card title="AI Assistant" icon="zap" accent>
         <Text style={[styles.intro, { color: colors.mutedForeground }]}>
           Analyze today&apos;s runs, the schedule, and recent history for run sequencing, break
@@ -321,6 +456,8 @@ export default function AssistantScreen() {
             );
           })
         : null}
+      </>
+      )}
     </ScrollView>
   );
 }
@@ -353,4 +490,31 @@ const styles = StyleSheet.create({
   emptyBox: { alignItems: "center", gap: 8, paddingVertical: 24 },
   emptyTitle: { fontSize: 14, fontFamily: FONTS.semibold },
   emptyText: { fontSize: 12, lineHeight: 18, textAlign: "center", maxWidth: 280, fontFamily: FONTS.regular },
+  thread: {
+    marginTop: 12,
+    maxHeight: 280,
+    borderWidth: 1,
+    borderRadius: 10,
+  },
+  threadEmpty: {
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    paddingVertical: 20,
+    fontFamily: FONTS.regular,
+  },
+  bubble: { maxWidth: "85%", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
+  bubbleText: { fontSize: 13, lineHeight: 19, fontFamily: FONTS.regular },
+  inputRow: { marginTop: 12, flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  input: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    fontFamily: FONTS.regular,
+  },
 });

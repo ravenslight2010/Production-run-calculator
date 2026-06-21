@@ -497,6 +497,46 @@ export interface OptimizeResult {
   note?: string;
 }
 
+/**
+ * A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.
+ */
+export interface AskInput {
+  /** The user's plain-language question about the day */
+  question: string;
+  dayState: OptimizeInput;
+}
+
+/**
+ * Who produced this turn
+ */
+export type ConversationTurnRole = typeof ConversationTurnRole[keyof typeof ConversationTurnRole];
+
+
+export const ConversationTurnRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+/**
+ * One turn in a user's AI conversation memory — a single message either from the user or the assistant.
+ */
+export interface ConversationTurn {
+  /** Who produced this turn */
+  role: ConversationTurnRole;
+  /** The message text */
+  text: string;
+}
+
+export interface AskResult {
+  /** The grounded plain-language answer */
+  answer: string;
+  /** The asking user's recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth. */
+  turns: ConversationTurn[];
+  generatedAt: number;
+  /** Optional message when the question could not be answered from data */
+  note?: string;
+}
+
 export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
 
 
@@ -770,27 +810,6 @@ export interface FacilityKnowledgeList {
 export interface SaveFacilityKnowledgeInput {
   /** The batch of facility-knowledge facts to upsert into the shared pool */
   knowledge: FacilityKnowledge[];
-}
-
-/**
- * Who produced this turn
- */
-export type ConversationTurnRole = typeof ConversationTurnRole[keyof typeof ConversationTurnRole];
-
-
-export const ConversationTurnRole = {
-  user: 'user',
-  assistant: 'assistant',
-} as const;
-
-/**
- * One turn in a user's AI conversation memory — a single message either from the user or the assistant.
- */
-export interface ConversationTurn {
-  /** Who produced this turn */
-  role: ConversationTurnRole;
-  /** The message text */
-  text: string;
 }
 
 export interface ConversationHistory {

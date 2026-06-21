@@ -587,6 +587,35 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/ask:
+    post:
+      operationId: aiAsk
+      tags: [ai]
+      summary: Ask the AI a free-form question about the day
+      description: >-
+        Answers a plain-language question grounded strictly in the day's real
+        run data, the shared facility memory, and the asking user's recent
+        conversation turns. Keeps per-user follow-up context, never invents data
+        (says so when it can't answer), and records the exchange back into that
+        user's conversation memory. Read-only — never applies any change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskInput"
+      responses:
+        "200":
+          description: A grounded answer plus the user's updated conversation window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AskResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/proactive-alert:
     post:
       operationId: aiProactiveAlert
@@ -2273,6 +2302,46 @@ components:
         note:
           type: string
           description: Optional message when data is insufficient for analysis
+
+    AskInput:
+      type: object
+      description: >-
+        A free-form question about the day plus the full live day-state the
+        answer must be grounded in. Reuses the OptimizeInput shape so both
+        clients send identically-shaped data.
+      required:
+        - question
+        - dayState
+      properties:
+        question:
+          type: string
+          description: The user's plain-language question about the day
+        dayState:
+          $ref: "#/components/schemas/OptimizeInput"
+
+    AskResult:
+      type: object
+      required:
+        - answer
+        - turns
+        - generatedAt
+      properties:
+        answer:
+          type: string
+          description: The grounded plain-language answer
+        turns:
+          type: array
+          description: >-
+            The asking user's recent conversation window (oldest first) after
+            this exchange was recorded, so the client can render the thread from
+            server truth.
+          items:
+            $ref: "#/components/schemas/ConversationTurn"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when the question could not be answered from data
 
     ProactiveAlert:
       type: object

@@ -34,12 +34,19 @@ import {
   sanitizeProactiveAlert,
   validateOptimizeBody as validateProactiveBody,
 } from "./aiProactive";
+import {
+  buildAskPrompt,
+  sanitizeAnswer,
+  validateAskBody,
+} from "./aiAsk";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 import {
   loadFacilityKnowledge,
   appendFacilityMemoryBlock,
   recordFacilityKnowledge,
+  groundPromptWithMemory,
+  recordConversationTurns,
 } from "./aiMemoryContext";
 
 const router: IRouter = Router();
@@ -102,6 +109,15 @@ const PROACTIVE_RATE_MAX = 20;
 const proactiveRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PROACTIVE_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the free-form "ask the AI about the day" chat: per-user fixed
+// window, Postgres-backed in production so the cost cap holds across instances.
+const ASK_RATE_WINDOW_MS = 60_000;
+const ASK_RATE_MAX = 10;
+const askRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(ASK_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -171,6 +187,78 @@ router.post(
 
     res.json({
       recommendations: reviewed,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
+
+// Free-form "ask the AI about the day" chat. Unlike /ai/optimize this is NOT
+// manager-gated — every signed-in worker can ask plain-language questions. The
+// answer is grounded strictly in the day's real data, the shared facility
+// memory, and this user's own recent conversation turns; the exchange is then
+// recorded back into that user's conversation memory so follow-ups keep context.
+// Read-only — the model only answers, it never takes actions.
+router.post(
+  "/ai/ask",
+  rateLimit({
+    windowMs: ASK_RATE_WINDOW_MS,
+    max: ASK_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: askRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateAskBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const userId = req.userId ?? "";
+    const { system, user } = buildAskPrompt(validation.data);
+    // Ground in facility memory + this user's prior turns BEFORE recording the
+    // new exchange, so the model sees the conversation as it stood at ask time.
+    const userPrompt = await groundPromptWithMemory(req.log, user, { userId });
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-ask call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    const { answer, note } = sanitizeAnswer(content);
+    const replyText = answer || note || "I couldn't find an answer in today's data.";
+
+    // Persist the exchange (user question + assistant reply) and return this
+    // user's updated conversation window so the client renders from server truth.
+    // Best-effort: a write failure must never drop the answer we already have.
+    let turns: Array<{ role: "user" | "assistant"; text: string }> = [];
+    if (userId) {
+      try {
+        turns = await recordConversationTurns(userId, [
+          { role: "user", text: validation.data.question },
+          { role: "assistant", text: replyText },
+        ]);
+      } catch (err) {
+        req.log.error({ err }, "ai-ask failed to record conversation turns");
+      }
+    }
+
+    res.json({
+      answer: replyText,
+      turns,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });

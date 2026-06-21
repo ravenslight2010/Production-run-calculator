@@ -24,6 +24,8 @@ import type {
   AiCorrectionList,
   AppendConversationInput,
   ApprovePasswordResetResult,
+  AskInput,
+  AskResult,
   AuthCredentials,
   AuthResponse,
   ChangePasswordCredentials,
@@ -2078,6 +2080,78 @@ export const useAiOptimize = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiOptimizeMutationOptions(options));
+    }
+
+export const getAiAskUrl = () => {
+
+
+
+
+  return `/api/ai/ask`
+}
+
+/**
+ * Answers a plain-language question grounded strictly in the day's real run data, the shared facility memory, and the asking user's recent conversation turns. Keeps per-user follow-up context, never invents data (says so when it can't answer), and records the exchange back into that user's conversation memory. Read-only — never applies any change.
+ * @summary Ask the AI a free-form question about the day
+ */
+export const aiAsk = async (askInput: AskInput, options?: RequestInit): Promise<AskResult> => {
+
+  return customFetch<AskResult>(getAiAskUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      askInput,)
+  }
+);}
+
+
+
+
+export const getAiAskMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,{data: BodyType<AskInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,{data: BodyType<AskInput>}, TContext> => {
+
+const mutationKey = ['aiAsk'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiAsk>>, {data: BodyType<AskInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiAsk(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiAskMutationResult = NonNullable<Awaited<ReturnType<typeof aiAsk>>>
+    export type AiAskMutationBody = BodyType<AskInput>
+    export type AiAskMutationError = ErrorType<void>
+
+    /**
+ * @summary Ask the AI a free-form question about the day
+ */
+export const useAiAsk = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAsk>>, TError,{data: BodyType<AskInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiAsk>>,
+        TError,
+        {data: BodyType<AskInput>},
+        TContext
+      > => {
+      return useMutation(getAiAskMutationOptions(options));
     }
 
 export const getAiProactiveAlertUrl = () => {

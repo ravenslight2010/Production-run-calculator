@@ -11,6 +11,8 @@ export * from './aiCorrection';
 export * from './aiCorrectionList';
 export * from './appendConversationInput';
 export * from './approvePasswordResetResult';
+export * from './askInput';
+export * from './askResult';
 export * from './authCredentials';
 export * from './authResponse';
 export * from './changePasswordCredentials';

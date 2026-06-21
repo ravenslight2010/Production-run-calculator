@@ -5,15 +5,17 @@ import {
   Gauge,
   Coffee,
   TrendingUp,
-  Lock,
   AlertTriangle,
   RefreshCw,
   Check,
   Zap,
   Undo2,
+  MessageCircle,
+  Send,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import {
   type OptimizeInput,
   type OptimizeRecommendation,
@@ -23,6 +25,8 @@ import {
   requestOptimize,
   optimizeErrorMessage,
 } from "../aiOptimize";
+import { requestAsk, askErrorMessage } from "../aiAsk";
+import { fetchConversationHistory, type ConversationTurn } from "../aiMemory";
 import { useMe } from "../useRole";
 import ReviewBadge from "./ReviewBadge";
 
@@ -139,6 +143,157 @@ function RecCard({
   );
 }
 
+// Free-form "ask the AI about the day" chat. Available to every signed-in
+// worker (not manager-gated). Answers are grounded strictly in the day's real
+// data; the server keeps per-user follow-up memory and returns the updated
+// conversation window on each reply, which we render as the thread.
+function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
+  const [turns, setTurns] = useState<ConversationTurn[]>([]);
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Load this user's prior conversation on mount (best-effort).
+  useEffect(() => {
+    let cancelled = false;
+    fetchConversationHistory()
+      .then((t) => {
+        if (!cancelled) setTurns(t);
+      })
+      .catch(() => {
+        /* treat as empty */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, loading]);
+
+  async function send() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    setNote(null);
+    const prevTurns = turns;
+    // Optimistically show the question; server truth replaces it on reply.
+    setTurns([...turns, { role: "user", text: q }]);
+    setQuestion("");
+    try {
+      const res = await requestAsk(q, buildInput());
+      if (res.turns.length) setTurns(res.turns);
+      if (res.note) setNote(res.note);
+    } catch (e) {
+      setTurns(prevTurns);
+      setQuestion(q);
+      setError(askErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MessageCircle className="w-5 h-5 text-primary" />
+          Ask about the day
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Ask a plain-language question about today&apos;s runs, the schedule, and recent history —
+          e.g. &ldquo;can we finish by 2pm?&rdquo;. Answers come only from real data.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div
+          ref={scrollRef}
+          className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border bg-card/40 p-3"
+          data-testid="ask-thread"
+        >
+          {turns.length === 0 && !loading ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              No questions yet. Ask anything about today&apos;s production.
+            </p>
+          ) : (
+            turns.map((t, i) => (
+              <div
+                key={i}
+                className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+                    t.role === "user"
+                      ? "bg-primary/15 text-foreground"
+                      : "bg-muted text-foreground"
+                  }`}
+                  data-testid={`ask-turn-${t.role}`}
+                >
+                  {t.text}
+                </div>
+              </div>
+            ))
+          )}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+              </div>
+            </div>
+          )}
+        </div>
+
+        {note && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{note}</span>
+          </div>
+        )}
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
+          <Textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about today's runs…"
+            rows={2}
+            className="min-h-[44px] resize-none"
+            disabled={loading}
+            data-testid="input-ask-question"
+          />
+          <Button
+            onClick={() => void send()}
+            disabled={loading || !question.trim()}
+            className="gap-1.5"
+            data-testid="button-ask-send"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Send
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AssistantTab({
   buildInput,
   onApplyAction,
@@ -175,21 +330,6 @@ export default function AssistantTab({
     );
   }
 
-  if (!isManager) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
-          <Lock className="w-6 h-6 text-muted-foreground" />
-          <p className="text-sm font-semibold text-foreground">Managers only</p>
-          <p className="max-w-xs text-xs text-muted-foreground">
-            The AI assistant is available to managers. Ask a manager to review optimization
-            recommendations.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   const grouped = (cat: OptimizeCategory) =>
     (result?.recommendations ?? []).filter((r) => r.category === cat);
 
@@ -197,6 +337,10 @@ export default function AssistantTab({
 
   return (
     <div className="space-y-4 pb-24">
+      <AskChat buildInput={buildInput} />
+
+      {!isManager ? null : (
+      <>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -271,6 +415,8 @@ export default function AssistantTab({
             </Card>
           );
         })}
+      </>
+      )}
     </div>
   );
 }

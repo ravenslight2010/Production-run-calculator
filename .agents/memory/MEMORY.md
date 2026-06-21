@@ -64,3 +64,4 @@
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert is no-op on Expo web; reload after login to load rules; 10-iteration cap (keep mobile plans minimal); clear today's daily_sync first.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store (domain/key/fact, factory-wide) + per-user conversation turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool; web+mobile parity.
 - [Proactive shift alerts](proactive-alerts.md) — separate /ai/proactive-alert endpoint; server returns ≤1 keyed nudge, client owns dedup/cooldown; poll hook must live in persistent spot (home.tsx / (tabs)/_layout.tsx), not assistant tab; web+mobile parity.
+- [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff plain-language Q&A grounded in day-state (reuses OptimizeInput/buildInput); requireAuth NOT requireRole; per-user conversation window; optimize stays manager-gated; web+mobile parity.

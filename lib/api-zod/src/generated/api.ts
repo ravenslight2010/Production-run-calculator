@@ -560,6 +560,81 @@ export const AiOptimizeResponse = zod.object({
 
 
 /**
+ * Answers a plain-language question grounded strictly in the day's real run data, the shared facility memory, and the asking user's recent conversation turns. Keeps per-user follow-up context, never invents data (says so when it can't answer), and records the exchange back into that user's conversation memory. Read-only — never applies any change.
+ * @summary Ask the AI a free-form question about the day
+ */
+export const AiAskBody = zod.object({
+  "question": zod.string().describe('The user\'s plain-language question about the day'),
+  "dayState": zod.object({
+  "date": zod.string(),
+  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
+  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
+  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
+  "runs": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).describe('Today\'s runs (running, upcoming, and finished)'),
+  "scheduledRuns": zod.array(zod.object({
+  "date": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "casesNeeded": zod.number()
+})).optional().describe('Future planned runs'),
+  "historyRuns": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).optional().describe('Recent finished runs from prior days')
+})
+}).describe('A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.')
+
+export const AiAskResponse = zod.object({
+  "answer": zod.string().describe('The grounded plain-language answer'),
+  "turns": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']).describe('Who produced this turn'),
+  "text": zod.string().describe('The message text')
+}).describe('One turn in a user\'s AI conversation memory — a single message either from the user or the assistant.')).describe('The asking user\'s recent conversation window (oldest first) after this exchange was recorded, so the client can render the thread from server truth.'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when the question could not be answered from data')
+})
+
+
+/**
  * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
  * @summary At-most-one proactive shift alert (AI); read-only
  */
