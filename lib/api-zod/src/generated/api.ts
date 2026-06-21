@@ -762,6 +762,7 @@ export const AiAskResponse = zod.object({
 export const AiRecipeAssistantBody = zod.object({
   "question": zod.string().describe('The user\'s plain-language recipe\/ingredient question'),
   "recipes": zod.array(zod.object({
+  "id": zod.string().optional().describe('Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an \"apply\" suggestion target this exact recipe deterministically.'),
   "kind": zod.string().describe('What the recipe is for (dough, sauce, cheese, other)'),
   "name": zod.string().describe('The recipe\'s name (may be empty if unnamed)'),
   "rows": zod.array(zod.object({
@@ -782,7 +783,17 @@ export const AiRecipeAssistantBody = zod.object({
 export const AiRecipeAssistantResponse = zod.object({
   "answer": zod.string().describe('The grounded plain-language answer'),
   "generatedAt": zod.number(),
-  "note": zod.string().optional().describe('Optional message when the question could not be answered from data')
+  "note": zod.string().optional().describe('Optional message when the question could not be answered from data'),
+  "suggestion": zod.object({
+  "kind": zod.enum(['scale', 'substitute']).describe('Whether this resizes a recipe (scale) or swaps an ingredient (substitute)'),
+  "recipeId": zod.string().describe('The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request.'),
+  "recipeName": zod.string().optional().describe('The target recipe\'s display name (for the confirmation UI)'),
+  "summary": zod.string().optional().describe('A short button\/label describing the change (e.g. \"Apply scaled dough 1.5x\")'),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
+}).describe('One ingredient line of a recipe (ingredient name + pounds).')).describe('The COMPLETE new set of ingredient rows for that recipe after the change')
+}).optional().describe('An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE\/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.')
 })
 
 

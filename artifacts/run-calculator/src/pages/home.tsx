@@ -118,7 +118,11 @@ import QRCode from "react-qr-code";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
-import { buildRecipeAssistContext } from "../aiRecipe";
+import {
+  buildRecipeAssistContext,
+  type RecipeAssistSuggestion,
+  type RecipeFieldId,
+} from "../aiRecipe";
 import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
@@ -3611,6 +3615,65 @@ export default function Home() {
         saveDayState(restored);
         schedulePush(restored);
       },
+    };
+  }
+
+  // Apply a confirm-first recipe suggestion from the AI helper (a scaled recipe
+  // or a substitution) to the CURRENT run's matching recipe rows. Routes through
+  // the same form + field-array + save/push path used everywhere else — no new
+  // write surface. The worker already tapped Apply; we return an undo that
+  // restores the previous rows. The AI never reaches here on its own.
+  function applyRecipeSuggestion(
+    s: RecipeAssistSuggestion,
+  ): { ok: boolean; message: string; undo?: () => void } {
+    const writers: Record<RecipeFieldId, (rows: { ingredient: string; lbs: number }[]) => void> = {
+      doughRecipe: (rows) => {
+        form.setValue("doughRecipe", rows, { shouldDirty: true });
+        replaceDough(rows);
+      },
+      frontlineRecipe: (rows) => {
+        form.setValue("frontlineRecipe", rows, { shouldDirty: true });
+        replaceFrontline(rows);
+      },
+      app1CheeseRecipe: (rows) => {
+        form.setValue("app1CheeseRecipe", rows, { shouldDirty: true });
+        replaceCheese1(rows);
+      },
+      app2CheeseRecipe: (rows) => {
+        form.setValue("app2CheeseRecipe", rows, { shouldDirty: true });
+        replaceCheese2(rows);
+      },
+      app3CheeseRecipe: (rows) => {
+        form.setValue("app3CheeseRecipe", rows, { shouldDirty: true });
+        replaceCheese3(rows);
+      },
+      app4CheeseRecipe: (rows) => {
+        form.setValue("app4CheeseRecipe", rows, { shouldDirty: true });
+        replaceCheese4(rows);
+      },
+    };
+    const writer = writers[s.recipeId as RecipeFieldId];
+    if (!writer) return { ok: false, message: "Unknown recipe" };
+
+    const rows = (s.rows ?? [])
+      .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
+      .filter((r) => r.ingredient);
+    if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
+
+    const prevRaw = (form.getValues() as Record<string, unknown>)[s.recipeId];
+    const prev = (Array.isArray(prevRaw) ? prevRaw : []) as { ingredient: string; lbs: number }[];
+    const prevRows = prev.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
+
+    const write = (next: { ingredient: string; lbs: number }[]) => {
+      writer(next);
+      saveRunValues(currentRunId, form.getValues());
+      schedulePush(dayStateRef.current, 0);
+    };
+    write(rows);
+    return {
+      ok: true,
+      message: s.kind === "scale" ? "Recipe scaled" : "Substitution applied",
+      undo: () => write(prevRows),
     };
   }
 
@@ -7989,6 +8052,7 @@ export default function Home() {
                       },
                     )
                   }
+                  onApplyRecipeSuggestion={applyRecipeSuggestion}
                   onApplyAction={applyOptimizeAction}
                   buildForecast={(targetDate) =>
                     buildForecastInput({

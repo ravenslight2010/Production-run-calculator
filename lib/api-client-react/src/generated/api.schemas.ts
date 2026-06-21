@@ -755,6 +755,8 @@ export interface RecipeAssistRow {
  * One of the current run's recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).
  */
 export interface RecipeAssistRecipe {
+  /** Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply" suggestion target this exact recipe deterministically. */
+  id?: string;
   /** What the recipe is for (dough, sauce, cheese, other) */
   kind: string;
   /** The recipe's name (may be empty if unnamed) */
@@ -787,12 +789,40 @@ export interface RecipeAssistInput {
   context?: RecipeAssistContext;
 }
 
+/**
+ * Whether this resizes a recipe (scale) or swaps an ingredient (substitute)
+ */
+export type RecipeAssistSuggestionKind = typeof RecipeAssistSuggestionKind[keyof typeof RecipeAssistSuggestionKind];
+
+
+export const RecipeAssistSuggestionKind = {
+  scale: 'scale',
+  substitute: 'substitute',
+} as const;
+
+/**
+ * An optional structured, confirm-first edit the worker can apply in one tap — the exact resulting ingredient rows of a scaled or substituted recipe. Present only for SCALE/SUBSTITUTE questions where the model could produce exact rows; absent for EXPLAIN questions or when it is unsure. Advisory: nothing is applied until the worker confirms.
+ */
+export interface RecipeAssistSuggestion {
+  /** Whether this resizes a recipe (scale) or swaps an ingredient (substitute) */
+  kind: RecipeAssistSuggestionKind;
+  /** The id of the recipe to apply this to, copied from the matching RecipeAssistRecipe.id sent in the request. */
+  recipeId: string;
+  /** The target recipe's display name (for the confirmation UI) */
+  recipeName?: string;
+  /** A short button/label describing the change (e.g. "Apply scaled dough 1.5x") */
+  summary?: string;
+  /** The COMPLETE new set of ingredient rows for that recipe after the change */
+  rows: RecipeAssistRow[];
+}
+
 export interface RecipeAssistResult {
   /** The grounded plain-language answer */
   answer: string;
   generatedAt: number;
   /** Optional message when the question could not be answered from data */
   note?: string;
+  suggestion?: RecipeAssistSuggestion;
 }
 
 export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];

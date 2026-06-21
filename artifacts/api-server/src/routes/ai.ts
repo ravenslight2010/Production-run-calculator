@@ -371,13 +371,21 @@ router.post(
       return;
     }
 
-    const { answer, note } = sanitizeRecipeAnswer(content);
+    // The model may only target a recipe we actually sent: collect the ids so a
+    // hallucinated/off-target suggestion is dropped rather than offered to apply.
+    const knownRecipeIds = new Set(
+      validation.data.recipes
+        .map((r) => r.id?.trim())
+        .filter((id): id is string => !!id),
+    );
+    const { answer, note, suggestion } = sanitizeRecipeAnswer(content, knownRecipeIds);
     const replyText = answer || note || "I couldn't answer that from the recipe data.";
 
     res.json({
       answer: replyText,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
+      ...(suggestion ? { suggestion } : {}),
     });
   },
 );

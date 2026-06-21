@@ -2871,6 +2871,12 @@ components:
         - name
         - rows
       properties:
+        id:
+          type: string
+          description: >-
+            Stable settings-field key identifying which recipe this is (e.g.
+            doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply"
+            suggestion target this exact recipe deterministically.
         kind:
           type: string
           description: What the recipe is for (dough, sauce, cheese, other)
@@ -2940,6 +2946,42 @@ components:
         note:
           type: string
           description: Optional message when the question could not be answered from data
+        suggestion:
+          $ref: "#/components/schemas/RecipeAssistSuggestion"
+
+    RecipeAssistSuggestion:
+      type: object
+      description: >-
+        An optional structured, confirm-first edit the worker can apply in one
+        tap — the exact resulting ingredient rows of a scaled or substituted
+        recipe. Present only for SCALE/SUBSTITUTE questions where the model could
+        produce exact rows; absent for EXPLAIN questions or when it is unsure.
+        Advisory: nothing is applied until the worker confirms.
+      required:
+        - kind
+        - recipeId
+        - rows
+      properties:
+        kind:
+          type: string
+          enum: [scale, substitute]
+          description: Whether this resizes a recipe (scale) or swaps an ingredient (substitute)
+        recipeId:
+          type: string
+          description: >-
+            The id of the recipe to apply this to, copied from the matching
+            RecipeAssistRecipe.id sent in the request.
+        recipeName:
+          type: string
+          description: The target recipe's display name (for the confirmation UI)
+        summary:
+          type: string
+          description: A short button/label describing the change (e.g. "Apply scaled dough 1.5x")
+        rows:
+          type: array
+          description: The COMPLETE new set of ingredient rows for that recipe after the change
+          items:
+            $ref: "#/components/schemas/RecipeAssistRow"
 
     ProactiveAlert:
       type: object

@@ -12,8 +12,34 @@ import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inven
 export type RecipeAssistRow = { ingredient: string; lbs: number };
 
 export type RecipeAssistRecipe = {
+  id?: string;
   kind: string;
   name: string;
+  rows: RecipeAssistRow[];
+};
+
+// The stable settings-field keys for the current run's recipes, in the order
+// the builder sends them. These double as the suggestion `recipeId`, so the
+// client can route an applied suggestion straight back to the right recipe.
+// Identical on web + mobile (replit.md parity).
+export const RECIPE_FIELD_IDS = [
+  "doughRecipe",
+  "frontlineRecipe",
+  "app1CheeseRecipe",
+  "app2CheeseRecipe",
+  "app3CheeseRecipe",
+  "app4CheeseRecipe",
+] as const;
+export type RecipeFieldId = (typeof RECIPE_FIELD_IDS)[number];
+
+// A structured, confirm-first edit returned by the assistant for a SCALE or
+// SUBSTITUTE question — the complete resulting rows for one recipe. Advisory:
+// nothing changes until the worker taps Apply.
+export type RecipeAssistSuggestion = {
+  kind: "scale" | "substitute";
+  recipeId: string;
+  recipeName?: string;
+  summary?: string;
   rows: RecipeAssistRow[];
 };
 
@@ -36,6 +62,7 @@ export type RecipeAssistResult = {
   answer: string;
   generatedAt: number;
   note?: string;
+  suggestion?: RecipeAssistSuggestion;
 };
 
 export async function requestRecipeAssist(input: RecipeAssistInput): Promise<RecipeAssistResult> {
@@ -100,18 +127,23 @@ export function buildRecipeAssistContext(
   context: RecipeAssistContext,
 ): Omit<RecipeAssistInput, "question"> {
   const recipes: RecipeAssistRecipe[] = [];
-  const add = (kind: string, name: string | undefined, rows: RecipeAssistRow[] | undefined) => {
+  const add = (
+    id: RecipeFieldId,
+    kind: string,
+    name: string | undefined,
+    rows: RecipeAssistRow[] | undefined,
+  ) => {
     const clean = (rows ?? [])
       .filter((r) => (r.ingredient ?? "").trim())
       .map((r) => ({ ingredient: r.ingredient.trim(), lbs: Number(r.lbs) || 0 }));
-    if (clean.length) recipes.push({ kind, name: (name ?? "").trim(), rows: clean });
+    if (clean.length) recipes.push({ id, kind, name: (name ?? "").trim(), rows: clean });
   };
-  add("dough", settings.doughRecipeName, settings.doughRecipe);
-  add("sauce", settings.frontlineRecipeName, settings.frontlineRecipe);
-  add("cheese", settings.app1CheeseRecipeName, settings.app1CheeseRecipe);
-  add("cheese", settings.app2CheeseRecipeName, settings.app2CheeseRecipe);
-  add("cheese", settings.app3CheeseRecipeName, settings.app3CheeseRecipe);
-  add("cheese", settings.app4CheeseRecipeName, settings.app4CheeseRecipe);
+  add("doughRecipe", "dough", settings.doughRecipeName, settings.doughRecipe);
+  add("frontlineRecipe", "sauce", settings.frontlineRecipeName, settings.frontlineRecipe);
+  add("app1CheeseRecipe", "cheese", settings.app1CheeseRecipeName, settings.app1CheeseRecipe);
+  add("app2CheeseRecipe", "cheese", settings.app2CheeseRecipeName, settings.app2CheeseRecipe);
+  add("app3CheeseRecipe", "cheese", settings.app3CheeseRecipeName, settings.app3CheeseRecipe);
+  add("app4CheeseRecipe", "cheese", settings.app4CheeseRecipeName, settings.app4CheeseRecipe);
 
   const names = Array.from(
     new Map(

@@ -7,11 +7,25 @@ import * as z from "zod";
 export const MAX_QUESTION_CHARS = 1000;
 export const MAX_ANSWER_CHARS = 2000;
 export const MAX_NOTE_CHARS = 600;
+export const MAX_SUMMARY_CHARS = 200;
+export const MAX_NAME_CHARS = 200;
 export const MAX_RECIPES = 24;
 export const MAX_ROWS_PER_RECIPE = 80;
 export const MAX_INGREDIENT_NAMES = 600;
 
 export type RecipeAssistInput = z.infer<typeof AiRecipeAssistantBody>;
+
+// A structured, confirm-first edit the worker can apply in one tap: the exact
+// resulting rows of a scaled or substituted recipe, targeted at one of the
+// recipes we sent (by its stable id). Advisory only — the client still requires
+// an explicit confirm before anything is written.
+export type RecipeSuggestion = {
+  kind: "scale" | "substitute";
+  recipeId: string;
+  recipeName: string;
+  summary: string;
+  rows: { ingredient: string; lbs: number }[];
+};
 
 export type RecipeAssistValidationResult =
   | { ok: true; data: RecipeAssistInput }
@@ -122,7 +136,8 @@ export function buildRecipeAssistPrompt(input: RecipeAssistInput): {
   } else {
     for (const r of input.recipes) {
       const name = r.name.trim() ? ` "${r.name.trim()}"` : "";
-      lines.push(`  [${r.kind}]${name}`);
+      const idTag = r.id?.trim() ? `id=${r.id.trim()} ` : "";
+      lines.push(`  [${idTag}${r.kind}]${name}`);
       lines.push(fmtRows(r.rows));
     }
   }
@@ -139,11 +154,27 @@ export function buildRecipeAssistPrompt(input: RecipeAssistInput): {
   lines.push("");
   lines.push(
     "Return ONLY JSON of the exact shape: " +
-      '{"answer":string,"note":string}. ' +
+      '{"answer":string,"note":string,"suggestion":object|null}. ' +
       'Put your plain-language reply in "answer". ' +
       'If the data above does not let you answer, set "answer" to a brief honest ' +
       'explanation that you cannot answer from the available data, and put what ' +
       'extra information would be needed in "note". Otherwise leave "note" empty.',
+  );
+  lines.push(
+    "When the question asks to SCALE a recipe or SUBSTITUTE an ingredient AND " +
+      "the data lets you produce the exact resulting ingredient rows, ALSO fill " +
+      '"suggestion" so the worker can apply it in one tap (they still confirm): ' +
+      '{"kind":"scale"|"substitute","recipeId":string,"recipeName":string,' +
+      '"summary":string,"rows":[{"ingredient":string,"lbs":number}]}. ' +
+      'Set "recipeId" to the id of the changed recipe, copied EXACTLY from its ' +
+      "[id=...] tag above. " +
+      'Set "summary" to a short button label (e.g. "Apply scaled dough 1.5x" or ' +
+      '"Replace Flour with Bread Flour"). ' +
+      'Set "rows" to the COMPLETE new set of ingredient rows for that recipe ' +
+      "after the change — include EVERY row, not just the ones that changed. " +
+      'For an EXPLAIN question, or if you are not certain of the exact rows or ' +
+      'the recipe id, set "suggestion" to null. Never include a suggestion you ' +
+      "are unsure about.",
   );
 
   return { system, user: lines.join("\n") };
@@ -152,7 +183,10 @@ export function buildRecipeAssistPrompt(input: RecipeAssistInput): {
 // The model returns JSON but isn't trustworthy. Parse leniently: prefer a
 // well-formed {answer, note}; if parsing fails entirely, fall back to using the
 // raw content as the answer so a stray formatting slip never drops a real reply.
-export function sanitizeRecipeAnswer(content: string): { answer: string; note?: string } {
+export function sanitizeRecipeAnswer(
+  content: string,
+  knownRecipeIds?: ReadonlySet<string>,
+): { answer: string; note?: string; suggestion?: RecipeSuggestion } {
   const raw = (content ?? "").trim();
   if (!raw) return { answer: "" };
 
@@ -166,6 +200,7 @@ export function sanitizeRecipeAnswer(content: string): { answer: string; note?: 
   const ResponseSchema = z.object({
     answer: z.coerce.string().optional(),
     note: z.coerce.string().optional(),
+    suggestion: z.unknown().optional(),
   });
   const result = ResponseSchema.safeParse(parsed);
   if (!result.success) {
@@ -173,8 +208,57 @@ export function sanitizeRecipeAnswer(content: string): { answer: string; note?: 
   }
   const answer = clamp(result.data.answer ?? "", MAX_ANSWER_CHARS);
   const note = clamp(result.data.note ?? "", MAX_NOTE_CHARS);
+  const suggestion = sanitizeSuggestion(result.data.suggestion, knownRecipeIds);
   // If the model produced neither an answer nor a note, fall back to the raw
   // content so we never return an empty reply for a non-empty response.
-  if (!answer && !note) return { answer: clamp(raw, MAX_ANSWER_CHARS) };
-  return note ? { answer, note } : { answer };
+  if (!answer && !note && !suggestion) return { answer: clamp(raw, MAX_ANSWER_CHARS) };
+  return {
+    answer,
+    ...(note ? { note } : {}),
+    ...(suggestion ? { suggestion } : {}),
+  };
+}
+
+// Validate a model-proposed structured suggestion. The model is untrusted, so be
+// strict: only "scale"/"substitute", the recipeId must name a recipe we actually
+// sent (when the caller supplies the known ids), and the rows must be real
+// (non-blank ingredient, finite non-negative pounds). Anything off → drop the
+// whole suggestion so the worker only ever sees an applyable, on-target edit.
+function sanitizeSuggestion(
+  value: unknown,
+  knownRecipeIds?: ReadonlySet<string>,
+): RecipeSuggestion | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const Schema = z.object({
+    kind: z.coerce.string().optional(),
+    recipeId: z.coerce.string().optional(),
+    recipeName: z.coerce.string().optional(),
+    summary: z.coerce.string().optional(),
+    rows: z
+      .array(z.object({ ingredient: z.coerce.string(), lbs: z.coerce.number() }))
+      .optional(),
+  });
+  const parsed = Schema.safeParse(value);
+  if (!parsed.success) return undefined;
+
+  const kind = parsed.data.kind?.trim().toLowerCase();
+  if (kind !== "scale" && kind !== "substitute") return undefined;
+
+  const recipeId = parsed.data.recipeId?.trim();
+  if (!recipeId) return undefined;
+  if (knownRecipeIds && !knownRecipeIds.has(recipeId)) return undefined;
+
+  const rows = (parsed.data.rows ?? [])
+    .map((r) => ({ ingredient: r.ingredient.trim(), lbs: r.lbs }))
+    .filter((r) => r.ingredient && Number.isFinite(r.lbs) && r.lbs >= 0)
+    .slice(0, MAX_ROWS_PER_RECIPE);
+  if (rows.length === 0) return undefined;
+
+  return {
+    kind,
+    recipeId,
+    recipeName: clamp(parsed.data.recipeName ?? "", MAX_NAME_CHARS),
+    summary: clamp(parsed.data.summary ?? "", MAX_SUMMARY_CHARS),
+    rows,
+  };
 }

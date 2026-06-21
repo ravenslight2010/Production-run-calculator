@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Card } from "@/components/UI";
 import ReviewBadge from "@/components/ReviewBadge";
 import { FONTS } from "@/constants/fonts";
-import { todayStr, useRun } from "@/context/RunContext";
+import { todayStr, useRun, type RunSettings } from "@/context/RunContext";
 import {
   buildOptimizeInput,
   optimizeErrorMessage,
@@ -43,7 +43,9 @@ import {
   buildRecipeAssistContext,
   recipeAssistErrorMessage,
   requestRecipeAssist,
+  RECIPE_FIELD_IDS,
   type RecipeAssistInput,
+  type RecipeAssistSuggestion,
 } from "@/context/aiRecipe";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { useColors } from "@/hooks/useColors";
@@ -333,19 +335,123 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   );
 }
 
+// A confirm-first, one-tap apply for a structured recipe suggestion (a scaled
+// recipe or a substitution). Nothing changes until the worker taps Apply; the
+// rows are shown first so they confirm exactly what they're applying. After
+// applying, a short Undo window restores the previous rows. Mirrors the web
+// SuggestionCard + RecCard (replit.md parity).
+function SuggestionCard({
+  suggestion,
+  onApply,
+}: {
+  suggestion: RecipeAssistSuggestion;
+  onApply: (s: RecipeAssistSuggestion) => { ok: boolean; message: string; undo?: () => void };
+}) {
+  const colors = useColors();
+  const [applied, setApplied] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const [undo, setUndo] = React.useState<(() => void) | null>(null);
+  const undoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(
+    () => () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    },
+    [],
+  );
+
+  function clearUndoTimer() {
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+  }
+
+  function handleApply() {
+    const result = onApply(suggestion);
+    setApplied(result);
+    if (result.ok && result.undo) {
+      const fn = result.undo;
+      setUndo(() => fn);
+      clearUndoTimer();
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+  }
+
+  function handleUndo() {
+    if (undo) undo();
+    clearUndoTimer();
+    setUndo(null);
+    setApplied(null);
+  }
+
+  const label =
+    suggestion.summary?.trim() ||
+    (suggestion.kind === "scale" ? "Apply scaled recipe" : "Apply substitution");
+  const title = suggestion.recipeName?.trim();
+
+  return (
+    <View style={[styles.suggestionCard, { backgroundColor: colors.background, borderColor: colors.primary }]}>
+      <View style={styles.suggestionHeader}>
+        <Feather name="zap" size={13} color={colors.primary} />
+        <Text style={[styles.suggestionKind, { color: colors.primary }]}>
+          {suggestion.kind === "scale" ? "SCALED RECIPE" : "SUBSTITUTION"}
+        </Text>
+      </View>
+      {title ? (
+        <Text style={[styles.suggestionTitle, { color: colors.foreground }]}>{title}</Text>
+      ) : null}
+      <View style={{ marginTop: 6, gap: 2 }}>
+        {suggestion.rows.map((r, idx) => (
+          <View key={idx} style={styles.suggestionRow}>
+            <Text style={[styles.suggestionRowName, { color: colors.mutedForeground }]} numberOfLines={1}>
+              {r.ingredient}
+            </Text>
+            <Text style={[styles.suggestionRowLbs, { color: colors.mutedForeground }]}>{r.lbs} lbs</Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.actionRow}>
+        <Button
+          label={applied?.ok ? "Applied" : label}
+          icon={applied?.ok ? "check" : "zap"}
+          size="sm"
+          variant={applied?.ok ? "outline" : "primary"}
+          disabled={!!applied?.ok}
+          onPress={handleApply}
+        />
+        {undo ? (
+          <Button label="Undo" icon="rotate-ccw" size="sm" variant="outline" onPress={handleUndo} />
+        ) : null}
+        {applied ? (
+          <Text style={[styles.actionMsg, { color: applied.ok ? "#34d399" : "#f87171" }]}>
+            {applied.message}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 // Recipe & ingredient helper. Single-shot Q&A (no follow-up memory) over the
 // current run's real recipes: scale a recipe, suggest a substitution, or explain
 // a formula in plain language. Available to every signed-in worker (not manager-
-// gated), exactly like AskChat. Advisory only — never edits a recipe; the worker
-// reads the numbers and acts themselves. EXACT mirror of the web RecipeAssistChat
-// (replit.md parity).
+// gated), exactly like AskChat. For a scale/substitute question the assistant may
+// also return a structured suggestion the worker can apply in one tap (confirm-
+// first via SuggestionCard) — the AI never edits a recipe on its own. EXACT mirror
+// of the web RecipeAssistChat (replit.md parity).
 function RecipeAssistChat({
   buildContext,
+  onApplySuggestion,
 }: {
   buildContext: () => Omit<RecipeAssistInput, "question">;
+  onApplySuggestion: (
+    s: RecipeAssistSuggestion,
+  ) => { ok: boolean; message: string; undo?: () => void };
 }) {
   const colors = useColors();
-  const [turns, setTurns] = React.useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [turns, setTurns] = React.useState<
+    { role: "user" | "assistant"; text: string; suggestion?: RecipeAssistSuggestion }[]
+  >([]);
   const [question, setQuestion] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -369,7 +475,10 @@ function RecipeAssistChat({
     try {
       const ctx = buildContext();
       const res = await requestRecipeAssist({ ...ctx, question: q });
-      setTurns((cur) => [...cur, { role: "assistant", text: res.answer }]);
+      setTurns((cur) => [
+        ...cur,
+        { role: "assistant", text: res.answer, suggestion: res.suggestion },
+      ]);
       if (res.note) setNote(res.note);
     } catch (e) {
       setTurns(prevTurns);
@@ -399,16 +508,20 @@ function RecipeAssistChat({
           </Text>
         ) : (
           turns.map((t, i) => (
-            <View
-              key={i}
-              style={[
-                styles.bubble,
-                t.role === "user"
-                  ? { alignSelf: "flex-end", backgroundColor: "rgba(14,165,233,0.18)" }
-                  : { alignSelf: "flex-start", backgroundColor: colors.muted },
-              ]}
-            >
-              <Text style={[styles.bubbleText, { color: colors.foreground }]}>{t.text}</Text>
+            <View key={i} style={{ alignSelf: "stretch", gap: 6 }}>
+              <View
+                style={[
+                  styles.bubble,
+                  t.role === "user"
+                    ? { alignSelf: "flex-end", backgroundColor: "rgba(14,165,233,0.18)" }
+                    : { alignSelf: "flex-start", backgroundColor: colors.muted },
+                ]}
+              >
+                <Text style={[styles.bubbleText, { color: colors.foreground }]}>{t.text}</Text>
+              </View>
+              {t.role === "assistant" && t.suggestion ? (
+                <SuggestionCard suggestion={t.suggestion} onApply={onApplySuggestion} />
+              ) : null}
             </View>
           ))
         )}
@@ -920,6 +1033,41 @@ export default function AssistantScreen() {
     };
   }
 
+  // Apply a confirm-first recipe suggestion from the AI helper (a scaled recipe
+  // or a substitution) to the CURRENT run's matching recipe rows. Routes through
+  // the existing updateRunSettingsById path — no new write surface. The worker
+  // already tapped Apply; we return an undo that restores the previous rows.
+  // EXACT mirror of the web applyRecipeSuggestion (replit.md parity).
+  function applyRecipeSuggestion(
+    s: RecipeAssistSuggestion,
+  ): { ok: boolean; message: string; undo?: () => void } {
+    if (!(RECIPE_FIELD_IDS as readonly string[]).includes(s.recipeId)) {
+      return { ok: false, message: "Unknown recipe" };
+    }
+    const runId = run?.id;
+    if (!runId) return { ok: false, message: "No active run" };
+
+    const rows = (s.rows ?? [])
+      .map((r) => ({ ingredient: (r.ingredient ?? "").trim(), lbs: Number(r.lbs) || 0 }))
+      .filter((r) => r.ingredient);
+    if (rows.length === 0) return { ok: false, message: "Nothing to apply" };
+
+    const prevRaw = (run?.settings as unknown as Record<string, unknown>)?.[s.recipeId];
+    const prev = (Array.isArray(prevRaw) ? prevRaw : ([] as { ingredient: string; lbs: number }[])).map(
+      (r) => ({ ingredient: r.ingredient, lbs: r.lbs }),
+    );
+
+    const write = (next: { ingredient: string; lbs: number }[]) => {
+      updateRunSettingsById(runId, { [s.recipeId]: next } as Partial<RunSettings>);
+    };
+    write(rows);
+    return {
+      ok: true,
+      message: s.kind === "scale" ? "Recipe scaled" : "Substitution applied",
+      undo: () => write(prev),
+    };
+  }
+
   // Shared day-state builder used by both the chat box and the optimize button,
   // so both send the model identically-shaped data.
   const buildInput = React.useCallback((): OptimizeInput => {
@@ -1040,7 +1188,10 @@ export default function AssistantScreen() {
     >
       <AskChat buildInput={buildInput} />
 
-      <RecipeAssistChat buildContext={buildRecipeContext} />
+      <RecipeAssistChat
+        buildContext={buildRecipeContext}
+        onApplySuggestion={applyRecipeSuggestion}
+      />
 
       {!isManager ? null : (
       <>
@@ -1165,6 +1316,13 @@ const styles = StyleSheet.create({
   recApplies: { marginTop: 6, fontSize: 11, fontFamily: FONTS.medium },
   actionRow: { marginTop: 10, flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 },
   actionMsg: { fontSize: 11, fontFamily: FONTS.medium },
+  suggestionCard: { borderWidth: 1, borderRadius: 10, padding: 10, alignSelf: "stretch" },
+  suggestionHeader: { flexDirection: "row", alignItems: "center", gap: 5 },
+  suggestionKind: { fontSize: 10, fontFamily: FONTS.bold, letterSpacing: 0.5 },
+  suggestionTitle: { marginTop: 4, fontSize: 12, fontFamily: FONTS.semibold },
+  suggestionRow: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  suggestionRowName: { flex: 1, fontSize: 11, fontFamily: FONTS.regular },
+  suggestionRowLbs: { fontSize: 11, fontFamily: FONTS.mono },
   emptyBox: { alignItems: "center", gap: 8, paddingVertical: 24 },
   emptyTitle: { fontSize: 14, fontFamily: FONTS.semibold },
   emptyText: { fontSize: 12, lineHeight: 18, textAlign: "center", maxWidth: 280, fontFamily: FONTS.regular },

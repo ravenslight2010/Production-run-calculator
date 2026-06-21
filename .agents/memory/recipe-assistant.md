@@ -30,3 +30,25 @@ grounding helper, so it never pollutes the day-ask conversation thread. It is si
 - Only non-empty recipes and >0/non-blank context fields are sent (strict grounding).
 - Server prompt/sanitize tests live in api-server (`aiRecipeAssistant.test.ts`), mirroring
   `aiAsk.test.ts` — NOT in the web shared harness.
+
+## Confirm-first one-tap suggestion apply
+The assistant may return an optional STRUCTURED `suggestion` (scale|substitute) the worker
+applies in one tap. The model is untrusted, so the design rule is: a suggestion is only ever
+APPLYABLE and ON-TARGET, never auto-applied.
+
+**Why structured + id round-trip:** applying through the EXISTING recipe write paths (no new
+write surface) needs the exact resulting rows plus an unambiguous target. So each recipe sent
+to the model carries a stable `id` = its settings field key, and the model must echo it back as
+`recipeId`. Free text alone couldn't be applied safely.
+
+**Trust-boundary rule (server `sanitizeSuggestion`):** drop the WHOLE suggestion unless kind is
+scale|substitute, `recipeId` is in the `knownRecipeIds` set the route derives from the recipes
+it actually sent, and at least one real row survives (non-blank ingredient, finite ≥0 lbs).
+This is what stops hallucinated/off-target writes — keep it strict.
+
+**Parity rule:** apply is the only platform-specific glue (web: react-hook-form setValue +
+field-array replace + existing save/push; mobile: `updateRunSettingsById`). Field keys are
+identical (`RECIPE_FIELD_IDS`, exported from both `aiRecipe.ts`), both gate on it, and both
+return an undo restoring the prior rows — so behavior stays identical without sharing the writer.
+Read prior rows defensively (`Array.isArray` before `.map`); persisted state isn't guaranteed
+to be an array.

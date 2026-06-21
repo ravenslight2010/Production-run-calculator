@@ -33,6 +33,7 @@ import { requestAsk, askErrorMessage } from "../aiAsk";
 import { useSpeechInput } from "../useSpeechInput";
 import {
   type RecipeAssistInput,
+  type RecipeAssistSuggestion,
   requestRecipeAssist,
   recipeAssistErrorMessage,
 } from "../aiRecipe";
@@ -344,17 +345,130 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   );
 }
 
+// A confirm-first, one-tap apply for a structured recipe suggestion (a scaled
+// recipe or a substitution). Nothing changes until the worker taps Apply; the
+// rows are shown first so they confirm exactly what they're applying. After
+// applying, a short Undo window restores the previous rows. Mirrors RecCard.
+function SuggestionCard({
+  suggestion,
+  onApply,
+}: {
+  suggestion: RecipeAssistSuggestion;
+  onApply: (s: RecipeAssistSuggestion) => { ok: boolean; message: string; undo?: () => void };
+}) {
+  const [applied, setApplied] = useState<{ ok: boolean; message: string } | null>(null);
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+  }, []);
+
+  function clearUndoTimer() {
+    if (undoTimer.current) {
+      clearTimeout(undoTimer.current);
+      undoTimer.current = null;
+    }
+  }
+
+  function handleApply() {
+    const result = onApply(suggestion);
+    setApplied(result);
+    if (result.ok && result.undo) {
+      const fn = result.undo;
+      setUndo(() => fn);
+      clearUndoTimer();
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+  }
+
+  function handleUndo() {
+    if (undo) undo();
+    clearUndoTimer();
+    setUndo(null);
+    setApplied(null);
+  }
+
+  const label =
+    suggestion.summary?.trim() ||
+    (suggestion.kind === "scale" ? "Apply scaled recipe" : "Apply substitution");
+  const title = suggestion.recipeName?.trim();
+
+  return (
+    <div
+      className="mt-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5"
+      data-testid="recipe-assist-suggestion"
+    >
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary/80">
+        <Sparkles className="h-3.5 w-3.5" />
+        {suggestion.kind === "scale" ? "Scaled recipe" : "Substitution"}
+      </div>
+      {title && <p className="mt-1 text-xs font-medium text-foreground">{title}</p>}
+      <ul className="mt-1.5 space-y-0.5">
+        {suggestion.rows.map((r, idx) => (
+          <li
+            key={idx}
+            className="flex justify-between gap-3 text-[11px] text-muted-foreground"
+          >
+            <span className="truncate">{r.ingredient}</span>
+            <span className="shrink-0 font-mono">{r.lbs} lbs</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant={applied?.ok ? "secondary" : "default"}
+          className="h-7 gap-1.5 text-xs"
+          onClick={handleApply}
+          disabled={applied?.ok}
+          data-testid="button-apply-recipe-suggestion"
+        >
+          {applied?.ok ? <Check className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
+          {applied?.ok ? "Applied" : label}
+        </Button>
+        {undo && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 text-xs"
+            onClick={handleUndo}
+            data-testid="button-undo-recipe-suggestion"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+            Undo
+          </Button>
+        )}
+        {applied && (
+          <span
+            className={`text-[11px] font-medium ${applied.ok ? "text-emerald-400" : "text-red-400"}`}
+          >
+            {applied.message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Recipe & ingredient helper. A single-shot Q&A (no follow-up memory) over the
 // current run's real recipes: scale a recipe, suggest a substitution, or explain
 // a formula in plain language. Available to every signed-in worker (not manager-
-// gated), exactly like AskChat. Advisory only — it never edits a recipe; the
-// worker reads the numbers and acts themselves.
+// gated), exactly like AskChat. For a scale/substitute question the assistant may
+// also return a structured suggestion the worker can apply in one tap (confirm-
+// first via SuggestionCard) — the AI never edits a recipe on its own.
 function RecipeAssistChat({
   buildContext,
+  onApplySuggestion,
 }: {
   buildContext: () => Omit<RecipeAssistInput, "question">;
+  onApplySuggestion: (
+    s: RecipeAssistSuggestion,
+  ) => { ok: boolean; message: string; undo?: () => void };
 }) {
-  const [turns, setTurns] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [turns, setTurns] = useState<
+    { role: "user" | "assistant"; text: string; suggestion?: RecipeAssistSuggestion }[]
+  >([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -378,7 +492,10 @@ function RecipeAssistChat({
     try {
       const ctx = buildContext();
       const res = await requestRecipeAssist({ ...ctx, question: q });
-      setTurns((cur) => [...cur, { role: "assistant", text: res.answer }]);
+      setTurns((cur) => [
+        ...cur,
+        { role: "assistant", text: res.answer, suggestion: res.suggestion },
+      ]);
       if (res.note) setNote(res.note);
     } catch (e) {
       setTurns(prevTurns);
@@ -423,7 +540,7 @@ function RecipeAssistChat({
             turns.map((t, i) => (
               <div
                 key={i}
-                className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`flex flex-col ${t.role === "user" ? "items-end" : "items-start"}`}
               >
                 <div
                   className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
@@ -435,6 +552,11 @@ function RecipeAssistChat({
                 >
                   {t.text}
                 </div>
+                {t.role === "assistant" && t.suggestion && (
+                  <div className="w-[85%]">
+                    <SuggestionCard suggestion={t.suggestion} onApply={onApplySuggestion} />
+                  </div>
+                )}
               </div>
             ))
           )}
@@ -831,6 +953,7 @@ function AccuracySection({
 export default function AssistantTab({
   buildInput,
   buildRecipeContext,
+  onApplyRecipeSuggestion,
   onApplyAction,
   buildForecast,
   onApplyForecast,
@@ -838,6 +961,9 @@ export default function AssistantTab({
 }: {
   buildInput: () => OptimizeInput;
   buildRecipeContext: () => Omit<RecipeAssistInput, "question">;
+  onApplyRecipeSuggestion: (
+    s: RecipeAssistSuggestion,
+  ) => { ok: boolean; message: string; undo?: () => void };
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
   buildForecast: (targetDate: string) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
@@ -881,7 +1007,10 @@ export default function AssistantTab({
     <div className="space-y-4 pb-24">
       <AskChat buildInput={buildInput} />
 
-      <RecipeAssistChat buildContext={buildRecipeContext} />
+      <RecipeAssistChat
+        buildContext={buildRecipeContext}
+        onApplySuggestion={onApplyRecipeSuggestion}
+      />
 
       {!isManager ? null : (
       <>

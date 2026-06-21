@@ -9,6 +9,8 @@ import {
   MAX_RECIPES,
   MAX_ROWS_PER_RECIPE,
   MAX_INGREDIENT_NAMES,
+  MAX_SUMMARY_CHARS,
+  MAX_NAME_CHARS,
 } from "./aiRecipeAssistant";
 
 function makeBody(overrides: Record<string, unknown> = {}) {
@@ -186,5 +188,133 @@ describe("sanitizeRecipeAnswer — JSON shape", () => {
     const out = sanitizeRecipeAnswer(JSON.stringify({ answer: longAnswer, note: longNote }));
     expect(out.answer.length).toBe(MAX_ANSWER_CHARS);
     expect(out.note?.length).toBe(MAX_NOTE_CHARS);
+  });
+});
+
+describe("sanitizeRecipeAnswer — structured suggestion", () => {
+  const known = new Set(["doughRecipe", "frontlineRecipe"]);
+
+  it("extracts a valid scale suggestion targeting a known recipe", () => {
+    const content = JSON.stringify({
+      answer: "Scaled to 1.5x.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "doughRecipe",
+        recipeName: "Dough",
+        summary: "1.5x",
+        rows: [
+          { ingredient: "Flour", lbs: 75 },
+          { ingredient: "Water", lbs: 45 },
+        ],
+      },
+    });
+    expect(sanitizeRecipeAnswer(content, known)).toEqual({
+      answer: "Scaled to 1.5x.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "doughRecipe",
+        recipeName: "Dough",
+        summary: "1.5x",
+        rows: [
+          { ingredient: "Flour", lbs: 75 },
+          { ingredient: "Water", lbs: 45 },
+        ],
+      },
+    });
+  });
+
+  it("accepts a substitute suggestion and normalizes kind casing/whitespace", () => {
+    const content = JSON.stringify({
+      answer: "Use oil instead of butter.",
+      suggestion: {
+        kind: " Substitute ",
+        recipeId: "frontlineRecipe",
+        rows: [{ ingredient: " Oil ", lbs: 5 }],
+      },
+    });
+    const out = sanitizeRecipeAnswer(content, known);
+    expect(out.suggestion).toEqual({
+      kind: "substitute",
+      recipeId: "frontlineRecipe",
+      recipeName: "",
+      summary: "",
+      rows: [{ ingredient: "Oil", lbs: 5 }],
+    });
+  });
+
+  it("drops a suggestion whose recipeId is not in the known set", () => {
+    const content = JSON.stringify({
+      answer: "Here.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "ghostRecipe",
+        rows: [{ ingredient: "Flour", lbs: 10 }],
+      },
+    });
+    expect(sanitizeRecipeAnswer(content, known)).toEqual({ answer: "Here." });
+  });
+
+  it("drops a suggestion with an unknown kind", () => {
+    const content = JSON.stringify({
+      answer: "Here.",
+      suggestion: {
+        kind: "delete",
+        recipeId: "doughRecipe",
+        rows: [{ ingredient: "Flour", lbs: 10 }],
+      },
+    });
+    expect(sanitizeRecipeAnswer(content, known).suggestion).toBeUndefined();
+  });
+
+  it("drops a suggestion with no real rows and filters blank/negative rows", () => {
+    const noRows = JSON.stringify({
+      answer: "Here.",
+      suggestion: { kind: "scale", recipeId: "doughRecipe", rows: [{ ingredient: "  ", lbs: 5 }] },
+    });
+    expect(sanitizeRecipeAnswer(noRows, known).suggestion).toBeUndefined();
+
+    const mixed = JSON.stringify({
+      answer: "Here.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "doughRecipe",
+        rows: [
+          { ingredient: "Flour", lbs: 10 },
+          { ingredient: "Bad", lbs: -1 },
+          { ingredient: "", lbs: 3 },
+        ],
+      },
+    });
+    expect(sanitizeRecipeAnswer(mixed, known).suggestion?.rows).toEqual([
+      { ingredient: "Flour", lbs: 10 },
+    ]);
+  });
+
+  it("clamps an over-long summary and recipeName", () => {
+    const content = JSON.stringify({
+      answer: "Here.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "doughRecipe",
+        recipeName: "n".repeat(MAX_NAME_CHARS + 50),
+        summary: "s".repeat(MAX_SUMMARY_CHARS + 50),
+        rows: [{ ingredient: "Flour", lbs: 10 }],
+      },
+    });
+    const out = sanitizeRecipeAnswer(content, known);
+    expect(out.suggestion?.summary.length).toBe(MAX_SUMMARY_CHARS);
+    expect(out.suggestion?.recipeName.length).toBe(MAX_NAME_CHARS);
+  });
+
+  it("keeps a valid suggestion even when there is no known-id set supplied", () => {
+    const content = JSON.stringify({
+      answer: "Here.",
+      suggestion: {
+        kind: "scale",
+        recipeId: "anyRecipe",
+        rows: [{ ingredient: "Flour", lbs: 10 }],
+      },
+    });
+    expect(sanitizeRecipeAnswer(content).suggestion?.recipeId).toBe("anyRecipe");
   });
 });

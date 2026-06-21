@@ -11,6 +11,8 @@ import type { RecipeAssistRow } from './recipeAssistRow';
  * One of the current run's recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).
  */
 export interface RecipeAssistRecipe {
+  /** Stable settings-field key identifying which recipe this is (e.g. doughRecipe, frontlineRecipe, app1CheeseRecipe). Lets an "apply" suggestion target this exact recipe deterministically. */
+  id?: string;
   /** What the recipe is for (dough, sauce, cheese, other) */
   kind: string;
   /** The recipe's name (may be empty if unnamed) */

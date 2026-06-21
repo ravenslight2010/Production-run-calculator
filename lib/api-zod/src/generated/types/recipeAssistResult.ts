@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { RecipeAssistSuggestion } from './recipeAssistSuggestion';
 
 export interface RecipeAssistResult {
   /** The grounded plain-language answer */
@@ -12,4 +13,5 @@ export interface RecipeAssistResult {
   generatedAt: number;
   /** Optional message when the question could not be answered from data */
   note?: string;
+  suggestion?: RecipeAssistSuggestion;
 }

@@ -140,6 +140,8 @@ export * from './recipeAssistInput';
 export * from './recipeAssistRecipe';
 export * from './recipeAssistResult';
 export * from './recipeAssistRow';
+export * from './recipeAssistSuggestion';
+export * from './recipeAssistSuggestionKind';
 export * from './reportIncidentInput';
 export * from './reportIncidentInputAppPlatform';
 export * from './reportIncidentInputSource';
