@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import React from "react";
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -42,6 +43,7 @@ import {
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
+import { useSpeechInput } from "@/hooks/useSpeechInput";
 
 const CATEGORY_META: Record<
   OptimizeCategory,
@@ -171,6 +173,15 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   const [note, setNote] = React.useState<string | null>(null);
   const scrollRef = React.useRef<ScrollView | null>(null);
 
+  // Voice input: transcribe speech into the question box. Sends through the same
+  // /ai/ask flow as typing — the user reviews and taps Send. Falls back to plain
+  // typing when speech isn't supported (e.g. native build) or the mic is denied.
+  const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
+    useSpeechInput({
+      onTranscript: (text) => setQuestion(text),
+    });
+  const micDenied = micState === "denied";
+
   // Load this user's prior conversation on mount (best-effort).
   React.useEffect(() => {
     let cancelled = false;
@@ -274,11 +285,33 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
           ]}
           value={question}
           onChangeText={setQuestion}
-          placeholder="Ask about today's runs…"
+          placeholder={listening ? "Listening…" : "Ask about today's runs…"}
           placeholderTextColor={colors.mutedForeground}
           multiline
           editable={!loading}
         />
+        {micSupported ? (
+          <Pressable
+            onPress={toggleMic}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel={listening ? "Stop voice input" : "Ask by voice"}
+            style={({ pressed }) => [
+              styles.micBtn,
+              {
+                borderColor: listening ? colors.primary : colors.border,
+                backgroundColor: listening ? colors.primary : colors.background,
+                opacity: loading ? 0.4 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Feather
+              name="mic"
+              size={18}
+              color={listening ? colors.primaryForeground : colors.foreground}
+            />
+          </Pressable>
+        ) : null}
         <Button
           label="Send"
           icon="send"
@@ -286,6 +319,11 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
           disabled={loading || !question.trim()}
         />
       </View>
+      {micDenied ? (
+        <Text style={[styles.micDenied, { color: colors.mutedForeground }]}>
+          Microphone access is blocked. Allow it in settings, or just type your question.
+        </Text>
+      ) : null}
     </Card>
   );
 }
@@ -864,6 +902,15 @@ const styles = StyleSheet.create({
   bubble: { maxWidth: "85%", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8 },
   bubbleText: { fontSize: 13, lineHeight: 19, fontFamily: FONTS.regular },
   inputRow: { marginTop: 12, flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  micBtn: {
+    width: 44,
+    height: 44,
+    borderWidth: 1,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  micDenied: { marginTop: 8, fontSize: 11, lineHeight: 16, fontFamily: FONTS.regular },
   input: {
     flex: 1,
     minHeight: 44,

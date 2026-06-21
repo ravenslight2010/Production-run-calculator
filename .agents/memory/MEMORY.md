@@ -68,3 +68,4 @@
 - [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory "quality") + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write; web+mobile parity.
 - [AI demand forecast](demand-forecast.md) — manager-gated /ai/forecast predicts next day's run plan from finished history; null+note when thin, confidence field, never auto-commits (seeds editable schedule); records to facility memory; web+mobile parity.
 - [AI recipe assistant](recipe-assistant.md) — staff /ai/recipe-assistant single-shot (no convo memory; NO userId to grounding); scale/sub/explain over real recipes; shared buildRecipeAssistContext verbatim; advisory-only; web+mobile parity.
+- [Voice ask input](voice-ask-input.md) — mic on Ask-the-day chat = Web Speech API (no native lib); mobile guards Platform.OS==="web"; hidden when unsupported (native) = graceful typing fallback; web+mobile parity.

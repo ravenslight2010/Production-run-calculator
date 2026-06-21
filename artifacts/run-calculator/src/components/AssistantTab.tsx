@@ -12,6 +12,7 @@ import {
   Undo2,
   MessageCircle,
   Send,
+  Mic,
   CalendarClock,
   CalendarPlus,
   ChefHat,
@@ -29,6 +30,7 @@ import {
   optimizeErrorMessage,
 } from "../aiOptimize";
 import { requestAsk, askErrorMessage } from "../aiAsk";
+import { useSpeechInput } from "../useSpeechInput";
 import {
   type RecipeAssistInput,
   requestRecipeAssist,
@@ -170,6 +172,15 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   const [note, setNote] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Voice input: transcribe speech into the question box. Sends through the same
+  // /ai/ask flow as typing — the user reviews and taps Send. Falls back to plain
+  // typing when speech isn't supported or the mic is denied.
+  const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
+    useSpeechInput({
+      onTranscript: (text) => setQuestion(text),
+    });
+  const micDenied = micState === "denied";
+
   // Load this user's prior conversation on mount (best-effort).
   useEffect(() => {
     let cancelled = false;
@@ -288,12 +299,27 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Ask about today's runs…"
+            placeholder={listening ? "Listening…" : "Ask about today's runs…"}
             rows={2}
             className="min-h-[44px] resize-none"
             disabled={loading}
             data-testid="input-ask-question"
           />
+          {micSupported && (
+            <Button
+              type="button"
+              variant={listening ? "default" : "outline"}
+              size="icon"
+              onClick={toggleMic}
+              disabled={loading}
+              className={`shrink-0 ${listening ? "animate-pulse" : ""}`}
+              aria-label={listening ? "Stop voice input" : "Ask by voice"}
+              title={listening ? "Stop voice input" : "Ask by voice"}
+              data-testid="button-ask-mic"
+            >
+              <Mic className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             onClick={() => void send()}
             disabled={loading || !question.trim()}
@@ -304,6 +330,11 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
             Send
           </Button>
         </div>
+        {micDenied && (
+          <p className="text-[11px] text-muted-foreground" data-testid="ask-mic-denied">
+            Microphone access is blocked. Allow it in your browser, or just type your question.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
