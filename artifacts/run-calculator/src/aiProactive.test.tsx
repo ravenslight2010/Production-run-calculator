@@ -28,6 +28,7 @@ import * as React from "react";
 
 import {
   useProactiveAlert as webUseProactiveAlert,
+  PROACTIVE_IDLE_POLL_MULTIPLIER,
   type ProactiveAlert,
   type ProactiveSettings,
 } from "./aiProactive";
@@ -140,9 +141,14 @@ function alert(key: string, title: string): ProactiveAlert {
   return { key, category: "run", title, detail: `${title} detail`, impact: "high" };
 }
 
-// A non-null OptimizeInput; the hook only checks for null before polling, so the
-// shape is irrelevant to the de-dup/cooldown logic under test.
-const buildInput = () => ({}) as OptimizeInput;
+// A non-null OptimizeInput describing an ACTIVE day (a run in progress). The
+// de-dup/cooldown suite relies on the per-poll base cadence, so it must look
+// active; the separate idle-cadence test below supplies an idle input.
+const buildInput = () => ({ runs: [{ status: "running" }] }) as unknown as OptimizeInput;
+
+// An idle day: no run in progress, so the watcher backs off to the slower idle
+// cadence.
+const buildIdleInput = () => ({ runs: [{ status: "ended" }] }) as unknown as OptimizeInput;
 
 // Advance the fake clock (and flush the awaited fetch chain) inside act().
 async function advance(ms: number): Promise<void> {
@@ -249,6 +255,27 @@ function defineSuite(label: string, getHook: () => UseProactiveAlertFn) {
 
       rerender({ enabled: false });
       expect(result.current.alert).toBeNull();
+    });
+
+    it("polls on the base cadence during an active shift", async () => {
+      // Active day (a run in progress): a second poll lands one base interval
+      // after the immediate first poll, so two polls fire within one base window.
+      renderHook(() => getHook()({ enabled: true, buildInput }));
+      await advance(POLL_MS);
+      expect(alertPostCount).toBe(2);
+    });
+
+    it("polls less often on an idle day to save background cost", async () => {
+      // Idle day (no run in progress): after the immediate first poll the watcher
+      // backs off by the idle multiplier. One base interval later it has NOT
+      // polled again; only after a full idle interval does the next poll fire.
+      renderHook(() => getHook()({ enabled: true, buildInput: buildIdleInput }));
+      await advance(POLL_MS);
+      expect(alertPostCount).toBe(1); // still just the first poll — backed off
+
+      // Step the rest of the way to the idle interval; the next poll fires there.
+      await advance(POLL_MS * (PROACTIVE_IDLE_POLL_MULTIPLIER - 1));
+      expect(alertPostCount).toBe(2);
     });
   });
 }

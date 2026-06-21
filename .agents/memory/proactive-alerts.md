@@ -52,3 +52,14 @@ each cycle, so cadence/cooldown/on-off changes take effect next cycle with no
 reload; cooldown is read via a ref so the evaluate closure stays stable. When
 disabled the timer keeps ticking on the DEFAULT cadence so a re-enable is picked
 up. UI inputs are in MINUTES (persist as seconds). Web+mobile parity required.
+
+**Idle-day backoff (cost saver):** on an idle day (no run in progress) the hook
+polls at `idlePollSeconds(pollSeconds) = pollSeconds * PROACTIVE_IDLE_POLL_MULTIPLIER`
+(4×), clamped to the same `PROACTIVE_POLL_SECONDS_MAX`. Active-day cadence is
+unchanged. Decision is purely client-side (a multiplier, NOT a new server knob),
+so no settings/migration change. The hook builds `OptimizeInput` ONCE per tick and
+feeds the same snapshot to both `evaluate(input)` and the cadence choice; client
+`isDayActive` mirrors the server's (`runs.some(status==="running")`) but must guard
+`Array.isArray(runs)` since the client builds the input. Test parity: the shared
+de-dup suite's `buildInput` must look ACTIVE (relies on per-poll base cadence);
+idle cadence has its own test. Web+mobile parity required.

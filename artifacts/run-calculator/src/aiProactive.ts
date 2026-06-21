@@ -43,6 +43,30 @@ export const PROACTIVE_POLL_SECONDS_MAX = 3600;
 export const PROACTIVE_COOLDOWN_SECONDS_MIN = 0;
 export const PROACTIVE_COOLDOWN_SECONDS_MAX = 86_400;
 
+// On an idle day (no run in progress) the only nudge that can fire is the
+// at-risk-stock heads-up — which doesn't need a tight cadence — so the watcher
+// backs off to this multiple of the active cadence to cut around-the-clock
+// background cost. Active-day cadence is unchanged. Kept identical web<->mobile
+// (replit.md parity).
+export const PROACTIVE_IDLE_POLL_MULTIPLIER = 4;
+
+// The effective poll cadence on an idle day: the active cadence stretched by the
+// idle multiplier, still clamped to the same upper bound so it can't drift out
+// of range.
+export function idlePollSeconds(activePollSeconds: number): number {
+  return Math.min(
+    PROACTIVE_POLL_SECONDS_MAX,
+    Math.round(activePollSeconds * PROACTIVE_IDLE_POLL_MULTIPLIER),
+  );
+}
+
+// A day is "active" once at least one run is in progress (status "running").
+// Mirrors the server's isDayActive so the client backs off its cadence on the
+// same definition the server uses to decide which nudges can fire.
+function isDayActive(input: OptimizeInput): boolean {
+  return Array.isArray(input.runs) && input.runs.some((r) => r.status === "running");
+}
+
 // Back-compat ms aliases (the hook now uses the per-facility settings instead).
 export const PROACTIVE_POLL_INTERVAL_MS = DEFAULT_PROACTIVE_POLL_SECONDS * 1000;
 export const PROACTIVE_DISMISS_COOLDOWN_MS = DEFAULT_PROACTIVE_COOLDOWN_SECONDS * 1000;
@@ -208,8 +232,7 @@ export function useProactiveAlert(args: {
     alertRef.current = alert;
   }, [alert]);
 
-  const evaluate = useCallback(async () => {
-    const input = buildInputRef.current();
+  const evaluate = useCallback(async (input: OptimizeInput | null) => {
     if (!input) return;
     let result: ProactiveAlertResult;
     try {
@@ -244,15 +267,23 @@ export function useProactiveAlert(args: {
       const settings = await fetchProactiveSettings();
       if (cancelled) return;
       cooldownMsRef.current = settings.cooldownSeconds * 1000;
+      // Build the input once so the SAME snapshot drives both the alert request
+      // and the cadence decision (active vs idle), and we never build it twice.
+      let nextPollSeconds = DEFAULT_PROACTIVE_POLL_SECONDS;
       if (settings.enabled) {
-        await evaluate();
+        const input = buildInputRef.current();
+        await evaluate(input);
+        // On an idle day back off to the slower idle cadence; an active day keeps
+        // the full base cadence so live-shift behavior is unchanged.
+        nextPollSeconds =
+          input && isDayActive(input)
+            ? settings.pollSeconds
+            : idlePollSeconds(settings.pollSeconds);
       } else {
         setAlert(null);
       }
       if (cancelled) return;
-      const delayMs =
-        (settings.enabled ? settings.pollSeconds : DEFAULT_PROACTIVE_POLL_SECONDS) * 1000;
-      timer = setTimeout(() => void tick(), delayMs);
+      timer = setTimeout(() => void tick(), nextPollSeconds * 1000);
     };
     void tick();
     return () => {
