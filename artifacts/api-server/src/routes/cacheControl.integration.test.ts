@@ -29,7 +29,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { signToken } from "../lib/auth";
 import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
-import { collectGetRoutePaths } from "../lib/routeScan";
+import { collectGetRoutePathsFromRouter } from "../lib/routeScan";
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];
@@ -42,6 +42,11 @@ let testDbName: string;
 let originalDatabaseUrl: string | undefined;
 let server: Server;
 let baseUrl: string;
+
+// Every non-excluded GET pattern the *live, assembled* router actually serves.
+// Derived from the router stack (not source text) in beforeAll, so a GET added
+// via a sub-router, a computed path, or `router.all(...)` is still checked.
+let noStorePatterns: string[] = [];
 
 // A manager so every endpoint (including the manager-only ones) passes authz —
 // we only care about the cache header, not the authz behavior here.
@@ -82,6 +87,13 @@ beforeAll(async () => {
   pool = dbMod.pool;
   userRolesTable = dbMod.userRolesTable;
   usersTable = dbMod.usersTable;
+
+  // Derive the at-risk GET set from the live router stack (the same router
+  // mounted below), minus the intentional exclusions. This is what makes a
+  // sub-router / computed-path / router.all GET get checked automatically.
+  noStorePatterns = collectGetRoutePathsFromRouter(routerMod.default)
+    .filter((pattern) => !excludedPatterns.has(pattern))
+    .sort();
 
   // Seed a single manager so authenticated requests succeed everywhere.
   await db.insert(usersTable).values([{ id: MANAGER, username: "manager", passwordHash: "x" }]);
@@ -133,14 +145,14 @@ function expectNoStore(res: Response): void {
   expect(res.headers.get("expires")).toBe("0");
 }
 
-// The runtime no-store check is DERIVED, not hand-maintained: we scan the route
-// source files for every GET registration (the same way the structural guard in
-// cacheControlCoverage.test.ts does) and subtract the exclusion list. A brand-new
-// shared-list GET is therefore verified end-to-end automatically — no one has to
-// remember to add it here. We assert the header regardless of the response body:
-// noStoreMiddleware runs before the handler, so even a 404 (e.g. an absent
-// incident) still carries it.
-const routesDir = path.dirname(fileURLToPath(import.meta.url));
+// The runtime no-store check is DERIVED, not hand-maintained: we introspect the
+// live, assembled router stack (see beforeAll) for every GET it actually serves
+// and subtract the exclusion list. Because this reads what Express registered —
+// not literal `router.get("…")` source text — a brand-new shared-list GET is
+// verified end-to-end automatically even if it's added via a sub-router, a
+// computed/variable path, or `router.all(...)`. We assert the header regardless
+// of the response body: noStoreMiddleware runs before the handler, so even a 404
+// (e.g. an absent incident) still carries it.
 
 // SSE streams stream forever and set their own streaming headers, so they need
 // special request handling (abort once headers arrive) in the exclusion suite.
@@ -162,26 +174,44 @@ function concretePath(pattern: string): string {
 
 const excludedPatterns = new Set(Object.keys(CACHE_CONTROL_EXCLUSIONS));
 
-// Every GET route pattern that is NOT excluded → must be no-store at runtime.
-const NO_STORE_PATTERNS = collectGetRoutePaths(routesDir)
-  .filter((pattern) => !excludedPatterns.has(pattern))
-  .sort();
-
 describe("no-store cache headers on at-risk GET endpoints", () => {
-  // If the scan ever finds nothing, the suite would be silently vacuous.
+  // If discovery ever finds nothing, the suite would be silently vacuous.
   it("derived at least one at-risk GET to check", () => {
-    expect(NO_STORE_PATTERNS.length).toBeGreaterThan(0);
+    expect(noStorePatterns.length).toBeGreaterThan(0);
   });
 
-  for (const pattern of NO_STORE_PATTERNS) {
-    const pathname = `/api${concretePath(pattern)}`;
-    it(`GET ${pathname} sends no-store`, async () => {
+  // One end-to-end pass over every non-excluded GET the live router serves.
+  // Because the set is derived from the assembled router stack (in beforeAll),
+  // a GET added via a sub-router / computed path / router.all is checked here
+  // automatically — no per-route test has to be hand-written. Failures are
+  // aggregated so one missing header doesn't hide the rest.
+  it("every at-risk GET sends the no-store triplet", async () => {
+    const failures: string[] = [];
+    for (const pattern of noStorePatterns) {
+      const pathname = `/api${concretePath(pattern)}`;
       const res = await get(pathname);
-      expectNoStore(res);
-      // Drain the body so the connection is released for the next test.
+      const cacheControl = res.headers.get("cache-control");
+      const pragma = res.headers.get("pragma");
+      const expires = res.headers.get("expires");
+      // Drain the body so the connection is released for the next request.
       await res.arrayBuffer();
-    });
-  }
+      if (
+        cacheControl !== "no-store, no-cache, must-revalidate" ||
+        pragma !== "no-cache" ||
+        expires !== "0"
+      ) {
+        failures.push(
+          `${pathname} → cache-control: ${cacheControl ?? "(none)"}, ` +
+            `pragma: ${pragma ?? "(none)"}, expires: ${expires ?? "(none)"}`,
+        );
+      }
+    }
+    expect(
+      failures,
+      `These at-risk GET routes did not send the no-store triplet (a shared-data ` +
+        `page that ships cacheable reintroduces the stale-data bug):\n${failures.join("\n")}`,
+    ).toEqual([]);
+  });
 });
 
 describe("intentional no-store exclusions", () => {

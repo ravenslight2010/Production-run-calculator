@@ -22,7 +22,8 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { CACHE_CONTROL_EXCLUSIONS } from "../lib/cacheControl";
-import { findRegistrations, listRouteSourceFiles } from "../lib/routeScan";
+import { collectGetRoutePathsFromRouter, listRouteSourceFiles } from "../lib/routeScan";
+import router from "./index";
 
 const routesDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -55,13 +56,10 @@ describe("no-store is middleware-owned (structural guard)", () => {
 // a real GET route. A stale entry (route renamed/removed) would silently widen
 // the allow-list, so fail if an exclusion no longer matches any GET.
 describe("no-store exclusion list has no stale entries", () => {
-  const allGetPaths = new Set<string>();
-  for (const file of routeFiles) {
-    const source = readFileSync(path.join(routesDir, file), "utf8");
-    for (const reg of findRegistrations(source)) {
-      if (reg.method === "get") allGetPaths.add(reg.routePath);
-    }
-  }
+  // Discover the real GET routes from the live, assembled router stack (not
+  // source text), so an exclusion that points at a GET registered via a
+  // sub-router / computed path / router.all is still recognized as valid.
+  const allGetPaths = new Set<string>(collectGetRoutePathsFromRouter(router));
 
   for (const excludedPath of Object.keys(CACHE_CONTROL_EXCLUSIONS)) {
     it(`excluded path ${excludedPath} still maps to a real GET route`, () => {
