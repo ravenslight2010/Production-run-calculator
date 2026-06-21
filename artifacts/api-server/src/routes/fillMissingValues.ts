@@ -2,7 +2,6 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, fillMissingValuesTable, type FillMissingValue } from "@workspace/db";
 import { SaveFillMissingValuesBody } from "@workspace/api-zod";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -46,7 +45,6 @@ async function listAll(): Promise<ValueRow[]> {
 
 router.get("/fill-missing-values", async (req: Request, res: Response) => {
   try {
-    noStore(res);
     const values = await listAll();
     res.json({ values });
   } catch (err) {

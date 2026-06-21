@@ -3,7 +3,6 @@ import { and, eq } from "drizzle-orm";
 import { db, deniedMergesTable, type DeniedMerge as DeniedMergeRow } from "@workspace/db";
 import { SaveDeniedMergesBody, DeleteDeniedMergesBody } from "@workspace/api-zod";
 import { deniedPairKey } from "@workspace/merge-suggest";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -43,7 +42,6 @@ async function listAll(): Promise<ApiPair[]> {
 
 router.get("/denied-merges", async (req: Request, res: Response) => {
   try {
-    noStore(res);
     const denied = await listAll();
     res.json({ denied });
   } catch (err) {

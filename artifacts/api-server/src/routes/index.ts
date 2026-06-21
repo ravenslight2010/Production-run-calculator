@@ -16,8 +16,17 @@ import deniedMergesRouter from "./deniedMerges";
 import aiCorrectionsRouter from "./aiCorrections";
 import productionRulesRouter from "./productionRules";
 import { requireAuth } from "../middlewares/requireAuth";
+import { noStoreMiddleware } from "../lib/cacheControl";
 
 const router: IRouter = Router();
+
+// Stale-data protection, on by default: every GET response gets the no-store
+// triplet automatically unless its route is in CACHE_CONTROL_EXCLUSIONS (SSE
+// streams, full-payload sync GETs, the public health probe,
+// /auth/username-available). Handlers no longer call noStore() themselves, so a
+// new shared-list GET can't accidentally ship cacheable. Runs before everything
+// so it also covers the public health/auth routes below.
+router.use(noStoreMiddleware);
 
 // Health check stays public so platform probes work without a session.
 router.use(healthRouter);

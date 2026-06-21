@@ -2,12 +2,10 @@ import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, productionRunsTable } from "@workspace/db";
 import { CreateRunBody, DeleteRunParams, ListRunsResponse, ListRunsResponseItem } from "@workspace/api-zod";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
 router.get("/runs", async (req, res): Promise<void> => {
-  noStore(res);
   const runs = await db
     .select()
     .from(productionRunsTable)

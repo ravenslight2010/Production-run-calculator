@@ -2,7 +2,6 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, photoAliasesTable, type PhotoAlias } from "@workspace/db";
 import { SavePhotoAliasesBody } from "@workspace/api-zod";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -36,7 +35,6 @@ async function listAll(): Promise<AliasRow[]> {
 
 router.get("/photo-aliases", async (req: Request, res: Response) => {
   try {
-    noStore(res);
     const aliases = await listAll();
     res.json({ aliases });
   } catch (err) {

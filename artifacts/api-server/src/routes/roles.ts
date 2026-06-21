@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
 import { ResetStaffPasswordBody, SetStaffRoleBody } from "@workspace/api-zod";
-import { noStore } from "../lib/cacheControl";
 import {
   deleteUser,
   getStaffMember,
@@ -27,7 +26,6 @@ const router: IRouter = Router();
 // and mobile clients know which controls to show/hide.
 router.get("/me", async (req, res): Promise<void> => {
   const userId = req.userId!;
-  noStore(res);
   res.json(await getStaffMember(userId));
 });
 
@@ -50,7 +48,6 @@ router.post("/me/tour-completed", async (req, res): Promise<void> => {
 // Staff roster — manager only. Lists every account so a manager can
 // promote/demote them.
 router.get("/users", requireRole("manager"), async (_req, res): Promise<void> => {
-  noStore(res);
   res.json(await listStaff());
 });
 
@@ -106,7 +103,6 @@ router.get(
   "/password-reset-requests",
   requireRole("manager"),
   async (_req, res): Promise<void> => {
-    noStore(res);
     res.json(await listPendingResetRequests());
   },
 );

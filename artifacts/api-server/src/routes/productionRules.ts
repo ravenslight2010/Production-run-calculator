@@ -4,7 +4,6 @@ import { db, productionRulesTable, type ProductionRuleRow } from "@workspace/db"
 import { SaveProductionRulesBody, DeleteProductionRulesBody } from "@workspace/api-zod";
 import { normalizeRule, type ProductionRule } from "@workspace/production-rules";
 import { requireRole } from "../middlewares/requireRole";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -68,7 +67,6 @@ router.get("/production-rules", async (req: Request, res: Response) => {
     // seconds. Without this, browsers cache the response (no validators/headers)
     // and serve a stale rules list — even the periodic refetch gets the cached
     // copy — so an operator keeps seeing an old/deleted rule until a full reload.
-    noStore(res);
     const rules = await listAll();
     res.json({ rules });
   } catch (err) {

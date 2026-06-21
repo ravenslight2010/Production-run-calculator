@@ -3,7 +3,6 @@ import { eq } from "drizzle-orm";
 import { db, aiCorrectionsTable, type AiCorrectionRow } from "@workspace/db";
 import { SaveAiCorrectionsBody } from "@workspace/api-zod";
 import { correctionKey, MAX_CORRECTION_TEXT_LEN, type AiCorrection } from "@workspace/ai-memory";
-import { noStore } from "../lib/cacheControl";
 
 const router: IRouter = Router();
 
@@ -30,7 +29,6 @@ async function listAll(): Promise<AiCorrection[]> {
 
 router.get("/ai-corrections", async (req: Request, res: Response) => {
   try {
-    noStore(res);
     const corrections = await listAll();
     res.json({ corrections });
   } catch (err) {

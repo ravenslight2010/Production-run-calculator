@@ -3,16 +3,20 @@ name: no-store cache headers on shared GETs
 description: Which JSON GET endpoints must send no-store, and why sync is the exception
 ---
 
-Shared, frequently-edited JSON GET endpoints in `artifacts/api-server` must send
-no-store via the `noStore(res)` helper (`src/lib/cacheControl.ts`) — it sets
-`Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache` +
-`Expires: 0`. Without it, browsers apply heuristic freshness and serve a stale
-copy even on periodic/SSE-nudged refetches (the original production-rules bug).
+No-store is applied **automatically by `noStoreMiddleware`** (`src/lib/
+cacheControl.ts`), mounted first in `routes/index.ts`. It stamps the triplet
+(`Cache-Control: no-store, no-cache, must-revalidate` + `Pragma: no-cache` +
+`Expires: 0`) on EVERY GET response whose route is not in
+`CACHE_CONTROL_EXCLUSIONS`. The rule is on-by-default — handlers no longer call
+`noStore(res)` (the per-handler helper still exists but isn't used in routes).
+Without it, browsers apply heuristic freshness and serve a stale copy even on
+periodic/SSE-nudged refetches (the original production-rules bug).
 
-Covered: production-rules, inventory (list/ledger/settings), roles
-(/me, /users, /password-reset-requests), incidents (list/unreviewed-count/:id),
-runs, and all learned-memory pools (photo/import/merge/spec-import aliases,
-ai-corrections, fill-missing-values, denied-merges).
+`CACHE_CONTROL_EXCLUSIONS` is the single source of truth, consumed by both the
+middleware and `cacheControlCoverage.test.ts`. Exclusion keys are route-pattern
+strings (`:param` segments wildcard-match). Excluded: `/healthz`,
+`/auth/username-available`, `/sync/today`, `/sync/scheduled`, `/sync/:date`,
+`/sync/events`, `/inventory/events`. Everything else GET is no-store.
 
 **Why sync.ts is intentionally NOT covered:** its SSE broadcast pushes the FULL
 day-state payload to clients, so they never rely on a (cacheable) GET refetch to

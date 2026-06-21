@@ -4,7 +4,6 @@ import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireRole } from "../middlewares/requireRole";
 import { getStaffMember } from "../lib/roles";
-import { noStore } from "../lib/cacheControl";
 import {
   countUnreviewedIncidents,
   createIncident,
@@ -131,7 +130,6 @@ router.post(
 
 // GET /incidents — manager-only review list (newest first).
 router.get("/incidents", requireRole("manager"), async (_req, res): Promise<void> => {
-  noStore(res);
   res.json(await listIncidents());
 });
 
@@ -141,14 +139,12 @@ router.get(
   "/incidents/unreviewed-count",
   requireRole("manager"),
   async (_req, res): Promise<void> => {
-    noStore(res);
     res.json({ count: await countUnreviewedIncidents() });
   },
 );
 
 // GET /incidents/:id — manager-only single incident.
 router.get("/incidents/:id", requireRole("manager"), async (req, res): Promise<void> => {
-  noStore(res);
   const incident = await getIncident(pathId(req.params.id));
   if (!incident) {
     res.status(404).json({ error: "No incident with that id" });
