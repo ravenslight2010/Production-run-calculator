@@ -8420,6 +8420,46 @@ export default function Home() {
                     </>
                   );
                 })()}
+                {/* Per-run breakdown: what each active run needs and roughly how
+                    long it runs, so warehouse staff can stage materials run by
+                    run instead of reading off one combined total. Reuses the
+                    same need/packaging math as the roll-up above. */}
+                {(() => {
+                  const activeRuns = dayState.runs.filter(r => !r.endedAt);
+                  if (activeRuns.length === 0) return null;
+                  return (
+                    <Card className="bg-card/50 border-border/50 shadow-md mb-4">
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                          <ListChecks className="w-4 h-4" /> What Each Run Needs
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-3">
+                        {activeRuns.map((r) => {
+                          const vals = loadRunValues(r.id);
+                          const s = computeSummaryStats(vals);
+                          const rows = [...aggregateNeedRows([vals]), ...aggregatePackagingNeeds([vals])];
+                          const estSec = s.estimatedTimeSec;
+                          return (
+                            <div key={r.id} className="rounded-md border border-border/40 bg-muted/10 p-3" data-testid={`warehouse-run-${r.id}`}>
+                              <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                                <span className="font-semibold text-sm truncate">{runLabel(r)}</span>
+                                <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
+                                  {s.totalCases} case{s.totalCases !== 1 ? "s" : ""}{estSec > 0 ? ` · ~${fmtTime(estSec)}` : ""}
+                                </span>
+                              </div>
+                              {rows.length === 0 ? (
+                                <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
+                              ) : (
+                                <NeedsList rows={rows} />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                   <CardHeader className="pb-2 pt-4 px-5">
                     <div className="flex items-center justify-between gap-2">

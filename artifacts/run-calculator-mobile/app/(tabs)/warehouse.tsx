@@ -5,8 +5,11 @@ import { Card } from "@/components/UI";
 import {
   useRun,
   computeCalc,
+  runLabel,
   todayStr,
   DEFAULT_PEP_TYPES,
+  type RunCalc,
+  type RunSettings,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
@@ -29,6 +32,68 @@ function fmtDate(s: string): string {
 
 type NeedRow = { label: string; value: string; sub: string };
 
+function fmtDur(sec: number): string {
+  if (!isFinite(sec) || sec < 0) return "—";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.round(sec % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+// Build the ingredient + packaging need rows for a SINGLE run, preserving each
+// row's native unit. Mirrors the all-runs aggregation below (and the web
+// aggregateNeedRows/aggregatePackagingNeeds) so the per-run breakdown lines up
+// exactly with the totals.
+function buildRunNeedRows(c: RunCalc, s: RunSettings): NeedRow[] {
+  const rows: NeedRow[] = [];
+  const fmt = (n: number, unit: string): string =>
+    fmtNum(n, unit === "batches" ? 2 : 1);
+  if (c.doughBatches > 0) rows.push({ label: "Dough", value: fmt(c.doughBatches, "batches"), sub: "batches" });
+  if (c.sauceBatches > 0) rows.push({ label: "Sauce", value: fmt(c.sauceBatches, "batches"), sub: "batches" });
+  const apps = [
+    { type: s.app1Type, lbs: c.app1Lbs, batches: c.app1Batches },
+    { type: s.app2Type, lbs: c.app2Lbs, batches: c.app2Batches },
+    { type: s.app3Type, lbs: c.app3Lbs, batches: c.app3Batches },
+    { type: s.app4Type, lbs: c.app4Lbs, batches: c.app4Batches },
+  ];
+  for (const a of apps) {
+    if (!a.type) continue;
+    const isMix = a.type.trim().toLowerCase().includes("mix");
+    if (isMix && a.lbs > 0) rows.push({ label: a.type, value: fmt(a.lbs, "lbs"), sub: "lbs" });
+    else if (!isMix && a.batches > 0) rows.push({ label: a.type, value: fmt(a.batches, "batches"), sub: "batches" });
+  }
+  const peps = [
+    { type: s.pep1Type, lbs: c.pep1Lbs, batches: c.pep1Batches },
+    { type: s.pep2Type, lbs: c.pep2Lbs, batches: c.pep2Batches },
+  ];
+  for (const p of peps) {
+    if (!p.type || p.lbs <= 0) continue;
+    if (DEFAULT_PEP_TYPES.includes(p.type)) rows.push({ label: p.type, value: fmt(p.lbs, "lbs"), sub: "lbs" });
+    else rows.push({ label: p.type, value: fmt(p.batches, "batches"), sub: "batches" });
+  }
+  return rows;
+}
+
+// Packaging consumables for a SINGLE cartoned run (mirrors the all-runs roll-up).
+function buildRunPackagingRows(s: RunSettings): NeedRow[] {
+  const rows: NeedRow[] = [];
+  if ((s.cartoned ?? "").trim().toLowerCase() !== "yes") return rows;
+  const cases = s.casesNeeded;
+  const pizzas = s.casesNeeded * s.pizzasPerCase;
+  const circle = (s.circles ?? "").trim();
+  if (circle && circle.toLowerCase() !== "none" && pizzas > 0)
+    rows.push({ label: `Circles — ${circle}`, value: fmtNum(pizzas, 0), sub: "circles" });
+  const shipper = (s.shipper ?? "").trim();
+  if (shipper && shipper.toLowerCase() !== "none" && cases > 0)
+    rows.push({ label: `Shippers — ${shipper}`, value: fmtNum(cases, 0), sub: "shippers" });
+  const perCase = Number(s.cartonsPerCase) || 0;
+  if (perCase > 0 && pizzas > 0)
+    rows.push({ label: "Cartons", value: fmtNum(Math.ceil(pizzas / perCase), 0), sub: "cases" });
+  return rows;
+}
+
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -41,6 +106,7 @@ export default function WarehouseScreen() {
   // unit (dough/sauce/cheese → batches, mixes/pepperoni → lbs) exactly like the
   // web warehouse tab (aggregateNeedRows). Never force everything to "lbs".
   const nowMs = Date.now();
+  const activeRuns = allRuns.filter((r) => r.endedAt == null);
   const map = new Map<string, { num: number; unit: string; order: number }>();
   let order = 0;
   const add = (label: string, num: number, unit: string) => {
@@ -191,6 +257,72 @@ export default function WarehouseScreen() {
           </Card>
         )}
 
+        {/* Per-run breakdown: what each active run needs and roughly how long it
+            runs, so warehouse staff can stage materials run by run instead of
+            reading off one combined total. Reuses the same per-run calc + need
+            mapping as the roll-up above (web/mobile parity). */}
+        {activeRuns.length > 0 && (
+          <Card title="What Each Run Needs" icon="list" style={{ marginTop: 16 }}>
+            <View style={styles.runList}>
+              {activeRuns.map((r, i) => {
+                const c = computeCalc(r, nowMs);
+                const s = r.settings;
+                const totalPizzas = s.casesNeeded * s.pizzasPerCase;
+                const estSec = c.ppm > 0 ? (totalPizzas * 60) / c.ppm : 0;
+                const rows = [...buildRunNeedRows(c, s), ...buildRunPackagingRows(s)];
+                return (
+                  <View
+                    key={r.id}
+                    style={[
+                      styles.runCard,
+                      { backgroundColor: colors.secondary, borderColor: colors.border },
+                    ]}
+                  >
+                    <View style={styles.runHeader}>
+                      <Text
+                        style={[styles.runTitle, { color: colors.foreground }]}
+                        numberOfLines={1}
+                      >
+                        {runLabel(r, i)}
+                      </Text>
+                      <Text style={[styles.runMeta, { color: colors.mutedForeground }]}>
+                        {s.casesNeeded} case{s.casesNeeded !== 1 ? "s" : ""}
+                        {estSec > 0 ? ` · ~${fmtDur(estSec)}` : ""}
+                      </Text>
+                    </View>
+                    {rows.length === 0 ? (
+                      <Text style={[styles.empty, { color: colors.mutedForeground }]}>
+                        No materials configured yet.
+                      </Text>
+                    ) : (
+                      <View style={styles.needList}>
+                        {rows.map((row, j) => (
+                          <View key={j} style={styles.needRow}>
+                            <Text
+                              style={[styles.needLabel, { color: colors.mutedForeground }]}
+                              numberOfLines={1}
+                            >
+                              {row.label}
+                            </Text>
+                            <Text style={styles.needValueWrap} numberOfLines={1}>
+                              <Text style={[styles.needValue, { color: colors.foreground }]}>
+                                {row.value}{" "}
+                              </Text>
+                              <Text style={[styles.needSub, { color: colors.mutedForeground }]}>
+                                {row.sub}
+                              </Text>
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </Card>
+        )}
+
         {/* Upcoming production schedule */}
         <Card title="Production Schedule" icon="calendar" style={{ marginTop: 16 }}>
           {scheduledDays.length === 0 ? (
@@ -248,6 +380,27 @@ const styles = StyleSheet.create({
     fontVariant: ["tabular-nums"],
   },
   needSub: { fontSize: 14, fontFamily: FONTS.regular },
+
+  runList: { gap: 10 },
+  runCard: {
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+  },
+  runHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 8,
+  },
+  runTitle: { fontSize: 15, flexShrink: 1, fontFamily: FONTS.medium },
+  runMeta: {
+    fontSize: 12,
+    flexShrink: 0,
+    fontFamily: FONTS.mono,
+    fontVariant: ["tabular-nums"],
+  },
 
   scheduleList: { gap: 6 },
   dayPill: {
