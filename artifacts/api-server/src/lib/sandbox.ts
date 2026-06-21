@@ -18,6 +18,7 @@ import {
   mergeAliasesTable,
   photoAliasesTable,
   specImportAliasesTable,
+  sandboxMetaTable,
 } from "@workspace/db";
 import { hashPassword, newUserId } from "./auth";
 import { findUserByUsername, getUserById } from "./users";
@@ -238,7 +239,51 @@ export async function resetSandbox(): Promise<void> {
     await copySimpleScoped(tx, mergeAliasesTable);
     await copySimpleScoped(tx, photoAliasesTable);
     await copySimpleScoped(tx, specImportAliasesTable);
+
+    // ── Stamp the copy time so clients can show "Sandbox copied from live at …"
+    // and the server can tell when the next automatic refresh is due. Singleton
+    // row id 1; upsert so the very first copy creates it.
+    const now = new Date();
+    await tx
+      .insert(sandboxMetaTable)
+      .values({ id: SANDBOX_META_ID, copiedAt: now })
+      .onConflictDoUpdate({ target: sandboxMetaTable.id, set: { copiedAt: now } });
   });
+}
+
+// Singleton row id for the sandbox bookkeeping table.
+const SANDBOX_META_ID = 1;
+
+// How stale the sandbox copy may get before the next sandbox session triggers an
+// automatic re-copy from live. Tuned to behave like a nightly refresh: the first
+// sandbox login each day re-seeds from live, so the demo/training space stays
+// trustworthy without anyone remembering to hit "Reset sandbox" and without a
+// cron. The clients never hold this threshold — the server reports a `sandboxStale`
+// boolean — so web and mobile can't drift on the cutoff.
+export const SANDBOX_STALE_MS = 24 * 60 * 60 * 1000;
+
+// When the sandbox was last re-copied from live, or null if it has never been
+// copied (a fresh database). Best-effort: a transient DB error reports null
+// (treated as stale, i.e. a copy is due) rather than throwing on the /me path.
+export async function getSandboxCopiedAt(): Promise<Date | null> {
+  try {
+    const [row] = await db
+      .select({ copiedAt: sandboxMetaTable.copiedAt })
+      .from(sandboxMetaTable)
+      .where(eq(sandboxMetaTable.id, SANDBOX_META_ID));
+    return row?.copiedAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Whether the sandbox copy is due for an automatic refresh: never copied, or
+// older than SANDBOX_STALE_MS. The client drives the actual re-copy (it reuses
+// the manual reset flow so it can also drop local state and reload), but the
+// server owns the cutoff so the two clients stay in lockstep.
+export function isSandboxCopyStale(copiedAt: Date | null): boolean {
+  if (copiedAt == null) return true;
+  return Date.now() - copiedAt.getTime() >= SANDBOX_STALE_MS;
 }
 
 // Transaction handle type (so the copy helper can run inside resetSandbox's tx).

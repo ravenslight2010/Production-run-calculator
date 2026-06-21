@@ -1556,9 +1556,40 @@ function NotesTextarea({ initialValue, onCommit, className }: { initialValue: st
   );
 }
 
+// Format the sandbox "copied from live" ISO timestamp for the banner. Shows the
+// local date + time; falls back to the raw value if it can't be parsed.
+function fmtSandboxCopiedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function Home() {
   const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen, markTourCompleted } =
     useAuth();
+  // Automatic sandbox refresh: when the server reports the sandbox copy is stale
+  // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
+  // the same flow as the manual "Reset sandbox" button, minus the confirm. This
+  // keeps the demo/training space trustworthy without anyone remembering to reset
+  // it. Guarded so it fires at most once per mount, and only for the sandbox
+  // account (sandboxStale is always false otherwise).
+  const autoSandboxResetRef = useRef(false);
+  useEffect(() => {
+    if (!me?.sandbox || !me.sandboxStale || autoSandboxResetRef.current) return;
+    autoSandboxResetRef.current = true;
+    resetSandboxRequest()
+      .then(() => window.location.reload())
+      .catch(() => {
+        // Best-effort; if the re-copy fails we leave the stale data in place and
+        // let the next load (or a manual reset) try again.
+        autoSandboxResetRef.current = false;
+      });
+  }, [me?.sandbox, me?.sandboxStale]);
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
@@ -7151,6 +7182,11 @@ export default function Home() {
             <FlaskConical className="w-4 h-4 shrink-0" />
             <span className="min-w-0">
               Sandbox mode — changes here are isolated and never affect live data.
+              {me.sandboxCopiedAt && (
+                <span className="hidden sm:inline opacity-80">
+                  {" "}Copied from live at {fmtSandboxCopiedAt(me.sandboxCopiedAt)}.
+                </span>
+              )}
             </span>
             <button
               type="button"

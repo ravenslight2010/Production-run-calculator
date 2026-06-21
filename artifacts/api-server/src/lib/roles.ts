@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
 import { revokeUser } from "./userValidity";
+import { getSandboxCopiedAt, isSandboxCopyStale } from "./sandbox";
 
 // ---------------------------------------------------------------------------
 // Capabilities
@@ -171,6 +172,15 @@ export type StaffMember = {
   onboardingSeen: boolean;
   tourCompleted: boolean;
   sandbox: boolean;
+  // ISO timestamp of when the sandbox was last re-copied from live, or null when
+  // it has never been copied. Only meaningful for the sandbox account; null for
+  // everyone else. Clients show it as "Sandbox copied from live at …".
+  sandboxCopiedAt: string | null;
+  // Whether the sandbox copy is stale and due for an automatic refresh. The
+  // client drives the re-copy (reusing the manual reset flow); the server owns
+  // the staleness cutoff so web and mobile stay in lockstep. Always false for
+  // non-sandbox accounts.
+  sandboxStale: boolean;
 };
 
 // Whether anyone currently holds manage-staff. Used for the bootstrap rule
@@ -228,6 +238,9 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     })
     .from(usersTable)
     .where(eq(usersTable.id, userId));
+  // The copy timestamp / staleness only matter for the sandbox account, so skip
+  // the extra read for everyone else.
+  const copiedAt = user?.sandbox ? await getSandboxCopiedAt() : null;
   return {
     userId,
     role,
@@ -237,6 +250,8 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     onboardingSeen: user?.onboardingSeen ?? false,
     tourCompleted: user?.tourCompleted ?? false,
     sandbox: user?.sandbox ?? false,
+    sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,
+    sandboxStale: user?.sandbox ? isSandboxCopyStale(copiedAt) : false,
   };
 }
 
@@ -286,6 +301,10 @@ export async function listStaff(): Promise<StaffMember[]> {
     onboardingSeen: r.onboardingSeen,
     tourCompleted: r.tourCompleted,
     sandbox: r.sandbox,
+    // The copy timestamp / staleness are only surfaced via the sandbox account's
+    // own /me; the roster never needs them, so leave them at their inert values.
+    sandboxCopiedAt: null,
+    sandboxStale: false,
   }));
 }
 

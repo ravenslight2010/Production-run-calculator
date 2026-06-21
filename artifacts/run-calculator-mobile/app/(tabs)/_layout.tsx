@@ -98,30 +98,41 @@ export default function TabLayout() {
   // Sandbox "Reset" — re-copy live → sandbox on the server, then drop this
   // device's local day-state and relaunch so the fresh sandbox state is pulled
   // from the server (the additive live-sync merge would otherwise hide it).
+  const runSandboxReset = async () => {
+    try {
+      await resetSandboxRequest();
+      await clearLocalStateForSandboxReset();
+    } catch {
+      // Best-effort: still relaunch so a partial reset re-pulls cleanly.
+    }
+    await reloadAppAsync().catch(() => {});
+  };
   const doSandboxReset = () => {
     Alert.alert(
       "Reset sandbox",
       "This replaces all sandbox data with a fresh copy of the live data. Live data is not affected. Continue?",
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Reset",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await resetSandboxRequest();
-                await clearLocalStateForSandboxReset();
-              } catch {
-                // Best-effort: still relaunch so a partial reset re-pulls cleanly.
-              }
-              await reloadAppAsync().catch(() => {});
-            })();
-          },
-        },
+        { text: "Reset", style: "destructive", onPress: () => void runSandboxReset() },
       ],
     );
   };
+
+  // Automatic sandbox refresh: when the server reports the sandbox copy is stale
+  // (older than its cutoff, or never copied), re-copy live → sandbox and relaunch
+  // — the same flow as the manual "Reset" action, minus the confirm. Keeps the
+  // demo/training space trustworthy without anyone remembering to reset it.
+  // Guarded so it fires at most once per mount, and only for the sandbox account
+  // (sandboxStale is always false otherwise).
+  const autoSandboxResetRef = useRef(false);
+  useEffect(() => {
+    if (!me?.sandbox || !me.sandboxStale || autoSandboxResetRef.current) return;
+    autoSandboxResetRef.current = true;
+    void runSandboxReset();
+    // runSandboxReset is stable enough for this one-shot guard; deps track the
+    // staleness signal only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.sandbox, me?.sandboxStale]);
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;

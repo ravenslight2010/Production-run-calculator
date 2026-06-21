@@ -23,4 +23,11 @@ export interface StaffMember {
   tourCompleted: boolean;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
+  /**
+     * ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as "Sandbox copied from live at …".
+     * @nullable
+     */
+  sandboxCopiedAt: string | null;
+  /** Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts. */
+  sandboxStale: boolean;
 }

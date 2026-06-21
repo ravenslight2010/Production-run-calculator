@@ -10,11 +10,26 @@ import { FONTS } from "@/constants/fonts";
 // offers a "Reset" action that re-copies live → sandbox. Mirrors the web
 // sandbox banner in artifacts/run-calculator/src/pages/home.tsx (replit.md
 // parity). Renders nothing for non-sandbox sessions.
+// Format the sandbox "copied from live" ISO timestamp for the banner. Shows a
+// short local date + time; falls back to the raw value if it can't be parsed.
+function fmtCopiedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function SandboxBanner({
   visible,
+  copiedAt,
   onReset,
 }: {
   visible: boolean;
+  copiedAt?: string | null;
   onReset: () => void;
 }) {
   const colors = useColors();
@@ -36,7 +51,9 @@ export default function SandboxBanner({
       >
         <Feather name="alert-triangle" size={14} color={accent} />
         <Text style={[styles.text, { color: colors.foreground }]} numberOfLines={1}>
-          Sandbox mode — changes never affect live data.
+          {copiedAt
+            ? `Sandbox — copied from live at ${fmtCopiedAt(copiedAt)}.`
+            : "Sandbox mode — changes never affect live data."}
         </Text>
         <Pressable
           onPress={onReset}

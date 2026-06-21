@@ -291,6 +291,13 @@ export interface StaffMember {
   // "sandbox" data scope. Clients show a persistent banner and a "Reset
   // sandbox" action when this is set.
   sandbox: boolean;
+  // ISO timestamp of when the sandbox was last re-copied from live (null until
+  // the first copy). Shown in the banner as "Sandbox copied from live at …".
+  sandboxCopiedAt: string | null;
+  // True when the sandbox copy is stale and due for an automatic refresh. The
+  // server owns the staleness cutoff; the client reacts by running the same
+  // reset-and-reload flow as the manual "Reset sandbox" button.
+  sandboxStale: boolean;
 }
 export const fetchMe = () => api<StaffMember>("/me");
 // Mark the first-login "Get Started" overview as seen. Returns the updated

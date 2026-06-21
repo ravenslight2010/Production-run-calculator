@@ -76,3 +76,4 @@
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
 - [Temp ingredient substitutions](temp-substitutions.md) — day-state overlay (swap/add/remove) for today's recipes; overlay BOTH totals + consumption keys (type fields by value); shared @workspace/inventory-math; web+mobile parity.
 - [Recipe apply/undo shared lib](recipe-apply-shared-lib.md) — recipe-suggestion validate/sanitize/apply/undo decision logic now in @workspace/recipe-apply; apps keep only resolveTargetId/readPrevRows/write glue; lib owns RECIPE_FIELD_IDS.
+- [Sandbox auto-refresh](sandbox-auto-refresh.md) — sandbox re-copies from live on stale login; server REPORTS staleness (sandbox_meta.copiedAt + 24h cutoff), client runs existing reset flow once/mount; banner shows copy time; web+mobile parity.
