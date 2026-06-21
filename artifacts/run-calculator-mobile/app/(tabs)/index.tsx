@@ -98,6 +98,12 @@ export default function CalculatorScreen() {
   const { calc, activeStoppage } = useRunClock();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
+  // Per-run acknowledgement of strict-rule checklists. Keyed by
+  // `${runId}#${ruleId}#${stepIndex}` so checks reset per run yet stay satisfied
+  // when returning to a run (web parity). A strict violation with a checklist
+  // blocks Start until every step is checked; one without a checklist blocks
+  // outright.
+  const [checklistAcks, setChecklistAcks] = useState<Record<string, boolean>>({});
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
 
   // ── Current-run identity (brand / flavor / cases) — edited inline here, like web ──
@@ -226,6 +232,21 @@ export default function CalculatorScreen() {
     });
   }, [productionRules, allRuns, run, runIndex]);
   const strictViolations = ruleViolations.filter((x) => x.enforcement === "strict");
+  const ackKey = (ruleId: string, i: number) => `${run.id}#${ruleId}#${i}`;
+  const toggleAck = (ruleId: string, i: number) =>
+    setChecklistAcks((prev) => {
+      const k = ackKey(ruleId, i);
+      return { ...prev, [k]: !prev[k] };
+    });
+  const checklistSatisfied = (rv: { ruleId: string; checklist?: string[] }) => {
+    const cl = rv.checklist ?? [];
+    if (cl.length === 0) return false;
+    return cl.every((_, i) => checklistAcks[ackKey(rv.ruleId, i)]);
+  };
+  const blockingViolations = strictViolations.filter((rv) => !checklistSatisfied(rv));
+  const checklistViolations = strictViolations.filter(
+    (rv) => (rv.checklist ?? []).length > 0,
+  );
 
   // Other runs in today's lineup that haven't been finished yet.
   const upcomingRuns = allRuns
@@ -880,15 +901,20 @@ export default function CalculatorScreen() {
               ) : (
                 <Pressable
                   onPress={() => {
-                    if (strictViolations.length > 0) {
+                    if (blockingViolations.length > 0) {
                       Haptics.notificationAsync(
                         Haptics.NotificationFeedbackType.Error,
                       );
+                      const anyChecklist = blockingViolations.some(
+                        (x) => (x.checklist ?? []).length > 0,
+                      );
                       Alert.alert(
                         "Can't start run",
-                        `Blocked by production rule${strictViolations.length > 1 ? "s" : ""}:\n\n` +
-                          strictViolations.map((x) => `• ${x.message}`).join("\n") +
-                          "\n\nFix these on the Configure tab, or ask a manager to adjust the rule.",
+                        `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}:\n\n` +
+                          blockingViolations.map((x) => `• ${x.message}`).join("\n") +
+                          (anyChecklist
+                            ? "\n\nComplete the checklist below, fix these on the Configure tab, or ask a manager to adjust the rule."
+                            : "\n\nFix these on the Configure tab, or ask a manager to adjust the rule."),
                       );
                       return;
                     }
@@ -900,22 +926,22 @@ export default function CalculatorScreen() {
                     styles.ctrlBtnWide,
                     {
                       backgroundColor:
-                        strictViolations.length > 0 ? colors.muted : colors.success,
+                        blockingViolations.length > 0 ? colors.muted : colors.success,
                       opacity: pressed ? 0.8 : 1,
                     },
                   ]}
                 >
                   <Feather
-                    name={strictViolations.length > 0 ? "lock" : "play"}
+                    name={blockingViolations.length > 0 ? "lock" : "play"}
                     size={16}
-                    color={strictViolations.length > 0 ? colors.mutedForeground : "#000"}
+                    color={blockingViolations.length > 0 ? colors.mutedForeground : "#000"}
                   />
                   <Text
                     style={[
                       styles.ctrlBtnText,
                       {
                         color:
-                          strictViolations.length > 0 ? colors.mutedForeground : "#000",
+                          blockingViolations.length > 0 ? colors.mutedForeground : "#000",
                       },
                     ]}
                   >
@@ -924,6 +950,81 @@ export default function CalculatorScreen() {
                 </Pressable>
               )}
             </View>
+
+            {!run.isRunning && !activeStoppage && checklistViolations.length > 0 ? (
+              <View style={{ marginTop: 12, gap: 10 }}>
+                {checklistViolations.map((rv) => {
+                  const cl = rv.checklist ?? [];
+                  const cleared = checklistSatisfied(rv);
+                  return (
+                    <View
+                      key={rv.ruleId}
+                      style={{
+                        gap: 8,
+                        padding: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: cleared ? "#16a34a" : "#dc2626",
+                        backgroundColor: cleared ? "#16a34a22" : "#dc262622",
+                      }}
+                    >
+                      <View
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                      >
+                        <Feather
+                          name={cleared ? "check-circle" : "alert-triangle"}
+                          size={14}
+                          color={cleared ? "#86efac" : "#fca5a5"}
+                        />
+                        <Text
+                          style={{
+                            flex: 1,
+                            fontFamily: FONTS.bold,
+                            fontSize: 12,
+                            color: cleared ? "#86efac" : "#fca5a5",
+                          }}
+                        >
+                          {rv.name}
+                          {cleared ? " — checklist complete" : " — complete to start"}
+                        </Text>
+                      </View>
+                      {cl.map((step, i) => {
+                        const checked = !!checklistAcks[ackKey(rv.ruleId, i)];
+                        return (
+                          <Pressable
+                            key={i}
+                            onPress={() => toggleAck(rv.ruleId, i)}
+                            style={{
+                              flexDirection: "row",
+                              alignItems: "flex-start",
+                              gap: 8,
+                            }}
+                          >
+                            <Feather
+                              name={checked ? "check-square" : "square"}
+                              size={16}
+                              color={checked ? "#86efac" : colors.mutedForeground}
+                            />
+                            <Text
+                              style={{
+                                flex: 1,
+                                fontFamily: FONTS.regular,
+                                fontSize: 12,
+                                color: colors.foreground,
+                                textDecorationLine: checked ? "line-through" : "none",
+                                opacity: checked ? 0.7 : 1,
+                              }}
+                            >
+                              {step}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         );
       })()}

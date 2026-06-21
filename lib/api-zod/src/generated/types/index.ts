@@ -100,6 +100,7 @@ export * from './resetStaffPassword';
 export * from './restockInput';
 export * from './reviewVerdict';
 export * from './reviewVerdictStatus';
+export * from './ruleBypassCondition';
 export * from './saveAiCorrectionsInput';
 export * from './saveDeniedMergesInput';
 export * from './saveFillMissingValuesInput';

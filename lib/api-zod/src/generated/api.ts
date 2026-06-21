@@ -822,7 +822,12 @@ export const ListProductionRulesResponse = zod.object({
   "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
   "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
   "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
-  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)'),
+  "bypass": zod.array(zod.object({
+  "field": zod.string().describe('Run field key (from the shared RULE_FIELDS catalog)'),
+  "value": zod.string().describe('Value under which the rule is waived')
+}).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
+  "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
 }).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 
@@ -843,7 +848,12 @@ export const SaveProductionRulesBody = zod.object({
   "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
   "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
   "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
-  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)'),
+  "bypass": zod.array(zod.object({
+  "field": zod.string().describe('Run field key (from the shared RULE_FIELDS catalog)'),
+  "value": zod.string().describe('Value under which the rule is waived')
+}).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
+  "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
 }).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.')).describe('The batch of rules to create or update (by id)')
 })
 
@@ -859,7 +869,12 @@ export const SaveProductionRulesResponse = zod.object({
   "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
   "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
   "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
-  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)'),
+  "bypass": zod.array(zod.object({
+  "field": zod.string().describe('Run field key (from the shared RULE_FIELDS catalog)'),
+  "value": zod.string().describe('Value under which the rule is waived')
+}).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
+  "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
 }).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 
@@ -884,7 +899,12 @@ export const DeleteProductionRulesResponse = zod.object({
   "max": zod.number().nullish().describe('Inclusive upper bound (numeric-range)'),
   "attribute": zod.string().nullish().describe('Run attribute key for the transition (sequence)'),
   "before": zod.string().nullish().describe('Disallowed preceding attribute value (sequence)'),
-  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)')
+  "after": zod.string().nullish().describe('Disallowed following attribute value (sequence)'),
+  "bypass": zod.array(zod.object({
+  "field": zod.string().describe('Run field key (from the shared RULE_FIELDS catalog)'),
+  "value": zod.string().describe('Value under which the rule is waived')
+}).describe('A single bypass condition for a production rule. The rule is waived when the current run\'s `field` matches `value` (text fields case-insensitive, number fields by numeric equality).')).nullish().describe('Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type.'),
+  "checklist": zod.array(zod.string()).nullish().describe('Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run.')
 }).describe('A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. \"flexible\" rules warn; \"strict\" rules block starting a run.'))
 })
 

@@ -7,6 +7,7 @@
  */
 import type { ProductionRuleEnforcement } from './productionRuleEnforcement';
 import type { ProductionRuleType } from './productionRuleType';
+import type { RuleBypassCondition } from './ruleBypassCondition';
 
 /**
  * A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.
@@ -31,4 +32,8 @@ export interface ProductionRule {
   before?: string | null;
   /** Disallowed following attribute value (sequence) */
   after?: string | null;
+  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  bypass?: RuleBypassCondition[] | null;
+  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  checklist?: string[] | null;
 }

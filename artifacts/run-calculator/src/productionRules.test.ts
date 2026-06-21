@@ -4,6 +4,7 @@ import {
   evaluateRule,
   evaluateRules,
   hasStrictViolation,
+  isRuleBypassed,
   newRule,
   defaultRuleName,
   RULE_FIELDS,
@@ -192,6 +193,127 @@ describe("evaluateRules + hasStrictViolation", () => {
       { id: "a", name: "Brand", type: "required-field", enforcement: "flexible", enabled: true, field: "brand" },
     ];
     expect(hasStrictViolation(evaluateRules(rules, ctx({ fields: { brand: "" } })))).toBe(false);
+  });
+});
+
+describe("normalizeRule - exceptions (bypass + checklist)", () => {
+  it("keeps valid bypass conditions and drops malformed ones", () => {
+    const r = normalizeRule({
+      id: "a",
+      type: "required-field",
+      field: "brand",
+      bypass: [
+        { field: "brand", value: "Acme" }, // valid
+        { field: "bogus", value: "x" }, // unknown field -> dropped
+        { field: "dieType", value: "" }, // empty value -> dropped
+        { field: "flavor" }, // missing value -> dropped
+        "nope", // not an object -> dropped
+      ],
+    });
+    expect(r?.bypass).toEqual([{ field: "brand", value: "Acme" }]);
+  });
+
+  it("omits bypass entirely when nothing valid remains", () => {
+    const r = normalizeRule({
+      id: "a",
+      type: "required-field",
+      field: "brand",
+      bypass: [{ field: "bogus", value: "x" }],
+    });
+    expect(r?.bypass).toBeUndefined();
+  });
+
+  it("trims/drops-blank/caps checklist steps and preserves order", () => {
+    const r = normalizeRule({
+      id: "a",
+      type: "required-field",
+      field: "brand",
+      checklist: ["  Step one  ", "", "   ", "Step two"],
+    });
+    expect(r?.checklist).toEqual(["Step one", "Step two"]);
+  });
+
+  it("omits checklist entirely when empty", () => {
+    const r = normalizeRule({ id: "a", type: "required-field", field: "brand", checklist: [] });
+    expect(r?.checklist).toBeUndefined();
+  });
+
+  it("attaches exceptions to any rule type", () => {
+    const r = normalizeRule({
+      id: "a",
+      type: "sequence",
+      before: "none",
+      after: "egg",
+      bypass: [{ field: "brand", value: "Acme" }],
+      checklist: ["Confirm allergen wash"],
+    });
+    expect(r?.bypass).toEqual([{ field: "brand", value: "Acme" }]);
+    expect(r?.checklist).toEqual(["Confirm allergen wash"]);
+  });
+});
+
+describe("bypass conditions skip evaluation", () => {
+  const rule: ProductionRule = {
+    id: "r1",
+    name: "Brand required",
+    type: "required-field",
+    enforcement: "strict",
+    enabled: true,
+    field: "brand",
+    bypass: [{ field: "dieType", value: "Thin" }],
+  };
+
+  it("reports the violation when no bypass condition matches", () => {
+    expect(evaluateRule(rule, ctx({ fields: { brand: "", dieType: "Thick" } }))).not.toBeNull();
+    expect(isRuleBypassed(rule, ctx({ fields: { dieType: "Thick" } }))).toBe(false);
+  });
+
+  it("waives the rule (no violation) when a bypass condition matches", () => {
+    expect(evaluateRule(rule, ctx({ fields: { brand: "", dieType: "Thin" } }))).toBeNull();
+    expect(isRuleBypassed(rule, ctx({ fields: { dieType: "Thin" } }))).toBe(true);
+  });
+
+  it("matches text bypass values case-insensitively", () => {
+    expect(isRuleBypassed(rule, ctx({ fields: { dieType: "THIN" } }))).toBe(true);
+  });
+
+  it("matches number bypass values by numeric equality", () => {
+    const numRule: ProductionRule = {
+      ...rule,
+      bypass: [{ field: "casesNeeded", value: "100" }],
+    };
+    expect(isRuleBypassed(numRule, ctx({ fields: { casesNeeded: 100 } }))).toBe(true);
+    expect(isRuleBypassed(numRule, ctx({ fields: { casesNeeded: 99 } }))).toBe(false);
+  });
+});
+
+describe("checklist rules still report violations", () => {
+  const rule: ProductionRule = {
+    id: "r2",
+    name: "Line speed range",
+    type: "numeric-range",
+    enforcement: "strict",
+    enabled: true,
+    field: "lineSpeed",
+    min: 50,
+    max: 100,
+    checklist: ["Confirm with supervisor", "Log the override"],
+  };
+
+  it("still emits the violation and carries the checklist onto it", () => {
+    const v = evaluateRule(rule, ctx({ fields: { lineSpeed: 40 } }));
+    expect(v).not.toBeNull();
+    expect(v?.enforcement).toBe("strict");
+    expect(v?.checklist).toEqual(["Confirm with supervisor", "Log the override"]);
+  });
+
+  it("does not carry a checklist when the rule passes", () => {
+    expect(evaluateRule(rule, ctx({ fields: { lineSpeed: 75 } }))).toBeNull();
+  });
+
+  it("a bypassed checklist rule emits nothing at all", () => {
+    const bypassed: ProductionRule = { ...rule, bypass: [{ field: "brand", value: "Acme" }] };
+    expect(evaluateRule(bypassed, ctx({ fields: { lineSpeed: 40, brand: "Acme" } }))).toBeNull();
   });
 });
 

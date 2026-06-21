@@ -40,6 +40,30 @@ export interface ProductionRule {
   attribute?: string;
   before?: string;
   after?: string;
+  // Exceptions (apply to any rule type) — see "Exceptions" below.
+  //
+  // Bypass conditions: when the current run matches ANY of these, the rule is
+  // skipped entirely (no warning, no block). Each condition is a run field key
+  // (from RULE_FIELDS) plus the value under which the rule is waived.
+  bypass?: RuleBypassCondition[];
+  // Required checklist: a short list of step labels a manager attaches to a
+  // (typically strict) rule. Pure evaluation still reports the violation; the
+  // client decides whether a strict violation actually blocks Start based on
+  // whether every step has been acknowledged for the current run.
+  checklist?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Exceptions: bypass conditions
+// ---------------------------------------------------------------------------
+
+// A single bypass condition. The run is checked field-by-field against these;
+// when it matches, the owning rule is waived for that run. `field` is a
+// RULE_FIELDS key and `value` is the value under which the rule is waived (text
+// fields match case-insensitively; number fields match by numeric equality).
+export interface RuleBypassCondition {
+  field: string;
+  value: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +170,11 @@ export interface RuleViolation {
   name: string;
   enforcement: RuleEnforcement;
   message: string;
+  // When the violated rule has a required checklist, its step labels are carried
+  // here so clients can render the checklist near Start without re-looking-up the
+  // rule. Whether the strict violation actually blocks Start is the client's call
+  // (it stays blocked until every step is acknowledged for the current run).
+  checklist?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +183,8 @@ export interface RuleViolation {
 
 const MAX_NAME_LEN = 120;
 const MAX_VALUE_LEN = 120;
+const MAX_BYPASS = 20;
+const MAX_CHECKLIST = 20;
 
 export function isRuleType(v: unknown): v is RuleType {
   return v === "required-field" || v === "numeric-range" || v === "sequence";
@@ -171,6 +202,39 @@ function toFiniteOrNull(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// Coerce an arbitrary persisted/synced value into a clean list of bypass
+// conditions: drop entries with an unknown field or an empty value, clamp value
+// length, and cap the count. Returns [] when there is nothing valid.
+function normalizeBypass(input: unknown): RuleBypassCondition[] {
+  if (!Array.isArray(input)) return [];
+  const out: RuleBypassCondition[] = [];
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const field = clampStr(r.field, 64);
+    if (!field || !ruleFieldDef(field)) continue;
+    const value = clampStr(r.value, MAX_VALUE_LEN);
+    if (!value) continue;
+    out.push({ field, value });
+    if (out.length >= MAX_BYPASS) break;
+  }
+  return out;
+}
+
+// Coerce an arbitrary persisted/synced value into a clean checklist: trim each
+// step, drop blanks, clamp text length, and cap the count.
+function normalizeChecklist(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const out: string[] = [];
+  for (const raw of input) {
+    const step = clampStr(raw, MAX_VALUE_LEN);
+    if (!step) continue;
+    out.push(step);
+    if (out.length >= MAX_CHECKLIST) break;
+  }
+  return out;
 }
 
 // Coerce an arbitrary persisted/synced object onto a well-formed ProductionRule,
@@ -194,6 +258,13 @@ export function normalizeRule(input: unknown): ProductionRule | null {
     enforcement,
     enabled,
   };
+
+  // Exceptions apply to every rule type; attach them once on the base so the
+  // per-type returns below all carry them.
+  const bypass = normalizeBypass(r.bypass);
+  if (bypass.length > 0) base.bypass = bypass;
+  const checklist = normalizeChecklist(r.checklist);
+  if (checklist.length > 0) base.checklist = checklist;
 
   if (r.type === "required-field") {
     const field = clampStr(r.field, 64);
@@ -322,18 +393,51 @@ function evaluateSequence(rule: ProductionRule, ctx: RuleRunContext): RuleViolat
   return null;
 }
 
+// Does any of the rule's bypass conditions match the current run? A match waives
+// the rule entirely (no warning, no block). Text fields compare
+// case-insensitively; number fields compare by numeric equality.
+function bypassConditionMatches(cond: RuleBypassCondition, ctx: RuleRunContext): boolean {
+  const def = ruleFieldDef(cond.field);
+  if (!def) return false;
+  const actual = ctx.fields[def.key];
+  if (def.kind === "number") {
+    const a = toFiniteOrNull(actual);
+    const b = toFiniteOrNull(cond.value);
+    return a !== null && b !== null && a === b;
+  }
+  return clampStr(actual, MAX_VALUE_LEN).toLowerCase() === cond.value.trim().toLowerCase();
+}
+
+export function isRuleBypassed(rule: ProductionRule, ctx: RuleRunContext): boolean {
+  if (!rule.bypass || rule.bypass.length === 0) return false;
+  return rule.bypass.some((c) => bypassConditionMatches(c, ctx));
+}
+
 export function evaluateRule(rule: ProductionRule, ctx: RuleRunContext): RuleViolation | null {
   if (!rule.enabled) return null;
+  // A bypassed rule produces no violation at all — no warning and no block.
+  if (isRuleBypassed(rule, ctx)) return null;
+  let violation: RuleViolation | null;
   switch (rule.type) {
     case "required-field":
-      return evaluateRequiredField(rule, ctx);
+      violation = evaluateRequiredField(rule, ctx);
+      break;
     case "numeric-range":
-      return evaluateNumericRange(rule, ctx);
+      violation = evaluateNumericRange(rule, ctx);
+      break;
     case "sequence":
-      return evaluateSequence(rule, ctx);
+      violation = evaluateSequence(rule, ctx);
+      break;
     default:
-      return null;
+      violation = null;
   }
+  // Carry the checklist onto the violation so clients can render it and decide
+  // whether the (strict) violation still blocks Start. Evaluation itself stays
+  // pure — it always reports the violation regardless of checklist completion.
+  if (violation && rule.checklist && rule.checklist.length > 0) {
+    violation.checklist = [...rule.checklist];
+  }
+  return violation;
 }
 
 // Evaluate all rules against a run context, returning every violation in rule

@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, Plus, Trash2, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  Plus,
+  Trash2,
+  ShieldAlert,
+  ShieldCheck,
+  ArrowUp,
+  ArrowDown,
+  ListChecks,
+  Filter,
+} from "lucide-react";
 import {
   newRule,
   defaultRuleName,
@@ -10,6 +20,7 @@ import {
   RULE_ATTRIBUTES,
   ruleAttributeDef,
   type ProductionRule,
+  type RuleBypassCondition,
   type RuleType,
 } from "@workspace/production-rules";
 import { useProductionRules } from "../hooks/useProductionRules";
@@ -294,6 +305,165 @@ function RuleEditor({
           </select>
         </div>
       )}
+
+      <RuleExceptionsEditor rule={rule} disabled={disabled} patch={patch} />
+    </div>
+  );
+}
+
+// Manager-defined exceptions shared by every rule type: bypass conditions (run
+// matches field=value -> rule waived entirely) and a required checklist (operator
+// must acknowledge each step per-run before a strict block clears).
+function RuleExceptionsEditor({
+  rule,
+  disabled,
+  patch,
+}: {
+  rule: ProductionRule;
+  disabled: boolean;
+  patch: (p: Partial<ProductionRule>) => void;
+}) {
+  const bypass = rule.bypass ?? [];
+  const checklist = rule.checklist ?? [];
+
+  function setBypass(next: RuleBypassCondition[]) {
+    patch({ bypass: next.length > 0 ? next : undefined });
+  }
+  function addBypass() {
+    setBypass([...bypass, { field: RULE_FIELDS[0].key, value: "" }]);
+  }
+  function patchBypass(i: number, p: Partial<RuleBypassCondition>) {
+    setBypass(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
+  }
+  function removeBypass(i: number) {
+    setBypass(bypass.filter((_, idx) => idx !== i));
+  }
+
+  function setChecklist(next: string[]) {
+    patch({ checklist: next.length > 0 ? next : undefined });
+  }
+  function addStep() {
+    setChecklist([...checklist, ""]);
+  }
+  function patchStep(i: number, value: string) {
+    setChecklist(checklist.map((s, idx) => (idx === i ? value : s)));
+  }
+  function removeStep(i: number) {
+    setChecklist(checklist.filter((_, idx) => idx !== i));
+  }
+  function moveStep(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= checklist.length) return;
+    const next = [...checklist];
+    [next[i], next[j]] = [next[j], next[i]];
+    setChecklist(next);
+  }
+
+  return (
+    <div className="space-y-2 pt-2 mt-1 border-t border-border/40">
+      {/* Bypass conditions */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+          <Filter className="w-3 h-3" /> Skip this rule when…
+        </div>
+        {bypass.map((cond, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs">
+            <select
+              value={ruleFieldDef(cond.field) ? cond.field : RULE_FIELDS[0].key}
+              onChange={(e) => patchBypass(i, { field: e.target.value })}
+              disabled={disabled}
+              className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+            >
+              {RULE_FIELDS.map((f) => (
+                <option key={f.key} value={f.key}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-muted-foreground">=</span>
+            <input
+              type="text"
+              value={cond.value}
+              placeholder="value"
+              onChange={(e) => patchBypass(i, { value: e.target.value })}
+              disabled={disabled}
+              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => removeBypass(i)}
+              disabled={disabled}
+              title="Remove condition"
+              className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addBypass}
+          disabled={disabled}
+          className="flex items-center gap-1 text-[11px] text-primary hover:underline disabled:opacity-50"
+        >
+          <Plus className="w-3 h-3" /> Add bypass condition
+        </button>
+      </div>
+
+      {/* Required checklist */}
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+          <ListChecks className="w-3 h-3" /> Require checklist before Start
+        </div>
+        {checklist.map((step, i) => (
+          <div key={i} className="flex items-center gap-1.5 text-xs">
+            <span className="text-[11px] text-muted-foreground w-4 text-right">{i + 1}.</span>
+            <input
+              type="text"
+              value={step}
+              placeholder="step description"
+              onChange={(e) => patchStep(i, e.target.value)}
+              disabled={disabled}
+              className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
+            />
+            <button
+              type="button"
+              onClick={() => moveStep(i, -1)}
+              disabled={disabled || i === 0}
+              title="Move up"
+              className="p-1 rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => moveStep(i, 1)}
+              disabled={disabled || i === checklist.length - 1}
+              title="Move down"
+              className="p-1 rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30"
+            >
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => removeStep(i)}
+              disabled={disabled}
+              title="Remove step"
+              className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addStep}
+          disabled={disabled}
+          className="flex items-center gap-1 text-[11px] text-primary hover:underline disabled:opacity-50"
+        >
+          <Plus className="w-3 h-3" /> Add checklist step
+        </button>
+      </div>
     </div>
   );
 }

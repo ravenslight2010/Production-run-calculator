@@ -1943,6 +1943,24 @@ export default function Home() {
   const flexibleViolations = ruleViolations.filter(x => x.enforcement === "flexible");
   const strictViolations = ruleViolations.filter(x => x.enforcement === "strict");
 
+  // Per-run acknowledgement of strict-rule checklists. Keyed by
+  // `${runId}#${ruleId}#${stepIndex}` so checks reset per run yet stay satisfied
+  // when returning to a run. A strict violation with a checklist blocks Start
+  // until every step is checked; a strict violation without one blocks outright.
+  const [checklistAcks, setChecklistAcks] = useState<Record<string, boolean>>({});
+  const ackKey = (ruleId: string, i: number) => `${currentRunId}#${ruleId}#${i}`;
+  const toggleAck = (ruleId: string, i: number) =>
+    setChecklistAcks(prev => {
+      const k = ackKey(ruleId, i);
+      return { ...prev, [k]: !prev[k] };
+    });
+  const checklistSatisfied = (rv: { ruleId: string; checklist?: string[] }) => {
+    const cl = rv.checklist ?? [];
+    if (cl.length === 0) return false;
+    return cl.every((_, i) => checklistAcks[ackKey(rv.ruleId, i)]);
+  };
+  const blockingViolations = strictViolations.filter(rv => !checklistSatisfied(rv));
+
   const { fields: cheese1Fields, append: appendCheese1, remove: removeCheese1, replace: replaceCheese1 } = useFieldArray({ control: form.control, name: "app1CheeseRecipe" });
   const { fields: cheese2Fields, append: appendCheese2, remove: removeCheese2, replace: replaceCheese2 } = useFieldArray({ control: form.control, name: "app2CheeseRecipe" });
   const { fields: cheese3Fields, append: appendCheese3, remove: removeCheese3, replace: replaceCheese3 } = useFieldArray({ control: form.control, name: "app3CheeseRecipe" });
@@ -6298,10 +6316,10 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={startRun}
-                  disabled={strictViolations.length > 0}
+                  disabled={blockingViolations.length > 0}
                   title={
-                    strictViolations.length > 0
-                      ? `Blocked by production rule${strictViolations.length > 1 ? "s" : ""}: ${strictViolations.map(x => x.name).join(", ")}`
+                    blockingViolations.length > 0
+                      ? `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}: ${blockingViolations.map(x => x.name).join(", ")}`
                       : undefined
                   }
                   className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
@@ -7252,25 +7270,64 @@ export default function Home() {
                         )}
                         {ruleViolations.length > 0 && (
                           <div className="mt-2 flex flex-col gap-1.5">
-                            {ruleViolations.map(rv => (
-                              <div
-                                key={rv.ruleId}
-                                className={`flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border ${
-                                  rv.enforcement === "strict"
-                                    ? "bg-red-950/40 border-red-700/40 text-red-300"
-                                    : "bg-amber-950/30 border-amber-700/40 text-amber-300"
-                                }`}
-                              >
-                                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                                <span>
-                                  <span className="font-bold">
-                                    {rv.name}
-                                    {rv.enforcement === "strict" ? " (blocks start)" : ""}:
-                                  </span>{" "}
-                                  {rv.message}
-                                </span>
-                              </div>
-                            ))}
+                            {ruleViolations.map(rv => {
+                              const cl = rv.checklist ?? [];
+                              const hasChecklist = rv.enforcement === "strict" && cl.length > 0;
+                              const cleared = hasChecklist && checklistSatisfied(rv);
+                              return (
+                                <div
+                                  key={rv.ruleId}
+                                  className={`px-2.5 py-1.5 rounded-md text-xs border ${
+                                    rv.enforcement === "strict"
+                                      ? cleared
+                                        ? "bg-green-950/40 border-green-700/40 text-green-300"
+                                        : "bg-red-950/40 border-red-700/40 text-red-300"
+                                      : "bg-amber-950/30 border-amber-700/40 text-amber-300"
+                                  }`}
+                                >
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                    <span>
+                                      <span className="font-bold">
+                                        {rv.name}
+                                        {rv.enforcement === "strict"
+                                          ? hasChecklist
+                                            ? cleared
+                                              ? " (checklist complete)"
+                                              : " (complete checklist to start)"
+                                            : " (blocks start)"
+                                          : ""}
+                                        :
+                                      </span>{" "}
+                                      {rv.message}
+                                    </span>
+                                  </div>
+                                  {hasChecklist && (
+                                    <div className="mt-1.5 ml-5 flex flex-col gap-1">
+                                      {cl.map((step, i) => {
+                                        const checked = !!checklistAcks[ackKey(rv.ruleId, i)];
+                                        return (
+                                          <label
+                                            key={i}
+                                            className="flex items-start gap-1.5 cursor-pointer"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={checked}
+                                              onChange={() => toggleAck(rv.ruleId, i)}
+                                              className="mt-0.5"
+                                            />
+                                            <span className={checked ? "line-through opacity-70" : ""}>
+                                              {step}
+                                            </span>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>

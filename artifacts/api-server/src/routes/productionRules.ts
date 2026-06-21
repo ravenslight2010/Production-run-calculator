@@ -31,6 +31,8 @@ function toApiRule(row: ProductionRuleRow): ProductionRule {
   if (row.attribute !== null) rule.attribute = row.attribute;
   if (row.before !== null) rule.before = row.before;
   if (row.after !== null) rule.after = row.after;
+  if (row.bypass && row.bypass.length > 0) rule.bypass = row.bypass;
+  if (row.checklist && row.checklist.length > 0) rule.checklist = row.checklist;
   return rule;
 }
 
@@ -49,6 +51,8 @@ function toDbValues(rule: ProductionRule) {
     attribute: rule.attribute ?? null,
     before: rule.before ?? null,
     after: rule.after ?? null,
+    bypass: rule.bypass ?? null,
+    checklist: rule.checklist ?? null,
     updatedAt: new Date(),
   };
 }
@@ -110,6 +114,8 @@ router.post(
               attribute: values.attribute,
               before: values.before,
               after: values.after,
+              bypass: values.bypass,
+              checklist: values.checklist,
               updatedAt: values.updatedAt,
             },
           });

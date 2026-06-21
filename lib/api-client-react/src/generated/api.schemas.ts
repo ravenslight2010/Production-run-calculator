@@ -767,6 +767,16 @@ export const ProductionRuleEnforcement = {
 } as const;
 
 /**
+ * A single bypass condition for a production rule. The rule is waived when the current run's `field` matches `value` (text fields case-insensitive, number fields by numeric equality).
+ */
+export interface RuleBypassCondition {
+  /** Run field key (from the shared RULE_FIELDS catalog) */
+  field: string;
+  /** Value under which the rule is waived */
+  value: string;
+}
+
+/**
  * A manager-defined factory-wide production rule. Flat shape: only the fields relevant to `type` are used. "flexible" rules warn; "strict" rules block starting a run.
  */
 export interface ProductionRule {
@@ -789,6 +799,10 @@ export interface ProductionRule {
   before?: string | null;
   /** Disallowed following attribute value (sequence) */
   after?: string | null;
+  /** Exceptions: when the current run matches any of these conditions the rule is waived entirely (no warning, no block). Applies to any type. */
+  bypass?: RuleBypassCondition[] | null;
+  /** Exceptions: ordered step labels a manager attaches to a (strict) rule. When the rule is violated and not bypassed, the operator must acknowledge every step before Start unblocks for that run. */
+  checklist?: string[] | null;
 }
 
 export interface ProductionRuleList {

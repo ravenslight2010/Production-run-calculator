@@ -3,8 +3,14 @@ import {
   text,
   boolean,
   doublePrecision,
+  jsonb,
   timestamp,
 } from "drizzle-orm/pg-core";
+
+// A bypass condition: when the current run's `field` equals `value`, the owning
+// rule is waived. Mirrors RuleBypassCondition in @workspace/production-rules;
+// kept inline here so the db package stays free of cross-lib coupling.
+type RuleBypassCondition = { field: string; value: string };
 
 // Manager-defined, factory-wide production rules. Unlike per-day run data (the
 // daily_sync JSONB blob), rules are global policy that applies across days, so
@@ -27,6 +33,11 @@ export const productionRulesTable = pgTable("production_rules", {
   attribute: text("attribute"),
   before: text("before"),
   after: text("after"),
+  // Exceptions (apply to any rule type). Variable-shape, so JSONB rather than
+  // flat columns: `bypass` is the list of waive-when conditions; `checklist` is
+  // the ordered list of step labels the operator must acknowledge.
+  bypass: jsonb("bypass").$type<RuleBypassCondition[]>(),
+  checklist: jsonb("checklist").$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

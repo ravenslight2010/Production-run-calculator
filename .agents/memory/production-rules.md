@@ -33,6 +33,28 @@ building the `fields` ctx:
 Sequence rules pass `sequence` = all runs' allergen attribute + `currentRunId` so only
 transitions involving the current run are flagged.
 
+## Exceptions: bypass conditions + required checklist
+Any rule type can carry two optional exceptions (apply to all types incl. sequence):
+- `bypass: RuleBypassCondition[]` ({field,value} over RULE_FIELDS keys). If the run
+  matches ANY condition the rule is waived ENTIRELY — `evaluateRule` returns null, so
+  no warning AND no block. Text match is case-insensitive; number match is numeric
+  equality (`isRuleBypassed` exported for clients).
+- `checklist: string[]` ordered steps. A violated strict rule still emits a violation,
+  with the steps copied onto `RuleViolation.checklist`. Start unblocks only once the
+  operator checks every step.
+
+**Per-run ack is CLIENT-ONLY, never persisted/synced.** Both apps hold a local
+`checklistAcks: Record<string,boolean>` keyed by `${runId}#${ruleId}#${stepIndex}` so
+checks reset per run yet survive switching away and back. `blockingViolations` =
+strict violations whose checklist isn't fully acked (a strict rule with NO checklist
+always blocks, old behavior). Web key uses `currentRunId`; mobile uses `run.id`.
+**Why local:** acks are a momentary per-operator gate, not shop policy — keeping them
+out of the synced day-state avoids cross-device clobber and keeps the rule model pure.
+
+Persistence: `bypass`/`checklist` are nullable JSONB columns on `production_rules`
+(stored only when non-empty). `normalizeBypass`/`normalizeChecklist` drop malformed
+entries (unknown field, blank value/step) and cap at 20 each.
+
 ## Gotcha: numeric-range needs a seeded bound
 `normalizeRule` rejects a numeric-range rule with neither min nor max, and the server
 drops malformed rules. So `newRule("numeric-range")` MUST seed a bound (currently

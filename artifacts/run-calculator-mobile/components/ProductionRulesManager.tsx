@@ -14,7 +14,9 @@ import {
   RULE_ATTRIBUTES,
   RULE_FIELDS,
   ruleAttributeDef,
+  ruleFieldDef,
   type ProductionRule,
+  type RuleBypassCondition,
   type RuleType,
 } from "@workspace/production-rules";
 import { SelectField } from "@/components/UI";
@@ -358,6 +360,162 @@ function RuleEditor({
           />
         </View>
       ) : null}
+
+      <RuleExceptionsEditor rule={rule} disabled={disabled} patch={patch} />
+    </View>
+  );
+}
+
+// Manager-defined exceptions shared by every rule type (mobile parity with web):
+// bypass conditions (run matches field=value -> rule waived entirely) and a
+// required checklist (operator acknowledges each step per-run before a strict
+// block clears).
+function RuleExceptionsEditor({
+  rule,
+  disabled,
+  patch,
+}: {
+  rule: ProductionRule;
+  disabled: boolean;
+  patch: (p: Partial<ProductionRule>) => void;
+}) {
+  const colors = useColors();
+  const bypass = rule.bypass ?? [];
+  const checklist = rule.checklist ?? [];
+
+  const setBypass = (next: RuleBypassCondition[]) =>
+    patch({ bypass: next.length > 0 ? next : undefined });
+  const addBypass = () => setBypass([...bypass, { field: RULE_FIELDS[0].key, value: "" }]);
+  const patchBypass = (i: number, p: Partial<RuleBypassCondition>) =>
+    setBypass(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
+  const removeBypass = (i: number) => setBypass(bypass.filter((_, idx) => idx !== i));
+
+  const setChecklist = (next: string[]) =>
+    patch({ checklist: next.length > 0 ? next : undefined });
+  const addStep = () => setChecklist([...checklist, ""]);
+  const patchStep = (i: number, value: string) =>
+    setChecklist(checklist.map((s, idx) => (idx === i ? value : s)));
+  const removeStep = (i: number) => setChecklist(checklist.filter((_, idx) => idx !== i));
+  const moveStep = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= checklist.length) return;
+    const next = [...checklist];
+    [next[i], next[j]] = [next[j], next[i]];
+    setChecklist(next);
+  };
+
+  const labelStyle = {
+    fontFamily: FONTS.bold,
+    fontSize: 11,
+    color: colors.mutedForeground,
+  } as const;
+  const inputStyle = {
+    flex: 1,
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: colors.foreground,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  } as const;
+
+  return (
+    <View style={{ gap: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
+      {/* Bypass conditions */}
+      <View style={{ gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Feather name="filter" size={12} color={colors.mutedForeground} />
+          <Text style={labelStyle}>Skip this rule when…</Text>
+        </View>
+        {bypass.map((cond, i) => (
+          <View key={i} style={{ gap: 6 }}>
+            <SelectField
+              label="Field"
+              value={ruleFieldDef(cond.field) ? cond.field : RULE_FIELDS[0].key}
+              onChange={(v) => patchBypass(i, { field: v })}
+              options={RULE_FIELDS.map((f) => f.key)}
+              optionLabel={(v) => RULE_FIELDS.find((f) => f.key === v)?.label ?? v}
+              allowAdd={false}
+            />
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ ...labelStyle, width: 36 }}>equals</Text>
+              <TextInput
+                style={inputStyle}
+                value={cond.value}
+                placeholder="value"
+                placeholderTextColor={colors.mutedForeground}
+                onChangeText={(t) => patchBypass(i, { value: t })}
+                editable={!disabled}
+              />
+              <Pressable onPress={() => removeBypass(i)} disabled={disabled} hitSlop={6}>
+                <Feather name="trash-2" size={16} color="#f87171" />
+              </Pressable>
+            </View>
+          </View>
+        ))}
+        <Pressable
+          onPress={addBypass}
+          disabled={disabled}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        >
+          <Feather name="plus" size={14} color={colors.primary} />
+          <Text style={{ fontFamily: FONTS.bold, fontSize: 12, color: colors.primary }}>
+            Add bypass condition
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Required checklist */}
+      <View style={{ gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Feather name="check-square" size={12} color={colors.mutedForeground} />
+          <Text style={labelStyle}>Require checklist before Start</Text>
+        </View>
+        {checklist.map((step, i) => (
+          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text style={{ ...labelStyle, width: 16, textAlign: "right" }}>{i + 1}.</Text>
+            <TextInput
+              style={inputStyle}
+              value={step}
+              placeholder="step description"
+              placeholderTextColor={colors.mutedForeground}
+              onChangeText={(t) => patchStep(i, t)}
+              editable={!disabled}
+            />
+            <Pressable
+              onPress={() => moveStep(i, -1)}
+              disabled={disabled || i === 0}
+              hitSlop={6}
+              style={{ opacity: i === 0 ? 0.3 : 1 }}
+            >
+              <Feather name="arrow-up" size={16} color={colors.mutedForeground} />
+            </Pressable>
+            <Pressable
+              onPress={() => moveStep(i, 1)}
+              disabled={disabled || i === checklist.length - 1}
+              hitSlop={6}
+              style={{ opacity: i === checklist.length - 1 ? 0.3 : 1 }}
+            >
+              <Feather name="arrow-down" size={16} color={colors.mutedForeground} />
+            </Pressable>
+            <Pressable onPress={() => removeStep(i)} disabled={disabled} hitSlop={6}>
+              <Feather name="trash-2" size={16} color="#f87171" />
+            </Pressable>
+          </View>
+        ))}
+        <Pressable
+          onPress={addStep}
+          disabled={disabled}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+        >
+          <Feather name="plus" size={14} color={colors.primary} />
+          <Text style={{ fontFamily: FONTS.bold, fontSize: 12, color: colors.primary }}>
+            Add checklist step
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
