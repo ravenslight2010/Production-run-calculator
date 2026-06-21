@@ -114,7 +114,15 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // fetch (undici) holds keep-alive sockets open, so server.close() would
+      // otherwise block until they idle out (~seconds) and can exceed the hook
+      // timeout. Force the lingering connections shut so close() resolves now.
+      server.closeAllConnections?.();
+    });
+  }
   // Close the app pool so the database has no open connections, then drop it.
   if (pool) await pool.end();
   if (adminPool) {
@@ -124,7 +132,7 @@ afterAll(async () => {
     await adminPool.end();
   }
   process.env.DATABASE_URL = originalDatabaseUrl;
-});
+}, 30_000);
 
 beforeEach(async () => {
   // The user-existence cache is module-level and outlives a single test.
