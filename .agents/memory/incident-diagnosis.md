@@ -52,3 +52,21 @@ app version — don't reintroduce a `Constants`/appVersion import.
 in-memory store SHARED across the whole vitest file (non-prod), so accumulated
 `seedIncident(OPERATOR)` calls eventually 429 → order-dependent failures. In new test
 blocks seed via direct `db.insert(incidentsTable)` rather than the rate-limited POST.
+For tests that MUST go through the rate-limited POST, mint a fresh disposable user
+per test (insert user+role, clearUserValidityCache) so each one's single POST lands
+within its own budget.
+
+**History-aware diagnosis (grounding + write-back):** each report's diagnosis is now
+grounded in recent SIMILAR past incidents pulled from shared facility memory
+(domain `"incidents"`), and every diagnosed incident is written BACK to that memory.
+- Matching is signature-based, NOT free-text: `incidentSignature` = `platform|screen|<sorted-deduped-content-tokens>`; tokens drop stopwords + len<3. So "does"/"the"/"when" never appear in a signature — a seeded memory key must use the *real* signature (e.g. `web|run|button-nothing-save-tap`, not `...button-does-nothing...`) to be an EXACT match. Similarity uses jaccard over signature tokens with `SIMILARITY_THRESHOLD` (~0.34), top `MAX_SIMILAR_INCIDENTS` (3).
+- Recurrence surfaced to reporter + manager: `IncidentRecurrence {count, lastWorkaround}`. `count` = priorExactCount+1 on an exact-key hit, else similar-match count; null when nothing matched. Lives on the Incident DTO + a nullable `recurrence` jsonb column (oneOf w/ `type:"null"` in OpenAPI for both `IncidentDiagnosis` + `Incident`).
+- Write-back is best-effort `recordFacilityKnowledge` (key=signature, source `"incident-diagnosis"`, `.catch` warn) — fire-and-forget, NOT awaited.
+- The general facility-memory block passed to the prompt EXCLUDES the `incidents`
+  domain; that domain is injected separately as a focused "SIMILAR PAST INCIDENTS"
+  history block so prior incidents don't double-appear.
+- **Test isolation trap:** because write-back is async + unawaited, a prior test's
+  write can land AFTER the next test's `beforeEach` truncate and leak a matching
+  memory row. Don't assert "facility table empty before" or rely on a shared report
+  body for a "no precedent" test — give that test a UNIQUE description (unique tokens →
+  unique signature) so no other test's write-back can match it.

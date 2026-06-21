@@ -1388,7 +1388,11 @@ export const ReportIncidentBody = zod.object({
 export const ReportIncidentResponse = zod.object({
   "incidentId": zod.string(),
   "diagnosis": zod.string().describe('Plain-language explanation of what likely went wrong'),
-  "workaround": zod.string().describe('Suggested next step \/ workaround for the user')
+  "workaround": zod.string().describe('Suggested next step \/ workaround for the user'),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent')
 })
 
 
@@ -1413,6 +1417,10 @@ export const ListIncidentsResponseItem = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -1454,6 +1462,10 @@ export const GetIncidentResponse = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -1485,6 +1497,10 @@ export const ReviewIncidentResponse = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),
@@ -1517,6 +1533,10 @@ export const ResolveIncidentResponse = zod.object({
 }).describe('Captured details about a reported issue or a crash'),
   "diagnosis": zod.string().nullable(),
   "workaround": zod.string().nullable(),
+  "recurrence": zod.union([zod.object({
+  "count": zod.number().describe('How many prior similar incidents were found'),
+  "lastWorkaround": zod.string().nullable().describe('The recovery step that helped previously, if any')
+}).describe('\"Seen before\" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident\/diagnosis when the problem has no precedent.'),zod.null()]).describe('Recurrence signal, or null when this problem has no precedent'),
   "status": zod.enum(['new', 'reviewed', 'resolved']),
   "createdAt": zod.coerce.date(),
   "reviewedAt": zod.coerce.date().nullable(),

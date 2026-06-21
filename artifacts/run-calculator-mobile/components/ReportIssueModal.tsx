@@ -99,6 +99,23 @@ export default function ReportIssueModal({
               <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
                 Here's what's likely happening and what to try.
               </Text>
+              {result.recurrence ? (
+                <View style={[styles.resultCard, { borderColor: "#f59e0b66", backgroundColor: "#f59e0b1a" }]}>
+                  <View style={styles.recurrenceRow}>
+                    <Feather name="rotate-ccw" size={14} color="#fbbf24" />
+                    <Text style={[styles.resultLabel, { color: "#fbbf24" }]}>
+                      {result.recurrence.count > 1
+                        ? `Seen ${result.recurrence.count}× before`
+                        : "Seen before"}
+                    </Text>
+                  </View>
+                  <Text style={[styles.resultBody, { color: colors.mutedForeground }]}>
+                    {result.recurrence.lastWorkaround
+                      ? `Last time this helped: ${result.recurrence.lastWorkaround}`
+                      : "This kind of problem has come up before."}
+                  </Text>
+                </View>
+              ) : null}
               <View style={[styles.resultCard, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
                 <Text style={[styles.resultLabel, { color: colors.foreground }]}>
                   What's happening
@@ -232,6 +249,7 @@ const styles = StyleSheet.create({
   },
   error: { fontSize: 13, fontFamily: FONTS.medium },
   resultCard: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 4 },
+  recurrenceRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   resultLabel: { fontSize: 13, fontFamily: FONTS.semibold },
   resultBody: { fontSize: 14, fontFamily: FONTS.regular, lineHeight: 20 },
   note: { fontSize: 12, fontFamily: FONTS.regular },

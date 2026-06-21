@@ -10,6 +10,7 @@ import {
   CheckCheck,
   ChevronRight,
   Lock,
+  History,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,14 @@ function IncidentRow({ incident }: { incident: Incident }) {
               <p className="text-sm text-red-400 font-mono break-words mt-0.5">
                 {ctx.errorMessage}
               </p>
+            </div>
+          )}
+          {incident.recurrence && (
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300 w-fit">
+              <History className="w-3.5 h-3.5" />
+              {incident.recurrence.count > 1
+                ? `Seen ${incident.recurrence.count}× before`
+                : "Seen before"}
             </div>
           )}
           {incident.diagnosis && (

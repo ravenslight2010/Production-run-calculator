@@ -101,6 +101,16 @@ function IncidentCard({ incident }: { incident: Incident }) {
           {ctx.errorMessage ? (
             <Field label="Error" value={ctx.errorMessage} colors={colors} mono />
           ) : null}
+          {incident.recurrence ? (
+            <View style={styles.recurrenceBadge}>
+              <Feather name="rotate-ccw" size={12} color="#fbbf24" />
+              <Text style={styles.recurrenceText}>
+                {incident.recurrence.count > 1
+                  ? `Seen ${incident.recurrence.count}× before`
+                  : "Seen before"}
+              </Text>
+            </View>
+          ) : null}
           {incident.diagnosis ? (
             <Field label="Diagnosis" value={incident.diagnosis} colors={colors} />
           ) : null}
@@ -371,6 +381,19 @@ const styles = StyleSheet.create({
   body: { borderTopWidth: 1, padding: 14, gap: 12 },
   fieldLabel: { fontSize: 11, fontFamily: FONTS.semibold, textTransform: "uppercase", letterSpacing: 0.4 },
   fieldValue: { fontSize: 14, fontFamily: FONTS.regular, lineHeight: 20 },
+  recurrenceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#f59e0b66",
+    backgroundColor: "#f59e0b1a",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  recurrenceText: { fontSize: 12, fontFamily: FONTS.semibold, color: "#fbbf24" },
   actionsRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10 },
   actionBtn: {
     flexDirection: "row",

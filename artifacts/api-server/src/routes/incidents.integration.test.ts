@@ -34,6 +34,9 @@ const mock = vi.hoisted(() => ({
   nextContent: "" as string | null,
   shouldThrow: false as boolean,
   calls: 0,
+  // The full user prompt the model last received, so tests can assert what the
+  // diagnosis was grounded in (e.g. the "SIMILAR PAST INCIDENTS" block).
+  lastUserPrompt: "" as string,
 }));
 
 vi.mock("@workspace/integrations-openai-ai-server", () => ({
@@ -41,8 +44,10 @@ vi.mock("@workspace/integrations-openai-ai-server", () => ({
     chat: {
       completions: {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        create: async (_args: any) => {
+        create: async (args: any) => {
           mock.calls += 1;
+          const messages = (args?.messages ?? []) as Array<{ role: string; content: string }>;
+          mock.lastUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
           if (mock.shouldThrow) throw new Error("provider blew up");
           return { choices: [{ message: { content: mock.nextContent } }] };
         },
@@ -57,6 +62,7 @@ let pool: DbModule["pool"];
 let usersTable: DbModule["usersTable"];
 let userRolesTable: DbModule["userRolesTable"];
 let incidentsTable: DbModule["incidentsTable"];
+let facilityKnowledgeTable: DbModule["facilityKnowledgeTable"];
 
 let clearUserValidityCache: () => void;
 
@@ -102,6 +108,7 @@ beforeAll(async () => {
   usersTable = dbMod.usersTable;
   userRolesTable = dbMod.userRolesTable;
   incidentsTable = dbMod.incidentsTable;
+  facilityKnowledgeTable = dbMod.facilityKnowledgeTable;
 
   const app: Express = express();
   app.use(express.json({ limit: "10mb" }));
@@ -139,8 +146,9 @@ beforeEach(async () => {
   });
   mock.shouldThrow = false;
   mock.calls = 0;
+  mock.lastUserPrompt = "";
   await db.execute(
-    sql`TRUNCATE ${incidentsTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${incidentsTable}, ${facilityKnowledgeTable}, ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
   );
   await db.insert(usersTable).values([
     { id: MANAGER, username: "manager", passwordHash: "x" },
@@ -391,5 +399,128 @@ describe("incident resolve — manager only", () => {
 
     const missing = await req(MANAGER, "POST", "/api/incidents/does-not-exist/resolve");
     expect(missing.status).toBe(404);
+  });
+});
+
+describe("history-aware diagnosis — grounding + write-back", () => {
+  // The per-user report rate limit (in-memory, keyed by userId) is NOT reset
+  // between tests, and the earlier describe blocks burn through OPERATOR's
+  // budget. Give each test here its own fresh reporter so its single POST always
+  // lands within budget.
+  let nextReporter = 0;
+  async function freshReporter(): Promise<string> {
+    const id = `hist-reporter-${nextReporter++}`;
+    await db.insert(usersTable).values({ id, username: id, passwordHash: "x" });
+    await db.insert(userRolesTable).values({ userId: id, role: "operator" });
+    clearUserValidityCache();
+    return id;
+  }
+
+  it("records a brand-new incident into facility memory with no recurrence", async () => {
+    const reporter = await freshReporter();
+    const res = await req(reporter, "POST", "/api/incidents", userReport());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { recurrence: unknown };
+    // First sighting: nothing to recur against.
+    expect(body.recurrence).toBeNull();
+    // No SIMILAR PAST INCIDENTS block when memory is empty.
+    expect(mock.lastUserPrompt).not.toContain("SIMILAR PAST INCIDENTS");
+
+    // The diagnosed incident is contributed back into the shared pool under the
+    // incidents domain (write-back is best-effort/async, so poll briefly).
+    let rows: Array<{ domain: string; fact: string }> = [];
+    for (let i = 0; i < 20 && rows.length === 0; i++) {
+      rows = await db.select().from(facilityKnowledgeTable);
+      if (rows.length === 0) await new Promise((r) => setTimeout(r, 25));
+    }
+    expect(rows.length).toBe(1);
+    expect(rows[0].domain).toBe("incidents");
+    expect(rows[0].fact).toContain("Seen 1x");
+    expect(rows[0].fact).toContain("What helped last time");
+  });
+
+  it("grounds the prompt in a similar past incident and surfaces recurrence", async () => {
+    // Seed a prior incident memory whose signature matches the new report
+    // (same platform/screen + overlapping tokens: "save"/"button").
+    // Exact signature for the report below (tokens de-duped+sorted, stopwords
+    // like "does" dropped) so this is an EXACT match and the stored "Seen 2x"
+    // count drives the recurrence signal.
+    await db.insert(facilityKnowledgeTable).values({
+      domain: "incidents",
+      key: "web|run|button-nothing-save-tap",
+      fact: 'Seen 2x on "Run" (web). Problem: Save button does nothing. What helped last time: Reload the page and re-enter the value.',
+      source: "incident-diagnosis",
+    });
+
+    const reporter = await freshReporter();
+    const res = await req(reporter, "POST", "/api/incidents", userReport());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      recurrence: { count: number; lastWorkaround: string | null } | null;
+    };
+
+    // The model prompt was grounded in the matching past incident.
+    expect(mock.lastUserPrompt).toContain("SIMILAR PAST INCIDENTS");
+    expect(mock.lastUserPrompt).toContain("Reload the page and re-enter the value");
+
+    // The reporter gets a "seen before" signal echoing the prior workaround.
+    expect(body.recurrence).not.toBeNull();
+    expect(body.recurrence?.count).toBeGreaterThanOrEqual(2);
+    expect(body.recurrence?.lastWorkaround).toContain("Reload the page");
+  });
+
+  it("excludes the incidents domain from the general facility-memory block", async () => {
+    // A general operational fact AND a prior incident both live in the pool. The
+    // incident must appear only in the focused history block, never the general
+    // one, so it isn't double-counted against the prompt budget.
+    await db.insert(facilityKnowledgeTable).values([
+      {
+        domain: "operations",
+        key: "line-1-speed",
+        fact: "Line 1 runs slower on Mondays.",
+        source: "test",
+      },
+      {
+        domain: "incidents",
+        key: "web|run|button-does-nothing-save-tap",
+        // Distinctive marker so the assertion below can't accidentally match the
+        // reporter's own description text earlier in the prompt.
+        fact: 'Seen 1x on "Run" (web). Problem: ZZZ-PRIOR-INCIDENT-MARKER. What helped last time: Reload the page.',
+        source: "incident-diagnosis",
+      },
+    ]);
+
+    const reporter = await freshReporter();
+    const res = await req(reporter, "POST", "/api/incidents", userReport());
+    expect(res.status).toBe(200);
+    await res.json();
+
+    const prompt = mock.lastUserPrompt;
+    // General operational fact is grounded in.
+    expect(prompt).toContain("Line 1 runs slower on Mondays.");
+    // The incident is surfaced only under the focused history heading.
+    expect(prompt).toContain("SIMILAR PAST INCIDENTS");
+    const historyIdx = prompt.indexOf("SIMILAR PAST INCIDENTS");
+    const incidentIdx = prompt.indexOf("ZZZ-PRIOR-INCIDENT-MARKER");
+    expect(incidentIdx).toBeGreaterThan(historyIdx);
+  });
+
+  it("still records the incident when the report has no precedent (fail-safe baseline)", async () => {
+    const reporter = await freshReporter();
+    // A deliberately unique signal so no other test's (async, best-effort)
+    // write-back can leak a matching memory row into this one.
+    const res = await req(reporter, "POST", "/api/incidents", {
+      source: "user_report",
+      screen: "Reports",
+      appPlatform: "web",
+      description: "The quarterly throughput export froze halfway through downloading.",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { incidentId: string; recurrence: unknown };
+    expect(body.incidentId).toBeTruthy();
+    // No prior similar incident in memory, so no recurrence is surfaced and the
+    // prompt carried no history block — but the incident is still recorded.
+    expect(body.recurrence).toBeNull();
+    expect(mock.lastUserPrompt).not.toContain("SIMILAR PAST INCIDENTS");
   });
 });

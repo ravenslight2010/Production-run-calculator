@@ -48,6 +48,7 @@ export * from './importAliasType';
 export * from './incident';
 export * from './incidentContext';
 export * from './incidentDiagnosis';
+export * from './incidentRecurrence';
 export * from './incidentSource';
 export * from './incidentStatus';
 export * from './inventoryItem';

@@ -14,6 +14,16 @@ export type IncidentContext = {
 
 export type IncidentSource = "user_report" | "auto_crash";
 
+// "Seen before" signal computed at report time from past similar incidents in
+// the shared facility-memory pool. `count` is how many prior similar incidents
+// were found; `lastWorkaround` echoes the recovery step that helped previously.
+// Null when this incident has no precedent. Stored on the incident so the
+// manager review list can flag recurring problems, and returned to the reporter.
+export type IncidentRecurrence = {
+  count: number;
+  lastWorkaround: string | null;
+};
+
 // The shape returned over the wire (matches the OpenAPI `Incident` schema):
 // timestamps are ISO strings and the jsonb context is a typed object.
 export type IncidentDTO = {
@@ -28,6 +38,7 @@ export type IncidentDTO = {
   context: IncidentContext;
   diagnosis: string | null;
   workaround: string | null;
+  recurrence: IncidentRecurrence | null;
   status: string;
   createdAt: string;
   reviewedAt: string | null;
@@ -47,6 +58,7 @@ function toDTO(row: Incident): IncidentDTO {
     context: (row.context ?? {}) as IncidentContext,
     diagnosis: row.diagnosis,
     workaround: row.workaround,
+    recurrence: (row.recurrence as IncidentRecurrence | null) ?? null,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     reviewedAt: row.reviewedAt ? row.reviewedAt.toISOString() : null,
@@ -65,6 +77,7 @@ export type CreateIncidentInput = {
   context: IncidentContext;
   diagnosis: string | null;
   workaround: string | null;
+  recurrence: IncidentRecurrence | null;
 };
 
 // Record a new incident (status defaults to "new"). The AI diagnosis is computed
@@ -85,6 +98,7 @@ export async function createIncident(input: CreateIncidentInput): Promise<Incide
       context: input.context,
       diagnosis: input.diagnosis,
       workaround: input.workaround,
+      recurrence: input.recurrence,
     })
     .returning();
   return toDTO(row);

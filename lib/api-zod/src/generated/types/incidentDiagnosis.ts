@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { IncidentRecurrence } from './incidentRecurrence';
 
 export interface IncidentDiagnosis {
   incidentId: string;
@@ -12,4 +13,6 @@ export interface IncidentDiagnosis {
   diagnosis: string;
   /** Suggested next step / workaround for the user */
   workaround: string;
+  /** Recurrence signal, or null when this problem has no precedent */
+  recurrence: IncidentRecurrence | null;
 }

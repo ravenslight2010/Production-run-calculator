@@ -1261,12 +1261,27 @@ export interface ReportIncidentInput {
   userAgent?: string;
 }
 
+/**
+ * "Seen before" signal computed at report time from past similar incidents in the shared facility-memory pool. Null on the incident/diagnosis when the problem has no precedent.
+ */
+export interface IncidentRecurrence {
+  /** How many prior similar incidents were found */
+  count: number;
+  /**
+     * The recovery step that helped previously, if any
+     * @nullable
+     */
+  lastWorkaround: string | null;
+}
+
 export interface IncidentDiagnosis {
   incidentId: string;
   /** Plain-language explanation of what likely went wrong */
   diagnosis: string;
   /** Suggested next step / workaround for the user */
   workaround: string;
+  /** Recurrence signal, or null when this problem has no precedent */
+  recurrence: IncidentRecurrence | null;
 }
 
 export type IncidentSource = typeof IncidentSource[keyof typeof IncidentSource];
@@ -1304,6 +1319,8 @@ export interface Incident {
   diagnosis: string | null;
   /** @nullable */
   workaround: string | null;
+  /** Recurrence signal, or null when this problem has no precedent */
+  recurrence: IncidentRecurrence | null;
   status: IncidentStatus;
   createdAt: string;
   /** @nullable */

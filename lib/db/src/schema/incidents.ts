@@ -41,6 +41,10 @@ export const incidentsTable = pgTable("incidents", {
   // could not produce one (the incident is still recorded).
   diagnosis: text("diagnosis"),
   workaround: text("workaround"),
+  // "Seen before" signal computed at report time from past similar incidents in
+  // the shared facility-memory pool: { count, lastWorkaround } or null when this
+  // problem has no precedent. Lets the manager list flag recurring issues.
+  recurrence: jsonb("recurrence"),
   // "new" (unreviewed) | "reviewed" (a manager has seen it) | "resolved" (the
   // underlying problem is considered fixed/handled). "resolved" implies the
   // incident has also been reviewed.

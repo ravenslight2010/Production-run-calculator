@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { IncidentContext } from './incidentContext';
+import type { IncidentRecurrence } from './incidentRecurrence';
 import type { IncidentSource } from './incidentSource';
 import type { IncidentStatus } from './incidentStatus';
 
@@ -27,6 +28,8 @@ export interface Incident {
   diagnosis: string | null;
   /** @nullable */
   workaround: string | null;
+  /** Recurrence signal, or null when this problem has no precedent */
+  recurrence: IncidentRecurrence | null;
   status: IncidentStatus;
   createdAt: Date;
   /** @nullable */

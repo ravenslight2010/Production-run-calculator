@@ -13,14 +13,22 @@ import {
   markIncidentReviewed,
 } from "../lib/incidents";
 import {
+  analyzeIncidentHistory,
+  appendIncidentHistoryBlock,
   buildDiagnosisPrompt,
   buildIncidentContext,
+  buildIncidentMemoryFact,
   FALLBACK_DIAGNOSIS,
   FALLBACK_WORKAROUND,
+  INCIDENT_MEMORY_DOMAIN,
   sanitizeDiagnosis,
   validateReportBody,
 } from "./incidentsAi";
-import { loadFacilityKnowledge, appendFacilityMemoryBlock } from "./aiMemoryContext";
+import {
+  loadFacilityKnowledge,
+  appendFacilityMemoryBlock,
+  recordFacilityKnowledge,
+} from "./aiMemoryContext";
 
 const router: IRouter = Router();
 
@@ -90,8 +98,23 @@ router.post(
       appVersion: data.appVersion ?? null,
       context,
     });
+    // Ground the diagnosis in history: pull the shared facility-memory pool,
+    // match this report against past incidents, and inject both the general
+    // operational facts AND a focused, ranked "similar past incidents" block so
+    // recurring problems get history-aware recovery steps. The incidents domain
+    // is excluded from the general block so it isn't double-listed alongside the
+    // focused one.
     const knowledge = await loadFacilityKnowledge(req.log);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    const history = analyzeIncidentHistory(knowledge, {
+      screen: data.screen,
+      appPlatform: data.appPlatform,
+      context,
+    });
+    const generalKnowledge = knowledge.filter(
+      (k) => k.domain.trim().toLowerCase() !== INCIDENT_MEMORY_DOMAIN,
+    );
+    let userPrompt = appendFacilityMemoryBlock(user, generalKnowledge);
+    userPrompt = appendIncidentHistoryBlock(userPrompt, history.similar);
 
     let diagnosis = FALLBACK_DIAGNOSIS;
     let workaround = FALLBACK_WORKAROUND;
@@ -125,9 +148,33 @@ router.post(
       context,
       diagnosis,
       workaround,
+      recurrence: history.recurrence,
     });
 
-    res.json({ incidentId: incident.id, diagnosis, workaround });
+    // Contribute this incident back into the shared facility-memory pool so the
+    // next similar report is grounded in it. Best-effort: a memory write failure
+    // must never fail the report the user just submitted.
+    void recordFacilityKnowledge([
+      {
+        domain: INCIDENT_MEMORY_DOMAIN,
+        key: history.signature,
+        fact: buildIncidentMemoryFact(
+          { screen: data.screen, appPlatform: data.appPlatform, context },
+          history.priorExactCount + 1,
+          workaround,
+        ),
+        source: "incident-diagnosis",
+      },
+    ]).catch((err) => {
+      req.log.warn({ err }, "failed to record incident to facility memory");
+    });
+
+    res.json({
+      incidentId: incident.id,
+      diagnosis,
+      workaround,
+      recurrence: history.recurrence,
+    });
   },
 );
 

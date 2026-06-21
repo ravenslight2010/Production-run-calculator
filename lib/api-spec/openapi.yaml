@@ -3577,12 +3577,30 @@ components:
           type: string
           maxLength: 500
 
+    IncidentRecurrence:
+      type: object
+      description: >-
+        "Seen before" signal computed at report time from past similar incidents
+        in the shared facility-memory pool. Null on the incident/diagnosis when
+        the problem has no precedent.
+      required:
+        - count
+        - lastWorkaround
+      properties:
+        count:
+          type: integer
+          description: How many prior similar incidents were found
+        lastWorkaround:
+          type: [string, "null"]
+          description: The recovery step that helped previously, if any
+
     IncidentDiagnosis:
       type: object
       required:
         - incidentId
         - diagnosis
         - workaround
+        - recurrence
       properties:
         incidentId:
           type: string
@@ -3592,6 +3610,11 @@ components:
         workaround:
           type: string
           description: Suggested next step / workaround for the user
+        recurrence:
+          oneOf:
+            - $ref: "#/components/schemas/IncidentRecurrence"
+            - type: "null"
+          description: Recurrence signal, or null when this problem has no precedent
 
     Incident:
       type: object
@@ -3607,6 +3630,7 @@ components:
         - context
         - diagnosis
         - workaround
+        - recurrence
         - status
         - createdAt
         - reviewedAt
@@ -3635,6 +3659,11 @@ components:
           type: [string, "null"]
         workaround:
           type: [string, "null"]
+        recurrence:
+          oneOf:
+            - $ref: "#/components/schemas/IncidentRecurrence"
+            - type: "null"
+          description: Recurrence signal, or null when this problem has no precedent
         status:
           type: string
           enum: [new, reviewed, resolved]

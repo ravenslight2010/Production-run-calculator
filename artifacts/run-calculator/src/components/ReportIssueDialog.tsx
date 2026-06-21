@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { LifeBuoy, Loader2, Lightbulb, Wrench, AlertTriangle } from "lucide-react";
+import { LifeBuoy, Loader2, Lightbulb, Wrench, AlertTriangle, History } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -80,6 +80,21 @@ export default function ReportIssueDialog({
 
         {result ? (
           <div className="space-y-3">
+            {result.recurrence ? (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-amber-300">
+                  <History className="w-4 h-4" />
+                  {result.recurrence.count > 1
+                    ? `Seen ${result.recurrence.count}× before`
+                    : "Seen before"}
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground whitespace-pre-wrap">
+                  {result.recurrence.lastWorkaround
+                    ? `Last time this helped: ${result.recurrence.lastWorkaround}`
+                    : "This kind of problem has come up before."}
+                </p>
+              </div>
+            ) : null}
             <div className="rounded-md border border-border bg-muted/40 p-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <Lightbulb className="w-4 h-4 text-amber-400" /> What's happening

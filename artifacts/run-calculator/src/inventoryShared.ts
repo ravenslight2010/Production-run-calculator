@@ -577,10 +577,17 @@ export type ReportIncidentBody = {
   errorStack?: string;
   userAgent?: string;
 };
+// "Seen before" signal: how many prior similar incidents were found and the
+// recovery step that helped previously. Null when the problem has no precedent.
+export type IncidentRecurrence = {
+  count: number;
+  lastWorkaround: string | null;
+};
 export type IncidentDiagnosis = {
   incidentId: string;
   diagnosis: string;
   workaround: string;
+  recurrence: IncidentRecurrence | null;
 };
 export type Incident = {
   id: string;
@@ -594,6 +601,7 @@ export type Incident = {
   context: IncidentContext;
   diagnosis: string | null;
   workaround: string | null;
+  recurrence: IncidentRecurrence | null;
   status: "new" | "reviewed" | "resolved";
   createdAt: string;
   reviewedAt: string | null;
