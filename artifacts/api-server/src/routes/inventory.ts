@@ -167,7 +167,7 @@ router.get("/inventory", async (_req, res): Promise<void> => {
   res.json(out);
 });
 
-router.post("/inventory/items", requireRole("manager"), async (req, res): Promise<void> => {
+router.post("/inventory/items", requireRole("supervisor"), async (req, res): Promise<void> => {
   const parsed = CreateInventoryItemBody.safeParse(req.body);
   if (!parsed.success) {
     req.log.warn({ errors: parsed.error.message }, "Invalid inventory item body");
@@ -193,7 +193,7 @@ router.post("/inventory/items", requireRole("manager"), async (req, res): Promis
   res.status(201).json(await loadItemResponse(item.id));
 });
 
-router.patch("/inventory/items/:id", requireRole("manager"), async (req, res): Promise<void> => {
+router.patch("/inventory/items/:id", requireRole("supervisor"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -220,7 +220,7 @@ router.patch("/inventory/items/:id", requireRole("manager"), async (req, res): P
   res.json(await loadItemResponse(id));
 });
 
-router.delete("/inventory/items/:id", requireRole("manager"), async (req, res): Promise<void> => {
+router.delete("/inventory/items/:id", requireRole("supervisor"), async (req, res): Promise<void> => {
   const id = parseId(req.params.id);
   if (id == null) {
     res.status(400).json({ error: "Invalid id" });
@@ -964,7 +964,7 @@ router.get("/inventory/settings", async (_req, res): Promise<void> => {
   res.json({ expirySoonDays: row.expirySoonDays });
 });
 
-router.put("/inventory/settings", requireRole("manager"), async (req, res): Promise<void> => {
+router.put("/inventory/settings", requireRole("supervisor"), async (req, res): Promise<void> => {
   const parsed = UpdateInventorySettingsBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

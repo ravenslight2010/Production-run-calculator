@@ -1,44 +1,67 @@
 ---
-name: Role gating (manager/operator)
-description: What is and isn't gated by manager/operator roles, and why.
+name: Role gating (5 roles, two ladders)
+description: The role model (operator/supervisor/manager + qc-operator/qc-manager), what each tier can do, and what must never be gated.
 ---
 
-# Manager/operator role gating
+# Role gating
 
-Roles live in the DB keyed by Clerk userId. First user to be seen bootstraps as
-manager, everyone else operator. The role-resolution helper creates the row on
+Roles live in the DB (`user_roles.role`, free-text — adding roles needs NO
+migration) keyed by userId. First user to be seen bootstraps as **manager**,
+every new account is **operator**. The role-resolution helper creates the row on
 first sight, so the `/me`-style role hook also bootstraps.
 
-## What IS gated (server-enforced, manager only)
+## The role model — two ladders
+- **Main ladder (rank-ordered):** operator < supervisor < manager. `mainRank()`
+  drives `requireRole(min)` — a caller passes when `mainRank(role) >= mainRank(min)`.
+- **QC track:** qc-operator < qc-manager. QC roles sit at **operator level on the
+  main ladder** (mainRank == operator), so today they get NO elevated main-ladder
+  powers. `requireQcRole` plumbing exists but is unused — reserved for future QC
+  powers. Don't wire QC powers without a real requirement.
+
+**Why:** lets QC be promoted/tracked independently without granting production
+authority, and keeps the door open for a future "warehouse/inventory roles" task
+(already queued — don't duplicate).
+
+## What IS gated
+**Supervisor-or-above** (the 3 manager powers supervisors gained):
 - inventory item create / metadata-edit / delete (includes reorder-threshold edit)
-- AI photo intake (paid action)
 - inventory settings (expiry lead time)
-- staff role admin (list users, change a user's role) — with a last-manager guard
+- password-reset approval queue (GET/approve/decline password-reset-requests)
 
-UI hides these for operators on BOTH web and mobile (parity).
+**Manager-only** (unchanged):
+- staff roster admin (list users, change role, reset password, remove member)
+- AI paid actions (photo intake, merge, optimize, forecast, etc.)
+- production rules CRUD, incidents review
 
-## Daily-ops writes stay operator-allowed — but must not become a master-data backdoor
-Restock / adjust / consume are open to operators. **Restock must be
-quantity-only: it must never overwrite an existing item's name/unit/category,
-and creating a brand-new item through restock is master-data creation, so it is
-manager-gated.**
+UI gating is by capability on BOTH web and mobile (parity): `isSupervisorOrAbove`
+for the 3 supervisor powers, `isManager` for the rest. **`usePendingResetCount`
+is gated `isSupervisorOrAbove`** (matches the endpoint).
 
-**Why:** an earlier version upserted item metadata on every restock, which let
-an operator create or overwrite master data through an ungated path (broken
-access control). Any "convenience upsert" on an operator-reachable write is a
-gating hole.
+### StaffRolesCard is split internally
+The card renders for `isSupervisorOrAbove` (so supervisors see the reset queue),
+but the **staff roster section is wrapped in `isManager`** and the roster query
+(`GET /users`) is `enabled: isManager` — a supervisor firing it would 403. The
+role picker offers all 5 roles (web `<select>`; mobile is a wrapping multi-button
+toggle driven by `ROLE_OPTIONS`, not the old binary operator/manager toggle).
 
-**How to apply:** when an operator-reachable endpoint touches an items/master
-table, make it look-up-only for existing rows and gate any insert/update of
-master fields behind a manager check.
+## Last-manager guard
+Blocks demoting OR deleting the only manager to ANY non-manager role (guard is
+`role !== "manager"`, not `role === "operator"`) — so supervisor/qc-operator/
+qc-manager are all rejected too. Two managers must exist before one can be moved.
+
+## Collision to avoid
+Web `home.tsx` has an UNRELATED client-side PIN "supervisor mode" (local state
+`role`/`isSupervisor`). That is NOT the staff role — never conflate it with the
+server `supervisor` role / `isSupervisorOrAbove` capability.
 
 ## What is NOT gated — and must NOT be
 Anything flowing through the shared `/sync` day-state blob (recipe editing,
 mobile master-data lists like brands/flavors/recipe ingredients/saved mixes).
+Restock/adjust/consume stay operator-allowed but must be quantity-only (never a
+master-data backdoor — gate any insert/update of master fields).
 
 **Why:** day-state is one shared blob, not per-user role-checkable endpoints, so
-it can't be cleanly role-split; and there is no web equivalent to gate, so
-gating it mobile-only would break the strict web/mobile parity preference.
+it can't be cleanly role-split; gating it would break strict web/mobile parity.
 
-**How to apply:** gate a new control only if it hits a manager-protected
-endpoint. If it writes via /sync, leave it operator-accessible.
+**How to apply:** gate a new control only if it hits a role-protected endpoint.
+If it writes via /sync, leave it operator-accessible.

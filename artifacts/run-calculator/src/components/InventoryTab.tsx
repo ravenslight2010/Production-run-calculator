@@ -106,7 +106,7 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
   const [showAdd, setShowAdd] = useState(false);
   const [expirySoonDays, setExpirySoonDays] = useState<number>(EXPIRY_SOON_DAYS);
   const [expiryInput, setExpiryInput] = useState<string>(String(EXPIRY_SOON_DAYS));
-  const { isManager } = useMe();
+  const { isManager, isSupervisorOrAbove } = useMe();
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -235,8 +235,8 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         </Card>
       )}
 
-      {/* Add item (manager only: creating master-data items) */}
-      {isManager && (
+      {/* Add item (supervisor or above: inventory-item master-data write) */}
+      {isSupervisorOrAbove && (
         <Card className="bg-card/50 border-border/50 shadow-md">
           <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between gap-2">
@@ -304,8 +304,8 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
         />
       )}
 
-      {/* Settings: configurable expiry lead time (manager only) */}
-      {isManager && (
+      {/* Settings: configurable expiry lead time (supervisor or above) */}
+      {isSupervisorOrAbove && (
         <Card className="bg-card/50 border-border/50 shadow-md">
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -347,8 +347,9 @@ export default function InventoryTab({ candidates }: { candidates: CandidateItem
       {/* Production rules (manager only) */}
       {isManager && <ProductionRulesManager />}
 
-      {/* Staff & roles (manager only) */}
-      {isManager && <StaffRolesCard />}
+      {/* Staff & roles. Visible to supervisor-or-above for the password-reset
+          approval queue; the staff roster inside is manager-only. */}
+      {isSupervisorOrAbove && <StaffRolesCard />}
     </div>
   );
 }
@@ -429,7 +430,7 @@ function ItemRow({
 }
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
-  const { isManager } = useMe();
+  const { isSupervisorOrAbove } = useMe();
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -490,10 +491,10 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </div>
 
-      {/* Reorder threshold (editing is a master-data write → manager only) */}
+      {/* Reorder threshold (editing is an inventory-item write → supervisor or above) */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">Reorder at</span>
-        {!isManager ? (
+        {!isSupervisorOrAbove ? (
           <span className="text-xs font-mono tabular-nums text-foreground">
             {fmtQty(item.reorderThreshold)} {item.unit}
           </span>
@@ -560,7 +561,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </div>
       )}
 
-      {isManager && (
+      {isSupervisorOrAbove && (
         <>
           <Separator className="bg-border/40" />
           <button

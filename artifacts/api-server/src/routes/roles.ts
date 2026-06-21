@@ -97,21 +97,21 @@ router.put(
   },
 );
 
-// Pending forgotten-password requests — manager only. These are the staff
-// members waiting for a manager to approve a reset and hand them a relay code.
+// Pending forgotten-password requests — supervisor or above. These are the
+// staff members waiting for approval of a reset and a relay code.
 router.get(
   "/password-reset-requests",
-  requireRole("manager"),
+  requireRole("supervisor"),
   async (_req, res): Promise<void> => {
     res.json(await listPendingResetRequests());
   },
 );
 
-// Approve a pending reset — manager only. Mints a short-lived single-use code
-// and returns it so the manager can relay it to the locked-out staff member.
+// Approve a pending reset — supervisor or above. Mints a short-lived single-use
+// code and returns it so it can be relayed to the locked-out staff member.
 router.post(
   "/password-reset-requests/:id/approve",
-  requireRole("manager"),
+  requireRole("supervisor"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
     if (!id) {
@@ -131,11 +131,11 @@ router.post(
   },
 );
 
-// Decline a pending reset — manager only. Marks the request declined so it
-// drops off the list without ever issuing a code.
+// Decline a pending reset — supervisor or above. Marks the request declined so
+// it drops off the list without ever issuing a code.
 router.post(
   "/password-reset-requests/:id/decline",
-  requireRole("manager"),
+  requireRole("supervisor"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
     if (!id) {

@@ -235,7 +235,7 @@ export interface IdentifyPhotoBody {
 }
 
 // ── Staff roles / access control ─────────────────────────────────────────────
-export type Role = "manager" | "operator";
+export type Role = "operator" | "supervisor" | "manager" | "qc-operator" | "qc-manager";
 export interface StaffMember {
   userId: string;
   role: Role;

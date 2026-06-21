@@ -3,12 +3,58 @@ import { db, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
 import { revokeUser } from "./userValidity";
 
-export type Role = "manager" | "operator";
+// All staff roles. Two tracks share one free-text column (user_roles.role):
+//   • Main ladder: operator < supervisor < manager.
+//   • QC track:    qc-operator < qc-manager.
+// QC roles sit at operator level on the MAIN ladder for now (no new powers yet);
+// their dedicated rank lets a future QC-only gate admit them without touching
+// the main-ladder gates.
+export type Role = "operator" | "supervisor" | "manager" | "qc-operator" | "qc-manager";
 
-export const ROLES: readonly Role[] = ["manager", "operator"] as const;
+// The three main-ladder levels a route can require. QC roles are never used as a
+// main-ladder minimum (they rank as operators there); a future QC gate uses the
+// separate qcRank below.
+export type MainRole = "operator" | "supervisor" | "manager";
+
+export const ROLES: readonly Role[] = [
+  "operator",
+  "supervisor",
+  "manager",
+  "qc-operator",
+  "qc-manager",
+] as const;
 
 export function isRole(value: unknown): value is Role {
-  return value === "manager" || value === "operator";
+  return (ROLES as readonly string[]).includes(value as string);
+}
+
+// Main-ladder rank: operator < supervisor < manager. QC roles are pinned at
+// operator level here so they get operator-level access until QC powers exist.
+const MAIN_RANK: Record<Role, number> = {
+  operator: 1,
+  "qc-operator": 1,
+  "qc-manager": 1,
+  supervisor: 2,
+  manager: 3,
+};
+
+export function mainRank(role: Role): number {
+  return MAIN_RANK[role] ?? 0;
+}
+
+// QC-track rank: qc-operator < qc-manager. Non-QC roles are 0 (off the track),
+// so a QC-track gate admits only the QC roles. Plumbing only — no route gates on
+// this yet.
+const QC_RANK: Record<Role, number> = {
+  operator: 0,
+  supervisor: 0,
+  manager: 0,
+  "qc-operator": 1,
+  "qc-manager": 2,
+};
+
+export function qcRank(role: Role): number {
+  return QC_RANK[role] ?? 0;
 }
 
 // StaffMember as exposed by the API. `name` carries the username and `email` is
@@ -139,7 +185,9 @@ export async function setUserRole(
   targetUserId: string,
   role: Role,
 ): Promise<{ ok: true; row: StaffMember } | { ok: false; status: number; error: string }> {
-  if (role === "operator") {
+  // Demoting to ANY non-manager role (operator, supervisor, or either QC role)
+  // must never strand the team without a manager.
+  if (role !== "manager") {
     const [other] = await db
       .select({ id: userRolesTable.userId })
       .from(userRolesTable)

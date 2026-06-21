@@ -32,23 +32,36 @@ import { useMe } from "@/hooks/useRole";
 
 const MIN_PASSWORD_LENGTH = 6;
 
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: "operator", label: "Operator" },
+  { value: "supervisor", label: "Supervisor" },
+  { value: "manager", label: "Manager" },
+  { value: "qc-operator", label: "QC Op" },
+  { value: "qc-manager", label: "QC Mgr" },
+];
+
 function serverMessage(error: unknown, fallback: string): string {
   return error instanceof InventoryApiError && error.serverMessage
     ? error.serverMessage
     : fallback;
 }
 
-// Manager-only UI for viewing every signed-in staff member, changing their
-// role, resetting a forgotten password, and removing a departed member. The
-// server enforces a last-manager guard, so failures (demoting or removing the
-// only remaining manager) are surfaced inline. Mirrors the web StaffRolesCard.
+// Staff & Roles card. The staff roster (view members, change roles, reset a
+// forgotten password, remove a departed member) is MANAGER-ONLY. The password-
+// reset approval queue is shown to supervisor-or-above (the card is only mounted
+// for them), matching the server gates. The server enforces a last-manager
+// guard, so failures (demoting or removing the only remaining manager) are
+// surfaced inline. Mirrors the web StaffRolesCard.
 export default function StaffRolesCard() {
   const colors = useColors();
   const qc = useQueryClient();
-  const { me } = useMe();
+  const { me, isManager } = useMe();
   const { data, isLoading, error } = useQuery({
     queryKey: ["staff"],
     queryFn: fetchStaff,
+    // The roster endpoint (GET /users) is manager-only; supervisors viewing the
+    // card for the reset queue must not fire it (it would 403).
+    enabled: isManager,
   });
 
   const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
@@ -227,6 +240,8 @@ export default function StaffRolesCard() {
           ))}
         </View>
       )}
+      {isManager && (
+        <>
       {isLoading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator size="small" color={colors.mutedForeground} />
@@ -270,13 +285,13 @@ export default function StaffRolesCard() {
                   ) : null}
                 </View>
                 <View style={styles.toggle}>
-                  {(["manager", "operator"] as Role[]).map((r) => {
-                    const active = member.role === r;
+                  {ROLE_OPTIONS.map(({ value, label }) => {
+                    const active = member.role === value;
                     return (
                       <Pressable
-                        key={r}
+                        key={value}
                         disabled={roleMutation.isPending || active}
-                        onPress={() => roleMutation.mutate({ userId: member.userId, role: r })}
+                        onPress={() => roleMutation.mutate({ userId: member.userId, role: value })}
                         style={[
                           styles.toggleBtn,
                           {
@@ -292,7 +307,7 @@ export default function StaffRolesCard() {
                             { color: active ? colors.primaryForeground : colors.mutedForeground },
                           ]}
                         >
-                          {r === "manager" ? "Manager" : "Operator"}
+                          {label}
                         </Text>
                       </Pressable>
                     );
@@ -325,6 +340,8 @@ export default function StaffRolesCard() {
           );
         })}
       </View>
+        </>
+      )}
 
       <Modal
         visible={resetTarget !== null}
@@ -475,7 +492,7 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 14, fontFamily: FONTS.medium },
   sub: { fontSize: 12, fontFamily: FONTS.regular },
-  toggle: { flexDirection: "row", gap: 4 },
+  toggle: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: 4 },
   toggleBtn: {
     borderWidth: 1,
     borderRadius: 6,

@@ -10,6 +10,13 @@ export function useMe(): {
   me: StaffMember | null;
   role: Role | null;
   isManager: boolean;
+  // Main-ladder capability: supervisor OR manager. Gates the powers supervisors
+  // share with managers (inventory-item CRUD, inventory settings, password-reset
+  // approval). Distinct from the local PIN "supervisor mode" in home.tsx.
+  isSupervisorOrAbove: boolean;
+  // On the QC track (qc-operator or qc-manager).
+  isQc: boolean;
+  isQcManager: boolean;
   isLoading: boolean;
 } {
   const { data, isLoading } = useQuery({
@@ -22,6 +29,9 @@ export function useMe(): {
     me: data ?? null,
     role,
     isManager: role === "manager",
+    isSupervisorOrAbove: role === "supervisor" || role === "manager",
+    isQc: role === "qc-operator" || role === "qc-manager",
+    isQcManager: role === "qc-manager",
     isLoading,
   };
 }

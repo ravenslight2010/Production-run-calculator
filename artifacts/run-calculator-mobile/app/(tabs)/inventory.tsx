@@ -85,7 +85,7 @@ export default function InventoryScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { allRuns } = useRun();
-  const { isManager } = useMe();
+  const { isManager, isSupervisorOrAbove } = useMe();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -245,8 +245,8 @@ export default function InventoryScreen() {
           </Card>
         )}
 
-        {/* Add item (manager only: creating master-data items) */}
-        {isManager && (
+        {/* Add item (supervisor or above: inventory-item master-data write) */}
+        {isSupervisorOrAbove && (
           <Card title="Add Item" icon="plus-square" style={{ marginBottom: 16 }}>
             <Pressable
               onPress={() => setShowAdd((v) => !v)}
@@ -316,8 +316,8 @@ export default function InventoryScreen() {
           />
         )}
 
-        {/* Settings: configurable expiry lead time (manager only) */}
-        {isManager && (
+        {/* Settings: configurable expiry lead time (supervisor or above) */}
+        {isSupervisorOrAbove && (
           <Card title="Settings" icon="settings" style={{ marginBottom: 16 }}>
             <View style={styles.settingsRow}>
               <Text style={[styles.settingsLabel, { color: colors.mutedForeground }]}>
@@ -348,8 +348,9 @@ export default function InventoryScreen() {
         {/* Account self-service (any signed-in user) */}
         <ChangePasswordCard />
 
-        {/* Staff & roles (manager only) */}
-        {isManager && <StaffRolesCard />}
+        {/* Staff & roles. Visible to supervisor-or-above for the password-reset
+            approval queue; the staff roster inside is manager-only. */}
+        {isSupervisorOrAbove && <StaffRolesCard />}
       </ScrollView>
     </View>
   );
@@ -439,7 +440,7 @@ function ItemRow({
 
 function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
   const colors = useColors();
-  const { isManager } = useMe();
+  const { isSupervisorOrAbove } = useMe();
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState<LedgerEntry[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -517,10 +518,10 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </View>
 
-      {/* Reorder threshold (editing is a master-data write → manager only) */}
+      {/* Reorder threshold (editing is an inventory-item write → supervisor or above) */}
       <View style={styles.thresholdRow}>
         <Text style={[styles.detailInline, { color: colors.mutedForeground }]}>Reorder at</Text>
-        {!isManager ? (
+        {!isSupervisorOrAbove ? (
           <Text style={[styles.thresholdValText, { color: colors.foreground }]}>
             {fmtQty(item.reorderThreshold)} {item.unit}
           </Text>
@@ -598,7 +599,7 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         </View>
       )}
 
-      {isManager && (
+      {isSupervisorOrAbove && (
         <>
           <View style={[styles.sep, { backgroundColor: colors.border }]} />
           <Button

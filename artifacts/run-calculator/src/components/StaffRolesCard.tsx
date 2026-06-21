@@ -85,16 +85,21 @@ function PasswordInput(props: React.ComponentProps<typeof Input>) {
   );
 }
 
-// Manager-only UI for viewing every signed-in staff member, changing their
-// role, resetting a forgotten password, and removing a departed member. The
-// server enforces a last-manager guard, so failures (demoting or removing the
-// only remaining manager) are surfaced inline.
+// Staff & Roles card. The staff roster (view members, change roles, reset a
+// forgotten password, remove a departed member) is MANAGER-ONLY. The password-
+// reset approval queue is shown to supervisor-or-above (the card is only mounted
+// for them), matching the server gates. The server enforces a last-manager
+// guard, so failures (demoting or removing the only remaining manager) are
+// surfaced inline.
 export default function StaffRolesCard() {
   const qc = useQueryClient();
-  const { me } = useMe();
+  const { me, isManager } = useMe();
   const { data, isLoading, error } = useQuery({
     queryKey: ["staff"],
     queryFn: fetchStaff,
+    // The roster endpoint (GET /users) is manager-only; supervisors viewing the
+    // card for the reset queue must not fire it (it would 403).
+    enabled: isManager,
   });
 
   const [resetTarget, setResetTarget] = useState<StaffMember | null>(null);
@@ -261,6 +266,8 @@ export default function StaffRolesCard() {
             )}
           </div>
         )}
+        {isManager && (
+          <>
         {isLoading && (
           <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading staff…
@@ -319,8 +326,11 @@ export default function StaffRolesCard() {
                     })
                   }
                 >
-                  <option value="manager">Manager</option>
                   <option value="operator">Operator</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="manager">Manager</option>
+                  <option value="qc-operator">QC Operator</option>
+                  <option value="qc-manager">QC Manager</option>
                 </select>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -357,6 +367,8 @@ export default function StaffRolesCard() {
             </div>
           );
         })}
+          </>
+        )}
       </CardContent>
 
       {/* Reset password dialog */}

@@ -63,6 +63,9 @@ let baseUrl: string;
 
 const MANAGER = "manager-1";
 const OPERATOR = "operator-1";
+const SUPERVISOR = "supervisor-1";
+const QC_OPERATOR = "qc-operator-1";
+const QC_MANAGER = "qc-manager-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -150,10 +153,16 @@ beforeEach(async () => {
   await db.insert(usersTable).values([
     { id: MANAGER, username: "manager", passwordHash: "x" },
     { id: OPERATOR, username: "operator", passwordHash: "x" },
+    { id: SUPERVISOR, username: "supervisor", passwordHash: "x" },
+    { id: QC_OPERATOR, username: "qc-operator", passwordHash: "x" },
+    { id: QC_MANAGER, username: "qc-manager", passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
     { userId: OPERATOR, role: "operator" },
+    { userId: SUPERVISOR, role: "supervisor" },
+    { userId: QC_OPERATOR, role: "qc-operator" },
+    { userId: QC_MANAGER, role: "qc-manager" },
   ]);
 });
 
@@ -197,7 +206,9 @@ type GatedRoute = {
   okStatus: number;
 };
 
-const GATED_ROUTES: GatedRoute[] = [
+// Routes a supervisor (and above) may use: the three manager powers supervisors
+// gained — inventory-item CRUD, inventory settings, and password-reset approval.
+const SUPERVISOR_ROUTES: GatedRoute[] = [
   {
     name: "POST /inventory/items",
     method: "POST",
@@ -225,6 +236,16 @@ const GATED_ROUTES: GatedRoute[] = [
     body: { expirySoonDays: 14 },
     okStatus: 200,
   },
+  {
+    name: "GET /password-reset-requests",
+    method: "GET",
+    path: () => "/api/password-reset-requests",
+    okStatus: 200,
+  },
+];
+
+// Routes that stay manager-only — supervisors and QC roles are forbidden.
+const MANAGER_ROUTES: GatedRoute[] = [
   {
     // A self-merge (fromKey === toKey) is a safe no-op that returns 200 once
     // past the guard, so it exercises authz without mutating real stock.
@@ -293,9 +314,11 @@ const GATED_ROUTES: GatedRoute[] = [
   },
 ];
 
+const ALL_ROUTES = [...SUPERVISOR_ROUTES, ...MANAGER_ROUTES];
+
 describe("role-based access control", () => {
   describe("signed out → 401", () => {
-    for (const route of GATED_ROUTES) {
+    for (const route of ALL_ROUTES) {
       it(`rejects ${route.name} with 401`, async () => {
         const itemId = await makeItem("ingredient:Target:lbs");
         const res = await req(null, route.method, route.path({ itemId }), route.body);
@@ -304,8 +327,8 @@ describe("role-based access control", () => {
     }
   });
 
-  describe("operator → 403", () => {
-    for (const route of GATED_ROUTES) {
+  describe("operator → 403 (no elevated powers)", () => {
+    for (const route of ALL_ROUTES) {
       it(`forbids ${route.name} with 403`, async () => {
         const itemId = await makeItem("ingredient:Target:lbs");
         const res = await req(OPERATOR, route.method, route.path({ itemId }), route.body);
@@ -314,8 +337,42 @@ describe("role-based access control", () => {
     }
   });
 
-  describe("manager → allowed", () => {
-    for (const route of GATED_ROUTES) {
+  // QC roles sit at operator level on the main ladder, so they get no elevated
+  // powers — forbidden on every gated route, supervisor and manager alike.
+  for (const qcUser of [QC_OPERATOR, QC_MANAGER]) {
+    describe(`${qcUser} → 403 (QC = operator-level on main ladder)`, () => {
+      for (const route of ALL_ROUTES) {
+        it(`forbids ${route.name} with 403`, async () => {
+          const itemId = await makeItem("ingredient:Target:lbs");
+          const res = await req(qcUser, route.method, route.path({ itemId }), route.body);
+          expect(res.status).toBe(403);
+        });
+      }
+    });
+  }
+
+  describe("supervisor → allowed on supervisor routes", () => {
+    for (const route of SUPERVISOR_ROUTES) {
+      it(`allows ${route.name} (${route.okStatus})`, async () => {
+        const itemId = await makeItem("ingredient:Target:lbs");
+        const res = await req(SUPERVISOR, route.method, route.path({ itemId }), route.body);
+        expect(res.status).toBe(route.okStatus);
+      });
+    }
+  });
+
+  describe("supervisor → 403 on manager-only routes", () => {
+    for (const route of MANAGER_ROUTES) {
+      it(`forbids ${route.name} with 403`, async () => {
+        const itemId = await makeItem("ingredient:Target:lbs");
+        const res = await req(SUPERVISOR, route.method, route.path({ itemId }), route.body);
+        expect(res.status).toBe(403);
+      });
+    }
+  });
+
+  describe("manager → allowed on every route", () => {
+    for (const route of ALL_ROUTES) {
       it(`allows ${route.name} (${route.okStatus})`, async () => {
         const itemId = await makeItem("ingredient:Target:lbs");
         const res = await req(MANAGER, route.method, route.path({ itemId }), route.body);
@@ -326,20 +383,24 @@ describe("role-based access control", () => {
 });
 
 describe("last-manager guard", () => {
-  it("rejects demoting the only manager (PUT /users/:id/role → 400)", async () => {
-    // The seeded roster has exactly one manager (MANAGER); OPERATOR doesn't count.
-    const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, { role: "operator" });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/last manager/i);
+  // The guard blocks demoting the only manager to ANY non-manager role, not just
+  // operator — so each of the four other roles must be rejected identically.
+  for (const role of ["operator", "supervisor", "qc-operator", "qc-manager"]) {
+    it(`rejects demoting the only manager to ${role} (PUT /users/:id/role → 400)`, async () => {
+      // The seeded roster has exactly one manager (MANAGER); the rest don't count.
+      const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, { role });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/last manager/i);
 
-    // The manager is unchanged — still a manager.
-    const [row] = await db
-      .select()
-      .from(userRolesTable)
-      .where(sql`${userRolesTable.userId} = ${MANAGER}`);
-    expect(row.role).toBe("manager");
-  });
+      // The manager is unchanged — still a manager.
+      const [row] = await db
+        .select()
+        .from(userRolesTable)
+        .where(sql`${userRolesTable.userId} = ${MANAGER}`);
+      expect(row.role).toBe("manager");
+    });
+  }
 
   it("allows demoting a manager when another manager remains (→ 200)", async () => {
     // Promote the operator so there are two managers, then demote one.
