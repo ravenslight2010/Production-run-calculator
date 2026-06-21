@@ -225,4 +225,40 @@ describe("buildProactivePrompt", () => {
     const { user } = buildProactivePrompt(baseInput({ runs: [] }));
     expect(user).toContain("(none)");
   });
+
+  it("renders an empty at-risk stock section by default", () => {
+    const { system, user } = buildProactivePrompt(baseInput());
+    expect(user).toContain("AT-RISK STOCK (expired or expiring soon):");
+    expect(user).toMatch(/AT-RISK STOCK[^]*\(none\)/);
+    // The watcher must be told a stock nudge is a valid kind of alert.
+    expect(system).toMatch(/expir/i);
+    expect(user).toContain("stock-expiring");
+  });
+
+  it("lists flagged at-risk stock with quantity and expiry timing", () => {
+    const { user } = buildProactivePrompt(baseInput(), [
+      {
+        key: "mozz",
+        name: "Mozzarella",
+        category: "Cheese",
+        unit: "lb",
+        status: "soon",
+        qtyAtRisk: 120,
+        earliestExpiration: "2026-06-23",
+        daysUntilExpiry: 2,
+      },
+      {
+        key: "sauce",
+        name: "Marinara",
+        category: "Sauce",
+        unit: "gal",
+        status: "expired",
+        qtyAtRisk: 8,
+        earliestExpiration: "2026-06-19",
+        daysUntilExpiry: -2,
+      },
+    ]);
+    expect(user).toContain("- Mozzarella [Cheese] — 120 lb at risk, expires in 2d (2026-06-23)");
+    expect(user).toContain("- Marinara [Sauce] — 8 gal at risk, expired 2d ago (2026-06-19)");
+  });
 });

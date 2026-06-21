@@ -29,6 +29,16 @@ banner above `<Tabs>` inside `<Form>`. Mobile: hook + banner in
 **Why:** Radix `TabsContent` unmounts inactive tabs on web; a hook mounted only in
 the assistant tab would stop polling the moment the manager navigates away.
 
+**Expiry/waste nudge wired in (server-only, auto-parity):** the proactive route
+loads current expired/expiring-soon stock via `flagExpiringItems` (same DB load
+as `/inventory/waste-insight`, grounded by `expirySoonDays`) and feeds it into
+`buildProactivePrompt(input, flaggedAtRisk)` as an "AT-RISK STOCK" section. The
+AI may surface a third kind of nudge — category `efficiency`, stable key
+`stock-expiring` — but is told to prioritize behind-plan/break over it. No extra
+AI call (folded into the existing one); the stock load is best-effort (failure →
+empty list, never breaks the poll). No client change needed: both banners already
+render `efficiency` and dedup by key, so web+mobile parity is automatic.
+
 **Manager-tunable cadence/cooldown/on-off (factory-wide):** the 4min poll and
 30min cooldown are no longer constants — they're a server-persisted single-row
 setting (`proactive_alert_settings` id=1; `GET` open to any authed user, `PUT`

@@ -1,6 +1,13 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, proactiveAlertSettingsTable } from "@workspace/db";
+import {
+  db,
+  proactiveAlertSettingsTable,
+  inventoryItemsTable,
+  inventoryLotsTable,
+  inventorySettingsTable,
+  type InventoryLot,
+} from "@workspace/db";
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
@@ -38,6 +45,11 @@ import {
   sanitizeProactiveAlert,
   validateOptimizeBody as validateProactiveBody,
 } from "./aiProactive";
+import {
+  flagExpiringItems,
+  type FlaggableItem,
+  type WasteFlaggedItem,
+} from "./wasteInsight";
 import {
   buildAskPrompt,
   sanitizeAnswer,
@@ -364,6 +376,50 @@ router.post(
   },
 );
 
+// Compute the current expired / expiring-soon stock the same way the on-demand
+// waste-insight endpoint does (deterministic flagging, grounded by the global
+// expiry lead-time setting). Fed into the proactive prompt so the watcher can
+// surface an auto-deduped waste nudge without anyone opening the Inventory tab.
+// Best-effort: a DB hiccup must never break the poll, so any failure returns an
+// empty list and the watcher simply omits the at-risk section.
+async function loadFlaggedAtRiskStock(
+  log: { error: (obj: unknown, msg?: string) => void },
+): Promise<WasteFlaggedItem[]> {
+  try {
+    const [settingsRow] = await db
+      .select()
+      .from(inventorySettingsTable)
+      .where(eq(inventorySettingsTable.id, 1));
+    const soonDays = settingsRow?.expirySoonDays ?? 7;
+
+    const items = await db
+      .select()
+      .from(inventoryItemsTable)
+      .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
+    const allLots = await db.select().from(inventoryLotsTable);
+    const lotsByItem = new Map<number, InventoryLot[]>();
+    for (const lot of allLots) {
+      const arr = lotsByItem.get(lot.itemId) ?? [];
+      arr.push(lot);
+      lotsByItem.set(lot.itemId, arr);
+    }
+    const flaggable: FlaggableItem[] = items.map((item) => ({
+      key: item.key,
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      lots: (lotsByItem.get(item.id) ?? []).map((l) => ({
+        qtyRemaining: l.qtyRemaining,
+        expirationDate: l.expirationDate,
+      })),
+    }));
+    return flagExpiringItems(flaggable, soonDays);
+  } catch (err) {
+    log.error({ err }, "proactive-alert: failed to load at-risk stock (non-fatal)");
+    return [];
+  }
+}
+
 // Proactive watcher: same live-day input as /ai/optimize, but returns at most a
 // single timely, dismissible nudge (or null). Polled on a cadence by the client
 // while a day is running; the client owns de-dup/cooldown via the returned key.
@@ -384,7 +440,8 @@ router.post(
     }
 
     const knowledge = await loadFacilityKnowledge(req.log);
-    const { system, user } = buildProactivePrompt(validation.data);
+    const flaggedAtRisk = await loadFlaggedAtRiskStock(req.log);
+    const { system, user } = buildProactivePrompt(validation.data, flaggedAtRisk);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let content = "";

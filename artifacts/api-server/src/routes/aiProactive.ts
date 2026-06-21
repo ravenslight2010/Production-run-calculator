@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
+import { MAX_FLAGGED_IN_PROMPT, type WasteFlaggedItem } from "./wasteInsight";
 
 // Proactive shift-floor watcher. Same input contract as /ai/optimize (the whole
 // live day), but a very different job: instead of a ranked list of advice the
@@ -146,7 +147,10 @@ export function sanitizeProactiveAlert(raw: unknown): {
 // Shape the validated live-day input into a compact, model-friendly prompt.
 // Mirrors the optimize prompt's run formatting so the two assistants reason over
 // the same facts, but asks for a single timely decision instead of a list.
-export function buildProactivePrompt(input: OptimizeInput): {
+export function buildProactivePrompt(
+  input: OptimizeInput,
+  flaggedAtRisk: ReadonlyArray<WasteFlaggedItem> = [],
+): {
   system: string;
   user: string;
 } {
@@ -154,13 +158,19 @@ export function buildProactivePrompt(input: OptimizeInput): {
     "You are a proactive production-line watcher for a frozen-pizza factory. " +
     "You run automatically every few minutes while a shift is in progress. " +
     "Your job is to decide whether, RIGHT NOW, there is exactly ONE timely, " +
-    "actionable nudge worth interrupting a busy shift manager for. Only two " +
+    "actionable nudge worth interrupting a busy shift manager for. Only three " +
     "kinds of nudge qualify: (1) the line is clearly falling behind the plan / " +
     "target finish time and the manager should act; or (2) a natural break or " +
     "changeover window is opening now, so a break/lunch can be taken without " +
-    "stalling the line. Be conservative: if nothing is clearly actionable at " +
-    "this exact moment, return no alert. Never invent data, never nag about " +
-    "minor things, and never suggest formula or recipe changes.";
+    "stalling the line; or (3) there is ingredient/packaging stock that is " +
+    "already expired or expiring very soon and today's production could be " +
+    "ordered to consume it first to avoid waste. The list of at-risk stock is " +
+    "given to you below — only raise a stock nudge when that list is non-empty, " +
+    "and never invent items or quantities. Be conservative: if nothing is " +
+    "clearly actionable at this exact moment, return no alert. Prioritize a " +
+    "behind-plan or break-window nudge over a stock nudge when more than one " +
+    "applies. Never nag about minor things, and never suggest formula or recipe " +
+    "changes.";
 
   const fmtRun = (r: OptimizeInput["runs"][number]): string => {
     const parts = [
@@ -213,6 +223,25 @@ export function buildProactivePrompt(input: OptimizeInput): {
   }
 
   lines.push("");
+  lines.push("AT-RISK STOCK (expired or expiring soon):");
+  if (flaggedAtRisk.length === 0) {
+    lines.push("(none)");
+  } else {
+    for (const f of flaggedAtRisk.slice(0, MAX_FLAGGED_IN_PROMPT)) {
+      const when =
+        f.daysUntilExpiry == null
+          ? "no date"
+          : f.daysUntilExpiry < 0
+            ? `expired ${Math.abs(f.daysUntilExpiry)}d ago`
+            : `expires in ${f.daysUntilExpiry}d`;
+      lines.push(
+        `- ${f.name} [${f.category}] — ${f.qtyAtRisk} ${f.unit} at risk, ${when}` +
+          (f.earliestExpiration ? ` (${f.earliestExpiration})` : ""),
+      );
+    }
+  }
+
+  lines.push("");
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"alert":{"key":string,"category":"run"|"break"|"efficiency","title":string,"detail":string,' +
@@ -221,9 +250,11 @@ export function buildProactivePrompt(input: OptimizeInput): {
       "When you do surface one, keep title short (a glanceable headline) and detail to one or two " +
       "plain-language sentences a floor manager can act on immediately. " +
       '"key" must be a short, stable lowercase slug naming the KIND of nudge (e.g. "behind-plan", ' +
-      '"break-window", "downtime-spike") — the SAME situation must always reuse the SAME key so ' +
-      "repeats can be suppressed; never make the key specific to a run instance or timestamp. " +
-      'Use "category":"break" for a break/changeover window, otherwise "run" or "efficiency".',
+      '"break-window", "downtime-spike", "stock-expiring") — the SAME situation must always reuse ' +
+      "the SAME key so repeats can be suppressed; never make the key specific to a run instance or " +
+      "timestamp. " +
+      'Use "category":"break" for a break/changeover window, "category":"efficiency" for an ' +
+      'at-risk-stock / waste-avoidance nudge (use the key "stock-expiring"), otherwise "run".',
   );
 
   return { system, user: lines.join("\n") };
