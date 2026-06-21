@@ -43,6 +43,55 @@ describe("collectGetRoutePathsFromRouter", () => {
     expect(found).not.toContain("/write-only");
   });
 
+  it("prepends the mount prefix for a sub-router mounted under a path", () => {
+    const root = Router();
+
+    // A sub-router mounted under a *static* prefix: the reported path must be
+    // the full `/admin/...` path, not the prefix-less `/...` the sub-router
+    // declares internally. Without prefix reconstruction the cache guard would
+    // check the wrong path.
+    const admin = Router();
+    admin.get("/incidents", (_req, res) => res.end());
+    admin.get("/incidents/:id", (_req, res) => res.end());
+    root.use("/admin", admin);
+
+    // A sub-router's own "/" route is reachable at exactly the prefix.
+    const status = Router();
+    status.get("/", (_req, res) => res.end());
+    root.use("/status", status);
+
+    // A sub-router mounted under a *parametric* prefix: the param name must be
+    // preserved in the reconstructed path.
+    const org = Router();
+    org.get("/members", (_req, res) => res.end());
+    root.use("/org/:orgId", org);
+
+    // A nested mount (prefix on prefix) must accumulate both segments.
+    const outer = Router();
+    const inner = Router();
+    inner.get("/leaf", (_req, res) => res.end());
+    outer.use("/inner", inner);
+    root.use("/outer", outer);
+
+    const found = collectGetRoutePathsFromRouter(root).sort();
+
+    expect(found).toContain("/admin/incidents");
+    expect(found).toContain("/admin/incidents/:id");
+    expect(found).toContain("/status");
+    expect(found).toContain("/org/:orgId/members");
+    expect(found).toContain("/outer/inner/leaf");
+  });
+
+  it("still reports root-mounted sub-router paths without a spurious prefix", () => {
+    const root = Router();
+    const sub = Router();
+    sub.get("/nested/:id", (_req, res) => res.end());
+    // Mounted at root (no prefix) — the path must be reported unchanged.
+    root.use(sub);
+
+    expect(collectGetRoutePathsFromRouter(root)).toContain("/nested/:id");
+  });
+
   it("returns an empty list for a router with no routes", () => {
     expect(collectGetRoutePathsFromRouter(Router())).toEqual([]);
   });
