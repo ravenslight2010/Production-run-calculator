@@ -147,7 +147,16 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  if (server) {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      // Under full-suite contention, fetch's keep-alive agent (and any SSE
+      // streams) leave sockets open, so server.close() never fires its callback
+      // and the hook times out. Force-destroy lingering connections so close()
+      // can resolve. (closeAllConnections is Node 18.2+; guarded for safety.)
+      server.closeAllConnections?.();
+    });
+  }
   if (pool) await pool.end();
   if (adminPool) {
     if (testDbName) {
