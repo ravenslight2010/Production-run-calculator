@@ -587,6 +587,35 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/proactive-alert:
+    post:
+      operationId: aiProactiveAlert
+      tags: [ai]
+      summary: At-most-one proactive shift alert (AI); read-only
+      description: >-
+        Same live-day input as /ai/optimize, but evaluated on a cadence while a
+        day is running. Returns at most a single timely, dismissible nudge
+        (falling behind plan, or a natural break/changeover window) — or null
+        when nothing is worth surfacing right now. Read-only; the client owns
+        de-duplication and cooldown via the returned stable alert key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OptimizeInput"
+      responses:
+        "200":
+          description: At most one proactive alert (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProactiveAlertResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/fill-missing:
     post:
       operationId: aiFillMissing
@@ -2244,6 +2273,53 @@ components:
         note:
           type: string
           description: Optional message when data is insufficient for analysis
+
+    ProactiveAlert:
+      type: object
+      description: >-
+        A single proactive, dismissible shift nudge. The key is a stable
+        lowercase slug naming the KIND of nudge (e.g. "behind-plan",
+        "break-window") so repeats of the same situation can be de-duped/cooled
+        down client-side; it is never run-instance or timestamp specific.
+      required:
+        - key
+        - category
+        - title
+        - detail
+        - impact
+      properties:
+        key:
+          type: string
+          description: Stable de-dup slug for the kind of nudge
+        category:
+          type: string
+          enum: [run, break, efficiency]
+        title:
+          type: string
+          description: Short glanceable headline
+        detail:
+          type: string
+          description: One or two plain-language sentences a manager can act on
+        impact:
+          type: string
+          enum: [high, medium, low]
+
+    ProactiveAlertResult:
+      type: object
+      required:
+        - alert
+        - generatedAt
+      properties:
+        alert:
+          oneOf:
+            - $ref: "#/components/schemas/ProactiveAlert"
+            - type: "null"
+          description: The single nudge to surface now, or null when nothing applies
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when no alert could be produced
 
     FillMissingField:
       type: object

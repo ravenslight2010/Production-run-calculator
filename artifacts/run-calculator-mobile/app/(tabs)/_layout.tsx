@@ -13,7 +13,11 @@ import { useMe } from "@/hooks/useRole";
 import ReportIssueModal from "@/components/ReportIssueModal";
 import GetStartedModal from "@/components/GetStartedModal";
 import GuidedTour from "@/components/GuidedTour";
+import ProactiveAlertBanner from "@/components/ProactiveAlertBanner";
 import { useGetStartedOverview } from "@workspace/onboarding";
+import { useRun, todayStr } from "@/context/RunContext";
+import { buildOptimizeInput } from "@/context/aiOptimize";
+import { useProactiveAlert } from "@/context/aiProactive";
 
 const MENU_ITEMS: {
   label: string;
@@ -57,6 +61,35 @@ export default function TabLayout() {
   const unreviewedIncidentCount = useUnreviewedIncidentCount();
   const { isManager } = useMe();
   const attentionCount = pendingResetCount + unreviewedIncidentCount;
+
+  // ── Proactive shift alerts ────────────────────────────────────────────────
+  // While a day is actively running (at least one run started but not ended),
+  // poll the server on a cadence for at most one timely, dismissible nudge.
+  // Manager-only; the hook owns cooldown + de-dup (see context/aiProactive.ts).
+  // Mounted here (persistent across tab switches) to mirror the web hook in
+  // home.tsx (replit.md parity).
+  const { allRuns, history, runToTime, scheduled } = useRun();
+  const dayIsActive = allRuns.some((r) => r.startedAt && !r.endedAt);
+  const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
+    enabled: isManager && dayIsActive,
+    buildInput: () =>
+      buildOptimizeInput({
+        date: todayStr(),
+        nowMs: Date.now(),
+        runToTime,
+        runs: allRuns,
+        history,
+        scheduledDays: Object.entries(scheduled).map(([date, runs]) => ({
+          date,
+          runs: runs.map((r) => ({
+            brand: r.brand,
+            flavor: r.flavor,
+            casesNeeded: r.casesNeeded,
+            dieType: r.dieType,
+          })),
+        })),
+      }),
+  });
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;
@@ -179,6 +212,8 @@ export default function TabLayout() {
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />
         <Tabs.Screen name="settings" options={{ href: null, title: "Settings" }} />
       </Tabs>
+
+      <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
 
       <Modal
         visible={menuOpen}

@@ -560,6 +560,80 @@ export const AiOptimizeResponse = zod.object({
 
 
 /**
+ * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
+ * @summary At-most-one proactive shift alert (AI); read-only
+ */
+export const AiProactiveAlertBody = zod.object({
+  "date": zod.string(),
+  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
+  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
+  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
+  "runs": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).describe('Today\'s runs (running, upcoming, and finished)'),
+  "scheduledRuns": zod.array(zod.object({
+  "date": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "casesNeeded": zod.number()
+})).optional().describe('Future planned runs'),
+  "historyRuns": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).optional().describe('Recent finished runs from prior days')
+})
+
+export const AiProactiveAlertResponse = zod.object({
+  "alert": zod.union([zod.object({
+  "key": zod.string().describe('Stable de-dup slug for the kind of nudge'),
+  "category": zod.enum(['run', 'break', 'efficiency']),
+  "title": zod.string().describe('Short glanceable headline'),
+  "detail": zod.string().describe('One or two plain-language sentences a manager can act on'),
+  "impact": zod.enum(['high', 'medium', 'low'])
+}).describe('A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. \"behind-plan\", \"break-window\") so repeats of the same situation can be de-duped\/cooled down client-side; it is never run-instance or timestamp specific.'),zod.null()]).describe('The single nudge to surface now, or null when nothing applies'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no alert could be produced')
+})
+
+
+/**
  * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
  * @summary Suggest values for blank run-setup fields (AI); read-only
  */

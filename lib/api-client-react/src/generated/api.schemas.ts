@@ -497,6 +497,46 @@ export interface OptimizeResult {
   note?: string;
 }
 
+export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
+
+
+export const ProactiveAlertCategory = {
+  run: 'run',
+  break: 'break',
+  efficiency: 'efficiency',
+} as const;
+
+export type ProactiveAlertImpact = typeof ProactiveAlertImpact[keyof typeof ProactiveAlertImpact];
+
+
+export const ProactiveAlertImpact = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+/**
+ * A single proactive, dismissible shift nudge. The key is a stable lowercase slug naming the KIND of nudge (e.g. "behind-plan", "break-window") so repeats of the same situation can be de-duped/cooled down client-side; it is never run-instance or timestamp specific.
+ */
+export interface ProactiveAlert {
+  /** Stable de-dup slug for the kind of nudge */
+  key: string;
+  category: ProactiveAlertCategory;
+  /** Short glanceable headline */
+  title: string;
+  /** One or two plain-language sentences a manager can act on */
+  detail: string;
+  impact: ProactiveAlertImpact;
+}
+
+export interface ProactiveAlertResult {
+  /** The single nudge to surface now, or null when nothing applies */
+  alert: ProactiveAlert | null;
+  generatedAt: number;
+  /** Optional message when no alert could be produced */
+  note?: string;
+}
+
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
 
 

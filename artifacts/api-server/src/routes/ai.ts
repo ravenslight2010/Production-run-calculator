@@ -29,9 +29,18 @@ import {
   sanitizeSuggestMerges,
   validateSuggestMergesBody,
 } from "./aiSuggestMerges";
+import {
+  buildProactivePrompt,
+  sanitizeProactiveAlert,
+  validateOptimizeBody as validateProactiveBody,
+} from "./aiProactive";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
-import { loadFacilityKnowledge, appendFacilityMemoryBlock } from "./aiMemoryContext";
+import {
+  loadFacilityKnowledge,
+  appendFacilityMemoryBlock,
+  recordFacilityKnowledge,
+} from "./aiMemoryContext";
 
 const router: IRouter = Router();
 
@@ -83,6 +92,16 @@ const SUGGEST_MERGES_RATE_MAX = 10;
 const suggestMergesRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(SUGGEST_MERGES_RATE_WINDOW_MS)
+    : undefined;
+
+// The proactive watcher polls on a cadence (every few minutes) while a day runs,
+// so it needs a little more headroom than the on-demand endpoints, but the same
+// posture: per-user fixed window, Postgres-backed in production for a shared cap.
+const PROACTIVE_RATE_WINDOW_MS = 60_000;
+const PROACTIVE_RATE_MAX = 20;
+const proactiveRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PROACTIVE_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -152,6 +171,87 @@ router.post(
 
     res.json({
       recommendations: reviewed,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
+
+// Proactive watcher: same live-day input as /ai/optimize, but returns at most a
+// single timely, dismissible nudge (or null). Polled on a cadence by the client
+// while a day is running; the client owns de-dup/cooldown via the returned key.
+router.post(
+  "/ai/proactive-alert",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: PROACTIVE_RATE_WINDOW_MS,
+    max: PROACTIVE_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: proactiveRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateProactiveBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const { system, user } = buildProactivePrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-proactive-alert call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-proactive-alert non-JSON response");
+      res.json({ alert: null, generatedAt: Date.now() });
+      return;
+    }
+
+    const { alert, note } = sanitizeProactiveAlert(raw);
+
+    // Record notable triggers back through the shared facility-memory write path
+    // (best-effort) so the watcher's timing improves over time. A write failure
+    // must never break the poll, so swallow errors.
+    if (alert) {
+      const now = new Date(validation.data.nowMs);
+      const nowClock = `${now.getHours().toString().padStart(2, "0")}:${now
+        .getMinutes()
+        .toString()
+        .padStart(2, "0")}`;
+      void recordFacilityKnowledge([
+        {
+          domain: "proactive-alerts",
+          key: `trigger:${alert.key}`,
+          fact: `Proactively alerted "${alert.title}" (${alert.category}/${alert.impact}) around ${nowClock}.`,
+          source: "proactive-watcher",
+        },
+      ]).catch((err) => {
+        req.log.error({ err }, "failed to record proactive-alert trigger to facility memory");
+      });
+    }
+
+    res.json({
+      alert,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });

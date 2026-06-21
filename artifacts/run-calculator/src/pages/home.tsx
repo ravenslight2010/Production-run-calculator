@@ -117,6 +117,8 @@ import QRCode from "react-qr-code";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
+import { useProactiveAlert } from "../aiProactive";
+import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
 import {
   computeRunConsumptionLines,
   deriveCandidateItems,
@@ -2600,6 +2602,34 @@ export default function Home() {
 
   // Keep dayStateRef current
   useEffect(() => { dayStateRef.current = dayState; }, [dayState]);
+
+  // ── Proactive shift alerts ────────────────────────────────────────────────
+  // While a day is actively running (at least one run started but not ended),
+  // poll the server on a cadence for at most one timely, dismissible nudge.
+  // Manager-only; the hook owns cooldown + de-dup (see aiProactive.ts). Mirrors
+  // the mobile provider in (tabs)/_layout.tsx (replit.md parity).
+  const dayIsActive = dayState.runs.some((r) => r.startedAt && !r.endedAt);
+  const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
+    enabled: isManager && dayIsActive,
+    buildInput: () =>
+      buildOptimizeInput({
+        date: todayStr(),
+        nowMs: Date.now(),
+        runToTime,
+        runs: dayState.runs,
+        runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
+        history,
+        scheduledDays: scheduledDays.map((d) => ({
+          date: d.date,
+          runs: (d.runs ?? []).map((r) => ({
+            brand: r.brand,
+            flavor: r.flavor,
+            casesNeeded: r.casesNeeded,
+            dieType: r.dieType,
+          })),
+        })),
+      }),
+  });
 
   // Update the apply-sync callback so it always captures fresh form/state refs
   useEffect(() => {
@@ -6822,6 +6852,7 @@ export default function Home() {
 
         <Form {...form}>
           <form>
+            <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               {/* ─── RUN ─── */}
               <TabsContent value="run">

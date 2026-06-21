@@ -61,6 +61,7 @@ import type {
   ParseSpecSheetResult,
   PasswordResetRequest,
   PhotoAliasList,
+  ProactiveAlertResult,
   ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
@@ -2077,6 +2078,78 @@ export const useAiOptimize = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiOptimizeMutationOptions(options));
+    }
+
+export const getAiProactiveAlertUrl = () => {
+
+
+
+
+  return `/api/ai/proactive-alert`
+}
+
+/**
+ * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
+ * @summary At-most-one proactive shift alert (AI); read-only
+ */
+export const aiProactiveAlert = async (optimizeInput: OptimizeInput, options?: RequestInit): Promise<ProactiveAlertResult> => {
+
+  return customFetch<ProactiveAlertResult>(getAiProactiveAlertUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      optimizeInput,)
+  }
+);}
+
+
+
+
+export const getAiProactiveAlertMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,{data: BodyType<OptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,{data: BodyType<OptimizeInput>}, TContext> => {
+
+const mutationKey = ['aiProactiveAlert'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiProactiveAlert>>, {data: BodyType<OptimizeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiProactiveAlert(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiProactiveAlertMutationResult = NonNullable<Awaited<ReturnType<typeof aiProactiveAlert>>>
+    export type AiProactiveAlertMutationBody = BodyType<OptimizeInput>
+    export type AiProactiveAlertMutationError = ErrorType<void>
+
+    /**
+ * @summary At-most-one proactive shift alert (AI); read-only
+ */
+export const useAiProactiveAlert = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiProactiveAlert>>, TError,{data: BodyType<OptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiProactiveAlert>>,
+        TError,
+        {data: BodyType<OptimizeInput>},
+        TContext
+      > => {
+      return useMutation(getAiProactiveAlertMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {
