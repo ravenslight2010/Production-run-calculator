@@ -73,3 +73,50 @@ describe("no-store exclusion list has no stale entries", () => {
     });
   }
 });
+
+// Guard the exclusion list against *additions*. The structural guard above only
+// checks the forward direction (every exclusion maps to a real route); it does
+// NOT stop someone from quietly adding a NEW shared-list GET to the allow-list
+// to silence a failing test, which would silently reintroduce the original
+// stale-data bug. These two checks make any change to the allow-list a
+// deliberate, reviewed act.
+describe("no-store exclusion list cannot grow without review", () => {
+  // 1. Every exclusion must carry a non-empty, human-readable justification.
+  //    A blank/whitespace reason means an undocumented exception slipped in.
+  for (const [excludedPath, reason] of Object.entries(CACHE_CONTROL_EXCLUSIONS)) {
+    it(`excluded path ${excludedPath} carries a non-empty reason`, () => {
+      expect(
+        typeof reason === "string" && reason.trim().length > 0,
+        `${excludedPath} is in CACHE_CONTROL_EXCLUSIONS without a justification. ` +
+          `Every cache exception must document WHY it is safe to serve cacheable ` +
+          `(e.g. it is not shared mutable list data, or edits arrive via full-payload SSE).`,
+      ).toBe(true);
+    });
+  }
+
+  // 2. Snapshot the known-safe set of excluded paths. Adding a new exclusion is
+  //    exactly how the stale-data bug would be reintroduced, so it must be a
+  //    deliberate edit to this list — reviewed alongside the cacheControl.ts
+  //    change. If you intentionally add/remove an exclusion, update this array.
+  const KNOWN_SAFE_EXCLUSIONS = [
+    "/healthz",
+    "/auth/username-available",
+    "/sync/today",
+    "/sync/scheduled",
+    "/sync/:date",
+    "/sync/events",
+    "/inventory/events",
+  ].sort();
+
+  it("the set of excluded paths matches the reviewed known-safe set", () => {
+    const actual = Object.keys(CACHE_CONTROL_EXCLUSIONS).sort();
+    expect(
+      actual,
+      `CACHE_CONTROL_EXCLUSIONS changed. Adding an exclusion suppresses no-store ` +
+        `for that GET — if it serves shared mutable data, this reintroduces the ` +
+        `stale-data bug other clients see until a full reload. Confirm the new ` +
+        `route is genuinely safe to cache, then update KNOWN_SAFE_EXCLUSIONS in ` +
+        `this test to record the reviewed decision.`,
+    ).toEqual(KNOWN_SAFE_EXCLUSIONS);
+  });
+});
