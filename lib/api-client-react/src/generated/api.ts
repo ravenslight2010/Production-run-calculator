@@ -40,6 +40,8 @@ import type {
   FillMissingInput,
   FillMissingResult,
   FillMissingValueList,
+  ForecastInput,
+  ForecastResult,
   ForgotPasswordRequest,
   HealthStatus,
   IdentifyPhotoInput,
@@ -2372,6 +2374,78 @@ export const useAiProactiveAlert = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiProactiveAlertMutationOptions(options));
+    }
+
+export const getAiForecastUrl = () => {
+
+
+
+
+  return `/api/ai/forecast`
+}
+
+/**
+ * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
+ * @summary Predict an upcoming day's run plan (AI); read-only
+ */
+export const aiForecast = async (forecastInput: ForecastInput, options?: RequestInit): Promise<ForecastResult> => {
+
+  return customFetch<ForecastResult>(getAiForecastUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      forecastInput,)
+  }
+);}
+
+
+
+
+export const getAiForecastMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,{data: BodyType<ForecastInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,{data: BodyType<ForecastInput>}, TContext> => {
+
+const mutationKey = ['aiForecast'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiForecast>>, {data: BodyType<ForecastInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiForecast(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiForecastMutationResult = NonNullable<Awaited<ReturnType<typeof aiForecast>>>
+    export type AiForecastMutationBody = BodyType<ForecastInput>
+    export type AiForecastMutationError = ErrorType<void>
+
+    /**
+ * @summary Predict an upcoming day's run plan (AI); read-only
+ */
+export const useAiForecast = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiForecast>>, TError,{data: BodyType<ForecastInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiForecast>>,
+        TError,
+        {data: BodyType<ForecastInput>},
+        TContext
+      > => {
+      return useMutation(getAiForecastMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {

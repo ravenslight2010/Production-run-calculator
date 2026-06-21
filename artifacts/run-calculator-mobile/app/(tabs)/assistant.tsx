@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React from "react";
 import {
   ActivityIndicator,
@@ -24,6 +25,13 @@ import {
   type OptimizeRecommendation,
   type OptimizeResult,
 } from "@/context/aiOptimize";
+import {
+  buildForecastInput,
+  forecastErrorMessage,
+  requestForecast,
+  type ForecastConfidence,
+  type ForecastPlan,
+} from "@/context/aiForecast";
 import { askErrorMessage, requestAsk } from "@/context/aiAsk";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { useColors } from "@/hooks/useColors";
@@ -276,6 +284,160 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   );
 }
 
+function tomorrowStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function confidenceColors(c: ForecastConfidence): { bg: string; fg: string } {
+  if (c === "high") return { bg: "rgba(16,185,129,0.15)", fg: "#34d399" };
+  if (c === "low") return { bg: "rgba(239,68,68,0.15)", fg: "#f87171" };
+  return { bg: "rgba(245,158,11,0.15)", fg: "#fbbf24" };
+}
+
+function formatTargetDate(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+// Manager-only demand forecast. Predicts an upcoming day's run plan grounded in
+// real history; advisory only. Tapping "Add to schedule" adds the runs to the
+// schedule for the target date and navigates there for review — nothing is
+// auto-committed. EXACT mirror of the web ForecastSection (replit.md parity).
+function ForecastSection({
+  buildForecast,
+  onApplyForecast,
+}: {
+  buildForecast: () => ReturnType<typeof buildForecastInput>;
+  onApplyForecast: (plan: ForecastPlan) => void;
+}) {
+  const colors = useColors();
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<{
+    forecast: ForecastPlan | null;
+    note?: string;
+    generatedAt: number;
+  } | null>(null);
+  const [applied, setApplied] = React.useState(false);
+
+  async function predict() {
+    setLoading(true);
+    setError(null);
+    setApplied(false);
+    try {
+      const res = await requestForecast(buildForecast());
+      setResult(res);
+    } catch (e) {
+      setError(forecastErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const plan = result?.forecast ?? null;
+
+  return (
+    <>
+      <Card title="Demand Forecast" icon="calendar" accent>
+        <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+          Predict tomorrow&apos;s run plan from recent production history — what to run, rough
+          quantities, and a sensible order. Advisory only; you review and adjust it in the schedule
+          before anything is planned.
+        </Text>
+        <Button
+          label={loading ? "Forecasting…" : result ? "Re-forecast" : "Forecast tomorrow"}
+          icon={result && !loading ? "refresh-cw" : "calendar"}
+          onPress={predict}
+          disabled={loading}
+          style={{ marginTop: 12 }}
+        />
+        {error ? (
+          <View style={[styles.errorBox, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" }]}>
+            <Feather name="alert-triangle" size={14} color="#f87171" />
+            <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+          </View>
+        ) : null}
+      </Card>
+
+      {result && !plan ? (
+        <Card>
+          <View style={styles.emptyBox}>
+            <Feather name="calendar" size={22} color={colors.mutedForeground} />
+            <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No forecast yet</Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+              {result.note ??
+                "There isn't enough production history to forecast responsibly yet. Finish a few days of runs and try again."}
+            </Text>
+          </View>
+        </Card>
+      ) : null}
+
+      {plan ? (
+        <Card title={`Plan for ${formatTargetDate(plan.targetDate)}`} icon="calendar">
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <View style={[styles.badge, { backgroundColor: confidenceColors(plan.confidence).bg }]}>
+              <Text style={[styles.badgeText, { color: confidenceColors(plan.confidence).fg }]}>
+                {plan.confidence.toUpperCase()} CONFIDENCE
+              </Text>
+            </View>
+          </View>
+          {plan.summary ? (
+            <Text style={[styles.recDetail, { color: colors.mutedForeground, marginTop: 0 }]}>
+              {plan.summary}
+            </Text>
+          ) : null}
+          <View style={{ gap: 8, marginTop: 10 }}>
+            {plan.runs.map((r, i) => (
+              <View
+                key={i}
+                style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+              >
+                <View style={styles.recHeader}>
+                  <Text style={[styles.recTitle, { color: colors.foreground }]}>
+                    {r.brand}
+                    {r.flavor ? ` · ${r.flavor}` : ""}
+                  </Text>
+                  <Text style={[styles.recApplies, { color: colors.primary, marginTop: 0 }]}>
+                    {r.casesNeeded > 0 ? `${r.casesNeeded} cs` : "—"}
+                  </Text>
+                </View>
+                {r.dieType ? (
+                  <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
+                    Die: {r.dieType}
+                  </Text>
+                ) : null}
+                {r.rationale ? (
+                  <Text style={[styles.recDetail, { color: colors.mutedForeground }]}>{r.rationale}</Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+          {result?.note ? (
+            <View style={[styles.errorBox, { borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.1)" }]}>
+              <Feather name="alert-triangle" size={14} color="#fbbf24" />
+              <Text style={[styles.errorText, { color: "#fbbf24" }]}>{result.note}</Text>
+            </View>
+          ) : null}
+          <Button
+            label={applied ? "Opened in schedule" : "Add to schedule"}
+            icon={applied ? "check" : "calendar"}
+            variant={applied ? "outline" : "primary"}
+            disabled={applied}
+            onPress={() => {
+              onApplyForecast(plan);
+              setApplied(true);
+            }}
+            style={{ marginTop: 12 }}
+          />
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
 export default function AssistantScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -288,6 +450,7 @@ export default function AssistantScreen() {
     setRunToTime,
     moveRun,
     updateRunSettingsById,
+    addScheduledRun,
   } = useRun();
 
   const [loading, setLoading] = React.useState(false);
@@ -383,6 +546,44 @@ export default function AssistantScreen() {
     }
   }
 
+  // Shapes recent finished history + scheduled days into the forecast wire input.
+  // Mirrors the web buildForecast wiring (replit.md parity).
+  const buildForecast = React.useCallback(() => {
+    const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
+      date,
+      runs: runs.map((r) => ({
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesNeeded,
+        dieType: r.dieType,
+      })),
+    }));
+    return buildForecastInput({
+      targetDate: tomorrowStr(),
+      nowMs: Date.now(),
+      history,
+      scheduledDays,
+    });
+  }, [scheduled, history]);
+
+  // Non-destructive apply: add each forecast run to the schedule for the target
+  // date, then navigate to the schedule screen so the manager reviews/adjusts.
+  // Nothing is auto-committed beyond seeding the editable schedule.
+  function applyForecast(plan: ForecastPlan) {
+    const date = plan.targetDate || tomorrowStr();
+    for (const r of plan.runs) {
+      const cases = Number.isFinite(r.casesNeeded) && r.casesNeeded > 0 ? Math.round(r.casesNeeded) : 0;
+      addScheduledRun(date, {
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: cases,
+        dieType: r.dieType ?? "",
+        notes: r.rationale ?? "",
+      });
+    }
+    router.push("/schedule");
+  }
+
   const recsFor = (cat: OptimizeCategory) =>
     (result?.recommendations ?? []).filter((r) => r.category === cat);
   const hasRecs = (result?.recommendations.length ?? 0) > 0;
@@ -404,6 +605,8 @@ export default function AssistantScreen() {
 
       {!isManager ? null : (
       <>
+      <ForecastSection buildForecast={buildForecast} onApplyForecast={applyForecast} />
+
       <Card title="AI Assistant" icon="zap" accent>
         <Text style={[styles.intro, { color: colors.mutedForeground }]}>
           Analyze today&apos;s runs, the schedule, and recent history for run sequencing, break

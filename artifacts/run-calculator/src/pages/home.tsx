@@ -117,6 +117,7 @@ import QRCode from "react-qr-code";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
+import { buildForecastInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
 import {
@@ -3692,6 +3693,34 @@ export default function Home() {
     saveDayState(newDs);
     if (activeStopId === stopId) setActiveStopId(null);
     schedulePush(newDs, 0);
+  }
+
+  // ── AI demand forecast → editable schedule ────────────────────────────────
+  // Non-destructive: the forecast plan only pre-fills the schedule editor for the
+  // target date. The manager reviews/adjusts and explicitly saves; nothing is
+  // committed by accepting the forecast.
+  function applyForecast(plan: ForecastPlan) {
+    const rows: { id: string; brand: string; flavor: string; casesNeeded: number }[] = [];
+    const values: Record<string, FormValues> = {};
+    for (const r of plan.runs) {
+      const id = genId();
+      const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+      const base: FormValues = profile ?? { ...DEFAULT_VALUES };
+      const cases = Number.isFinite(r.casesNeeded) && r.casesNeeded > 0 ? Math.round(r.casesNeeded) : 0;
+      rows.push({ id, brand: r.brand, flavor: r.flavor, casesNeeded: cases });
+      values[id] = { ...base, casesNeeded: cases, ...(r.dieType ? { dieType: r.dieType } : {}) };
+    }
+    if (rows.length === 0) {
+      const id = genId();
+      rows.push({ id, brand: "", flavor: "", casesNeeded: 0 });
+      values[id] = { ...DEFAULT_VALUES };
+    }
+    setScheduleAdvancedRunId(null);
+    setScheduleEditorDate(plan.targetDate || tomorrowStr());
+    setScheduleEditorRunValues(values);
+    setScheduleEditorRuns(rows);
+    setScheduleView("editor");
+    setShowScheduleDialog(true);
   }
 
   // ── Templates ─────────────────────────────────────────────────────────────
@@ -7941,6 +7970,24 @@ export default function Home() {
                     })
                   }
                   onApplyAction={applyOptimizeAction}
+                  buildForecast={() =>
+                    buildForecastInput({
+                      targetDate: tomorrowStr(),
+                      nowMs: Date.now(),
+                      history,
+                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                      scheduledDays: scheduledDays.map((d) => ({
+                        date: d.date,
+                        runs: (d.runs ?? []).map((r) => ({
+                          brand: r.brand,
+                          flavor: r.flavor,
+                          casesNeeded: r.casesNeeded,
+                          dieType: r.dieType,
+                        })),
+                      })),
+                    })
+                  }
+                  onApplyForecast={applyForecast}
                 />
               </TabsContent>
 

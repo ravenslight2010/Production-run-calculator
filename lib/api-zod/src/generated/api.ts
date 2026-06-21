@@ -766,6 +766,50 @@ export const AiProactiveAlertResponse = zod.object({
 
 
 /**
+ * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
+ * @summary Predict an upcoming day's run plan (AI); read-only
+ */
+export const AiForecastBody = zod.object({
+  "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the upcoming day to forecast'),
+  "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
+  "history": zod.array(zod.object({
+  "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().describe('May be empty when unknown'),
+  "cases": zod.number().describe('Cases actually produced for this run'),
+  "netRunMin": zod.number().describe('Net run minutes (excludes downtime); a throughput signal')
+}).describe('A finished run from a past day, used to learn demand patterns.'))
+}).describe('One past production day with its finished runs.')).describe('Recent finished production days, most useful when several weeks deep'),
+  "scheduledRuns": zod.array(zod.object({
+  "date": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "casesNeeded": zod.number()
+})).optional().describe('Runs already planned for future days (incl. any existing plan for the target day)')
+})
+
+export const AiForecastResponse = zod.object({
+  "forecast": zod.union([zod.object({
+  "targetDate": zod.string(),
+  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
+  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().describe('May be empty when the model is unsure'),
+  "casesNeeded": zod.number().describe('Rough suggested case target'),
+  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
+}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
+}),zod.null()]).describe('The predicted plan, or null when history is too thin to predict'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
+})
+
+
+/**
  * Given a run's known brand/flavor/context and a list of still-blank scalar fields, returns a suggested value plus a short rationale for each. Read-only — never writes anything; the client decides what (if anything) to commit. Used by the "Fill in missing data" setup assistant for fields that have no known profile/spec/default source.
  * @summary Suggest values for blank run-setup fields (AI); read-only
  */

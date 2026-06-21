@@ -90,7 +90,7 @@ function statusOf(run: RunMeta): RunStatus {
   return "upcoming";
 }
 
-function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number): OptimizeRun {
+export function buildOptimizeRun(run: RunMeta, vals: FormValues, nowMs: number): OptimizeRun {
   const s = computeSummaryStats(vals);
   const status = statusOf(run);
   const ppc = vals.pizzasPerCase;

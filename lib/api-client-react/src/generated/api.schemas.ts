@@ -700,6 +700,84 @@ export interface ProactiveAlertResult {
   note?: string;
 }
 
+/**
+ * A finished run from a past day, used to learn demand patterns.
+ */
+export interface ForecastHistoryRun {
+  brand: string;
+  flavor: string;
+  /** May be empty when unknown */
+  dieType: string;
+  /** Cases actually produced for this run */
+  cases: number;
+  /** Net run minutes (excludes downtime); a throughput signal */
+  netRunMin: number;
+}
+
+/**
+ * One past production day with its finished runs.
+ */
+export interface ForecastHistoryDay {
+  /** ISO date (YYYY-MM-DD) of the production day */
+  date: string;
+  runs: ForecastHistoryRun[];
+}
+
+export interface ForecastInput {
+  /** ISO date (YYYY-MM-DD) of the upcoming day to forecast */
+  targetDate: string;
+  /** Client clock in epoch ms (for relative reasoning) */
+  nowMs: number;
+  /** Recent finished production days, most useful when several weeks deep */
+  history: ForecastHistoryDay[];
+  /** Runs already planned for future days (incl. any existing plan for the target day) */
+  scheduledRuns?: OptimizeScheduledRun[];
+}
+
+/**
+ * One suggested run in the predicted plan (advisory; not committed).
+ */
+export interface ForecastRun {
+  brand: string;
+  flavor: string;
+  /** May be empty when the model is unsure */
+  dieType: string;
+  /** Rough suggested case target */
+  casesNeeded: number;
+  /** Short reason this run is suggested (grounded in history) */
+  rationale: string;
+}
+
+/**
+ * Honest confidence given how much history supports the prediction
+ */
+export type ForecastPlanConfidence = typeof ForecastPlanConfidence[keyof typeof ForecastPlanConfidence];
+
+
+export const ForecastPlanConfidence = {
+  high: 'high',
+  medium: 'medium',
+  low: 'low',
+} as const;
+
+export interface ForecastPlan {
+  targetDate: string;
+  /** Honest confidence given how much history supports the prediction */
+  confidence: ForecastPlanConfidence;
+  /** Plain-language rationale for the whole plan, incl. caveats */
+  summary: string;
+  /** Suggested runs in a sensible production sequence */
+  runs: ForecastRun[];
+}
+
+export interface ForecastResult {
+  /** The predicted plan, or null when history is too thin to predict */
+  forecast: ForecastPlan | null;
+  generatedAt: number;
+  /** Explanation when no forecast could responsibly be produced */
+  note?: string;
+}
+
 export type FillMissingFieldCategory = typeof FillMissingFieldCategory[keyof typeof FillMissingFieldCategory];
 
 

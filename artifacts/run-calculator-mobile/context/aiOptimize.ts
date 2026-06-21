@@ -102,7 +102,7 @@ function statusOf(run: RunState): RunStatus {
   return "upcoming";
 }
 
-function buildOptimizeRun(run: RunState, index: number, nowMs: number): OptimizeRun {
+export function buildOptimizeRun(run: RunState, index: number, nowMs: number): OptimizeRun {
   const s = run.settings;
   const p = run.progress;
   const status = statusOf(run);

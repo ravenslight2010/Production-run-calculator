@@ -1,0 +1,142 @@
+import { getAuthToken } from "@workspace/api-client-react";
+import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
+import { InventoryApiError, photoErrorMessage } from "./inventoryShared";
+import {
+  buildOptimizeRun,
+  type OptimizeScheduledRun,
+} from "./aiOptimize";
+import type { HistoryDay } from "./RunContext";
+
+// AI demand-forecast client (raw fetch + Bearer). EXACT mirror of the web
+// src/aiForecast.ts: same wire shapes, same finished-run filtering, same error
+// handling. Mobile history runs carry their own settings, so each is shaped via
+// the shared buildOptimizeRun(run, index, nowMs) (replit.md parity rule).
+
+// ── Types (mirror the OpenAPI /ai/forecast contract) ─────────────────────────
+export type ForecastConfidence = "high" | "medium" | "low";
+
+export type ForecastHistoryRun = {
+  brand: string;
+  flavor: string;
+  dieType: string;
+  cases: number;
+  netRunMin: number;
+};
+
+export type ForecastHistoryDay = {
+  date: string;
+  runs: ForecastHistoryRun[];
+};
+
+export type ForecastInput = {
+  targetDate: string;
+  nowMs: number;
+  history: ForecastHistoryDay[];
+  scheduledRuns: OptimizeScheduledRun[];
+};
+
+export type ForecastRun = {
+  brand: string;
+  flavor: string;
+  dieType: string;
+  casesNeeded: number;
+  rationale: string;
+};
+
+export type ForecastPlan = {
+  targetDate: string;
+  confidence: ForecastConfidence;
+  summary: string;
+  runs: ForecastRun[];
+};
+
+export type ForecastResult = {
+  forecast: ForecastPlan | null;
+  generatedAt: number;
+  note?: string;
+};
+
+export type ForecastScheduledDayInput = {
+  date: string;
+  runs: { brand: string; flavor: string; casesNeeded: number; dieType?: string }[];
+};
+
+// Build the wire input. Only FINISHED runs carry usable demand signal, so each
+// history run is shaped through the shared buildOptimizeRun (keeping cases/net
+// minutes consistent with optimize/ask) and only finished ones are mapped.
+export function buildForecastInput(args: {
+  targetDate: string;
+  nowMs: number;
+  history: HistoryDay[];
+  scheduledDays: ForecastScheduledDayInput[];
+}): ForecastInput {
+  const history: ForecastHistoryDay[] = [];
+  for (const day of args.history) {
+    const runs: ForecastHistoryRun[] = [];
+    day.runs.forEach((run, i) => {
+      const o = buildOptimizeRun(run, i, args.nowMs);
+      if (o.status !== "finished") return;
+      runs.push({
+        brand: o.brand,
+        flavor: o.flavor,
+        dieType: o.dieType,
+        cases: o.casesMade,
+        netRunMin: Math.round(o.netElapsedSec / 60),
+      });
+    });
+    if (runs.length) history.push({ date: day.date, runs });
+  }
+
+  const scheduledRuns: OptimizeScheduledRun[] = [];
+  for (const day of args.scheduledDays) {
+    for (const r of day.runs) {
+      scheduledRuns.push({
+        date: day.date,
+        brand: r.brand,
+        flavor: r.flavor,
+        dieType: r.dieType ?? "",
+        casesNeeded: r.casesNeeded,
+      });
+    }
+  }
+
+  return { targetDate: args.targetDate, nowMs: args.nowMs, history, scheduledRuns };
+}
+
+// ── API client (raw fetch + Bearer, matches requestOptimize) ─────────────────
+export async function requestForecast(input: ForecastInput): Promise<ForecastResult> {
+  const base = getApiBaseUrl();
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const res = await fetch(`${base}/api/ai/forecast`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": clientId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const retryAfterRaw = res.headers.get("Retry-After");
+    const retryAfterSec =
+      retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
+    let serverMessage: string | null = null;
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (body && typeof body.error === "string") serverMessage = body.error;
+    } catch {
+      // non-JSON error body; ignore
+    }
+    throw new InventoryApiError(
+      res.status,
+      `Forecast request failed (${res.status})`,
+      retryAfterSec,
+      serverMessage,
+    );
+  }
+  return (await res.json()) as ForecastResult;
+}
+
+// Reuse the photo endpoint's friendly 429/413 messaging for parity.
+export const forecastErrorMessage = photoErrorMessage;

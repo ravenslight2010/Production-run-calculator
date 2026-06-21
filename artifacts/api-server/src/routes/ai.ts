@@ -39,6 +39,13 @@ import {
   sanitizeAnswer,
   validateAskBody,
 } from "./aiAsk";
+import {
+  aggregateForecastHistory,
+  buildForecastPrompt,
+  sanitizeForecast,
+  validateForecastBody,
+  FORECAST_MIN_RUNS,
+} from "./aiForecast";
 import { reviewSuggestions } from "./aiReviewer";
 import { loadCorrections, appendCorrectionsBlock } from "./aiCorrectionsContext";
 import {
@@ -118,6 +125,15 @@ const ASK_RATE_MAX = 10;
 const askRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(ASK_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the on-demand demand forecaster: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const FORECAST_RATE_WINDOW_MS = 60_000;
+const FORECAST_RATE_MAX = 10;
+const forecastRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(FORECAST_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -340,6 +356,99 @@ router.post(
 
     res.json({
       alert,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
+
+// On-demand demand forecaster: given recent finished history (grouped by day)
+// and any scheduled future runs, predict a suggested run plan for one upcoming
+// day plus a plain-language rationale. Manager-gated and read-only — nothing is
+// committed; the manager reviews the suggestion into the editable schedule.
+router.post(
+  "/ai/forecast",
+  requireRole("manager"),
+  rateLimit({
+    windowMs: FORECAST_RATE_WINDOW_MS,
+    max: FORECAST_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: forecastRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateForecastBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Hard floor against fabrication: a single finished run (or none) isn't a
+    // pattern to predict from, so refuse honestly without spending an AI call.
+    const agg = aggregateForecastHistory(validation.data);
+    if (agg.totalRuns < FORECAST_MIN_RUNS) {
+      res.json({
+        forecast: null,
+        generatedAt: Date.now(),
+        note: "Not enough production history yet to forecast. Finish a few days of runs and try again.",
+      });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const { system, user } = buildForecastPrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 4096,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-forecast call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-forecast non-JSON response");
+      res.json({ forecast: null, generatedAt: Date.now() });
+      return;
+    }
+
+    const { forecast, note } = sanitizeForecast(raw, validation.data.targetDate);
+
+    // Record the produced forecast back through the shared facility-memory write
+    // path (best-effort) so future forecasts — and any later accuracy review —
+    // can reference what was predicted for this kind of day. A write failure
+    // must never break the response, so swallow errors.
+    if (forecast) {
+      const products = forecast.runs
+        .map((r) => `${r.brand} ${r.flavor} (~${r.casesNeeded}cs)`)
+        .join(", ");
+      void recordFacilityKnowledge([
+        {
+          domain: "forecast",
+          key: `plan:${forecast.targetDate}`,
+          fact: `Forecast for ${forecast.targetDate} [${forecast.confidence} confidence]: ${products}.`,
+          source: "demand-forecaster",
+        },
+      ]).catch((err) => {
+        req.log.error({ err }, "failed to record forecast to facility memory");
+      });
+    }
+
+    res.json({
+      forecast,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });

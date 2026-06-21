@@ -710,6 +710,39 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/forecast:
+    post:
+      operationId: aiForecast
+      tags: [ai]
+      summary: Predict an upcoming day's run plan (AI); read-only
+      description: >-
+        Given recent finished production history (grouped by day) and any
+        already-scheduled future runs, predicts a suggested run plan for one
+        upcoming day — what to run, rough case quantities, and a sensible
+        sequence — plus a plain-language rationale and an honest confidence
+        level. Grounded strictly in the supplied history and shared facility
+        memory; explicit about uncertainty and returns a null forecast (with a
+        note) when history is too thin to predict responsibly. Read-only — never
+        writes or commits anything; the manager reviews and adjusts the
+        suggestion into the editable schedule.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForecastInput"
+      responses:
+        "200":
+          description: A suggested run plan for the target day (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForecastResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/fill-missing:
     post:
       operationId: aiFillMissing
@@ -2600,6 +2633,133 @@ components:
         note:
           type: string
           description: Optional message when no alert could be produced
+
+    ForecastHistoryRun:
+      type: object
+      description: A finished run from a past day, used to learn demand patterns.
+      required:
+        - brand
+        - flavor
+        - dieType
+        - cases
+        - netRunMin
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+          description: May be empty when unknown
+        cases:
+          type: number
+          description: Cases actually produced for this run
+        netRunMin:
+          type: number
+          description: Net run minutes (excludes downtime); a throughput signal
+
+    ForecastHistoryDay:
+      type: object
+      description: One past production day with its finished runs.
+      required:
+        - date
+        - runs
+      properties:
+        date:
+          type: string
+          description: ISO date (YYYY-MM-DD) of the production day
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ForecastHistoryRun"
+
+    ForecastInput:
+      type: object
+      required:
+        - targetDate
+        - nowMs
+        - history
+      properties:
+        targetDate:
+          type: string
+          description: ISO date (YYYY-MM-DD) of the upcoming day to forecast
+        nowMs:
+          type: number
+          description: Client clock in epoch ms (for relative reasoning)
+        history:
+          type: array
+          description: Recent finished production days, most useful when several weeks deep
+          items:
+            $ref: "#/components/schemas/ForecastHistoryDay"
+        scheduledRuns:
+          type: array
+          description: Runs already planned for future days (incl. any existing plan for the target day)
+          items:
+            $ref: "#/components/schemas/OptimizeScheduledRun"
+
+    ForecastRun:
+      type: object
+      description: One suggested run in the predicted plan (advisory; not committed).
+      required:
+        - brand
+        - flavor
+        - dieType
+        - casesNeeded
+        - rationale
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+          description: May be empty when the model is unsure
+        casesNeeded:
+          type: number
+          description: Rough suggested case target
+        rationale:
+          type: string
+          description: Short reason this run is suggested (grounded in history)
+
+    ForecastPlan:
+      type: object
+      required:
+        - targetDate
+        - confidence
+        - summary
+        - runs
+      properties:
+        targetDate:
+          type: string
+        confidence:
+          type: string
+          enum: [high, medium, low]
+          description: Honest confidence given how much history supports the prediction
+        summary:
+          type: string
+          description: Plain-language rationale for the whole plan, incl. caveats
+        runs:
+          type: array
+          description: Suggested runs in a sensible production sequence
+          items:
+            $ref: "#/components/schemas/ForecastRun"
+
+    ForecastResult:
+      type: object
+      required:
+        - forecast
+        - generatedAt
+      properties:
+        forecast:
+          oneOf:
+            - $ref: "#/components/schemas/ForecastPlan"
+            - type: "null"
+          description: The predicted plan, or null when history is too thin to predict
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Explanation when no forecast could responsibly be produced
 
     FillMissingField:
       type: object
