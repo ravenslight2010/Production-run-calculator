@@ -14,6 +14,7 @@ import {
   Send,
   CalendarClock,
   CalendarPlus,
+  ChefHat,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,11 @@ import {
   optimizeErrorMessage,
 } from "../aiOptimize";
 import { requestAsk, askErrorMessage } from "../aiAsk";
+import {
+  type RecipeAssistInput,
+  requestRecipeAssist,
+  recipeAssistErrorMessage,
+} from "../aiRecipe";
 import {
   type ForecastInput,
   type ForecastPlan,
@@ -303,6 +309,148 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   );
 }
 
+// Recipe & ingredient helper. A single-shot Q&A (no follow-up memory) over the
+// current run's real recipes: scale a recipe, suggest a substitution, or explain
+// a formula in plain language. Available to every signed-in worker (not manager-
+// gated), exactly like AskChat. Advisory only — it never edits a recipe; the
+// worker reads the numbers and acts themselves.
+function RecipeAssistChat({
+  buildContext,
+}: {
+  buildContext: () => Omit<RecipeAssistInput, "question">;
+}) {
+  const [turns, setTurns] = useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns, loading]);
+
+  async function send() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    setNote(null);
+    const prevTurns = turns;
+    setTurns([...turns, { role: "user", text: q }]);
+    setQuestion("");
+    try {
+      const ctx = buildContext();
+      const res = await requestRecipeAssist({ ...ctx, question: q });
+      setTurns((cur) => [...cur, { role: "assistant", text: res.answer }]);
+      if (res.note) setNote(res.note);
+    } catch (e) {
+      setTurns(prevTurns);
+      setQuestion(q);
+      setError(recipeAssistErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ChefHat className="w-5 h-5 text-primary" />
+          Recipe &amp; ingredient helper
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Ask about this run&apos;s recipes — e.g. &ldquo;scale the dough recipe to 1.5x&rdquo;,
+          &ldquo;what can I substitute for X?&rdquo;, or &ldquo;explain how the dough batch is
+          figured&rdquo;. Answers use only your real recipe data. Advisory only — nothing is changed.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div
+          ref={scrollRef}
+          className="max-h-72 space-y-2 overflow-y-auto rounded-md border border-border bg-card/40 p-3"
+          data-testid="recipe-assist-thread"
+        >
+          {turns.length === 0 && !loading ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              No questions yet. Ask anything about your recipes or ingredients.
+            </p>
+          ) : (
+            turns.map((t, i) => (
+              <div
+                key={i}
+                className={`flex ${t.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
+                    t.role === "user"
+                      ? "bg-primary/15 text-foreground"
+                      : "bg-muted text-foreground"
+                  }`}
+                  data-testid={`recipe-assist-turn-${t.role}`}
+                >
+                  {t.text}
+                </div>
+              </div>
+            ))
+          )}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+              </div>
+            </div>
+          )}
+        </div>
+
+        {note && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{note}</span>
+          </div>
+        )}
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
+          <Textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about a recipe or ingredient…"
+            rows={2}
+            className="min-h-[44px] resize-none"
+            disabled={loading}
+            data-testid="input-recipe-assist-question"
+          />
+          <Button
+            onClick={() => void send()}
+            disabled={loading || !question.trim()}
+            className="gap-1.5"
+            data-testid="button-recipe-assist-send"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Send
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function confidenceClass(c: ForecastConfidence): string {
   if (c === "high") return "bg-emerald-500/15 text-emerald-400 border-emerald-500/30";
   if (c === "low") return "bg-red-500/15 text-red-400 border-red-500/30";
@@ -469,11 +617,13 @@ function ForecastSection({
 
 export default function AssistantTab({
   buildInput,
+  buildRecipeContext,
   onApplyAction,
   buildForecast,
   onApplyForecast,
 }: {
   buildInput: () => OptimizeInput;
+  buildRecipeContext: () => Omit<RecipeAssistInput, "question">;
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
   buildForecast: () => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
@@ -515,6 +665,8 @@ export default function AssistantTab({
   return (
     <div className="space-y-4 pb-24">
       <AskChat buildInput={buildInput} />
+
+      <RecipeAssistChat buildContext={buildRecipeContext} />
 
       {!isManager ? null : (
       <>

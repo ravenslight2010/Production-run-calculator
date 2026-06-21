@@ -33,6 +33,12 @@ import {
   type ForecastPlan,
 } from "@/context/aiForecast";
 import { askErrorMessage, requestAsk } from "@/context/aiAsk";
+import {
+  buildRecipeAssistContext,
+  recipeAssistErrorMessage,
+  requestRecipeAssist,
+  type RecipeAssistInput,
+} from "@/context/aiRecipe";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
@@ -284,6 +290,130 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
   );
 }
 
+// Recipe & ingredient helper. Single-shot Q&A (no follow-up memory) over the
+// current run's real recipes: scale a recipe, suggest a substitution, or explain
+// a formula in plain language. Available to every signed-in worker (not manager-
+// gated), exactly like AskChat. Advisory only — never edits a recipe; the worker
+// reads the numbers and acts themselves. EXACT mirror of the web RecipeAssistChat
+// (replit.md parity).
+function RecipeAssistChat({
+  buildContext,
+}: {
+  buildContext: () => Omit<RecipeAssistInput, "question">;
+}) {
+  const colors = useColors();
+  const [turns, setTurns] = React.useState<{ role: "user" | "assistant"; text: string }[]>([]);
+  const [question, setQuestion] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
+  const scrollRef = React.useRef<ScrollView | null>(null);
+
+  React.useEffect(() => {
+    const id = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+    return () => clearTimeout(id);
+  }, [turns, loading]);
+
+  async function send() {
+    const q = question.trim();
+    if (!q || loading) return;
+    setLoading(true);
+    setError(null);
+    setNote(null);
+    const prevTurns = turns;
+    setTurns([...turns, { role: "user", text: q }]);
+    setQuestion("");
+    try {
+      const ctx = buildContext();
+      const res = await requestRecipeAssist({ ...ctx, question: q });
+      setTurns((cur) => [...cur, { role: "assistant", text: res.answer }]);
+      if (res.note) setNote(res.note);
+    } catch (e) {
+      setTurns(prevTurns);
+      setQuestion(q);
+      setError(recipeAssistErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card title="Recipe & ingredient helper" icon="book-open" accent>
+      <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+        Ask about this run&apos;s recipes — e.g. &ldquo;scale the dough recipe to 1.5x&rdquo;,
+        &ldquo;what can I substitute for X?&rdquo;, or &ldquo;explain how the dough batch is
+        figured&rdquo;. Answers use only your real recipe data. Advisory only — nothing is changed.
+      </Text>
+      <ScrollView
+        ref={scrollRef}
+        style={[styles.thread, { borderColor: colors.border, backgroundColor: colors.background }]}
+        contentContainerStyle={{ gap: 8, padding: 10 }}
+        nestedScrollEnabled
+      >
+        {turns.length === 0 && !loading ? (
+          <Text style={[styles.threadEmpty, { color: colors.mutedForeground }]}>
+            No questions yet. Ask anything about your recipes or ingredients.
+          </Text>
+        ) : (
+          turns.map((t, i) => (
+            <View
+              key={i}
+              style={[
+                styles.bubble,
+                t.role === "user"
+                  ? { alignSelf: "flex-end", backgroundColor: "rgba(14,165,233,0.18)" }
+                  : { alignSelf: "flex-start", backgroundColor: colors.muted },
+              ]}
+            >
+              <Text style={[styles.bubbleText, { color: colors.foreground }]}>{t.text}</Text>
+            </View>
+          ))
+        )}
+        {loading ? (
+          <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted, flexDirection: "row", alignItems: "center", gap: 8 }]}>
+            <ActivityIndicator size="small" color={colors.mutedForeground} />
+            <Text style={[styles.bubbleText, { color: colors.mutedForeground }]}>Thinking…</Text>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {note ? (
+        <View style={[styles.errorBox, { borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.1)" }]}>
+          <Feather name="alert-triangle" size={14} color="#fbbf24" />
+          <Text style={[styles.errorText, { color: "#fbbf24" }]}>{note}</Text>
+        </View>
+      ) : null}
+      {error ? (
+        <View style={[styles.errorBox, { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" }]}>
+          <Feather name="alert-triangle" size={14} color="#f87171" />
+          <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.inputRow}>
+        <TextInput
+          style={[
+            styles.input,
+            { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background },
+          ]}
+          value={question}
+          onChangeText={setQuestion}
+          placeholder="Ask about a recipe or ingredient…"
+          placeholderTextColor={colors.mutedForeground}
+          multiline
+          editable={!loading}
+        />
+        <Button
+          label="Send"
+          icon="send"
+          onPress={send}
+          disabled={loading || !question.trim()}
+        />
+      </View>
+    </Card>
+  );
+}
+
 function tomorrowStr(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -443,6 +573,7 @@ export default function AssistantScreen() {
   const insets = useSafeAreaInsets();
   const { isManager, isLoading: roleLoading } = useMe();
   const {
+    run,
     allRuns,
     history,
     runToTime,
@@ -451,6 +582,9 @@ export default function AssistantScreen() {
     moveRun,
     updateRunSettingsById,
     addScheduledRun,
+    cheeseIngredients,
+    doughIngredients,
+    frontlineIngredients,
   } = useRun();
 
   const [loading, setLoading] = React.useState(false);
@@ -533,6 +667,25 @@ export default function AssistantScreen() {
     });
   }, [scheduled, runToTime, allRuns, history]);
 
+  // Shape the current run's recipes + known ingredient pool + run context for the
+  // recipe & ingredient helper. Mirrors the web buildRecipeContext wiring; the
+  // extraction itself lives in the shared buildRecipeAssistContext (replit.md
+  // parity).
+  const buildRecipeContext = React.useCallback((): Omit<RecipeAssistInput, "question"> => {
+    const s = run?.settings;
+    return buildRecipeAssistContext(
+      s ?? {},
+      [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
+      {
+        brand: s?.brand,
+        flavor: s?.flavor,
+        casesNeeded: s?.casesNeeded,
+        pizzasPerCase: s?.pizzasPerCase,
+        doughballWeightOz: s?.doughballWeightOz,
+      },
+    );
+  }, [run, cheeseIngredients, doughIngredients, frontlineIngredients]);
+
   async function analyze() {
     setLoading(true);
     setError(null);
@@ -602,6 +755,8 @@ export default function AssistantScreen() {
       contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120, gap: 14 }}
     >
       <AskChat buildInput={buildInput} />
+
+      <RecipeAssistChat buildContext={buildRecipeContext} />
 
       {!isManager ? null : (
       <>

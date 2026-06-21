@@ -40,6 +40,11 @@ import {
   validateAskBody,
 } from "./aiAsk";
 import {
+  buildRecipeAssistPrompt,
+  sanitizeRecipeAnswer,
+  validateRecipeAssistBody,
+} from "./aiRecipeAssistant";
+import {
   aggregateForecastHistory,
   buildForecastPrompt,
   sanitizeForecast,
@@ -125,6 +130,16 @@ const ASK_RATE_MAX = 10;
 const askRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(ASK_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the recipe & ingredient helper (staff-facing chat): per-user
+// fixed window, Postgres-backed in production so the cost cap holds across
+// instances.
+const RECIPE_ASSIST_RATE_WINDOW_MS = 60_000;
+const RECIPE_ASSIST_RATE_MAX = 10;
+const recipeAssistRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(RECIPE_ASSIST_RATE_WINDOW_MS)
     : undefined;
 
 // Same posture for the on-demand demand forecaster: per-user fixed window,
@@ -275,6 +290,70 @@ router.post(
     res.json({
       answer: replyText,
       turns,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
+    });
+  },
+);
+
+// Recipe & ingredient helper: a single-shot, staff-facing Q&A over the current
+// run's recipes — scale a recipe, suggest a substitution, or explain a formula.
+// Grounded strictly in the supplied recipe rows, the known ingredient pool, the
+// shared name-corrections (so a fix learned elsewhere is honored), and the
+// facility memory. Advisory only — never edits a recipe, never writes anything.
+// Not manager-gated: floor staff use it, exactly like /ai/ask.
+router.post(
+  "/ai/recipe-assistant",
+  rateLimit({
+    windowMs: RECIPE_ASSIST_RATE_WINDOW_MS,
+    max: RECIPE_ASSIST_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: recipeAssistRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateRecipeAssistBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const { system, user } = buildRecipeAssistPrompt(validation.data);
+    // Ground the prompt in the shared name-corrections (so substitutions honor
+    // fixes staff already made) and the facility memory. Read-only and fail-safe.
+    const corrections = await loadCorrections(req.log);
+    const withCorrections = appendCorrectionsBlock(user, corrections, [
+      "ingredient",
+      "brand",
+      "flavor",
+      "die",
+    ]);
+    const grounded = await groundPromptWithMemory(req.log, withCorrections, {
+      facilityDomains: ["ingredient", "general"],
+    });
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: grounded },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-recipe-assistant call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    const { answer, note } = sanitizeRecipeAnswer(content);
+    const replyText = answer || note || "I couldn't answer that from the recipe data.";
+
+    res.json({
+      answer: replyText,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });

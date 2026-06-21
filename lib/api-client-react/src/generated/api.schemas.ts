@@ -660,6 +660,59 @@ export interface AskResult {
   note?: string;
 }
 
+/**
+ * One ingredient line of a recipe (ingredient name + pounds).
+ */
+export interface RecipeAssistRow {
+  ingredient: string;
+  /** Pounds of this ingredient in the recipe/batch */
+  lbs: number;
+}
+
+/**
+ * One of the current run's recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).
+ */
+export interface RecipeAssistRecipe {
+  /** What the recipe is for (dough, sauce, cheese, other) */
+  kind: string;
+  /** The recipe's name (may be empty if unnamed) */
+  name: string;
+  rows: RecipeAssistRow[];
+}
+
+/**
+ * Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.
+ */
+export interface RecipeAssistContext {
+  brand?: string;
+  flavor?: string;
+  casesNeeded?: number;
+  pizzasPerCase?: number;
+  /** Target weight of one doughball in ounces */
+  doughballWeightOz?: number;
+}
+
+/**
+ * A plain-language recipe/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.
+ */
+export interface RecipeAssistInput {
+  /** The user's plain-language recipe/ingredient question */
+  question: string;
+  /** The current run's recipes (dough/sauce/cheese), may be empty */
+  recipes: RecipeAssistRecipe[];
+  /** Known ingredient names, so substitutions stay within the app's pool */
+  ingredientNames?: string[];
+  context?: RecipeAssistContext;
+}
+
+export interface RecipeAssistResult {
+  /** The grounded plain-language answer */
+  answer: string;
+  generatedAt: number;
+  /** Optional message when the question could not be answered from data */
+  note?: string;
+}
+
 export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
 
 

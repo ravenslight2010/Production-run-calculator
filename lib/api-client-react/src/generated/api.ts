@@ -71,6 +71,8 @@ import type {
   ProductionRunInput,
   QualityCheckPhotoInput,
   QualityCheckResult,
+  RecipeAssistInput,
+  RecipeAssistResult,
   ReportIncidentInput,
   ResetPasswordRequest,
   ResetStaffPassword,
@@ -2302,6 +2304,78 @@ export const useAiAsk = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiAskMutationOptions(options));
+    }
+
+export const getAiRecipeAssistantUrl = () => {
+
+
+
+
+  return `/api/ai/recipe-assistant`
+}
+
+/**
+ * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
+ * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
+ */
+export const aiRecipeAssistant = async (recipeAssistInput: RecipeAssistInput, options?: RequestInit): Promise<RecipeAssistResult> => {
+
+  return customFetch<RecipeAssistResult>(getAiRecipeAssistantUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      recipeAssistInput,)
+  }
+);}
+
+
+
+
+export const getAiRecipeAssistantMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,{data: BodyType<RecipeAssistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,{data: BodyType<RecipeAssistInput>}, TContext> => {
+
+const mutationKey = ['aiRecipeAssistant'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiRecipeAssistant>>, {data: BodyType<RecipeAssistInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiRecipeAssistant(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiRecipeAssistantMutationResult = NonNullable<Awaited<ReturnType<typeof aiRecipeAssistant>>>
+    export type AiRecipeAssistantMutationBody = BodyType<RecipeAssistInput>
+    export type AiRecipeAssistantMutationError = ErrorType<void>
+
+    /**
+ * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
+ */
+export const useAiRecipeAssistant = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiRecipeAssistant>>, TError,{data: BodyType<RecipeAssistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiRecipeAssistant>>,
+        TError,
+        {data: BodyType<RecipeAssistInput>},
+        TContext
+      > => {
+      return useMutation(getAiRecipeAssistantMutationOptions(options));
     }
 
 export const getAiProactiveAlertUrl = () => {

@@ -692,6 +692,37 @@ export const AiAskResponse = zod.object({
 
 
 /**
+ * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
+ * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
+ */
+export const AiRecipeAssistantBody = zod.object({
+  "question": zod.string().describe('The user\'s plain-language recipe\/ingredient question'),
+  "recipes": zod.array(zod.object({
+  "kind": zod.string().describe('What the recipe is for (dough, sauce, cheese, other)'),
+  "name": zod.string().describe('The recipe\'s name (may be empty if unnamed)'),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number().describe('Pounds of this ingredient in the recipe\/batch')
+}).describe('One ingredient line of a recipe (ingredient name + pounds).'))
+}).describe('One of the current run\'s recipes the question may be about — a named set of ingredient rows tagged by kind (dough, sauce, cheese, other).')).describe('The current run\'s recipes (dough\/sauce\/cheese), may be empty'),
+  "ingredientNames": zod.array(zod.string()).optional().describe('Known ingredient names, so substitutions stay within the app\'s pool'),
+  "context": zod.object({
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "casesNeeded": zod.number().optional(),
+  "pizzasPerCase": zod.number().optional(),
+  "doughballWeightOz": zod.number().optional().describe('Target weight of one doughball in ounces')
+}).optional().describe('Optional run numbers the model may use to ground scaling math so its answer is consistent with what the app computes.')
+}).describe('A plain-language recipe\/ingredient question plus the real recipe rows, the known ingredient pool, and optional run context the answer must be grounded in. Both clients send identically-shaped data.')
+
+export const AiRecipeAssistantResponse = zod.object({
+  "answer": zod.string().describe('The grounded plain-language answer'),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when the question could not be answered from data')
+})
+
+
+/**
  * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
  * @summary At-most-one proactive shift alert (AI); read-only
  */

@@ -117,6 +117,7 @@ import QRCode from "react-qr-code";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import GuidedTour from "../components/GuidedTour";
 import { buildOptimizeInput, type OptimizeAction } from "../aiOptimize";
+import { buildRecipeAssistContext } from "../aiRecipe";
 import { buildForecastInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
@@ -7968,6 +7969,19 @@ export default function Home() {
                         })),
                       })),
                     })
+                  }
+                  buildRecipeContext={() =>
+                    buildRecipeAssistContext(
+                      form.getValues(),
+                      [...cheeseIngredients, ...doughIngredients, ...frontlineIngredients],
+                      {
+                        brand: currentRun?.brand,
+                        flavor: currentRun?.flavor,
+                        casesNeeded: v.casesNeeded,
+                        pizzasPerCase: v.pizzasPerCase,
+                        doughballWeightOz: v.targetDoughballWeight,
+                      },
+                    )
                   }
                   onApplyAction={applyOptimizeAction}
                   buildForecast={() =>
