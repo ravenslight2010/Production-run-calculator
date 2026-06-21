@@ -498,14 +498,24 @@ function formatTargetDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
+// Tomorrow as a local YYYY-MM-DD string — the default forecast target and the
+// earliest day the manager may forecast (forecasting today or the past makes no
+// sense). Kept in lockstep with the mobile tomorrowStr() (replit.md parity).
+function tomorrowStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // Manager-only demand forecast. Predicts an upcoming day's run plan grounded in
-// real history; advisory only. The manager taps "Add to schedule" to review the
-// suggestion in the editable schedule editor — nothing is committed here.
+// real history; advisory only. The manager picks the target day (defaults to
+// tomorrow) then taps "Add to schedule" to review the suggestion in the editable
+// schedule editor — nothing is committed here.
 function ForecastSection({
   buildForecast,
   onApplyForecast,
 }: {
-  buildForecast: () => ForecastInput;
+  buildForecast: (targetDate: string) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
 }) {
   const [loading, setLoading] = useState(false);
@@ -514,13 +524,14 @@ function ForecastSection({
     { forecast: ForecastPlan | null; note?: string; generatedAt: number } | null
   >(null);
   const [applied, setApplied] = useState(false);
+  const [targetDate, setTargetDate] = useState(tomorrowStr());
 
   async function predict() {
     setLoading(true);
     setError(null);
     setApplied(false);
     try {
-      const res = await requestForecast(buildForecast());
+      const res = await requestForecast(buildForecast(targetDate || tomorrowStr()));
       setResult(res);
     } catch (e) {
       setError(forecastErrorMessage(e));
@@ -540,12 +551,29 @@ function ForecastSection({
             Demand Forecast
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Predict tomorrow&apos;s run plan from recent production history — what to run, rough
-            quantities, and a sensible order. Advisory only; you review and adjust it in the
+            Predict an upcoming day&apos;s run plan from recent production history — what to run,
+            rough quantities, and a sensible order. Advisory only; you review and adjust it in the
             schedule before anything is planned.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div className="space-y-1.5">
+            <label
+              htmlFor="forecast-target-date"
+              className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground"
+            >
+              Forecast day
+            </label>
+            <input
+              id="forecast-target-date"
+              type="date"
+              value={targetDate}
+              min={tomorrowStr()}
+              onChange={(e) => setTargetDate(e.target.value)}
+              className="h-9 w-full rounded-md border border-border/60 bg-muted/40 px-3 text-sm outline-none transition-colors focus:border-primary/60"
+              data-testid="input-forecast-date"
+            />
+          </div>
           <Button onClick={predict} disabled={loading} className="gap-2" data-testid="button-forecast">
             {loading ? (
               <>
@@ -557,7 +585,7 @@ function ForecastSection({
               </>
             ) : (
               <>
-                <CalendarClock className="w-4 h-4" /> Forecast tomorrow
+                <CalendarClock className="w-4 h-4" /> Forecast {formatTargetDate(targetDate || tomorrowStr())}
               </>
             )}
           </Button>
@@ -811,7 +839,7 @@ export default function AssistantTab({
   buildInput: () => OptimizeInput;
   buildRecipeContext: () => Omit<RecipeAssistInput, "question">;
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
-  buildForecast: () => ForecastInput;
+  buildForecast: (targetDate: string) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
   buildAccuracy: () => ForecastAccuracyInput;
 }) {

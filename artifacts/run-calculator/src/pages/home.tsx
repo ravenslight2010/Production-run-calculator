@@ -7990,9 +7990,9 @@ export default function Home() {
                     )
                   }
                   onApplyAction={applyOptimizeAction}
-                  buildForecast={() =>
+                  buildForecast={(targetDate) =>
                     buildForecastInput({
-                      targetDate: tomorrowStr(),
+                      targetDate: targetDate || tomorrowStr(),
                       nowMs: Date.now(),
                       history,
                       runValuesForHistory: (day, run) => day.runValues?.[run.id],

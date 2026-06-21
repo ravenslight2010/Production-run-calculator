@@ -463,6 +463,32 @@ function tomorrowStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// A window of `count` future days as local YYYY-MM-DD strings, beginning
+// `startOffset` days after tomorrow. The window can be paged forward without
+// limit (Earlier/Later) so the manager can forecast ANY future day, while still
+// never targeting today or the past. Mirrors the web date input's min=tomorrow
+// constraint with no upper bound (replit.md parity).
+function futureDates(startOffset: number, count: number): string[] {
+  const out: string[] = [];
+  const base = new Date();
+  for (let i = 0; i < count; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1 + startOffset + i);
+    out.push(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`,
+    );
+  }
+  return out;
+}
+
+function fmtForecastChip(iso: string): { weekday: string; day: string } {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return {
+    weekday: dt.toLocaleDateString(undefined, { weekday: "short" }),
+    day: dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+  };
+}
+
 function confidenceColors(c: ForecastConfidence): { bg: string; fg: string } {
   if (c === "high") return { bg: "rgba(16,185,129,0.15)", fg: "#34d399" };
   if (c === "low") return { bg: "rgba(239,68,68,0.15)", fg: "#f87171" };
@@ -476,14 +502,15 @@ function formatTargetDate(iso: string): string {
 }
 
 // Manager-only demand forecast. Predicts an upcoming day's run plan grounded in
-// real history; advisory only. Tapping "Add to schedule" adds the runs to the
-// schedule for the target date and navigates there for review — nothing is
-// auto-committed. EXACT mirror of the web ForecastSection (replit.md parity).
+// real history; advisory only. The manager picks the target day (defaults to
+// tomorrow) then tapping "Add to schedule" adds the runs to the schedule for the
+// target date and navigates there for review — nothing is auto-committed. EXACT
+// mirror of the web ForecastSection (replit.md parity).
 function ForecastSection({
   buildForecast,
   onApplyForecast,
 }: {
-  buildForecast: () => ReturnType<typeof buildForecastInput>;
+  buildForecast: (targetDate: string) => ReturnType<typeof buildForecastInput>;
   onApplyForecast: (plan: ForecastPlan) => void;
 }) {
   const colors = useColors();
@@ -495,13 +522,16 @@ function ForecastSection({
     generatedAt: number;
   } | null>(null);
   const [applied, setApplied] = React.useState(false);
+  const [windowStart, setWindowStart] = React.useState(0);
+  const dates = React.useMemo(() => futureDates(windowStart, 14), [windowStart]);
+  const [targetDate, setTargetDate] = React.useState(tomorrowStr());
 
   async function predict() {
     setLoading(true);
     setError(null);
     setApplied(false);
     try {
-      const res = await requestForecast(buildForecast());
+      const res = await requestForecast(buildForecast(targetDate || tomorrowStr()));
       setResult(res);
     } catch (e) {
       setError(forecastErrorMessage(e));
@@ -511,17 +541,94 @@ function ForecastSection({
   }
 
   const plan = result?.forecast ?? null;
+  const tomorrow = tomorrowStr();
 
   return (
     <>
       <Card title="Demand Forecast" icon="calendar" accent>
         <Text style={[styles.intro, { color: colors.mutedForeground }]}>
-          Predict tomorrow&apos;s run plan from recent production history — what to run, rough
+          Predict an upcoming day&apos;s run plan from recent production history — what to run, rough
           quantities, and a sensible order. Advisory only; you review and adjust it in the schedule
           before anything is planned.
         </Text>
+        <View style={styles.forecastDateHeader}>
+          <Text style={[styles.forecastDateLabel, { color: colors.mutedForeground }]}>
+            FORECAST DAY
+          </Text>
+          <View style={styles.forecastNavRow}>
+            <Pressable
+              onPress={() => setWindowStart((s) => Math.max(0, s - 14))}
+              disabled={windowStart === 0}
+              hitSlop={8}
+              style={[
+                styles.forecastNavBtn,
+                {
+                  borderColor: colors.border,
+                  opacity: windowStart === 0 ? 0.4 : 1,
+                },
+              ]}
+            >
+              <Feather name="chevron-left" size={14} color={colors.foreground} />
+              <Text style={[styles.forecastNavText, { color: colors.foreground }]}>Earlier</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setWindowStart((s) => s + 14)}
+              hitSlop={8}
+              style={[styles.forecastNavBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.forecastNavText, { color: colors.foreground }]}>Later</Text>
+              <Feather name="chevron-right" size={14} color={colors.foreground} />
+            </Pressable>
+          </View>
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.forecastDateRow}
+        >
+          {dates.map((d) => {
+            const sel = d === targetDate;
+            const { weekday, day } = fmtForecastChip(d);
+            return (
+              <Pressable
+                key={d}
+                onPress={() => setTargetDate(d)}
+                style={[
+                  styles.forecastDateChip,
+                  {
+                    backgroundColor: sel ? colors.primary : colors.background,
+                    borderColor: sel ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.forecastDateWeekday,
+                    { color: sel ? colors.primaryForeground : colors.mutedForeground },
+                  ]}
+                >
+                  {d === tomorrow ? "Tomorrow" : weekday}
+                </Text>
+                <Text
+                  style={[
+                    styles.forecastDateDay,
+                    { color: sel ? colors.primaryForeground : colors.foreground },
+                  ]}
+                >
+                  {day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
         <Button
-          label={loading ? "Forecasting…" : result ? "Re-forecast" : "Forecast tomorrow"}
+          label={
+            loading
+              ? "Forecasting…"
+              : result
+                ? "Re-forecast"
+                : `Forecast ${formatTargetDate(targetDate || tomorrow)}`
+          }
           icon={result && !loading ? "refresh-cw" : "calendar"}
           onPress={predict}
           disabled={loading}
@@ -869,23 +976,26 @@ export default function AssistantScreen() {
 
   // Shapes recent finished history + scheduled days into the forecast wire input.
   // Mirrors the web buildForecast wiring (replit.md parity).
-  const buildForecast = React.useCallback(() => {
-    const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
-      date,
-      runs: runs.map((r) => ({
-        brand: r.brand,
-        flavor: r.flavor,
-        casesNeeded: r.casesNeeded,
-        dieType: r.dieType,
-      })),
-    }));
-    return buildForecastInput({
-      targetDate: tomorrowStr(),
-      nowMs: Date.now(),
-      history,
-      scheduledDays,
-    });
-  }, [scheduled, history]);
+  const buildForecast = React.useCallback(
+    (targetDate: string) => {
+      const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
+        date,
+        runs: runs.map((r) => ({
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesNeeded,
+          dieType: r.dieType,
+        })),
+      }));
+      return buildForecastInput({
+        targetDate: targetDate || tomorrowStr(),
+        nowMs: Date.now(),
+        history,
+        scheduledDays,
+      });
+    },
+    [scheduled, history],
+  );
 
   // Shapes recent finished history into the accuracy wire input — the server
   // reads the recorded forecasts itself. Mirrors the web buildAccuracy wiring.
@@ -1000,6 +1110,40 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   intro: { fontSize: 13, lineHeight: 19, fontFamily: FONTS.regular },
+  forecastDateHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  forecastDateLabel: {
+    fontSize: 10,
+    fontFamily: FONTS.bold,
+    letterSpacing: 1,
+  },
+  forecastNavRow: { flexDirection: "row", gap: 6 },
+  forecastNavBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  forecastNavText: { fontSize: 11, fontFamily: FONTS.medium },
+  forecastDateRow: { flexDirection: "row", gap: 8, paddingRight: 4 },
+  forecastDateChip: {
+    minWidth: 64,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: "center",
+  },
+  forecastDateWeekday: { fontSize: 11, fontFamily: FONTS.medium },
+  forecastDateDay: { fontSize: 13, fontFamily: FONTS.bold, marginTop: 2 },
   errorBox: {
     flexDirection: "row",
     alignItems: "flex-start",
