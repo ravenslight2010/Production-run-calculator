@@ -1,6 +1,6 @@
 ---
-name: Role gating (5 roles, two ladders)
-description: The role model (operator/supervisor/manager + qc-operator/qc-manager), what each tier can do, and what must never be gated.
+name: Role gating (7 roles, two ladders + flat ops roles)
+description: The role model (operator/supervisor/manager + qc-operator/qc-manager + warehouse/inventory), what each tier can do, and what must never be gated.
 ---
 
 # Role gating
@@ -10,17 +10,27 @@ migration) keyed by userId. First user to be seen bootstraps as **manager**,
 every new account is **operator**. The role-resolution helper creates the row on
 first sight, so the `/me`-style role hook also bootstraps.
 
-## The role model — two ladders
+## The role model — two ladders + flat operator-level roles (7 total)
 - **Main ladder (rank-ordered):** operator < supervisor < manager. `mainRank()`
   drives `requireRole(min)` — a caller passes when `mainRank(role) >= mainRank(min)`.
 - **QC track:** qc-operator < qc-manager. QC roles sit at **operator level on the
   main ladder** (mainRank == operator), so today they get NO elevated main-ladder
   powers. `requireQcRole` plumbing exists but is unused — reserved for future QC
   powers. Don't wire QC powers without a real requirement.
+- **Flat operator-level roles:** `warehouse` and `inventory`. mainRank == 1
+  (operator), qcRank == 0 (off the QC track). They are pure job labels — same
+  access as a plain operator (run needs, restock/incoming counts, consume/adjust,
+  low-stock alerts) and NOTHING gated. No new booleans in the `useRole` hooks:
+  they resolve to isManager=false / isSupervisorOrAbove=false / isQc=false, i.e.
+  operator-level by omission. Don't grant them item CRUD, reorder-threshold, or
+  inventory settings — the user explicitly chose flat roles.
 
-**Why:** lets QC be promoted/tracked independently without granting production
-authority, and keeps the door open for a future "warehouse/inventory roles" task
-(already queued — don't duplicate).
+**Why:** lets QC and warehouse/inventory be tracked/labeled independently without
+granting production authority. Adding a flat role = extend `Role`/`ROLES` + both
+rank maps (mainRank 1, qcRank 0) + both OpenAPI enums (StaffMember.role +
+StaffRoleUpdate) + the `Role` type in each app's inventoryShared + the role
+pickers (web `<option>`s, mobile `ROLE_OPTIONS`). No requireRole/guard edits and
+no DB migration needed.
 
 ## What IS gated
 **Supervisor-or-above** (the 3 manager powers supervisors gained):

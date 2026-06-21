@@ -15,4 +15,6 @@ export const StaffMemberRole = {
   manager: 'manager',
   'qc-operator': 'qc-operator',
   'qc-manager': 'qc-manager',
+  warehouse: 'warehouse',
+  inventory: 'inventory',
 } as const;

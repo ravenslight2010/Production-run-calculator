@@ -429,7 +429,14 @@ export function applyPhotoAliases(
 }
 
 // ── Staff roles / access control ─────────────────────────────────────────────
-export type Role = "operator" | "supervisor" | "manager" | "qc-operator" | "qc-manager";
+export type Role =
+  | "operator"
+  | "supervisor"
+  | "manager"
+  | "qc-operator"
+  | "qc-manager"
+  | "warehouse"
+  | "inventory";
 export type StaffMember = {
   userId: string;
   role: Role;

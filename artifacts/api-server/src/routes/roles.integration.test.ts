@@ -66,6 +66,8 @@ const OPERATOR = "operator-1";
 const SUPERVISOR = "supervisor-1";
 const QC_OPERATOR = "qc-operator-1";
 const QC_MANAGER = "qc-manager-1";
+const WAREHOUSE = "warehouse-1";
+const INVENTORY = "inventory-1";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -156,6 +158,8 @@ beforeEach(async () => {
     { id: SUPERVISOR, username: "supervisor", passwordHash: "x" },
     { id: QC_OPERATOR, username: "qc-operator", passwordHash: "x" },
     { id: QC_MANAGER, username: "qc-manager", passwordHash: "x" },
+    { id: WAREHOUSE, username: "warehouse", passwordHash: "x" },
+    { id: INVENTORY, username: "inventory", passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
@@ -163,6 +167,8 @@ beforeEach(async () => {
     { userId: SUPERVISOR, role: "supervisor" },
     { userId: QC_OPERATOR, role: "qc-operator" },
     { userId: QC_MANAGER, role: "qc-manager" },
+    { userId: WAREHOUSE, role: "warehouse" },
+    { userId: INVENTORY, role: "inventory" },
   ]);
 });
 
@@ -351,6 +357,50 @@ describe("role-based access control", () => {
     });
   }
 
+  // warehouse and inventory are flat operator-level roles — they get no elevated
+  // powers, so they are forbidden on every gated route, supervisor and manager
+  // alike (exactly like a plain operator).
+  for (const flatUser of [WAREHOUSE, INVENTORY]) {
+    describe(`${flatUser} → 403 (flat operator-level role)`, () => {
+      for (const route of ALL_ROUTES) {
+        it(`forbids ${route.name} with 403`, async () => {
+          const itemId = await makeItem("ingredient:Target:lbs");
+          const res = await req(flatUser, route.method, route.path({ itemId }), route.body);
+          expect(res.status).toBe(403);
+        });
+      }
+    });
+  }
+
+  // warehouse and inventory get operator-level access: an ungated route every
+  // signed-in user (including a plain operator) may call must admit them. GET /me
+  // is the canonical such route — it returns the caller's own StaffMember.
+  for (const flatUser of [WAREHOUSE, INVENTORY]) {
+    it(`admits ${flatUser} on the ungated GET /me (operator-level access)`, async () => {
+      const res = await req(flatUser, "GET", "/api/me");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { userId: string; role: string };
+      expect(body.userId).toBe(flatUser);
+      expect(body.role).toBe(flatUser === WAREHOUSE ? "warehouse" : "inventory");
+    });
+  }
+
+  // A manager can assign the two new roles through the change-role route, and the
+  // role persists — proving warehouse/inventory validate against the full set.
+  for (const role of ["warehouse", "inventory"] as const) {
+    it(`lets a manager assign ${role} via PUT /users/:id/role (→ 200)`, async () => {
+      const res = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/role`, { role });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { role: string };
+      expect(body.role).toBe(role);
+      const [row] = await db
+        .select()
+        .from(userRolesTable)
+        .where(sql`${userRolesTable.userId} = ${OPERATOR}`);
+      expect(row.role).toBe(role);
+    });
+  }
+
   describe("supervisor → allowed on supervisor routes", () => {
     for (const route of SUPERVISOR_ROUTES) {
       it(`allows ${route.name} (${route.okStatus})`, async () => {
@@ -384,8 +434,15 @@ describe("role-based access control", () => {
 
 describe("last-manager guard", () => {
   // The guard blocks demoting the only manager to ANY non-manager role, not just
-  // operator — so each of the four other roles must be rejected identically.
-  for (const role of ["operator", "supervisor", "qc-operator", "qc-manager"]) {
+  // operator — so each of the six other roles must be rejected identically.
+  for (const role of [
+    "operator",
+    "supervisor",
+    "qc-operator",
+    "qc-manager",
+    "warehouse",
+    "inventory",
+  ]) {
     it(`rejects demoting the only manager to ${role} (PUT /users/:id/role → 400)`, async () => {
       // The seeded roster has exactly one manager (MANAGER); the rest don't count.
       const res = await req(MANAGER, "PUT", `/api/users/${MANAGER}/role`, { role });

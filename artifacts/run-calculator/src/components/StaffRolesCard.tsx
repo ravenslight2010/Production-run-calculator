@@ -331,6 +331,8 @@ export default function StaffRolesCard() {
                   <option value="manager">Manager</option>
                   <option value="qc-operator">QC Operator</option>
                   <option value="qc-manager">QC Manager</option>
+                  <option value="warehouse">Warehouse</option>
+                  <option value="inventory">Inventory</option>
                 </select>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

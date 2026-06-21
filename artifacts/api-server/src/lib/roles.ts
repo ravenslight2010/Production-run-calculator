@@ -9,7 +9,18 @@ import { revokeUser } from "./userValidity";
 // QC roles sit at operator level on the MAIN ladder for now (no new powers yet);
 // their dedicated rank lets a future QC-only gate admit them without touching
 // the main-ladder gates.
-export type Role = "operator" | "supervisor" | "manager" | "qc-operator" | "qc-manager";
+// warehouse and inventory are FLAT operator-level roles: they exist only to
+// designate staff by their job (run needs, incoming counts, low-stock signals —
+// all work an operator already does) and grant NO elevated powers. They rank as
+// operators on the main ladder and sit off the QC track entirely.
+export type Role =
+  | "operator"
+  | "supervisor"
+  | "manager"
+  | "qc-operator"
+  | "qc-manager"
+  | "warehouse"
+  | "inventory";
 
 // The three main-ladder levels a route can require. QC roles are never used as a
 // main-ladder minimum (they rank as operators there); a future QC gate uses the
@@ -22,6 +33,8 @@ export const ROLES: readonly Role[] = [
   "manager",
   "qc-operator",
   "qc-manager",
+  "warehouse",
+  "inventory",
 ] as const;
 
 export function isRole(value: unknown): value is Role {
@@ -34,6 +47,10 @@ const MAIN_RANK: Record<Role, number> = {
   operator: 1,
   "qc-operator": 1,
   "qc-manager": 1,
+  // warehouse and inventory are flat operator-level roles — same access as an
+  // operator on the main ladder, no elevated powers.
+  warehouse: 1,
+  inventory: 1,
   supervisor: 2,
   manager: 3,
 };
@@ -49,6 +66,9 @@ const QC_RANK: Record<Role, number> = {
   operator: 0,
   supervisor: 0,
   manager: 0,
+  // warehouse and inventory are off the QC track entirely.
+  warehouse: 0,
+  inventory: 0,
   "qc-operator": 1,
   "qc-manager": 2,
 };

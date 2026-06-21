@@ -72,7 +72,7 @@ export const SignInResponse = zod.object({
   "token": zod.string(),
   "user": zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1844,7 +1844,7 @@ export const ResolveIncidentResponse = zod.object({
  */
 export const GetMeResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1859,7 +1859,7 @@ export const GetMeResponse = zod.object({
  */
 export const MarkOnboardingSeenResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1874,7 +1874,7 @@ export const MarkOnboardingSeenResponse = zod.object({
  */
 export const MarkTourCompletedResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1888,7 +1888,7 @@ export const MarkTourCompletedResponse = zod.object({
  */
 export const ListStaffResponseItem = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
@@ -1906,12 +1906,12 @@ export const SetStaffRoleParams = zod.object({
 })
 
 export const SetStaffRoleBody = zod.object({
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager'])
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory'])
 })
 
 export const SetStaffRoleResponse = zod.object({
   "userId": zod.string(),
-  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager']),
+  "role": zod.enum(['operator', 'supervisor', 'manager', 'qc-operator', 'qc-manager', 'warehouse', 'inventory']),
   "email": zod.string().nullable(),
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),

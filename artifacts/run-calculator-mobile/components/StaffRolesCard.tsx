@@ -38,6 +38,8 @@ const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: "manager", label: "Manager" },
   { value: "qc-operator", label: "QC Op" },
   { value: "qc-manager", label: "QC Mgr" },
+  { value: "warehouse", label: "Warehouse" },
+  { value: "inventory", label: "Inventory" },
 ];
 
 function serverMessage(error: unknown, fallback: string): string {

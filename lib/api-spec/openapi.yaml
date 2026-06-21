@@ -2519,7 +2519,7 @@ components:
           type: string
         role:
           type: string
-          enum: [operator, supervisor, manager, qc-operator, qc-manager]
+          enum: [operator, supervisor, manager, qc-operator, qc-manager, warehouse, inventory]
         email:
           type: [string, "null"]
         name:
@@ -2548,7 +2548,7 @@ components:
       properties:
         role:
           type: string
-          enum: [operator, supervisor, manager, qc-operator, qc-manager]
+          enum: [operator, supervisor, manager, qc-operator, qc-manager, warehouse, inventory]
 
     ResetStaffPassword:
       type: object
