@@ -1256,6 +1256,9 @@ interface RunContextValue {
     partial: Partial<Pick<RunState, "actualCases" | "wasteLbs">>,
   ) => void;
   applyCarryOver: (excessTrays: number, excessBatches: number) => void;
+  // Close out the whole day and reset to a fresh next day (manual trigger of the
+  // automatic midnight rollover). Irreversible — used by the voice rollover cmd.
+  rolloverDay: () => void;
   addRun: () => void;
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
@@ -2035,6 +2038,36 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     },
     [persist],
   );
+
+  // Manually trigger the same day close-out the automatic midnight rollover
+  // performs: auto-deduct inventory for open runs, freeze them at now, archive
+  // the day to history, reset to a fresh day, and push the new resetAt session
+  // boundary (which signs other devices out). Irreversible by design — exposed
+  // to voice as a manager-only command. Mirrors web's voice rollover handler.
+  const rolloverDay = useCallback(() => {
+    const cur = appStateRef.current;
+    consumeOpenRunsForRollover(cur.runs);
+    const now = Date.now();
+    const archived: HistoryDay = {
+      date: cur.date,
+      runs: cur.runs.map((r) => closeOutRun(normalizeRun(r), now)),
+    };
+    const next: AppState = {
+      ...cur,
+      runs: [makeNewRun()],
+      currentIndex: 0,
+      shiftNotes: "",
+      date: todayStr(),
+      resetAt: now,
+      history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
+        0,
+        MAX_HISTORY_DAYS,
+      ),
+    };
+    setAppState(next);
+    persistNow(next);
+    forceSignedOutRef.current();
+  }, [persistNow]);
 
   const addRun = useCallback(() => {
     setAppState((prev) => {
@@ -2996,6 +3029,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         addPastStoppage,
         updateRunMeta,
         applyCarryOver,
+        rolloverDay,
         addRun,
         switchRun,
         deleteRun,

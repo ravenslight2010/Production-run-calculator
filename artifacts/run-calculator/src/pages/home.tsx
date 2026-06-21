@@ -109,6 +109,13 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
+import {
+  dispatchVoiceCommand,
+  type VoiceCommandAction,
+  type VoiceCommandHandlers,
+  type VoiceCommandResult,
+} from "@workspace/voice-commands";
+import { restockInventory, adjustInventory } from "../inventoryShared";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
@@ -3617,6 +3624,310 @@ export default function Home() {
       },
     };
   }
+
+  // Voice commands: build the platform handler set that the shared dispatcher
+  // calls. Every handler forwards to an EXISTING run/inventory mutation (no new
+  // write surface) and returns an undo so a misheard command can be reverted
+  // within the AssistantTab's short window. Server-resolved ids are validated
+  // again here (the run may have changed since classification). Mobile mirrors
+  // this exactly via RunContext in artifacts/run-calculator-mobile (replit.md
+  // parity) — same kinds, same arguments through dispatchVoiceCommand.
+  function buildVoiceHandlers(): VoiceCommandHandlers {
+    // Function declarations are hoisted, so capture the page-level mutations
+    // whose names collide with handler methods to call them unambiguously.
+    const pageAddRun = addRun;
+    const pageRemoveRun = removeRun;
+    const pageUpdateRunMeta = updateRunMeta;
+    const findIdx = (runId: string) => dayStateRef.current.runs.findIndex((r) => r.id === runId);
+
+    return {
+      setTargetTime(time) {
+        return applyOptimizeAction({ kind: "set_target_time", label: "", time });
+      },
+      clearTargetTime() {
+        const prev = runToTime;
+        setRunToTime("");
+        return {
+          ok: true,
+          message: "Finish time cleared",
+          undo: () => setRunToTime(prev),
+        };
+      },
+      setRunTarget(runId, casesNeeded) {
+        return applyOptimizeAction({ kind: "set_run_target", label: "", runId, casesNeeded });
+      },
+      reorderRun(runId, beforeRunId) {
+        return applyOptimizeAction({ kind: "reorder_run", label: "", runId, beforeRunId });
+      },
+      addRun(brand, flavor) {
+        if (dayStateRef.current.runs.length >= MAX_RUNS) {
+          return { ok: false, message: "Maximum runs reached" };
+        }
+        const prevDs = dayStateRef.current;
+        const prevIndex = prevDs.currentIndex;
+        pageAddRun();
+        setRunBrandFlavor(brand, flavor);
+        const name = `${brand} ${flavor}`.trim() || "run";
+        return {
+          ok: true,
+          message: `Added ${name}`,
+          undo: () => {
+            setDayState(prevDs);
+            saveDayState(prevDs);
+            const vals = loadRunValues(prevDs.runs[prevIndex].id);
+            form.reset(vals);
+            resetFieldArrays(vals);
+            schedulePush(prevDs, 0);
+          },
+        };
+      },
+      removeRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const run = dayStateRef.current.runs[idx];
+        if (run.startedAt || run.endedAt) {
+          return { ok: false, message: "Can't remove a started or finished run" };
+        }
+        if (dayStateRef.current.runs.length <= 1) {
+          return { ok: false, message: "Can't remove the only run" };
+        }
+        const prevDs = dayStateRef.current;
+        const prevIndex = prevDs.currentIndex;
+        if (idx !== prevIndex) switchToRun(idx);
+        pageRemoveRun();
+        return {
+          ok: true,
+          message: "Run removed",
+          undo: () => {
+            setDayState(prevDs);
+            saveDayState(prevDs);
+            const vals = loadRunValues(prevDs.runs[prevIndex].id);
+            form.reset(vals);
+            resetFieldArrays(vals);
+            schedulePush(prevDs, 0);
+          },
+        };
+      },
+      switchRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const prevIndex = dayStateRef.current.currentIndex;
+        if (idx === prevIndex) return { ok: true, message: "Already on that run" };
+        switchToRun(idx);
+        return {
+          ok: true,
+          message: "Switched run",
+          undo: () => switchToRun(prevIndex),
+        };
+      },
+      updateRunMeta(runId, brand, flavor) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const run = dayStateRef.current.runs[idx];
+        const newBrand = brand ?? run.brand;
+        const newFlavor = flavor ?? run.flavor;
+        const prevBrand = run.brand;
+        const prevFlavor = run.flavor;
+        const name = `${newBrand} ${newFlavor}`.trim() || "run";
+        if (idx === dayStateRef.current.currentIndex) {
+          setRunBrandFlavor(newBrand, newFlavor);
+          return {
+            ok: true,
+            message: `Renamed to ${name}`,
+            undo: () => setRunBrandFlavor(prevBrand, prevFlavor),
+          };
+        }
+        pageUpdateRunMeta(runId, { brand: newBrand, flavor: newFlavor });
+        return {
+          ok: true,
+          message: `Renamed to ${name}`,
+          undo: () => pageUpdateRunMeta(runId, { brand: prevBrand, flavor: prevFlavor }),
+        };
+      },
+      finishRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const run = dayStateRef.current.runs[idx];
+        if (run.endedAt) return { ok: false, message: "Run already finished" };
+        if (!run.startedAt) return { ok: false, message: "Run hasn't started yet" };
+        const prevDs = dayStateRef.current;
+        const prevIndex = prevDs.currentIndex;
+        if (idx !== prevIndex) switchToRun(idx);
+        endRun();
+        return {
+          ok: true,
+          message: "Run finished",
+          undo: () => {
+            setDayState(prevDs);
+            saveDayState(prevDs);
+            const vals = loadRunValues(prevDs.runs[prevIndex].id);
+            form.reset(vals);
+            resetFieldArrays(vals);
+            schedulePush(prevDs, 0);
+          },
+        };
+      },
+      startStoppage(runId, reason) {
+        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
+        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        const prevDs = dayStateRef.current;
+        const prevActive = activeStopId;
+        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
+        logStop(reason, "");
+        return {
+          ok: true,
+          message: reason ? `Stoppage started: ${reason}` : "Stoppage started",
+          undo: () => {
+            setDayState(prevDs);
+            saveDayState(prevDs);
+            setActiveStopId(prevActive);
+            schedulePush(prevDs, 0);
+          },
+        };
+      },
+      endStoppage(runId) {
+        const targetIdx = runId ? findIdx(runId) : dayStateRef.current.currentIndex;
+        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        if (runId && targetIdx !== dayStateRef.current.currentIndex) switchToRun(targetIdx);
+        if (!activeStopId) return { ok: false, message: "No active stoppage" };
+        const prevDs = dayStateRef.current;
+        const prevActive = activeStopId;
+        endStop();
+        return {
+          ok: true,
+          message: "Stoppage ended",
+          undo: () => {
+            setDayState(prevDs);
+            saveDayState(prevDs);
+            setActiveStopId(prevActive);
+            schedulePush(prevDs, 0);
+          },
+        };
+      },
+      setRunProgress(runId, progress) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const isCurrent = idx === dayStateRef.current.currentIndex;
+        const before = isCurrent ? form.getValues() : loadRunValues(runId);
+        const prev = {
+          skidsCompleted: before.skidsCompleted,
+          casesOnCurrentSkid: before.casesOnCurrentSkid,
+          casesPerSkid: before.casesPerSkid,
+        };
+        const writeProgress = (p: {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          casesPerSkid?: number;
+        }) => {
+          if (isCurrent) {
+            if (p.skidsCompleted != null)
+              form.setValue("skidsCompleted", p.skidsCompleted, { shouldDirty: true });
+            if (p.casesOnCurrentSkid != null)
+              form.setValue("casesOnCurrentSkid", p.casesOnCurrentSkid, { shouldDirty: true });
+            if (p.casesPerSkid != null)
+              form.setValue("casesPerSkid", p.casesPerSkid, { shouldDirty: true });
+            saveRunValues(currentRunId, form.getValues());
+          } else {
+            const cur = loadRunValues(runId);
+            saveRunValues(runId, {
+              ...cur,
+              ...(p.skidsCompleted != null ? { skidsCompleted: p.skidsCompleted } : {}),
+              ...(p.casesOnCurrentSkid != null ? { casesOnCurrentSkid: p.casesOnCurrentSkid } : {}),
+              ...(p.casesPerSkid != null ? { casesPerSkid: p.casesPerSkid } : {}),
+            });
+          }
+          schedulePush(dayStateRef.current, 0);
+        };
+        writeProgress(progress);
+        return {
+          ok: true,
+          message: "Progress updated",
+          undo: () => writeProgress(prev),
+        };
+      },
+      logActualCases(runId, actualCases) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const prev = dayStateRef.current.runs[idx].actualCases;
+        pageUpdateRunMeta(runId, { actualCases });
+        return {
+          ok: true,
+          message: `Logged ${actualCases} cases`,
+          undo: () => pageUpdateRunMeta(runId, { actualCases: prev }),
+        };
+      },
+      logWaste(runId, wasteLbs) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const prev = dayStateRef.current.runs[idx].wasteLbs;
+        pageUpdateRunMeta(runId, { wasteLbs });
+        return {
+          ok: true,
+          message: `Logged ${wasteLbs} lbs waste`,
+          undo: () => pageUpdateRunMeta(runId, { wasteLbs: prev }),
+        };
+      },
+      async restockItem(body) {
+        await restockInventory({
+          itemKey: body.itemKey,
+          category: body.category,
+          name: body.name,
+          unit: body.unit,
+          qty: body.qty,
+        });
+        return { ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` };
+      },
+      async adjustItem(body) {
+        await adjustInventory({ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note });
+        const sign = body.qtyDelta >= 0 ? "+" : "";
+        return {
+          ok: true,
+          message: `Adjusted stock ${sign}${body.qtyDelta}`,
+          undo: async () => {
+            await adjustInventory({
+              itemId: body.itemId,
+              qtyDelta: -body.qtyDelta,
+              note: "Undo voice adjustment",
+            });
+          },
+        };
+      },
+      rollover() {
+        // Manually trigger the same day close-out the midnight reset performs:
+        // auto-deduct inventory for open runs, freeze them at now, archive the
+        // day to history, then reset to a fresh day and push it. Irreversible by
+        // design (no undo) — gated to managers in VOICE_COMMAND_ROLES.
+        const cur = dayStateRef.current;
+        for (const r of cur.runs) {
+          if (r.startedAt && !r.endedAt) {
+            const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
+            void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
+          }
+        }
+        const now = Date.now();
+        const finalDs: DayState = {
+          ...cur,
+          runs: cur.runs.map((r) =>
+            r.startedAt && !r.endedAt ? { ...r, endedAt: now, pausedAt: undefined } : r,
+          ),
+        };
+        archiveDayToHistory(finalDs, cur.date ?? todayStr());
+        const fresh = { ...freshDayState(), resetAt: now };
+        setDayState(fresh);
+        saveDayState(fresh);
+        setRunToTime("19:15");
+        form.reset(DEFAULT_VALUES);
+        resetFieldArrays(DEFAULT_VALUES);
+        schedulePush(fresh, 0);
+        return { ok: true, message: "Day rolled over" };
+      },
+    };
+  }
+
+  // Entry point passed to AssistantTab: dispatch the server-resolved actions
+  // through the shared, parity-critical mapping with this user's role.
+  const applyVoiceCommand = (actions: VoiceCommandAction[]): Promise<VoiceCommandResult[]> =>
+    dispatchVoiceCommand(actions, buildVoiceHandlers(), isManager);
 
   // Apply a confirm-first recipe suggestion from the AI helper (a scaled recipe
   // or a substitution) to the CURRENT run's matching recipe rows. Routes through
@@ -8054,6 +8365,7 @@ export default function Home() {
                   }
                   onApplyRecipeSuggestion={applyRecipeSuggestion}
                   onApplyAction={applyOptimizeAction}
+                  onApplyVoiceCommand={applyVoiceCommand}
                   buildForecast={(targetDate) =>
                     buildForecastInput({
                       targetDate: targetDate || tomorrowStr(),

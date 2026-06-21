@@ -744,6 +744,35 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/command:
+    post:
+      operationId: aiCommand
+      tags: [ai]
+      summary: Classify a spoken phrase as a question or an executable command
+      description: >-
+        Takes a single spoken utterance plus the live day-state and classifies it
+        as either a QUESTION (the client routes it to /ai/ask, unchanged) or a
+        COMMAND. For a command, returns one or more structured actions drawn from
+        a fixed vocabulary, with every fuzzy reference already resolved against
+        the grounding (a run by brand/flavor → run id, an inventory item by name →
+        item key/id) and a friendly label attached. Returns an explicit "none"
+        when nothing actionable was understood. This endpoint never mutates
+        anything itself — the client runs the actions through its existing
+        handlers (with role gating and Undo).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandInput"
+      responses:
+        "200":
+          description: Classification result — question, command actions, or none
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/recipe-assistant:
     post:
       operationId: aiRecipeAssistant
@@ -2847,6 +2876,23 @@ components:
         note:
           type: string
           description: Optional message when the question could not be answered from data
+
+    CommandInput:
+      type: object
+      description: >-
+        A single spoken utterance plus the full live day-state it must be
+        interpreted against. Reuses the OptimizeInput shape so both clients send
+        identically-shaped grounding data (the same data /ai/ask uses), letting
+        the server resolve fuzzy run references to concrete run ids.
+      required:
+        - utterance
+        - dayState
+      properties:
+        utterance:
+          type: string
+          description: The user's spoken phrase (a question or an action command)
+        dayState:
+          $ref: "#/components/schemas/OptimizeInput"
 
     RecipeAssistRow:
       type: object

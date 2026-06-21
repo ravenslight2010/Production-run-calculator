@@ -56,6 +56,12 @@ import {
   validateAskBody,
 } from "./aiAsk";
 import {
+  buildCommandPrompt,
+  sanitizeCommand,
+  validateCommandBody,
+  type CommandGrounding,
+} from "./aiCommand";
+import {
   buildRecipeAssistPrompt,
   sanitizeRecipeAnswer,
   validateRecipeAssistBody,
@@ -152,6 +158,15 @@ const ASK_RATE_MAX = 10;
 const askRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(ASK_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the voice-command interpreter: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const COMMAND_RATE_WINDOW_MS = 60_000;
+const COMMAND_RATE_MAX = 20;
+const commandRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(COMMAND_RATE_WINDOW_MS)
     : undefined;
 
 // Same posture for the recipe & ingredient helper (staff-facing chat): per-user
@@ -315,6 +330,111 @@ router.post(
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
+  },
+);
+
+// Voice commands: classify a single spoken phrase as a QUESTION (the client
+// routes it to /ai/ask, unchanged) or a COMMAND. For a command, return one or
+// more structured actions from a fixed vocabulary, with every fuzzy reference
+// already resolved against the grounding (today's runs by brand/flavor → run id,
+// inventory items by name → item key/id) and validated. This endpoint NEVER
+// mutates anything — the client runs the actions through its existing handlers,
+// applying the same role gating and offering Undo. Not manager-gated: floor
+// staff issue commands, exactly like manual actions (each action's own role bar
+// is enforced client-side, mirroring the manual UI).
+router.post(
+  "/ai/command",
+  rateLimit({
+    windowMs: COMMAND_RATE_WINDOW_MS,
+    max: COMMAND_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: commandRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateCommandBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Build the grounding: runs come from the supplied day-state; inventory is
+    // read live from the DB so item references resolve to current keys/ids.
+    const grounding: CommandGrounding = {
+      runs: new Map(),
+      inventoryByKey: new Map(),
+      inventoryById: new Map(),
+    };
+    for (const r of validation.data.dayState.runs) {
+      grounding.runs.set(r.id, { label: r.label, brand: r.brand, flavor: r.flavor });
+    }
+
+    let inventoryForPrompt: Array<{
+      key: string;
+      id: number;
+      category: string;
+      name: string;
+      unit: string;
+      onHand: number;
+    }> = [];
+    try {
+      const items = await db
+        .select()
+        .from(inventoryItemsTable)
+        .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
+      // On-hand per item is the sum of its lots' remaining qty (no onHand column).
+      const lots = await db.select().from(inventoryLotsTable);
+      const onHandByItem = new Map<number, number>();
+      for (const lot of lots) {
+        onHandByItem.set(lot.itemId, (onHandByItem.get(lot.itemId) ?? 0) + lot.qtyRemaining);
+      }
+      inventoryForPrompt = items.map((item) => ({
+        key: item.key,
+        id: item.id,
+        category: item.category,
+        name: item.name,
+        unit: item.unit,
+        onHand: Math.round((onHandByItem.get(item.id) ?? 0) * 100) / 100,
+      }));
+      for (const item of items) {
+        grounding.inventoryByKey.set(item.key, {
+          id: item.id,
+          category: item.category,
+          name: item.name,
+          unit: item.unit,
+        });
+        grounding.inventoryById.set(item.id, {
+          key: item.key,
+          name: item.name,
+          unit: item.unit,
+        });
+      }
+    } catch (err) {
+      // Inventory grounding is best-effort: run commands still work without it.
+      req.log.error({ err }, "ai-command failed to load inventory grounding");
+    }
+
+    const { system, user } = buildCommandPrompt(validation.data, inventoryForPrompt);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 1024,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-command call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    const result = sanitizeCommand(content, grounding);
+    res.json({ ...result, generatedAt: Date.now() });
   },
 );
 

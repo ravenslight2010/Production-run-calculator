@@ -70,3 +70,4 @@
 - [Forecast accuracy](forecast-accuracy.md) — manager-only forecast-vs-actual scoring; /ai/forecast-accuracy is pure math (no AI/limit); formatForecastFact↔parseForecastFact canonical round-trip, truncation-tolerant; web+mobile parity.
 - [AI recipe assistant](recipe-assistant.md) — staff /ai/recipe-assistant single-shot (no convo memory; NO userId to grounding); scale/sub/explain over real recipes; shared buildRecipeAssistContext verbatim; advisory-only; web+mobile parity.
 - [Voice ask input](voice-ask-input.md) — mic on Ask-the-day chat = Web Speech API (no native lib); mobile guards Platform.OS==="web"; hidden when unsupported (native) = graceful typing fallback; web+mobile parity.
+- [Voice commands](voice-commands.md) — spoken phrase → /ai/command classifies question vs command; actions run via EXISTING handlers (no confirm, Undo safety net); parity in @workspace/voice-commands dispatch; server grounds fuzzy refs; mobile Undo drift accepted.

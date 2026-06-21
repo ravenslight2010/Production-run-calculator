@@ -17,6 +17,7 @@ export * from './authCredentials';
 export * from './authResponse';
 export * from './changePasswordCredentials';
 export * from './checkUsernameAvailableParams';
+export * from './commandInput';
 export * from './consumeInput';
 export * from './consumeLine';
 export * from './consumeResult';

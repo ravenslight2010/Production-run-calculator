@@ -756,6 +756,71 @@ export const AiAskResponse = zod.object({
 
 
 /**
+ * Takes a single spoken utterance plus the live day-state and classifies it as either a QUESTION (the client routes it to /ai/ask, unchanged) or a COMMAND. For a command, returns one or more structured actions drawn from a fixed vocabulary, with every fuzzy reference already resolved against the grounding (a run by brand/flavor → run id, an inventory item by name → item key/id) and a friendly label attached. Returns an explicit "none" when nothing actionable was understood. This endpoint never mutates anything itself — the client runs the actions through its existing handlers (with role gating and Undo).
+ * @summary Classify a spoken phrase as a question or an executable command
+ */
+export const AiCommandBody = zod.object({
+  "utterance": zod.string().describe('The user\'s spoken phrase (a question or an action command)'),
+  "dayState": zod.object({
+  "date": zod.string(),
+  "nowMs": zod.number().describe('Client clock (ms epoch) so the model can reason about timing'),
+  "runToTime": zod.string().optional().describe('Target completion time of day (HH:MM), or empty if unset'),
+  "todayPpm": zod.number().optional().describe('Today\'s aggregate pizzas-per-minute so far'),
+  "benchmarkPpm": zod.number().nullish().describe('Historical average pizzas-per-minute, or null if no history'),
+  "runs": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).describe('Today\'s runs (running, upcoming, and finished)'),
+  "scheduledRuns": zod.array(zod.object({
+  "date": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "casesNeeded": zod.number()
+})).optional().describe('Future planned runs'),
+  "historyRuns": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string(),
+  "status": zod.enum(['running', 'upcoming', 'finished']),
+  "casesNeeded": zod.number(),
+  "casesMade": zod.number(),
+  "casesLeft": zod.number(),
+  "plannedPpm": zod.number().describe('Planned pizzas-per-minute from line config'),
+  "actualPpm": zod.number().nullable().describe('Observed pizzas-per-minute, or null if not yet measurable'),
+  "minutesRemaining": zod.number().nullable(),
+  "netElapsedSec": zod.number(),
+  "downtimeSec": zod.number(),
+  "stoppages": zod.array(zod.object({
+  "reason": zod.string(),
+  "durationSec": zod.number(),
+  "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
+}))
+})).optional().describe('Recent finished runs from prior days')
+})
+}).describe('A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data \/ai\/ask uses), letting the server resolve fuzzy run references to concrete run ids.')
+
+
+/**
  * Answers a plain-language question about the current run's recipes and ingredients — scaling a recipe, suggesting a substitution, or explaining a formula — grounded strictly in the supplied recipe rows, the known ingredient pool, the shared name-corrections, and the facility memory. Advisory only: never edits or commits a recipe, never invents ingredients or quantities (says so plainly when the data is insufficient). Read-only.
  * @summary Recipe & ingredient helper — scale, substitute, explain (AI); read-only
  */

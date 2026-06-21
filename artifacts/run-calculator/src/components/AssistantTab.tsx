@@ -30,6 +30,8 @@ import {
   optimizeErrorMessage,
 } from "../aiOptimize";
 import { requestAsk, askErrorMessage } from "../aiAsk";
+import { requestCommand, commandErrorMessage } from "../aiCommand";
+import type { VoiceCommandAction, VoiceCommandResult } from "@workspace/voice-commands";
 import { useSpeechInput } from "../useSpeechInput";
 import {
   type RecipeAssistInput,
@@ -165,24 +167,100 @@ function RecCard({
   );
 }
 
+// One executed voice-command result, with a short Undo window. The command has
+// ALREADY run (voice commands apply immediately — Undo is the safety net), so
+// this only confirms what happened and offers to revert it. Mirrors the undo
+// timer pattern used by SuggestionCard / RecCard.
+function VoiceResultRow({ result }: { result: VoiceCommandResult }) {
+  const [undo, setUndo] = useState<(() => void | Promise<void>) | null>(() =>
+    result.ok && result.undo ? result.undo : null,
+  );
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (result.ok && result.undo) {
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+    return () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    };
+  }, [result]);
+
+  function handleUndo() {
+    if (undo) void undo();
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndo(null);
+  }
+
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+        result.ok
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+          : "border-red-500/30 bg-red-500/10 text-red-300"
+      }`}
+      data-testid="voice-command-result"
+    >
+      {result.ok ? (
+        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">{result.label}</p>
+        <p className="text-[11px] opacity-90">{result.message}</p>
+      </div>
+      {undo && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 shrink-0 gap-1 px-2 text-[11px]"
+          onClick={handleUndo}
+          data-testid="button-undo-voice-command"
+        >
+          <Undo2 className="h-3 w-3" />
+          Undo
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // Free-form "ask the AI about the day" chat. Available to every signed-in
 // worker (not manager-gated). Answers are grounded strictly in the day's real
 // data; the server keeps per-user follow-up memory and returns the updated
 // conversation window on each reply, which we render as the thread.
-function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
+//
+// The mic does double duty: a spoken phrase is sent to /ai/command, which
+// classifies it as a QUESTION (routed through the unchanged ask flow) or a
+// COMMAND (dispatched immediately through the app's existing mutations, with an
+// Undo safety net). Typed input always goes through the ask flow as before.
+function AskChat({
+  buildInput,
+  onApplyVoiceCommand,
+}: {
+  buildInput: () => OptimizeInput;
+  onApplyVoiceCommand: (actions: VoiceCommandAction[]) => Promise<VoiceCommandResult[]>;
+}) {
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
+  const [voiceResults, setVoiceResults] = useState<VoiceCommandResult[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Voice input: transcribe speech into the question box. Sends through the same
-  // /ai/ask flow as typing — the user reviews and taps Send. Falls back to plain
-  // typing when speech isn't supported or the mic is denied.
+  // Voice input: a FINAL transcript is sent to /ai/command, which decides whether
+  // it's a question (routed through the unchanged ask flow) or a command
+  // (dispatched immediately through existing mutations). Interim transcripts just
+  // preview in the box. Falls back to plain typing when speech isn't supported.
   const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
     useSpeechInput({
-      onTranscript: (text) => setQuestion(text),
+      onTranscript: (text, isFinal) => {
+        setQuestion(text);
+        if (isFinal) void handleVoice(text);
+      },
     });
   const micDenied = micState === "denied";
 
@@ -206,8 +284,8 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, loading]);
 
-  async function send() {
-    const q = question.trim();
+  async function sendQuestion(raw: string) {
+    const q = raw.trim();
     if (!q || loading) return;
     setLoading(true);
     setError(null);
@@ -229,10 +307,42 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
     }
   }
 
+  function send() {
+    void sendQuestion(question);
+  }
+
+  // A finished spoken phrase: classify it server-side, then either route it
+  // through the unchanged ask flow (question) or dispatch the resolved actions
+  // immediately (command). "none" leaves the transcript in the box so the user
+  // can edit and send it as a question manually.
+  async function handleVoice(utterance: string) {
+    const u = utterance.trim();
+    if (!u || voiceBusy || loading) return;
+    setVoiceBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await requestCommand(u, buildInput());
+      if (res.type === "question") {
+        await sendQuestion(u);
+      } else if (res.type === "command") {
+        const results = await onApplyVoiceCommand(res.actions);
+        setVoiceResults((prev) => [...prev, ...results]);
+        setQuestion("");
+      } else {
+        setNote(res.note || "I didn't catch a question or command in that.");
+      }
+    } catch (e) {
+      setError(commandErrorMessage(e));
+    } finally {
+      setVoiceBusy(false);
+    }
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      void send();
+      send();
     }
   }
 
@@ -299,15 +409,31 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
           </div>
         )}
 
+        {voiceResults.length > 0 && (
+          <div className="space-y-1.5" data-testid="voice-command-results">
+            {voiceResults.map((r, i) => (
+              <VoiceResultRow key={`${i}-${r.kind}`} result={r} />
+            ))}
+          </div>
+        )}
+
+        {voiceBusy && (
+          <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Working on that…
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
           <Textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={listening ? "Listening…" : "Ask about today's runs…"}
+            placeholder={
+              listening ? "Listening…" : "Ask a question, or say a command (e.g. start a stoppage)…"
+            }
             rows={2}
             className="min-h-[44px] resize-none"
-            disabled={loading}
+            disabled={loading || voiceBusy}
             data-testid="input-ask-question"
           />
           {micSupported && (
@@ -316,10 +442,10 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
               variant={listening ? "default" : "outline"}
               size="icon"
               onClick={toggleMic}
-              disabled={loading}
+              disabled={loading || voiceBusy}
               className={`shrink-0 ${listening ? "animate-pulse" : ""}`}
-              aria-label={listening ? "Stop voice input" : "Ask by voice"}
-              title={listening ? "Stop voice input" : "Ask by voice"}
+              aria-label={listening ? "Stop voice input" : "Speak a question or command"}
+              title={listening ? "Stop voice input" : "Speak a question or command"}
               data-testid="button-ask-mic"
             >
               <Mic className="h-4 w-4" />
@@ -955,6 +1081,7 @@ export default function AssistantTab({
   buildRecipeContext,
   onApplyRecipeSuggestion,
   onApplyAction,
+  onApplyVoiceCommand,
   buildForecast,
   onApplyForecast,
   buildAccuracy,
@@ -965,6 +1092,7 @@ export default function AssistantTab({
     s: RecipeAssistSuggestion,
   ) => { ok: boolean; message: string; undo?: () => void };
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
+  onApplyVoiceCommand: (actions: VoiceCommandAction[]) => Promise<VoiceCommandResult[]>;
   buildForecast: (targetDate: string) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
   buildAccuracy: () => ForecastAccuracyInput;
@@ -1005,7 +1133,7 @@ export default function AssistantTab({
 
   return (
     <div className="space-y-4 pb-24">
-      <AskChat buildInput={buildInput} />
+      <AskChat buildInput={buildInput} onApplyVoiceCommand={onApplyVoiceCommand} />
 
       <RecipeAssistChat
         buildContext={buildRecipeContext}

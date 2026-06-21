@@ -743,6 +743,15 @@ export interface AskResult {
 }
 
 /**
+ * A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data /ai/ask uses), letting the server resolve fuzzy run references to concrete run ids.
+ */
+export interface CommandInput {
+  /** The user's spoken phrase (a question or an action command) */
+  utterance: string;
+  dayState: OptimizeInput;
+}
+
+/**
  * One ingredient line of a recipe (ingredient name + pounds).
  */
 export interface RecipeAssistRow {

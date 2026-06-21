@@ -30,6 +30,7 @@ import type {
   AuthResponse,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
+  CommandInput,
   ConsumeInput,
   ConsumeResult,
   ConversationHistory,
@@ -2468,6 +2469,78 @@ export const useAiAsk = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiAskMutationOptions(options));
+    }
+
+export const getAiCommandUrl = () => {
+
+
+
+
+  return `/api/ai/command`
+}
+
+/**
+ * Takes a single spoken utterance plus the live day-state and classifies it as either a QUESTION (the client routes it to /ai/ask, unchanged) or a COMMAND. For a command, returns one or more structured actions drawn from a fixed vocabulary, with every fuzzy reference already resolved against the grounding (a run by brand/flavor → run id, an inventory item by name → item key/id) and a friendly label attached. Returns an explicit "none" when nothing actionable was understood. This endpoint never mutates anything itself — the client runs the actions through its existing handlers (with role gating and Undo).
+ * @summary Classify a spoken phrase as a question or an executable command
+ */
+export const aiCommand = async (commandInput: CommandInput, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getAiCommandUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      commandInput,)
+  }
+);}
+
+
+
+
+export const getAiCommandMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,{data: BodyType<CommandInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,{data: BodyType<CommandInput>}, TContext> => {
+
+const mutationKey = ['aiCommand'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiCommand>>, {data: BodyType<CommandInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiCommand(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiCommandMutationResult = NonNullable<Awaited<ReturnType<typeof aiCommand>>>
+    export type AiCommandMutationBody = BodyType<CommandInput>
+    export type AiCommandMutationError = ErrorType<void>
+
+    /**
+ * @summary Classify a spoken phrase as a question or an executable command
+ */
+export const useAiCommand = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiCommand>>, TError,{data: BodyType<CommandInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiCommand>>,
+        TError,
+        {data: BodyType<CommandInput>},
+        TContext
+      > => {
+      return useMutation(getAiCommandMutationOptions(options));
     }
 
 export const getAiRecipeAssistantUrl = () => {

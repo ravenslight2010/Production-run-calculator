@@ -25,6 +25,9 @@
       "path": "./lib/inventory-math"
     },
     {
+      "path": "./lib/voice-commands"
+    },
+    {
       "path": "./lib/spec-import"
     },
     {

@@ -48,6 +48,14 @@ import {
   type RecipeAssistSuggestion,
 } from "@/context/aiRecipe";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
+import { requestCommand, commandErrorMessage } from "@/context/aiCommand";
+import { restockInventory, adjustInventory } from "@/context/inventoryShared";
+import {
+  dispatchVoiceCommand,
+  type VoiceCommandAction,
+  type VoiceCommandHandlers,
+  type VoiceCommandResult,
+} from "@workspace/voice-commands";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 import { useSpeechInput } from "@/hooks/useSpeechInput";
@@ -166,26 +174,109 @@ function RecCard({
   );
 }
 
+// A short visual confirmation for ONE dispatched voice command, with an Undo
+// button live for the same brief window as the rest of the assistant's apply
+// actions. Mirrors the web VoiceResultRow (replit.md parity).
+function VoiceResultRow({ result }: { result: VoiceCommandResult }) {
+  const colors = useColors();
+  const [undo, setUndo] = React.useState<(() => void | Promise<void>) | null>(() =>
+    result.ok && result.undo ? result.undo : null,
+  );
+  const undoTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    if (result.ok && result.undo) {
+      undoTimer.current = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    }
+    return () => {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+    };
+  }, [result]);
+
+  function handleUndo() {
+    if (undo) void undo();
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndo(null);
+  }
+
+  const tone = result.ok
+    ? { border: "rgba(16,185,129,0.3)", bg: "rgba(16,185,129,0.1)", fg: "#34d399" }
+    : { border: "rgba(239,68,68,0.3)", bg: "rgba(239,68,68,0.1)", fg: "#f87171" };
+
+  return (
+    <View
+      style={[styles.voiceResult, { borderColor: tone.border, backgroundColor: tone.bg }]}
+      // @ts-expect-error RN web testID → data-testid for UI tests
+      dataSet={{ testid: "voice-command-result" }}
+    >
+      <Feather
+        name={result.ok ? "check" : "alert-triangle"}
+        size={14}
+        color={tone.fg}
+        style={{ marginTop: 1 }}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.voiceResultLabel, { color: colors.foreground }]}>{result.label}</Text>
+        <Text style={[styles.voiceResultMsg, { color: tone.fg }]}>{result.message}</Text>
+      </View>
+      {undo ? (
+        <Pressable
+          onPress={handleUndo}
+          accessibilityRole="button"
+          accessibilityLabel="Undo voice command"
+          // @ts-expect-error RN web testID → data-testid for UI tests
+          dataSet={{ testid: "button-undo-voice-command" }}
+          style={({ pressed }) => [
+            styles.voiceUndoBtn,
+            { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Feather name="rotate-ccw" size={12} color={colors.foreground} />
+          <Text style={[styles.voiceUndoText, { color: colors.foreground }]}>Undo</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 // Free-form "ask the AI about the day" chat. Available to every signed-in
 // worker (not manager-gated). Answers are grounded strictly in the day's real
 // data; the server keeps per-user follow-up memory and returns the updated
-// conversation window on each reply, which we render as the thread. Mirrors the
-// web AskChat (replit.md parity).
-function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
+// conversation window on each reply, which we render as the thread.
+//
+// The mic does double duty: a spoken phrase is sent to /ai/command, which
+// classifies it as a QUESTION (routed through the unchanged ask flow) or a
+// COMMAND (dispatched immediately through the app's existing mutations, with an
+// Undo safety net). Typed input always goes through the ask flow as before.
+// Mirrors the web AskChat (replit.md parity).
+function AskChat({
+  buildInput,
+  onApplyVoiceCommand,
+}: {
+  buildInput: () => OptimizeInput;
+  onApplyVoiceCommand: (actions: VoiceCommandAction[]) => Promise<VoiceCommandResult[]>;
+}) {
   const colors = useColors();
   const [turns, setTurns] = React.useState<ConversationTurn[]>([]);
   const [question, setQuestion] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
+  const [voiceBusy, setVoiceBusy] = React.useState(false);
+  const [voiceResults, setVoiceResults] = React.useState<VoiceCommandResult[]>([]);
   const scrollRef = React.useRef<ScrollView | null>(null);
 
-  // Voice input: transcribe speech into the question box. Sends through the same
-  // /ai/ask flow as typing — the user reviews and taps Send. Falls back to plain
-  // typing when speech isn't supported (e.g. native build) or the mic is denied.
+  // Voice input: a FINAL transcript is sent to /ai/command, which decides whether
+  // it's a question (routed through the unchanged ask flow) or a command
+  // (dispatched immediately through existing mutations). Interim transcripts just
+  // preview in the box. Falls back to plain typing when speech isn't supported
+  // (e.g. native build) or the mic is denied.
   const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
     useSpeechInput({
-      onTranscript: (text) => setQuestion(text),
+      onTranscript: (text, isFinal) => {
+        setQuestion(text);
+        if (isFinal) void handleVoice(text);
+      },
     });
   const micDenied = micState === "denied";
 
@@ -209,8 +300,8 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
     return () => clearTimeout(id);
   }, [turns, loading]);
 
-  async function send() {
-    const q = question.trim();
+  async function sendQuestion(raw: string) {
+    const q = raw.trim();
     if (!q || loading) return;
     setLoading(true);
     setError(null);
@@ -229,6 +320,38 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
       setError(askErrorMessage(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  function send() {
+    void sendQuestion(question);
+  }
+
+  // A finished spoken phrase: classify it server-side, then either route it
+  // through the unchanged ask flow (question) or dispatch the resolved actions
+  // immediately (command). "none" surfaces a short note so the user can edit the
+  // transcript and send it as a question manually.
+  async function handleVoice(utterance: string) {
+    const u = utterance.trim();
+    if (!u || voiceBusy || loading) return;
+    setVoiceBusy(true);
+    setError(null);
+    setNote(null);
+    try {
+      const res = await requestCommand(u, buildInput());
+      if (res.type === "question") {
+        await sendQuestion(u);
+      } else if (res.type === "command") {
+        const results = await onApplyVoiceCommand(res.actions);
+        setVoiceResults((prev) => [...prev, ...results]);
+        setQuestion("");
+      } else {
+        setNote(res.note || "I didn't catch a question or command in that.");
+      }
+    } catch (e) {
+      setError(commandErrorMessage(e));
+    } finally {
+      setVoiceBusy(false);
     }
   }
 
@@ -284,6 +407,20 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
         </View>
       ) : null}
 
+      {voiceResults.length > 0 ? (
+        <View style={{ gap: 6, marginTop: 4 }}>
+          {voiceResults.map((r, i) => (
+            <VoiceResultRow key={`${i}-${r.kind}`} result={r} />
+          ))}
+        </View>
+      ) : null}
+      {voiceBusy ? (
+        <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted, flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }]}>
+          <ActivityIndicator size="small" color={colors.mutedForeground} />
+          <Text style={[styles.bubbleText, { color: colors.mutedForeground }]}>Working on that…</Text>
+        </View>
+      ) : null}
+
       <View style={styles.inputRow}>
         <TextInput
           style={[
@@ -295,12 +432,12 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
           placeholder={listening ? "Listening…" : "Ask about today's runs…"}
           placeholderTextColor={colors.mutedForeground}
           multiline
-          editable={!loading}
+          editable={!loading && !voiceBusy}
         />
         {micSupported ? (
           <Pressable
             onPress={toggleMic}
-            disabled={loading}
+            disabled={loading || voiceBusy}
             accessibilityRole="button"
             accessibilityLabel={listening ? "Stop voice input" : "Ask by voice"}
             style={({ pressed }) => [
@@ -308,7 +445,7 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
               {
                 borderColor: listening ? colors.primary : colors.border,
                 backgroundColor: listening ? colors.primary : colors.background,
-                opacity: loading ? 0.4 : pressed ? 0.7 : 1,
+                opacity: loading || voiceBusy ? 0.4 : pressed ? 0.7 : 1,
               },
             ]}
           >
@@ -323,7 +460,7 @@ function AskChat({ buildInput }: { buildInput: () => OptimizeInput }) {
           label="Send"
           icon="send"
           onPress={send}
-          disabled={loading || !question.trim()}
+          disabled={loading || voiceBusy || !question.trim()}
         />
       </View>
       {micDenied ? (
@@ -973,6 +1110,16 @@ export default function AssistantScreen() {
     cheeseIngredients,
     doughIngredients,
     frontlineIngredients,
+    addRun: ctxAddRun,
+    switchRun: ctxSwitchRun,
+    deleteRun: ctxDeleteRun,
+    updateSettings: ctxUpdateSettings,
+    updateProgress: ctxUpdateProgress,
+    updateRunMeta: ctxUpdateRunMeta,
+    endRun: ctxEndRun,
+    addStoppage: ctxAddStoppage,
+    endActiveStoppage: ctxEndActiveStoppage,
+    rolloverDay: ctxRolloverDay,
   } = useRun();
 
   const [loading, setLoading] = React.useState(false);
@@ -1067,6 +1214,286 @@ export default function AssistantScreen() {
       undo: () => write(prev),
     };
   }
+
+  // Build the platform handlers for dispatched voice commands. Each forwards to
+  // an EXISTING RunContext / inventory mutation (no new write surface) and, where
+  // the mobile context offers a clean inverse, returns an undo so a misheard
+  // command can be reverted within the AskChat's short Undo window. Server-
+  // resolved ids are validated again here (the run may have changed since
+  // classification). EXACT parity with the web buildVoiceHandlers in
+  // artifacts/run-calculator/src/pages/home.tsx — same kinds, same arguments
+  // through dispatchVoiceCommand. The few structural ops mobile's context can't
+  // cleanly reverse (finish run, remove run, start/end stoppage) execute
+  // identically but omit the Undo button.
+  function buildVoiceHandlers(): VoiceCommandHandlers {
+    // --- Live, synchronously-updated shadow of run ordering + current index ---
+    // dispatchVoiceCommand runs a command's actions in sequence within a single
+    // task, BEFORE React re-renders, so the captured `allRuns`/`run` (and
+    // appStateRef, which is refreshed on render) never reflect a switch / add /
+    // remove / reorder made by an EARLIER action in the same utterance. The
+    // RunContext mutations all compose correctly (each is a functional
+    // setAppState updater), but a handler's OWN decisions — which run is current,
+    // a runId's index, whether a switch is needed — must be made against an
+    // equally-live view, or a later action lands on the wrong run. We therefore
+    // shadow ordering + current index here and update it in lockstep with every
+    // mutating handler, mirroring each context updater exactly. Run *content*
+    // (started/ended/stoppages) is read from the command-start snapshot, which is
+    // correct for the first action to touch a run; degenerate same-run content
+    // sequences within a single utterance are not supported by design.
+    type Shadow = { id: string; snap: (typeof allRuns)[number] | null };
+    const liveRuns: Shadow[] = allRuns.map((r) => ({ id: r.id, snap: r }));
+    let liveIdx = run ? liveRuns.findIndex((s) => s.id === run.id) : -1;
+    let newRunSeq = 0;
+    const findIdx = (runId: string) => liveRuns.findIndex((s) => s.id === runId);
+    const snapAt = (idx: number): (typeof allRuns)[number] | null =>
+      idx >= 0 && idx < liveRuns.length ? liveRuns[idx].snap : null;
+
+    return {
+      setTargetTime(time) {
+        return applyAction({ kind: "set_target_time", label: "", time });
+      },
+      clearTargetTime() {
+        const prev = runToTime;
+        setRunToTime("");
+        return { ok: true, message: "Finish time cleared", undo: () => setRunToTime(prev) };
+      },
+      setRunTarget(runId, casesNeeded) {
+        return applyAction({ kind: "set_run_target", label: "", runId, casesNeeded });
+      },
+      reorderRun(runId, beforeRunId) {
+        // Resolved against the live shadow (not the command-start `allRuns`) so a
+        // reorder following an earlier add/remove/move still targets the right run.
+        const fromIdx = findIdx(runId);
+        if (fromIdx < 0) return { ok: false, message: "Run no longer exists" };
+        let toIdx: number;
+        if (beforeRunId == null) {
+          toIdx = liveRuns.length - 1;
+        } else {
+          const remaining = liveRuns.filter((s) => s.id !== runId);
+          const beforePos = remaining.findIndex((s) => s.id === beforeRunId);
+          if (beforePos < 0) return { ok: false, message: "Target run no longer exists" };
+          toIdx = beforePos;
+        }
+        if (toIdx === fromIdx) return { ok: true, message: "Already in place" };
+        moveRun(fromIdx, toIdx);
+        // Mirror RunContext.moveRun, including its "keep the same focused run"
+        // currentIndex recomputation by run identity.
+        const focusedId = liveIdx >= 0 ? liveRuns[liveIdx].id : null;
+        const [moved] = liveRuns.splice(fromIdx, 1);
+        liveRuns.splice(toIdx, 0, moved);
+        if (focusedId != null) liveIdx = liveRuns.findIndex((s) => s.id === focusedId);
+        return { ok: true, message: "Run order updated", undo: () => moveRun(toIdx, fromIdx) };
+      },
+      addRun(brand, flavor) {
+        const prevLen = liveRuns.length;
+        const prevIndex = liveIdx;
+        // addRun appends and makes the new run current; updateSettings (queued
+        // right after) then lands on that new current run.
+        ctxAddRun();
+        ctxUpdateSettings({ brand, flavor });
+        // Mirror: a new run is appended and becomes current. Its real id is
+        // unknown here, but a later action can't target it (it didn't exist when
+        // the command was grounded), so a sentinel id is sufficient.
+        liveRuns.push({ id: `__new_${newRunSeq++}__`, snap: null });
+        liveIdx = liveRuns.length - 1;
+        const name = `${brand} ${flavor}`.trim() || "run";
+        return {
+          ok: true,
+          message: `Added ${name}`,
+          undo: () => {
+            ctxDeleteRun(prevLen);
+            if (prevIndex >= 0) ctxSwitchRun(prevIndex);
+          },
+        };
+      },
+      removeRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const target = snapAt(idx);
+        if (target && (target.startedAt || target.endedAt)) {
+          return { ok: false, message: "Can't remove a started or finished run" };
+        }
+        if (liveRuns.length <= 1) return { ok: false, message: "Can't remove the only run" };
+        const prevSettings = target?.settings;
+        ctxDeleteRun(idx);
+        // Mirror RunContext.deleteRun: drop the run, clamp currentIndex.
+        liveRuns.splice(idx, 1);
+        liveIdx = Math.min(liveIdx, liveRuns.length - 1);
+        // Re-add restores the run's data (un-started, so only settings matter);
+        // it reappears at the end rather than its original slot.
+        return {
+          ok: true,
+          message: "Run removed",
+          undo: () => {
+            ctxAddRun();
+            if (prevSettings) ctxUpdateSettings(prevSettings);
+          },
+        };
+      },
+      switchRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        if (idx === liveIdx) return { ok: true, message: "Already on that run" };
+        const prevIndex = liveIdx;
+        ctxSwitchRun(idx);
+        liveIdx = idx;
+        return {
+          ok: true,
+          message: "Switched run",
+          undo: prevIndex >= 0 ? () => ctxSwitchRun(prevIndex) : undefined,
+        };
+      },
+      updateRunMeta(runId, brand, flavor) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const target = snapAt(idx);
+        const newBrand = brand ?? target?.settings.brand ?? "";
+        const newFlavor = flavor ?? target?.settings.flavor ?? "";
+        const prevBrand = target?.settings.brand ?? "";
+        const prevFlavor = target?.settings.flavor ?? "";
+        const name = `${newBrand} ${newFlavor}`.trim() || "run";
+        updateRunSettingsById(runId, { brand: newBrand, flavor: newFlavor });
+        return {
+          ok: true,
+          message: `Renamed to ${name}`,
+          undo: () => updateRunSettingsById(runId, { brand: prevBrand, flavor: prevFlavor }),
+        };
+      },
+      finishRun(runId) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const target = snapAt(idx);
+        if (target?.endedAt) return { ok: false, message: "Run already finished" };
+        if (target && !target.startedAt) return { ok: false, message: "Run hasn't started yet" };
+        if (idx !== liveIdx) {
+          ctxSwitchRun(idx);
+          liveIdx = idx;
+        }
+        ctxEndRun();
+        // No un-finish primitive on mobile (endRun also consumes inventory
+        // idempotently), so no Undo — the command itself runs at web parity.
+        return { ok: true, message: "Run finished" };
+      },
+      startStoppage(runId, reason, stoppageType) {
+        const targetIdx = runId ? findIdx(runId) : liveIdx;
+        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        if (targetIdx !== liveIdx) {
+          ctxSwitchRun(targetIdx);
+          liveIdx = targetIdx;
+        }
+        ctxAddStoppage(stoppageType, reason);
+        // Mobile has no remove-stoppage primitive, so no Undo button.
+        return {
+          ok: true,
+          message: reason ? `Stoppage started: ${reason}` : "Stoppage started",
+        };
+      },
+      endStoppage(runId) {
+        const targetIdx = runId ? findIdx(runId) : liveIdx;
+        if (targetIdx < 0) return { ok: false, message: "Run no longer exists" };
+        if (targetIdx !== liveIdx) {
+          ctxSwitchRun(targetIdx);
+          liveIdx = targetIdx;
+        }
+        const target = snapAt(targetIdx);
+        if (target && !target.stoppages.some((s) => s.endedAt == null)) {
+          return { ok: false, message: "No active stoppage" };
+        }
+        ctxEndActiveStoppage();
+        // No reopen-stoppage primitive on mobile, so no Undo button.
+        return { ok: true, message: "Stoppage ended" };
+      },
+      setRunProgress(runId, progress) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const target = snapAt(idx);
+        const prev = {
+          skidsCompleted: target?.progress.skidsCompleted,
+          casesOnCurrentSkid: target?.progress.casesOnCurrentSkid,
+          casesPerSkid: target?.settings.casesPerSkid,
+        };
+        // casesPerSkid is a per-run SETTING; skids/cases-on-skid are PROGRESS.
+        // updateProgress acts on the current run, so switch first for another run.
+        const writeProgress = (p: {
+          skidsCompleted?: number;
+          casesOnCurrentSkid?: number;
+          casesPerSkid?: number;
+        }) => {
+          if (p.casesPerSkid != null) updateRunSettingsById(runId, { casesPerSkid: p.casesPerSkid });
+          if (p.skidsCompleted != null || p.casesOnCurrentSkid != null) {
+            if (idx !== liveIdx) {
+              ctxSwitchRun(idx);
+              liveIdx = idx;
+            }
+            ctxUpdateProgress({
+              ...(p.skidsCompleted != null ? { skidsCompleted: p.skidsCompleted } : {}),
+              ...(p.casesOnCurrentSkid != null ? { casesOnCurrentSkid: p.casesOnCurrentSkid } : {}),
+            });
+          }
+        };
+        writeProgress(progress);
+        return { ok: true, message: "Progress updated", undo: () => writeProgress(prev) };
+      },
+      logActualCases(runId, actualCases) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const prev = snapAt(idx)?.actualCases;
+        ctxUpdateRunMeta(runId, { actualCases });
+        return {
+          ok: true,
+          message: `Logged ${actualCases} cases`,
+          undo: () => ctxUpdateRunMeta(runId, { actualCases: prev }),
+        };
+      },
+      logWaste(runId, wasteLbs) {
+        const idx = findIdx(runId);
+        if (idx < 0) return { ok: false, message: "Run no longer exists" };
+        const prev = snapAt(idx)?.wasteLbs;
+        ctxUpdateRunMeta(runId, { wasteLbs });
+        return {
+          ok: true,
+          message: `Logged ${wasteLbs} lbs waste`,
+          undo: () => ctxUpdateRunMeta(runId, { wasteLbs: prev }),
+        };
+      },
+      async restockItem(body) {
+        await restockInventory({
+          itemKey: body.itemKey,
+          category: body.category,
+          name: body.name,
+          unit: body.unit,
+          qty: body.qty,
+        });
+        return { ok: true, message: `Restocked ${body.qty} ${body.unit} of ${body.name}` };
+      },
+      async adjustItem(body) {
+        await adjustInventory({ itemId: body.itemId, qtyDelta: body.qtyDelta, note: body.note });
+        const sign = body.qtyDelta >= 0 ? "+" : "";
+        return {
+          ok: true,
+          message: `Adjusted stock ${sign}${body.qtyDelta}`,
+          undo: async () => {
+            await adjustInventory({
+              itemId: body.itemId,
+              qtyDelta: -body.qtyDelta,
+              note: "Undo voice adjustment",
+            });
+          },
+        };
+      },
+      rollover() {
+        // Reuse the context's manual day close-out. Irreversible by design — no
+        // undo (gated to managers in the shared VOICE_COMMAND_ROLES map).
+        ctxRolloverDay();
+        return { ok: true, message: "Day rolled over" };
+      },
+    };
+  }
+
+  // Entry point passed to AskChat: dispatch the server-resolved actions through
+  // the shared, parity-critical mapping with this user's role.
+  const applyVoiceCommand = (actions: VoiceCommandAction[]): Promise<VoiceCommandResult[]> =>
+    dispatchVoiceCommand(actions, buildVoiceHandlers(), isManager);
 
   // Shared day-state builder used by both the chat box and the optimize button,
   // so both send the model identically-shaped data.
@@ -1186,7 +1613,7 @@ export default function AssistantScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 120, gap: 14 }}
     >
-      <AskChat buildInput={buildInput} />
+      <AskChat buildInput={buildInput} onApplyVoiceCommand={applyVoiceCommand} />
 
       <RecipeAssistChat
         buildContext={buildRecipeContext}
@@ -1351,6 +1778,27 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   micDenied: { marginTop: 8, fontSize: 11, lineHeight: 16, fontFamily: FONTS.regular },
+  voiceResult: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  voiceResultLabel: { fontSize: 12, fontFamily: FONTS.medium },
+  voiceResultMsg: { fontSize: 11, lineHeight: 15, fontFamily: FONTS.regular, marginTop: 1 },
+  voiceUndoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  voiceUndoText: { fontSize: 11, fontFamily: FONTS.medium },
   input: {
     flex: 1,
     minHeight: 44,

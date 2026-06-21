@@ -194,6 +194,9 @@ importers:
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
+      '@workspace/voice-commands':
+        specifier: workspace:*
+        version: link:../../lib/voice-commands
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -465,6 +468,9 @@ importers:
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
+      '@workspace/voice-commands':
+        specifier: workspace:*
+        version: link:../../lib/voice-commands
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -706,6 +712,9 @@ importers:
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
+      '@workspace/voice-commands':
+        specifier: workspace:*
+        version: link:../../lib/voice-commands
       expo-file-system:
         specifier: ~19.0.23
         version: 19.0.23(expo@54.0.35)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))
@@ -964,6 +973,8 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/spec-import: {}
+
+  lib/voice-commands: {}
 
   scripts:
     devDependencies:
