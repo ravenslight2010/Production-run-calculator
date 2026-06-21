@@ -111,6 +111,7 @@ import InventoryTab from "../components/InventoryTab";
 import AssistantTab from "../components/AssistantTab";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
+import QualityHistoryTab from "../components/QualityHistoryTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
 import QRCode from "react-qr-code";
@@ -6847,6 +6848,11 @@ export default function Home() {
                     )}
                   </DropdownMenuItem>
                 )}
+                {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("quality")}>
+                    <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
+                  </DropdownMenuItem>
+                )}
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -8007,6 +8013,10 @@ export default function Home() {
 
               <TabsContent value="incidents">
                 <IncidentsTab />
+              </TabsContent>
+
+              <TabsContent value="quality">
+                <QualityHistoryTab />
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>

@@ -301,6 +301,76 @@ export interface QualityCheckResult {
   note?: string;
 }
 
+export type QualityCheckRecordInputProductType = typeof QualityCheckRecordInputProductType[keyof typeof QualityCheckRecordInputProductType];
+
+
+export const QualityCheckRecordInputProductType = {
+  pizza: 'pizza',
+  crust: 'crust',
+  other: 'other',
+} as const;
+
+export type QualityCheckRecordInputStatus = typeof QualityCheckRecordInputStatus[keyof typeof QualityCheckRecordInputStatus];
+
+
+export const QualityCheckRecordInputStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+/**
+ * A reviewed-and-confirmed quality check to persist into the manager history.
+ */
+export interface QualityCheckRecordInput {
+  productType: QualityCheckRecordInputProductType;
+  status: QualityCheckRecordInputStatus;
+  /** 0..1 model confidence at check time */
+  confidence: number;
+  /** Plain-language overall assessment */
+  summary: string;
+  issues: QualityIssue[];
+  /** Optional plain-language context the reviewer attached */
+  notes?: string;
+  /** Optional small base64 data URI of the analyzed photo; dropped server-side when too large. */
+  thumbnail?: string;
+}
+
+export type QualityCheckRecordProductType = typeof QualityCheckRecordProductType[keyof typeof QualityCheckRecordProductType];
+
+
+export const QualityCheckRecordProductType = {
+  pizza: 'pizza',
+  crust: 'crust',
+  other: 'other',
+} as const;
+
+export type QualityCheckRecordStatus = typeof QualityCheckRecordStatus[keyof typeof QualityCheckRecordStatus];
+
+
+export const QualityCheckRecordStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+/**
+ * A persisted quality check in the manager history.
+ */
+export interface QualityCheckRecord {
+  id: number;
+  productType: QualityCheckRecordProductType;
+  status: QualityCheckRecordStatus;
+  confidence: number;
+  summary: string;
+  issues: QualityIssue[];
+  notes?: string | null;
+  thumbnail?: string | null;
+  reviewerName?: string | null;
+  /** ISO-8601 timestamp the check was recorded */
+  createdAt: string;
+}
+
 /**
  * Request for an expiry/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.
  */
@@ -1487,4 +1557,33 @@ username: string;
 export type ListInventoryLedgerParams = {
 itemId?: number;
 };
+
+export type ListQualityChecksParams = {
+/**
+ * Only return checks for this product type
+ */
+productType?: ListQualityChecksProductType;
+/**
+ * Only return checks with this verdict
+ */
+status?: ListQualityChecksStatus;
+};
+
+export type ListQualityChecksProductType = typeof ListQualityChecksProductType[keyof typeof ListQualityChecksProductType];
+
+
+export const ListQualityChecksProductType = {
+  pizza: 'pizza',
+  crust: 'crust',
+  other: 'other',
+} as const;
+
+export type ListQualityChecksStatus = typeof ListQualityChecksStatus[keyof typeof ListQualityChecksStatus];
+
+
+export const ListQualityChecksStatus = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
 

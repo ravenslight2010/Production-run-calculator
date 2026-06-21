@@ -53,6 +53,7 @@ import type {
   InventoryLedgerEntry,
   InventorySettings,
   ListInventoryLedgerParams,
+  ListQualityChecksParams,
   MatchImportInput,
   MatchImportResult,
   MergeAliasList,
@@ -71,6 +72,8 @@ import type {
   ProductionRun,
   ProductionRunInput,
   QualityCheckPhotoInput,
+  QualityCheckRecord,
+  QualityCheckRecordInput,
   QualityCheckResult,
   RecipeAssistInput,
   RecipeAssistResult,
@@ -2091,6 +2094,163 @@ export const useQualityCheckPhoto = <TError = ErrorType<void>,
       > => {
       return useMutation(getQualityCheckPhotoMutationOptions(options));
     }
+
+export const getRecordQualityCheckUrl = () => {
+
+
+
+
+  return `/api/inventory/quality-checks`
+}
+
+/**
+ * Persists a structured record of a quality check a manager reviewed and confirmed (product type, verdict, confidence, summary, specific issues, optional notes and a small photo thumbnail). This builds a browsable history managers can audit and use to spot trends over time. The advisory /inventory/quality-photo endpoint never writes — this is the deliberate, user-driven save.
+ * @summary Record a reviewed-and-confirmed quality check (manager only)
+ */
+export const recordQualityCheck = async (qualityCheckRecordInput: QualityCheckRecordInput, options?: RequestInit): Promise<QualityCheckRecord> => {
+
+  return customFetch<QualityCheckRecord>(getRecordQualityCheckUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      qualityCheckRecordInput,)
+  }
+);}
+
+
+
+
+export const getRecordQualityCheckMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQualityCheck>>, TError,{data: BodyType<QualityCheckRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordQualityCheck>>, TError,{data: BodyType<QualityCheckRecordInput>}, TContext> => {
+
+const mutationKey = ['recordQualityCheck'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordQualityCheck>>, {data: BodyType<QualityCheckRecordInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  recordQualityCheck(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordQualityCheckMutationResult = NonNullable<Awaited<ReturnType<typeof recordQualityCheck>>>
+    export type RecordQualityCheckMutationBody = BodyType<QualityCheckRecordInput>
+    export type RecordQualityCheckMutationError = ErrorType<void>
+
+    /**
+ * @summary Record a reviewed-and-confirmed quality check (manager only)
+ */
+export const useRecordQualityCheck = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordQualityCheck>>, TError,{data: BodyType<QualityCheckRecordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof recordQualityCheck>>,
+        TError,
+        {data: BodyType<QualityCheckRecordInput>},
+        TContext
+      > => {
+      return useMutation(getRecordQualityCheckMutationOptions(options));
+    }
+
+export const getListQualityChecksUrl = (params?: ListQualityChecksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/inventory/quality-checks?${stringifiedParams}` : `/api/inventory/quality-checks`
+}
+
+/**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
+ * @summary List past quality checks (manager only)
+ */
+export const listQualityChecks = async (params?: ListQualityChecksParams, options?: RequestInit): Promise<QualityCheckRecord[]> => {
+
+  return customFetch<QualityCheckRecord[]>(getListQualityChecksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListQualityChecksQueryKey = (params?: ListQualityChecksParams,) => {
+    return [
+    `/api/inventory/quality-checks`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListQualityChecksQueryOptions = <TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(params?: ListQualityChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListQualityChecksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listQualityChecks>>> = ({ signal }) => listQualityChecks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListQualityChecksQueryResult = NonNullable<Awaited<ReturnType<typeof listQualityChecks>>>
+export type ListQualityChecksQueryError = ErrorType<void>
+
+
+/**
+ * @summary List past quality checks (manager only)
+ */
+
+export function useListQualityChecks<TData = Awaited<ReturnType<typeof listQualityChecks>>, TError = ErrorType<void>>(
+ params?: ListQualityChecksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listQualityChecks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListQualityChecksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
 
 export const getWasteInsightUrl = () => {
 

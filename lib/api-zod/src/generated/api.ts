@@ -501,6 +501,70 @@ export const QualityCheckPhotoResponse = zod.object({
 
 
 /**
+ * Persists a structured record of a quality check a manager reviewed and confirmed (product type, verdict, confidence, summary, specific issues, optional notes and a small photo thumbnail). This builds a browsable history managers can audit and use to spot trends over time. The advisory /inventory/quality-photo endpoint never writes — this is the deliberate, user-driven save.
+ * @summary Record a reviewed-and-confirmed quality check (manager only)
+ */
+export const RecordQualityCheckBody = zod.object({
+  "productType": zod.enum(['pizza', 'crust', 'other']),
+  "status": zod.enum(['pass', 'warn', 'fail']),
+  "confidence": zod.number().describe('0..1 model confidence at check time'),
+  "summary": zod.string().describe('Plain-language overall assessment'),
+  "issues": zod.array(zod.object({
+  "type": zod.string().describe('Short category of the issue (e.g. size, topping coverage, appearance, burn)'),
+  "severity": zod.enum(['minor', 'major', 'critical']),
+  "detail": zod.string().describe('One plain-language sentence describing the issue')
+}).describe('One specific quality concern the AI observed in the photo.')),
+  "notes": zod.string().optional().describe('Optional plain-language context the reviewer attached'),
+  "thumbnail": zod.string().optional().describe('Optional small base64 data URI of the analyzed photo; dropped server-side when too large.')
+}).describe('A reviewed-and-confirmed quality check to persist into the manager history.')
+
+export const RecordQualityCheckResponse = zod.object({
+  "id": zod.number(),
+  "productType": zod.enum(['pizza', 'crust', 'other']),
+  "status": zod.enum(['pass', 'warn', 'fail']),
+  "confidence": zod.number(),
+  "summary": zod.string(),
+  "issues": zod.array(zod.object({
+  "type": zod.string().describe('Short category of the issue (e.g. size, topping coverage, appearance, burn)'),
+  "severity": zod.enum(['minor', 'major', 'critical']),
+  "detail": zod.string().describe('One plain-language sentence describing the issue')
+}).describe('One specific quality concern the AI observed in the photo.')),
+  "notes": zod.string().nullish(),
+  "thumbnail": zod.string().nullish(),
+  "reviewerName": zod.string().nullish(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the check was recorded')
+}).describe('A persisted quality check in the manager history.')
+
+
+/**
+ * Returns recorded quality checks (newest first) for a manager to review, optionally filtered by product type and/or status.
+ * @summary List past quality checks (manager only)
+ */
+export const ListQualityChecksQueryParams = zod.object({
+  "productType": zod.enum(['pizza', 'crust', 'other']).optional().describe('Only return checks for this product type'),
+  "status": zod.enum(['pass', 'warn', 'fail']).optional().describe('Only return checks with this verdict')
+})
+
+export const ListQualityChecksResponseItem = zod.object({
+  "id": zod.number(),
+  "productType": zod.enum(['pizza', 'crust', 'other']),
+  "status": zod.enum(['pass', 'warn', 'fail']),
+  "confidence": zod.number(),
+  "summary": zod.string(),
+  "issues": zod.array(zod.object({
+  "type": zod.string().describe('Short category of the issue (e.g. size, topping coverage, appearance, burn)'),
+  "severity": zod.enum(['minor', 'major', 'critical']),
+  "detail": zod.string().describe('One plain-language sentence describing the issue')
+}).describe('One specific quality concern the AI observed in the photo.')),
+  "notes": zod.string().nullish(),
+  "thumbnail": zod.string().nullish(),
+  "reviewerName": zod.string().nullish(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the check was recorded')
+}).describe('A persisted quality check in the manager history.')
+export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem)
+
+
+/**
  * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
  * @summary Flag items trending toward expiry and suggest run-order to use them first
  */

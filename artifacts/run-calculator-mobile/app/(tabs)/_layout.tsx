@@ -207,6 +207,7 @@ export default function TabLayout() {
         <Tabs.Screen name="inventory" options={{ href: null, title: "Inventory" }} />
         <Tabs.Screen name="assistant" options={{ href: null, title: "AI Assistant" }} />
         <Tabs.Screen name="incidents" options={{ href: null, title: "Reported issues" }} />
+        <Tabs.Screen name="quality" options={{ href: null, title: "Quality history" }} />
         <Tabs.Screen name="stoppages" options={{ href: null, title: "Stoppages" }} />
         <Tabs.Screen name="summary" options={{ href: null, title: "Summary" }} />
         <Tabs.Screen name="configure" options={{ href: null, title: "Setup" }} />
@@ -391,6 +392,35 @@ export default function TabLayout() {
                     <Text style={styles.menuBadgeText}>{unreviewedIncidentCount}</Text>
                   </View>
                 )}
+                <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+              </Pressable>
+            )}
+            {isManager && (
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
+                  router.push("/quality" as never);
+                }}
+                style={({ pressed }) => [
+                  styles.menuItem,
+                  {
+                    backgroundColor: colors.secondary,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: colors.primary + "22" }]}>
+                  <Feather name="shield" size={18} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.foreground }]}>
+                    Quality history
+                  </Text>
+                  <Text style={[styles.menuItemDesc, { color: colors.mutedForeground }]}>
+                    Browse past quality checks and outcomes
+                  </Text>
+                </View>
                 <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
               </Pressable>
             )}

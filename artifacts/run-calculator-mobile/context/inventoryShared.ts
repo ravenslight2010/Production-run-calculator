@@ -543,6 +543,50 @@ export const qualityCheckPhoto = (body: QualityCheckBody) =>
     body: JSON.stringify(body),
   });
 
+// ── Quality check history (persisted, manager-reviewed records) ──────────────
+export type QualityCheckRecord = {
+  id: number;
+  productType: QualityProductType;
+  status: QualityStatus;
+  confidence: number;
+  summary: string;
+  issues: QualityIssue[];
+  notes: string | null;
+  thumbnail: string | null;
+  reviewerName: string | null;
+  createdAt: string;
+};
+export type QualityCheckRecordBody = {
+  productType: QualityProductType;
+  status: QualityStatus;
+  confidence: number;
+  summary: string;
+  issues: QualityIssue[];
+  notes?: string;
+  thumbnail?: string;
+};
+
+// Persist a reviewed-and-confirmed quality check into the manager history.
+// Manager-only; the advisory quality-photo endpoint never writes.
+export const recordQualityCheck = (body: QualityCheckRecordBody) =>
+  api<QualityCheckRecord>("/inventory/quality-checks", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// Manager-only: list past quality checks (newest first), optionally filtered by
+// product type and/or status.
+export const fetchQualityChecks = (filter?: {
+  productType?: QualityProductType;
+  status?: QualityStatus;
+}) => {
+  const params = new URLSearchParams();
+  if (filter?.productType) params.set("productType", filter.productType);
+  if (filter?.status) params.set("status", filter.status);
+  const qs = params.toString();
+  return api<QualityCheckRecord[]>(`/inventory/quality-checks${qs ? `?${qs}` : ""}`);
+};
+
 // ── AI expiry & waste insight ────────────────────────────────────────────────
 export type WasteStatus = "expired" | "soon";
 export type WasteInsightItem = {

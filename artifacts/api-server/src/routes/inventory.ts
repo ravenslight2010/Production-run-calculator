@@ -7,6 +7,7 @@ import {
   inventoryLedgerTable,
   inventoryConsumedRunsTable,
   inventorySettingsTable,
+  qualityChecksTable,
   type InventoryLot,
 } from "@workspace/db";
 import {
@@ -22,13 +23,18 @@ import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireRole } from "../middlewares/requireRole";
-import { getOrCreateUserRole } from "../lib/roles";
+import { getOrCreateUserRole, getStaffMember } from "../lib/roles";
 import { sanitizeGuesses, validateIdentifyPhotoBody } from "./photoIdentify";
 import {
   buildQualityPrompt,
   sanitizeAssessment,
   validateQualityPhotoBody,
 } from "./qualityPhoto";
+import {
+  parseHistoryFilter,
+  rowToRecord,
+  validateRecordQualityCheckBody,
+} from "./qualityChecks";
 import {
   buildWastePrompt,
   flagExpiringItems,
@@ -453,6 +459,75 @@ router.post(
     }
     const { assessment, note } = sanitizeAssessment(raw);
     res.json({ assessment, generatedAt: Date.now(), ...(note ? { note } : {}) });
+  },
+);
+
+// POST /inventory/quality-checks — persist a reviewed-and-confirmed quality
+// check into the manager history. Manager-only. The /inventory/quality-photo
+// endpoint above is purely advisory; this is the deliberate, user-driven save of
+// a structured record (verdict, confidence, issues, optional notes + thumbnail)
+// the manager can browse and audit later. Validation/normalization live in
+// ./qualityChecks so they can be unit-tested without a DB.
+router.post(
+  "/inventory/quality-checks",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const validation = validateRecordQualityCheckBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const data = validation.data;
+
+    // Snapshot the reviewer's identity so the history view survives even if the
+    // account is later removed; a lookup failure must not fail the save.
+    const reviewerId = req.userId ?? null;
+    let reviewerName: string | null = null;
+    if (reviewerId) {
+      try {
+        reviewerName = (await getStaffMember(reviewerId)).name;
+      } catch (err) {
+        req.log.warn({ err }, "quality-check reviewer lookup failed");
+      }
+    }
+
+    const [row] = await db
+      .insert(qualityChecksTable)
+      .values({
+        productType: data.productType,
+        status: data.status,
+        confidence: data.confidence,
+        summary: data.summary,
+        issues: data.issues,
+        notes: data.notes,
+        thumbnail: data.thumbnail,
+        reviewerId,
+        reviewerName,
+      })
+      .returning();
+    res.json(rowToRecord(row));
+  },
+);
+
+// GET /inventory/quality-checks — manager-only quality history (newest first),
+// optionally filtered by product type and/or status. Unknown filter values are
+// ignored rather than erroring so a stray query param never breaks the view.
+router.get(
+  "/inventory/quality-checks",
+  requireRole("manager"),
+  async (req, res): Promise<void> => {
+    const filter = parseHistoryFilter(req.query);
+    const conditions = [];
+    if (filter.productType)
+      conditions.push(eq(qualityChecksTable.productType, filter.productType));
+    if (filter.status) conditions.push(eq(qualityChecksTable.status, filter.status));
+
+    const rows = await db
+      .select()
+      .from(qualityChecksTable)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(desc(qualityChecksTable.createdAt));
+    res.json(rows.map(rowToRecord));
   },
 );
 

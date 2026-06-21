@@ -15,6 +15,7 @@ export const MAX_ISSUE_TYPE_CHARS = 60;
 export const MAX_ISSUE_DETAIL_CHARS = 300;
 export const MAX_ISSUES = 12;
 
+export type QualityProductType = "pizza" | "crust" | "other";
 export type QualityStatus = "pass" | "warn" | "fail";
 export type QualitySeverity = "minor" | "major" | "critical";
 

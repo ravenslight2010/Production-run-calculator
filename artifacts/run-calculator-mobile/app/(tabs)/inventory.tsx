@@ -12,6 +12,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import * as ImageManipulator from "expo-image-manipulator";
 import { Feather } from "@expo/vector-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card, Button } from "@/components/UI";
 import { useRun } from "@/context/RunContext";
@@ -50,6 +51,7 @@ import {
   type InventoryCategory,
   type PhotoGuess,
   qualityCheckPhoto,
+  recordQualityCheck,
   wasteInsight,
   type QualityProductType,
   type QualityStatus,
@@ -1456,6 +1458,7 @@ function qualityStatusMeta(
 
 function QualityCheckCard() {
   const colors = useColors();
+  const qc = useQueryClient();
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [productType, setProductType] = useState<QualityProductType>("pizza");
@@ -1546,26 +1549,50 @@ function QualityCheckCard() {
     if (!res.canceled) await analyzeAsset(res.assets[0]);
   }
 
-  // Record the reviewed outcome to shared facility memory. This is the ONLY
-  // write — the assessment itself is never auto-saved.
+  // Record the reviewed outcome. This is the ONLY write — the assessment itself
+  // is never auto-saved. Two things happen on confirm:
+  //   1. A structured row is persisted into the browsable manager Quality
+  //      History (date, product, verdict, confidence, issues, optional photo).
+  //   2. A free-text fact is recorded into shared facility memory so future AI
+  //      checks are grounded in it.
   async function confirmOutcome() {
     if (!result) return;
     const a = result.assessment;
     setConfirming(true);
     setError(null);
     try {
+      const thumbnail = lastImageRef.current
+        ? `data:image/jpeg;base64,${lastImageRef.current}`
+        : undefined;
+      await recordQualityCheck({
+        productType,
+        status: a.status,
+        confidence: a.confidence,
+        summary: a.summary,
+        issues: a.issues,
+        notes: notes.trim() || undefined,
+        thumbnail,
+      });
+      void qc.invalidateQueries({ queryKey: ["qualityChecks"] });
+
       const issueText = a.issues.length
         ? ` Issues: ${a.issues.map((i) => `${i.type} (${i.severity}) — ${i.detail}`).join("; ")}.`
         : "";
-      await saveFacilityKnowledge([
-        {
-          domain: "quality",
-          key: `check:${productType}:${todayStr()}`,
-          fact:
-            `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
-            `"${a.status}" (${Math.round(a.confidence * 100)}% confidence). ${a.summary}${issueText}`,
-        },
-      ]);
+      // Best-effort: the structured record above is the source of truth, so a
+      // facility-memory write failure must not undo a successful save.
+      try {
+        await saveFacilityKnowledge([
+          {
+            domain: "quality",
+            key: `check:${productType}:${todayStr()}`,
+            fact:
+              `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
+              `"${a.status}" (${Math.round(a.confidence * 100)}% confidence). ${a.summary}${issueText}`,
+          },
+        ]);
+      } catch {
+        // ignore — the history record persisted
+      }
       setConfirmed(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save outcome");

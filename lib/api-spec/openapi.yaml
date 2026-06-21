@@ -594,6 +594,69 @@ paths:
         "502":
           description: Vision provider error
 
+  /inventory/quality-checks:
+    post:
+      operationId: recordQualityCheck
+      tags: [inventory]
+      summary: Record a reviewed-and-confirmed quality check (manager only)
+      description: >-
+        Persists a structured record of a quality check a manager reviewed and
+        confirmed (product type, verdict, confidence, summary, specific issues,
+        optional notes and a small photo thumbnail). This builds a browsable
+        history managers can audit and use to spot trends over time. The
+        advisory /inventory/quality-photo endpoint never writes — this is the
+        deliberate, user-driven save.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QualityCheckRecordInput"
+      responses:
+        "200":
+          description: The recorded quality check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QualityCheckRecord"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    get:
+      operationId: listQualityChecks
+      tags: [inventory]
+      summary: List past quality checks (manager only)
+      description: >-
+        Returns recorded quality checks (newest first) for a manager to review,
+        optionally filtered by product type and/or status.
+      parameters:
+        - name: productType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pizza, crust, other]
+          description: Only return checks for this product type
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pass, warn, fail]
+          description: Only return checks with this verdict
+      responses:
+        "200":
+          description: Quality check history (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/QualityCheckRecord"
+        "403":
+          description: Manager role required
+
   /inventory/waste-insight:
     post:
       operationId: wasteInsight
@@ -2193,6 +2256,84 @@ components:
         note:
           type: string
           description: Optional message when the photo could not be assessed
+
+    QualityCheckRecordInput:
+      type: object
+      description: >-
+        A reviewed-and-confirmed quality check to persist into the manager
+        history.
+      required:
+        - productType
+        - status
+        - confidence
+        - summary
+        - issues
+      properties:
+        productType:
+          type: string
+          enum: [pizza, crust, other]
+        status:
+          type: string
+          enum: [pass, warn, fail]
+        confidence:
+          type: number
+          description: 0..1 model confidence at check time
+        summary:
+          type: string
+          description: Plain-language overall assessment
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/QualityIssue"
+        notes:
+          type: string
+          description: Optional plain-language context the reviewer attached
+        thumbnail:
+          type: string
+          description: >-
+            Optional small base64 data URI of the analyzed photo; dropped
+            server-side when too large.
+
+    QualityCheckRecord:
+      type: object
+      description: A persisted quality check in the manager history.
+      required:
+        - id
+        - productType
+        - status
+        - confidence
+        - summary
+        - issues
+        - createdAt
+      properties:
+        id:
+          type: integer
+        productType:
+          type: string
+          enum: [pizza, crust, other]
+        status:
+          type: string
+          enum: [pass, warn, fail]
+        confidence:
+          type: number
+        summary:
+          type: string
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/QualityIssue"
+        notes:
+          type: string
+          nullable: true
+        thumbnail:
+          type: string
+          nullable: true
+        reviewerName:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          description: ISO-8601 timestamp the check was recorded
 
     WasteInsightInput:
       type: object
