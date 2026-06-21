@@ -656,13 +656,27 @@ function RecipeAssistChat({
   const [note, setNote] = React.useState<string | null>(null);
   const scrollRef = React.useRef<ScrollView | null>(null);
 
+  // Voice input: a FINAL transcript is sent straight through the normal ask flow
+  // (this helper is single-shot — no /ai/command classification like AskChat).
+  // Interim transcripts just preview in the box. Falls back to plain typing when
+  // speech isn't supported (native build) or the mic is denied. EXACT mirror of
+  // the web RecipeAssistChat (replit.md parity).
+  const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
+    useSpeechInput({
+      onTranscript: (text, isFinal) => {
+        setQuestion(text);
+        if (isFinal) void send(text);
+      },
+    });
+  const micDenied = micState === "denied";
+
   React.useEffect(() => {
     const id = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
     return () => clearTimeout(id);
   }, [turns, loading]);
 
-  async function send() {
-    const q = question.trim();
+  async function send(raw?: string) {
+    const q = (raw ?? question).trim();
     if (!q || loading) return;
     setLoading(true);
     setError(null);
@@ -752,18 +766,45 @@ function RecipeAssistChat({
           ]}
           value={question}
           onChangeText={setQuestion}
-          placeholder="Ask about a recipe or ingredient…"
+          placeholder={listening ? "Listening…" : "Ask about a recipe or ingredient…"}
           placeholderTextColor={colors.mutedForeground}
           multiline
           editable={!loading}
         />
+        {micSupported ? (
+          <Pressable
+            onPress={toggleMic}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel={listening ? "Stop voice input" : "Ask a recipe question by voice"}
+            style={({ pressed }) => [
+              styles.micBtn,
+              {
+                borderColor: listening ? colors.primary : colors.border,
+                backgroundColor: listening ? colors.primary : colors.background,
+                opacity: loading ? 0.4 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Feather
+              name="mic"
+              size={18}
+              color={listening ? colors.primaryForeground : colors.foreground}
+            />
+          </Pressable>
+        ) : null}
         <Button
           label="Send"
           icon="send"
-          onPress={send}
+          onPress={() => void send()}
           disabled={loading || !question.trim()}
         />
       </View>
+      {micDenied ? (
+        <Text style={[styles.micDenied, { color: colors.mutedForeground }]}>
+          Microphone access is blocked. Allow it in settings, or just type your question.
+        </Text>
+      ) : null}
     </Card>
   );
 }

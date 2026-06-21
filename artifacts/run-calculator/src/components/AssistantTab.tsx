@@ -656,13 +656,27 @@ function RecipeAssistChat({
   const [note, setNote] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Voice input: a FINAL transcript is sent straight through the normal ask flow
+  // (this helper is single-shot — no /ai/command classification like AskChat).
+  // Interim transcripts just preview in the box. Falls back to plain typing when
+  // speech isn't supported or the mic is denied. Mirrors the mobile
+  // RecipeAssistChat (replit.md parity).
+  const { supported: micSupported, listening, state: micState, toggle: toggleMic } =
+    useSpeechInput({
+      onTranscript: (text, isFinal) => {
+        setQuestion(text);
+        if (isFinal) void send(text);
+      },
+    });
+  const micDenied = micState === "denied";
+
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns, loading]);
 
-  async function send() {
-    const q = question.trim();
+  async function send(raw?: string) {
+    const q = (raw ?? question).trim();
     if (!q || loading) return;
     setLoading(true);
     setError(null);
@@ -768,12 +782,27 @@ function RecipeAssistChat({
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Ask about a recipe or ingredient…"
+            placeholder={listening ? "Listening…" : "Ask about a recipe or ingredient…"}
             rows={2}
             className="min-h-[44px] resize-none"
             disabled={loading}
             data-testid="input-recipe-assist-question"
           />
+          {micSupported && (
+            <Button
+              type="button"
+              variant={listening ? "default" : "outline"}
+              size="icon"
+              onClick={toggleMic}
+              disabled={loading}
+              className={`shrink-0 ${listening ? "animate-pulse" : ""}`}
+              aria-label={listening ? "Stop voice input" : "Ask a recipe question by voice"}
+              title={listening ? "Stop voice input" : "Ask a recipe question by voice"}
+              data-testid="button-recipe-assist-mic"
+            >
+              <Mic className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             onClick={() => void send()}
             disabled={loading || !question.trim()}
@@ -784,6 +813,14 @@ function RecipeAssistChat({
             Send
           </Button>
         </div>
+        {micDenied && (
+          <p
+            className="text-[11px] text-muted-foreground"
+            data-testid="recipe-assist-mic-denied"
+          >
+            Microphone access is blocked. Allow it in your browser, or just type your question.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
