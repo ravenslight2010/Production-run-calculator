@@ -1621,6 +1621,10 @@ export default function Home() {
   const [history, setHistory] = useState<HistoryDay[]>(() => loadHistory());
   const [expandedHistoryDay, setExpandedHistoryDay] = useState<string | null>(null);
   const [sauceWeightsOpen, setSauceWeightsOpen] = useState(false);
+  // Bumped on each write to a non-active draining run so the Packaging
+  // "Finishing — Freezer Draining" panel re-renders immediately (its values are
+  // read from persisted run storage, not the live form).
+  const [, setDrainBump] = useState(0);
 
   // ── Historical PPM benchmark (average of finished runs across all days) ───
   const histBenchmarkPpm = useMemo(() => {
@@ -4131,6 +4135,19 @@ export default function Home() {
         schedulePush(dayStateRef.current, 0);
       },
     });
+  }
+
+  // Persist skid/case progress for a SPECIFIC (non-active) draining run. The
+  // active run writes through the live form + autosave effect; a just-ended run
+  // still draining its freezer is written here through the EXISTING per-run
+  // saveRunValues path (no new write surface), pushed to sync, and a bump forces
+  // an immediate re-render of the draining panel. Manual logging only — we never
+  // auto-track a non-active ended run. Mirrored on mobile (replit.md parity).
+  function updateDrainingRunValues(id: string, partial: Partial<FormValues>) {
+    const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
+    saveRunValues(id, vals);
+    schedulePush(dayStateRef.current, 0);
+    setDrainBump((b) => b + 1);
   }
 
   function flashSaved() {
@@ -8293,6 +8310,136 @@ export default function Home() {
                     </div>
                   </CardContent>
                 </Card>
+                {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
+                {(() => {
+                  if (!lastEndedRun?.endedAt) return null;
+                  // The active run shows its own card (incl. its own emptying bar);
+                  // the draining panel is only for a DIFFERENT, just-ended run.
+                  if (lastEndedRun.id === currentRunId) return null;
+                  const dv = loadRunValues(lastEndedRun.id);
+                  const fT = Number(dv.freezerTime) || 0;
+                  if (fT <= 0) return null;
+                  const freezerMs = fT * 60000;
+                  const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
+                  if (remainMs <= 0) return null; // freezer fully empty
+                  const casesPerSkid = Number(dv.casesPerSkid) || 0;
+                  const casesNeeded = Number(dv.casesNeeded) || 0;
+                  const skids = Number(dv.skidsCompleted) || 0;
+                  const casesOnSkid = Number(dv.casesOnCurrentSkid) || 0;
+                  const casesDone = skids * casesPerSkid + casesOnSkid;
+                  const casesLeft = Math.max(0, casesNeeded - casesDone);
+                  if (casesNeeded > 0 && casesLeft <= 0) return null; // all packaged
+                  const id = lastEndedRun.id;
+                  const name =
+                    `${lastEndedRun.brand ?? ""}${lastEndedRun.flavor ? ` – ${lastEndedRun.flavor}` : ""}`.trim() ||
+                    "Finished run";
+                  const maxSkids = casesPerSkid > 0 ? Math.floor(casesNeeded / casesPerSkid) : undefined;
+                  const maxCasesOnSkid = casesPerSkid > 0 ? casesPerSkid : undefined;
+                  const pct = Math.min(1 - remainMs / freezerMs, 1);
+                  const mm = Math.floor(remainMs / 60000);
+                  const ss = Math.floor((remainMs % 60000) / 1000);
+                  const skidNearlyFull =
+                    casesPerSkid > 0 && casesOnSkid > 0 &&
+                    casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
+                  return (
+                    <Card className="bg-amber-950/10 border-amber-600/40 shadow-md mb-4">
+                      <CardHeader className="pb-1 pt-3 px-4">
+                        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-amber-400">
+                          Finishing — Freezer Draining
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-2">
+                        <p className="text-base font-semibold text-foreground truncate">{name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Finished pizzas are still exiting the freezer. Log skids &amp; cases as they come off.
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Total Skids Completed</p>
+                            <div className="flex items-stretch">
+                              <button
+                                type="button"
+                                onClick={() => { navigator.vibrate?.(8); updateDrainingRunValues(id, { skidsCompleted: Math.max(0, skids - 1) }); }}
+                                className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
+                              >
+                                −
+                              </button>
+                              <div className="flex-1 h-12 border-y border-input bg-background flex items-center justify-center text-lg font-mono font-bold tabular-nums text-foreground">
+                                {skids}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); updateDrainingRunValues(id, { skidsCompleted: skids + 1 }); }}
+                                className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Cases on Current Skid</p>
+                            <div className="flex items-stretch">
+                              <button
+                                type="button"
+                                onClick={() => { navigator.vibrate?.(8); updateDrainingRunValues(id, { casesOnCurrentSkid: Math.max(0, casesOnSkid - 1) }); }}
+                                className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
+                              >
+                                −
+                              </button>
+                              <div className="flex-1 h-12 border-y border-input bg-background flex items-center justify-center text-lg font-mono font-bold tabular-nums text-foreground">
+                                {casesOnSkid}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => { if (maxCasesOnSkid !== undefined && casesOnSkid >= maxCasesOnSkid) return; navigator.vibrate?.(8); updateDrainingRunValues(id, { casesOnCurrentSkid: casesOnSkid + 1 }); }}
+                                className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        {skidNearlyFull && (
+                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            Skid nearly full — {casesPerSkid - casesOnSkid} case{casesPerSkid - casesOnSkid !== 1 ? "s" : ""} to go
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => { navigator.vibrate?.(15); updateDrainingRunValues(id, { skidsCompleted: skids + 1, casesOnCurrentSkid: 0 }); }}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/40 text-emerald-400 text-sm font-semibold transition-colors active:scale-[0.98]"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          Skid Done — log &amp; reset
+                        </button>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-muted/20 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold tabular-nums text-emerald-400">{fmtNum(casesDone, 0)}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Cases done</p>
+                          </div>
+                          <div className="bg-muted/20 rounded-lg p-3 text-center">
+                            <p className="text-2xl font-mono font-bold tabular-nums">{fmtNum(casesLeft, 0)}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Cases left</p>
+                          </div>
+                        </div>
+                        <Separator className="opacity-30 my-1" />
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Freezer Emptying</p>
+                          <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-1000 bg-amber-500"
+                              style={{ width: `${pct * 100}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] font-mono font-semibold text-right text-amber-400">
+                            {`Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
                 <Card className="bg-card/50 border-border/50 shadow-md mb-4">
                     <CardHeader className="pb-1 pt-3 px-4">
                       <div className="flex items-center justify-between">
@@ -8423,7 +8570,7 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                      {Number(v.freezerTime) > 0 && lastEndedRun?.endedAt && (() => {
+                      {Number(v.freezerTime) > 0 && lastEndedRun?.endedAt && lastEndedRun.id === currentRunId && (() => {
                         const freezerMs = Number(v.freezerTime) * 60000;
                         const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
                         const pct = Math.min(1 - remainMs / freezerMs, 1);

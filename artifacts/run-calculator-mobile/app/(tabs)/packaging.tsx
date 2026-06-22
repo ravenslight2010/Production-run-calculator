@@ -5,7 +5,8 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-n
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Stepper } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
-import { useRun, computeCalc, computeDoughSupply, liveFreezerMin, PACKAGING_FIELDS } from "@/context/RunContext";
+import { useRun, computeCalc, computeDoughSupply, liveFreezerMin, runLabel, PACKAGING_FIELDS } from "@/context/RunContext";
+import type { RunState } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 
 function fmtTime(min: number): string {
@@ -20,7 +21,9 @@ export default function PackagingScreen() {
   const insets = useSafeAreaInsets();
   const {
     run,
+    allRuns,
     updateProgress,
+    updateProgressForRun,
     autoTrack,
     setAutoTrack,
     suppressAutoTrack,
@@ -30,6 +33,56 @@ export default function PackagingScreen() {
 
   const nowMs = Date.now();
   const calc = computeCalc(run, nowMs);
+
+  // ── Draining run (transition view) ─────────────────────────────────────────
+  // When a run ends and the next begins, the just-ended run's pizzas keep
+  // exiting the freezer tunnel for `freezerTime` more minutes. Pick the
+  // most-recently-ended run (other than the active one) whose freezer is still
+  // draining AND that still has unpackaged cases, so the operator can keep
+  // logging it. Manual logging only — we never auto-track a non-active run.
+  const drainingRun: RunState | null = (() => {
+    let best: RunState | undefined;
+    for (const r of allRuns) {
+      if (r.id === run.id) continue;
+      if (r.endedAt == null) continue;
+      if (!best || r.endedAt > (best.endedAt ?? 0)) best = r;
+    }
+    if (!best || best.endedAt == null) return null;
+    const fT = best.settings.freezerTime;
+    if (fT <= 0) return null;
+    if (nowMs >= best.endedAt + fT * 60000) return null; // freezer fully empty
+    const dCalc = computeCalc(best, nowMs);
+    if (best.settings.casesNeeded > 0 && dCalc.casesLeft <= 0) return null; // all packaged
+    return best;
+  })();
+
+  const dr = drainingRun;
+  const drCalc = dr ? computeCalc(dr, nowMs) : null;
+  const drCasesPerSkid = dr?.settings.casesPerSkid ?? 0;
+  // Mirror web's draining-panel increment caps so logging behaves identically
+  // across platforms: skids cap at floor(casesNeeded / casesPerSkid), cases on
+  // the current skid cap at casesPerSkid.
+  const drCasesNeeded = dr?.settings.casesNeeded ?? 0;
+  const drMaxSkids = drCasesPerSkid > 0 ? Math.floor(drCasesNeeded / drCasesPerSkid) : undefined;
+  const drMaxCasesOnSkid = drCasesPerSkid > 0 ? drCasesPerSkid : undefined;
+  const drCasesDone = dr
+    ? dr.progress.skidsCompleted * drCasesPerSkid + dr.progress.casesOnCurrentSkid
+    : 0;
+  const drFreezerTime = dr?.settings.freezerTime ?? 0;
+  const drFreezerMs = drFreezerTime * 60000;
+  const drRemainMs =
+    dr && dr.endedAt != null
+      ? Math.max(0, dr.endedAt + drFreezerMs - nowMs)
+      : 0;
+  const drPct = drFreezerMs > 0 ? Math.min(1 - drRemainMs / drFreezerMs, 1) : 0;
+  const drDone = drRemainMs === 0;
+  const drMM = Math.floor(drRemainMs / 60000);
+  const drSS = Math.floor((drRemainMs % 60000) / 1000);
+  const drSkidNearlyFull =
+    !!dr &&
+    drCasesPerSkid > 0 &&
+    drCasesPerSkid - dr.progress.casesOnCurrentSkid <= 3 &&
+    dr.progress.casesOnCurrentSkid < drCasesPerSkid;
   const freezerTime = run.settings.freezerTime;
   const freezerMin = liveFreezerMin(run, nowMs);
   const freezerRemaining = Math.max(0, freezerTime - freezerMin);
@@ -58,6 +111,163 @@ export default function PackagingScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
+        {dr ? (
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: colors.card, borderColor: (colors.warning ?? "#f59e0b") + "66" },
+            ]}
+          >
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: colors.warning ?? "#f59e0b" }]}>
+                FINISHING — FREEZER DRAINING
+              </Text>
+            </View>
+            <View style={styles.cardBody}>
+              <Text style={[styles.drainName, { color: colors.foreground }]} numberOfLines={1}>
+                {runLabel(dr, allRuns.indexOf(dr))}
+              </Text>
+              <Text style={[styles.drainHint, { color: colors.mutedForeground }]}>
+                Finished pizzas are still exiting the freezer. Log skids &amp; cases as they come
+                off.
+              </Text>
+
+              <Stepper
+                label="Total Skids Completed"
+                value={dr.progress.skidsCompleted}
+                onDecrement={() => {
+                  Haptics.selectionAsync();
+                  updateProgressForRun(dr.id, {
+                    skidsCompleted: Math.max(0, dr.progress.skidsCompleted - 1),
+                  });
+                }}
+                onIncrement={() => {
+                  if (drMaxSkids !== undefined && dr.progress.skidsCompleted >= drMaxSkids) return;
+                  Haptics.selectionAsync();
+                  updateProgressForRun(dr.id, {
+                    skidsCompleted: dr.progress.skidsCompleted + 1,
+                  });
+                }}
+              />
+              <Stepper
+                label="Cases on Current Skid"
+                value={dr.progress.casesOnCurrentSkid}
+                onDecrement={() => {
+                  Haptics.selectionAsync();
+                  updateProgressForRun(dr.id, {
+                    casesOnCurrentSkid: Math.max(0, dr.progress.casesOnCurrentSkid - 1),
+                  });
+                }}
+                onIncrement={() => {
+                  if (drMaxCasesOnSkid !== undefined && dr.progress.casesOnCurrentSkid >= drMaxCasesOnSkid) return;
+                  Haptics.selectionAsync();
+                  updateProgressForRun(dr.id, {
+                    casesOnCurrentSkid: dr.progress.casesOnCurrentSkid + 1,
+                  });
+                }}
+              />
+
+              {drSkidNearlyFull ? (
+                <View
+                  style={[
+                    styles.skidWarn,
+                    { backgroundColor: colors.warning + "22", borderColor: colors.warning + "4d" },
+                  ]}
+                >
+                  <Feather name="alert-triangle" size={14} color={colors.warning} />
+                  <Text style={[styles.skidWarnText, { color: colors.warning }]}>
+                    Skid nearly full — {drCasesPerSkid - dr.progress.casesOnCurrentSkid} case
+                    {drCasesPerSkid - dr.progress.casesOnCurrentSkid !== 1 ? "s" : ""} to go
+                  </Text>
+                </View>
+              ) : null}
+
+              <Pressable
+                onPress={() => {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  updateProgressForRun(dr.id, {
+                    skidsCompleted: dr.progress.skidsCompleted + 1,
+                    casesOnCurrentSkid: 0,
+                  });
+                }}
+                style={({ pressed }) => [
+                  styles.skidDoneBtn,
+                  {
+                    backgroundColor: colors.success + "22",
+                    borderColor: colors.success + "66",
+                    opacity: pressed ? 0.6 : 1,
+                  },
+                ]}
+              >
+                <Feather name="check-circle" size={16} color={colors.success} />
+                <Text style={[styles.skidDoneText, { color: colors.success }]}>
+                  Skid Done — log &amp; reset
+                </Text>
+              </Pressable>
+
+              {/* Cases done / left for the draining run */}
+              <View style={styles.drainMetrics}>
+                <View style={[styles.drainCell, { backgroundColor: colors.secondary + "66" }]}>
+                  <Text
+                    style={[styles.drainValue, { color: colors.success }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {drCasesDone}
+                  </Text>
+                  <Text style={[styles.drainLabel, { color: colors.mutedForeground }]}>
+                    Cases done
+                  </Text>
+                </View>
+                <View style={[styles.drainCell, { backgroundColor: colors.secondary + "66" }]}>
+                  <Text
+                    style={[styles.drainValue, { color: colors.foreground }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {drCalc?.casesLeft ?? 0}
+                  </Text>
+                  <Text style={[styles.drainLabel, { color: colors.mutedForeground }]}>
+                    Cases left
+                  </Text>
+                </View>
+              </View>
+
+              {/* Freezer emptying countdown */}
+              {drFreezerTime > 0 ? (
+                <>
+                  <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                  <Text style={[styles.freezerLabel, { color: colors.mutedForeground }]}>
+                    FREEZER EMPTYING
+                  </Text>
+                  <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          backgroundColor: drDone ? colors.success : colors.warning ?? "#f59e0b",
+                          width: `${drPct * 100}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.freezerStatus,
+                      { color: drDone ? colors.success : colors.warning ?? "#f59e0b" },
+                    ]}
+                  >
+                    {drDone
+                      ? "✓ Freezer empty"
+                      : `Draining — ${String(drMM).padStart(2, "0")}:${String(drSS).padStart(2, "0")} left`}
+                  </Text>
+                </>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         {/* ─── Current Progress card ─── */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.cardHeader}>
@@ -352,6 +562,23 @@ const styles = StyleSheet.create({
   },
   cardTitle: { fontSize: 12, fontFamily: FONTS.semibold, letterSpacing: 1 },
   cardBody: { paddingHorizontal: 16, paddingBottom: 14 },
+
+  drainName: { fontSize: 16, fontFamily: FONTS.semibold, marginTop: 2 },
+  drainHint: { fontSize: 12, lineHeight: 16, marginTop: 4, marginBottom: 8 },
+  drainMetrics: { flexDirection: "row", gap: 12, marginTop: 14 },
+  drainCell: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    alignItems: "center",
+  },
+  drainValue: {
+    fontSize: 26,
+    fontFamily: FONTS.monoBold,
+    fontVariant: ["tabular-nums"],
+  },
+  drainLabel: { fontSize: 12, marginTop: 2, fontFamily: FONTS.regular },
 
   autoPill: {
     flexDirection: "row",

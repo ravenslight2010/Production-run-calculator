@@ -1285,6 +1285,10 @@ interface RunContextValue {
   allRuns: RunState[];
   updateSettings: (partial: Partial<RunSettings>) => void;
   updateProgress: (partial: Partial<RunProgress>) => void;
+  // Persist skid/case progress for a SPECIFIC (possibly non-active) run by id.
+  // Used by the Packaging "Finishing — Freezer Draining" panel to log product
+  // still exiting the freezer for a just-ended run while a new run is active.
+  updateProgressForRun: (runId: string, partial: Partial<RunProgress>) => void;
   startRun: () => void;
   endRun: () => void;
   addStoppage: (type: Stoppage["type"], reason?: string, notes?: string) => void;
@@ -1986,6 +1990,24 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (partial: Partial<RunProgress>) =>
       updateCurrentRun((r) => ({ ...r, progress: { ...r.progress, ...partial } })),
     [updateCurrentRun],
+  );
+
+  // Write progress to a run identified by id (mirrors updateRunSettingsById).
+  // Lets the Packaging draining panel log skids/cases for the just-ended run
+  // without switching the active run. Persists + syncs through the same path.
+  const updateProgressForRun = useCallback(
+    (runId: string, partial: Partial<RunProgress>) => {
+      setAppState((prev) => {
+        const idx = prev.runs.findIndex((r) => r.id === runId);
+        if (idx < 0) return prev;
+        const runs = [...prev.runs];
+        runs[idx] = { ...runs[idx], progress: { ...runs[idx].progress, ...partial } };
+        const next = { ...prev, runs };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
   );
 
   const startRun = useCallback(
@@ -3362,6 +3384,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         deleteRun,
         moveRun,
         updateRunSettingsById,
+        updateProgressForRun,
         captureRunsSnapshot,
         restoreRunsSnapshot,
         resetRun,
