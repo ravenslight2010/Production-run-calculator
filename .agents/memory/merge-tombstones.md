@@ -45,12 +45,14 @@ isolation). Behavior, at web+mobile parity:
   ErrorBoundary-uncatchable async path).
 - DELETE on explicit re-add, preserving "re-add resurrects".
 
-**Parity trap (caught in review):** mobile `addListItem` is ONE generic handler
-over all `MasterListKey`s — including non-mergeable `brands`/`stopReasons` —
-whereas web has per-list `add*` handlers and only the mergeable ones clear the
-tombstone. Gate the durable DELETE on a `MERGEABLE_LIST_KEYS` set
-(die/pep/cheese/dough/frontline) or adding an unrelated brand named like a
-tombstoned ingredient silently un-tombstones it factory-wide. Mobile merge
+**Parity trap (caught in review, twice):** mobile `addListItem` is ONE generic
+handler over all `MasterListKey`s — including non-mergeable `brands`/`stopReasons`
+— whereas web has per-list `add*` handlers and only the mergeable ones clear the
+tombstone. BOTH the local `mergedAway` removal AND the durable DELETE must be
+gated on `MERGEABLE_LIST_KEYS` (die/pep/cheese/dough/frontline). The first pass
+gated only the durable DELETE and left the LOCAL filter unconditional, so adding a
+non-mergeable brand named like a tombstoned ingredient still cleared the local
+tombstone and could re-push it via day-sync. Gate them together. Mobile merge
 universe = pep+die+cheese+dough+frontline (NO ingredientTypes/mix); web prunes
 ingredientTypes/pep/die/cheese/dough/frontline/mix.
 

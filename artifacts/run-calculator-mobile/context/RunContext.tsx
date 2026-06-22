@@ -2607,11 +2607,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       setAppState((prev) => {
         if (prev[list].includes(v)) return prev;
         // Re-adding a name resurrects it: drop it from the tombstone so the sync
-        // union won't strip it back out (web parity).
+        // union won't strip it back out (web parity). Gate this on the mergeable
+        // lists only — brands/stopReasons never carry tombstones, so adding one
+        // of those must NOT clear an ingredient tombstone that merely shares the
+        // same text (matches the durable DELETE gating below + web, where only
+        // the mergeable add* handlers clear the tombstone).
         const lower = v.trim().toLowerCase();
-        const mergedAway = (prev.mergedAway ?? []).filter(
-          (n) => n.trim().toLowerCase() !== lower,
-        );
+        const mergedAway = MERGEABLE_LIST_KEYS.has(list)
+          ? (prev.mergedAway ?? []).filter((n) => n.trim().toLowerCase() !== lower)
+          : (prev.mergedAway ?? []);
         const next = withChangeRecord(
           prev,
           { ...prev, mergedAway, [list]: [...prev[list], v] },
