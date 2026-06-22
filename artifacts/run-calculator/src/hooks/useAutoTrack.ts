@@ -36,6 +36,7 @@ interface AutoTrackResult {
     skids: number;
     casesOnSkid: number;
     expectedCases: number;
+    expectedCasesRaw: number;
     trays: number | null;
     batches: number | null;
   } | null;
@@ -103,6 +104,11 @@ export function useAutoTrack({
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
       expectedCases,
+      // Unclamped time-based total — drives the INCREMENTAL delta below so that a
+      // downward manual correction (e.g. after the estimate ran ahead and hit the
+      // casesNeeded clamp) can still climb again. The clamp lives only on what is
+      // displayed/written, not on the delta source.
+      expectedCasesRaw,
       // Tray/batch suggestions are handled incrementally in the write effect;
       // returning null here means the UI falls back to the calc-based suggestion.
       trays: null,
@@ -135,6 +141,12 @@ export function useAutoTrack({
       : 5; // first bucket — assume 5-min duration
 
     const expectedCases = autoTrackSuggestion.expectedCases;
+    // Baseline the incremental delta off the UNCLAMPED total so the count keeps
+    // advancing even after the time-based estimate saturates at casesNeeded (e.g.
+    // the estimate ran ahead, the operator corrected the count down, then hit
+    // "Resume now"). Using the clamped value here would pin the delta at 0 and the
+    // count would never climb again.
+    const expectedRaw = autoTrackSuggestion.expectedCasesRaw;
     const prevExpected = lastExpectedCasesRef.current;
 
     // Always advance the bucket bookkeeping — even while suppressed — so the
@@ -142,7 +154,7 @@ export function useAutoTrack({
     // operator's manual edit.
     lastAutoMinBucketRef.current = bucket;
     lastBucketTimeMsRef.current = nowMs;
-    lastExpectedCasesRef.current = expectedCases;
+    lastExpectedCasesRef.current = expectedRaw;
 
     // While the manual-edit suppression window is open, keep baselines current but
     // do not write — the operator is taking over.
@@ -166,7 +178,7 @@ export function useAutoTrack({
     } else {
       // Add the production since the last bucket on top of the current value, so a
       // manual correction is preserved and tracking continues forward from it.
-      const deltaCases = Math.max(0, expectedCases - prevExpected);
+      const deltaCases = Math.max(0, expectedRaw - prevExpected);
       if (deltaCases > 0) {
         const target = curTotal + deltaCases;
         // Never pull a value down below what the operator already has on the floor.

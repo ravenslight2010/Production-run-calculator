@@ -3293,7 +3293,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     // expiring never causes a catch-up jump that wipes a manual edit.
     autoBucketRef.current = bucket;
     autoBucketTimeMsRef.current = nowMs;
-    autoExpectedCasesRef.current = expectedCases;
+    // Baseline the incremental delta off the UNCLAMPED output total (web parity)
+    // so the count keeps advancing even after the time-based estimate saturates at
+    // casesNeeded — e.g. the estimate ran ahead, the operator corrected the count
+    // down, then resumed auto-track. Using the clamped value here would pin the
+    // delta at 0 and the count would never climb again.
+    autoExpectedCasesRef.current = outputCasesRaw;
 
     // While the manual-edit suppression window is open, keep baselines current
     // but do not write — a supervisor is taking over.
@@ -3319,7 +3324,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             : expectedCases;
       }
     } else {
-      const deltaCases = Math.max(0, expectedCases - prevExpected);
+      const deltaCases = Math.max(0, outputCasesRaw - prevExpected);
       if (deltaCases > 0) {
         const target = curTotal + deltaCases;
         newTotal =

@@ -40,6 +40,17 @@ cases). Never re-couple them into one count, or one timeline will be wrong.
 **Why:** mobile previously used one no-offset count for both and overcounted
 completed cases by `freezerTime` worth of production.
 
+**Incremental delta must baseline off the UNCLAMPED expected, not the clamped
+one:** skids/cases `expectedCases` is clamped to `casesNeeded` for display/write,
+but the per-bucket delta MUST be `rawExpected_now - rawExpected_prev` (web
+`expectedCasesRaw`, mobile `outputCasesRaw`). If the delta uses the *clamped*
+value, then once the time-based estimate saturates at `casesNeeded` both terms pin
+at `casesNeeded`, delta is 0 forever, and after the operator corrects the count
+DOWN (estimate ran ahead) auto-track can never climb again — user reported "auto
+count was ahead, I adjusted it and hit Resume now, it never started back up."
+Keep the output cap (`Math.min(target, Math.max(curTotal, casesNeeded))`) so the
+count still can't cycle past target. Strict web+mobile parity.
+
 **Freezer delay is intentional even with cases on the skid at Start:** when the
 operator enters a starting count (e.g. cases already on the skid) before Start,
 the desired behavior is to KEEP the freezer-tunnel delay for NEW output and have
