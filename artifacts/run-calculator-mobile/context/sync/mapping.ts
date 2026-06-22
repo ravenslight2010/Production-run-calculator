@@ -57,6 +57,7 @@ export interface SyncableState {
   mergedAway: string[];
   substitutions: IngredientSubstitution[];
   substitutionLog: SubstitutionLogEntry[];
+  stagedItems: Record<string, boolean>;
 }
 
 export type SyncableStatePatch = Partial<SyncableState>;
@@ -336,6 +337,7 @@ export function appStateToPayload(
       date: todayStr(),
       substitutions: state.substitutions ?? [],
       substitutionLog: state.substitutionLog ?? [],
+      stagedItems: state.stagedItems ?? {},
     },
     runValues,
     brands: state.brands,
@@ -431,6 +433,10 @@ export function applyPayloadToState(
     // adopt its substitution list wholesale (web parity — replaced, not merged).
     patch.substitutions = Array.isArray(ds.substitutions) ? ds.substitutions : [];
     patch.substitutionLog = Array.isArray(ds.substitutionLog) ? ds.substitutionLog : [];
+    // Staging checklist is a today-only overlay too: adopt the accepted day's
+    // map wholesale (web parity — replaced, not merged).
+    patch.stagedItems =
+      ds.stagedItems && typeof ds.stagedItems === "object" ? ds.stagedItems : {};
     patch.resetAt = Math.max(prev.resetAt, remoteResetAt);
     patch.date = todayStr();
   }

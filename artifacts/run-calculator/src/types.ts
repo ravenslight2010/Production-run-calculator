@@ -213,10 +213,14 @@ export type DayState = {
   // handoffs and end-of-day review. Synced alongside substitutions; cleared at
   // the daily reset. Never feeds the calc — purely an audit log.
   substitutionLog?: SubstitutionLogEntry[];
+  // Warehouse staging checklist: which per-run need rows have been pulled/staged.
+  // Keyed by `${runId}::${label}__${unit}` (only checked items stored as true).
+  // Lives in synced day-state, NOT master data; cleared at the daily reset.
+  stagedItems?: Record<string, boolean>;
 };
 
 export type SyncPayload = {
-  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[] };
+  dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean> };
   runValues: Record<string, FormValues>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;

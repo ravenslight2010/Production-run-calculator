@@ -1,5 +1,6 @@
 import React from "react";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "@/components/UI";
 import {
@@ -97,7 +98,7 @@ function buildRunPackagingRows(s: RunSettings): NeedRow[] {
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, scheduled } = useRun();
+  const { allRuns, scheduled, stagedItems, toggleStagedItem } = useRun();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -270,6 +271,9 @@ export default function WarehouseScreen() {
                 const totalPizzas = s.casesNeeded * s.pizzasPerCase;
                 const estSec = c.ppm > 0 ? (totalPizzas * 60) / c.ppm : 0;
                 const rows = [...buildRunNeedRows(c, s), ...buildRunPackagingRows(s)];
+                const stagedCount = rows.filter(
+                  (row) => stagedItems[`${r.id}::${row.label}__${row.sub}`],
+                ).length;
                 return (
                   <View
                     key={r.id}
@@ -286,6 +290,7 @@ export default function WarehouseScreen() {
                         {runLabel(r, i)}
                       </Text>
                       <Text style={[styles.runMeta, { color: colors.mutedForeground }]}>
+                        {rows.length > 0 ? `${stagedCount}/${rows.length} staged · ` : ""}
                         {s.casesNeeded} case{s.casesNeeded !== 1 ? "s" : ""}
                         {estSec > 0 ? ` · ~${fmtDur(estSec)}` : ""}
                       </Text>
@@ -296,24 +301,51 @@ export default function WarehouseScreen() {
                       </Text>
                     ) : (
                       <View style={styles.needList}>
-                        {rows.map((row, j) => (
-                          <View key={j} style={styles.needRow}>
-                            <Text
-                              style={[styles.needLabel, { color: colors.mutedForeground }]}
-                              numberOfLines={1}
+                        {rows.map((row) => {
+                          const rowKey = `${row.label}__${row.sub}`;
+                          const checked = !!stagedItems[`${r.id}::${rowKey}`];
+                          return (
+                            <Pressable
+                              key={rowKey}
+                              onPress={() => toggleStagedItem(r.id, rowKey)}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked }}
+                              style={[styles.needRow, { alignItems: "center", paddingVertical: 2 }]}
                             >
-                              {row.label}
-                            </Text>
-                            <Text style={styles.needValueWrap} numberOfLines={1}>
-                              <Text style={[styles.needValue, { color: colors.foreground }]}>
-                                {row.value}{" "}
+                              <Ionicons
+                                name={checked ? "checkbox" : "square-outline"}
+                                size={18}
+                                color={checked ? colors.primary : colors.mutedForeground}
+                                style={styles.needCheck}
+                              />
+                              <Text
+                                style={[
+                                  styles.needLabel,
+                                  {
+                                    color: colors.mutedForeground,
+                                    textDecorationLine: checked ? "line-through" : "none",
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {row.label}
                               </Text>
-                              <Text style={[styles.needSub, { color: colors.mutedForeground }]}>
-                                {row.sub}
+                              <Text style={styles.needValueWrap} numberOfLines={1}>
+                                <Text
+                                  style={[
+                                    styles.needValue,
+                                    { color: checked ? colors.mutedForeground : colors.foreground },
+                                  ]}
+                                >
+                                  {row.value}{" "}
+                                </Text>
+                                <Text style={[styles.needSub, { color: colors.mutedForeground }]}>
+                                  {row.sub}
+                                </Text>
                               </Text>
-                            </Text>
-                          </View>
-                        ))}
+                            </Pressable>
+                          );
+                        })}
                       </View>
                     )}
                   </View>
@@ -372,6 +404,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  needCheck: { marginRight: 2 },
   needLabel: { fontSize: 14, flexShrink: 1, fontFamily: FONTS.regular },
   needValueWrap: { textAlign: "right", flexShrink: 0 },
   needValue: {

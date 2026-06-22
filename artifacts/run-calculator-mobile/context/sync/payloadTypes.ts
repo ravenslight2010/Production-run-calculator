@@ -119,6 +119,9 @@ export interface SyncDayState {
   substitutions?: IngredientSubstitution[];
   // Read-only timestamped activity log of substitution adds/clears (today-only).
   substitutionLog?: SubstitutionLogEntry[];
+  // Warehouse staging checklist: per-run need rows ticked off as pulled/staged.
+  // Keyed by `${runId}::${label}__${unit}` (only checked rows stored true).
+  stagedItems?: Record<string, boolean>;
 }
 
 // The full daily payload. Mobile owns/maps a subset of these fields; any field

@@ -478,6 +478,7 @@ function buildNextDayState(cur: AppState, today: string): AppState {
     shiftNotes: "",
     substitutions: [],
     substitutionLog: [],
+    stagedItems: {},
     date: today,
     resetAt: boundaryMs,
     history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -905,6 +906,10 @@ interface AppState {
   // Read-only timestamped trail of substitution add/clear actions (audit log
   // for shift handoffs); synced alongside substitutions, cleared at daily reset.
   substitutionLog: SubstitutionLogEntry[];
+  // Warehouse staging checklist: which per-run need rows have been pulled/staged.
+  // Keyed by `${runId}::${label}__${unit}` (only checked rows stored as true).
+  // Synced in day-state, NOT master data; cleared at the daily reset.
+  stagedItems: Record<string, boolean>;
   stopReasons: string[];
   // Per-product profiles, keyed by `${brand}__${flavor}` (lowercased/trimmed)
   brandProfiles: Record<string, RunProfile>;
@@ -1321,6 +1326,10 @@ interface RunContextValue {
   addSubstitution: (sub: IngredientSubstitution) => void;
   removeSubstitution: (id: string) => void;
   clearSubstitutions: () => void;
+  // Warehouse staging checklist: which per-run need rows are pulled/staged.
+  // Keyed by `${runId}::${label}__${unit}`; cleared at the daily reset.
+  stagedItems: Record<string, boolean>;
+  toggleStagedItem: (runId: string, rowKey: string) => void;
   templates: RunTemplate[];
   history: HistoryDay[];
   saveTemplate: (name: string) => void;
@@ -1431,6 +1440,7 @@ const INITIAL_STATE: AppState = {
   mergedAway: [],
   substitutions: [],
   substitutionLog: [],
+  stagedItems: {},
   stopReasons: [...DEFAULT_STOP_REASONS],
   brandProfiles: {},
   doughRecipePresets: {},
@@ -1568,6 +1578,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     mergedAway: parsed.mergedAway ?? [],
     substitutions: parsed.substitutions ?? [],
     substitutionLog: parsed.substitutionLog ?? [],
+    stagedItems: parsed.stagedItems ?? {},
     stopReasons: parsed.stopReasons ?? [...DEFAULT_STOP_REASONS],
     brandProfiles: Object.fromEntries(
       Object.entries(parsed.brandProfiles ?? {}).map(([k, v]) => [
@@ -2123,6 +2134,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       shiftNotes: "",
       substitutions: [],
       substitutionLog: [],
+      stagedItems: {},
       date: todayStr(),
       resetAt: now,
       history: [archived, ...cur.history.filter((h) => h.date !== cur.date)].slice(
@@ -2335,6 +2347,25 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       return next;
     });
   }, [persist, makeSubLogEntry]);
+
+  // Warehouse staging checklist: tick a per-run need row off as pulled/staged.
+  // Lives in synced day-state (NOT master data) and clears at the daily reset.
+  // Only checked rows are stored (true); unchecking deletes the key. Keyed by
+  // `${runId}::${label}__${unit}` so it lines up with web and survives re-renders.
+  const toggleStagedItem = useCallback(
+    (runId: string, rowKey: string) => {
+      const key = `${runId}::${rowKey}`;
+      setAppState((prev) => {
+        const items = { ...(prev.stagedItems ?? {}) };
+        if (items[key]) delete items[key];
+        else items[key] = true;
+        const next = { ...prev, stagedItems: items };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
   const saveTemplate = useCallback(
     (name: string) => {
@@ -3219,6 +3250,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         addSubstitution,
         removeSubstitution,
         clearSubstitutions,
+        stagedItems: appState.stagedItems,
+        toggleStagedItem,
         templates: appState.templates,
         history: appState.history,
         saveTemplate,

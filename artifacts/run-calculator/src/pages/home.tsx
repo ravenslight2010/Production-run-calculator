@@ -202,6 +202,7 @@ import {
   Plus,
   Pencil,
   Check,
+  CheckSquare,
   Play,
   Pause,
   Square,
@@ -2732,6 +2733,9 @@ export default function Home() {
             // the accepted day wins, same as runs. The activity log rides along.
             substitutions: payload.dayState.substitutions ?? [],
             substitutionLog: payload.dayState.substitutionLog ?? [],
+            // Warehouse staging checklist rides along with the accepted day,
+            // same authoritative whole-map replacement as substitutions.
+            stagedItems: payload.dayState.stagedItems ?? {},
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -3028,7 +3032,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [] };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -3118,7 +3122,7 @@ export default function Home() {
       }
     }
     return {
-      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [] },
+      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
@@ -3258,6 +3262,25 @@ export default function Home() {
         ? describeSubstitution(existing[0])
         : `All substitutions (${existing.length})`;
     persistSubstitutions([], [makeSubLogEntry("cleared", description)]);
+  }
+
+  // ── Warehouse staging checklist (day-state overlay) ────────────────────────
+  // Warehouse staff tick off per-run need rows as they pull/stage them. Like
+  // substitutions, these live in the synced day-state (NOT master data) and clear
+  // at the daily reset. Only checked rows are stored (true); unchecking deletes
+  // the key. Keyed by `${runId}::${label}__${unit}` so it lines up across web +
+  // mobile and survives row re-renders.
+  function toggleStagedItem(runId: string, rowKey: string) {
+    const key = `${runId}::${rowKey}`;
+    const prev = dayStateRef.current.stagedItems ?? {};
+    const next = { ...prev };
+    if (next[key]) delete next[key];
+    else next[key] = true;
+    const newDs = { ...dayStateRef.current, stagedItems: next };
+    setDayState(newDs);
+    saveDayState(newDs);
+    lastLocalEditRef.current = Date.now();
+    schedulePush(newDs, 0);
   }
 
   function addRun() {
@@ -4573,7 +4596,7 @@ export default function Home() {
           if (res.ok) {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
-              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [] };
+              const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
               saveDayState(ds);
               setDayState(ds);
@@ -8472,18 +8495,45 @@ export default function Home() {
                           const s = computeSummaryStats(vals);
                           const rows = [...aggregateNeedRows([vals]), ...aggregatePackagingNeeds([vals])];
                           const estSec = s.estimatedTimeSec;
+                          const staged = dayState.stagedItems ?? {};
+                          const stagedCount = rows.filter(row => staged[`${r.id}::${row.label}__${row.sub ?? ""}`]).length;
                           return (
                             <div key={r.id} className="rounded-md border border-border/40 bg-muted/10 p-3" data-testid={`warehouse-run-${r.id}`}>
                               <div className="flex items-baseline justify-between gap-2 mb-1.5">
                                 <span className="font-semibold text-sm truncate">{runLabel(r)}</span>
                                 <span className="text-xs text-muted-foreground shrink-0 tabular-nums">
-                                  {s.totalCases} case{s.totalCases !== 1 ? "s" : ""}{estSec > 0 ? ` · ~${fmtTime(estSec)}` : ""}
+                                  {rows.length > 0 ? `${stagedCount}/${rows.length} staged · ` : ""}{s.totalCases} case{s.totalCases !== 1 ? "s" : ""}{estSec > 0 ? ` · ~${fmtTime(estSec)}` : ""}
                                 </span>
                               </div>
                               {rows.length === 0 ? (
                                 <p className="text-xs text-muted-foreground italic">No materials configured yet.</p>
                               ) : (
-                                <NeedsList rows={rows} />
+                                <div className="space-y-1">
+                                  {rows.map((row) => {
+                                    const rowKey = `${row.label}__${row.sub ?? ""}`;
+                                    const checked = !!staged[`${r.id}::${rowKey}`];
+                                    return (
+                                      <button
+                                        key={rowKey}
+                                        type="button"
+                                        onClick={() => toggleStagedItem(r.id, rowKey)}
+                                        aria-pressed={checked}
+                                        data-testid={`stage-${r.id}-${rowKey}`}
+                                        className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-muted/40 transition-colors"
+                                      >
+                                        {checked ? (
+                                          <CheckSquare className="w-4 h-4 shrink-0 text-primary" />
+                                        ) : (
+                                          <Square className="w-4 h-4 shrink-0 text-muted-foreground/60" />
+                                        )}
+                                        <span className={`flex-1 truncate ${checked ? "line-through text-muted-foreground" : "text-muted-foreground"}`}>{row.label}</span>
+                                        <span className={`font-bold tabular-nums whitespace-nowrap ${checked ? "text-muted-foreground" : "text-foreground"}`}>
+                                          {row.value} <span className="font-normal text-muted-foreground">{row.sub}</span>
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               )}
                             </div>
                           );
