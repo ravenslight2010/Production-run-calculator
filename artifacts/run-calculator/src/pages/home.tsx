@@ -2075,6 +2075,9 @@ export default function Home() {
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
   const [showFloorMode, setShowFloorMode] = useState(false);
+  // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
+  // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
+  const [floorDimmed, setFloorDimmed] = useState(false);
 
 
   // ── Templates ─────────────────────────────────────────────────────────────
@@ -4556,6 +4559,28 @@ export default function Home() {
     };
   }, []); // setShowFloorMode is a stable setter — no deps needed
 
+  // Floor Mode auto-dim: once Floor Mode is showing, dim it after a stretch of
+  // inactivity and restore instantly on any interaction. Paired with the slow
+  // CSS drift (.floor-drift) this keeps a left-on floor monitor safe from
+  // burn-in/glare without hiding the live numbers when someone is watching.
+  useEffect(() => {
+    if (!showFloorMode) { setFloorDimmed(false); return; }
+    const DIM_MS = 90 * 1000;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+    function arm() {
+      setFloorDimmed(false);
+      if (timerId) clearTimeout(timerId);
+      timerId = setTimeout(() => setFloorDimmed(true), DIM_MS);
+    }
+    arm();
+    const events = ["touchstart", "mousedown", "keydown", "mousemove"] as const;
+    events.forEach(ev => window.addEventListener(ev, arm, { passive: true }));
+    return () => {
+      if (timerId) clearTimeout(timerId);
+      events.forEach(ev => window.removeEventListener(ev, arm));
+    };
+  }, [showFloorMode]);
+
   // Reset all runs at midnight — archive current day first, auto-end any active run
   useEffect(() => {
     function msUntilMidnight() {
@@ -5607,7 +5632,11 @@ export default function Home() {
           : "—";
 
         return (
-          <div className="fixed inset-0 z-[40] flex flex-col font-sans select-none" style={{ background: bg, color: "white" }}>
+          <div
+            className="fixed inset-0 z-[40] flex flex-col font-sans select-none"
+            style={{ background: bg, color: "white", opacity: floorDimmed ? 0.45 : 1, transition: "opacity 1200ms ease" }}
+          >
+            <div className="floor-drift flex flex-1 flex-col min-h-0">
             {/* Header */}
             <header className="flex justify-between items-center px-5 pt-5 pb-2 shrink-0">
               <div className="flex flex-col gap-1.5">
@@ -5657,6 +5686,39 @@ export default function Home() {
 
             {/* Bottom */}
             <div className="px-4 pb-6 space-y-4 shrink-0">
+              {/* Smarter insights: pace, ETA, supply + food-safety heads-up */}
+              {(() => {
+                type Chip = { key: string; label: string; bg: string; fg: string };
+                const chips: Chip[] = [];
+                if ((runStatus === "running" || runStatus === "paused") && calc.paceStatus) {
+                  const paceMap = {
+                    ahead: { label: `▲ ${Math.abs(calc.paceDelta)} ahead`, bg: "rgba(22,101,52,0.5)", fg: "#bbf7d0" },
+                    behind: { label: `▼ ${Math.abs(calc.paceDelta)} behind`, bg: "rgba(127,29,29,0.5)", fg: "#fecaca" },
+                    "on-pace": { label: "✓ On pace", bg: "rgba(255,255,255,0.08)", fg: "rgba(255,255,255,0.85)" },
+                  } as const;
+                  const p = paceMap[calc.paceStatus];
+                  chips.push({ key: "pace", label: p.label, bg: p.bg, fg: p.fg });
+                }
+                if (estFinish !== "—") {
+                  chips.push({ key: "eta", label: `ETA ${estFinish}`, bg: "rgba(255,255,255,0.08)", fg: "rgba(255,255,255,0.85)" });
+                }
+                if (calc.doughShortCases > 0) {
+                  chips.push({ key: "dough", label: `Dough short ${Math.ceil(calc.doughShortCases)} cases`, bg: "rgba(127,29,29,0.5)", fg: "#fecaca" });
+                }
+                if (allergenWarnings.length > 0) {
+                  chips.push({ key: "allergen", label: `⚠ Allergen ×${allergenWarnings.length}`, bg: "rgba(113,63,18,0.6)", fg: "#fde68a" });
+                }
+                if (chips.length === 0) return null;
+                return (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    {chips.map(c => (
+                      <span key={c.key} className="px-3 py-1.5 rounded-full text-sm font-bold tabular-nums" style={{ background: c.bg, color: c.fg }}>
+                        {c.label}
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
               {/* Progress */}
               <div className="px-1 space-y-1.5">
                 <div className="flex justify-between text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.3)" }}>
@@ -5773,6 +5835,7 @@ export default function Home() {
                   </button>
                 )}
               </div>
+            </div>
             </div>
           </div>
         );

@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Modal,
@@ -22,7 +23,12 @@ import {
   StatRow,
 } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
-import { allergenMeta, normalizeAllergen } from "@workspace/allergen";
+import {
+  allergenMeta,
+  normalizeAllergen,
+  allergenSequenceWarnings,
+  type AllergenSequenceItem,
+} from "@workspace/allergen";
 import {
   evaluateRules,
   type RuleSequenceItem,
@@ -39,6 +45,7 @@ import {
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { useNotifications } from "@/hooks/useNotifications";
+import FloorMode from "@/components/FloorMode";
 
 function fmtTime(min: number): string {
   if (min <= 0) return "Done";
@@ -173,6 +180,37 @@ export default function CalculatorScreen() {
   const nowMs = Date.now();
   const supply = computeDoughSupply(run, nowMs, doughSubTab);
 
+  // ── Floor Mode (idle big-numbers display; mobile parity with web) ──────────
+  // Auto-activates after 3 min of no touches on the run screen and can be
+  // opened manually. Touches anywhere on the screen re-arm the idle timer.
+  const [showFloorMode, setShowFloorMode] = useState(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resetIdle = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setShowFloorMode(true), 3 * 60 * 1000);
+  }, []);
+  // Only arm the idle timer while the Run tab is focused — otherwise the
+  // background tab could pop Floor Mode over whatever screen the user is on
+  // (tabs stay mounted in expo-router).
+  useFocusEffect(
+    useCallback(() => {
+      if (!showFloorMode) resetIdle();
+      return () => {
+        if (idleTimer.current) clearTimeout(idleTimer.current);
+      };
+    }, [showFloorMode, resetIdle]),
+  );
+
+  // Allergen sequence warnings across today's lineup (matches web's overlay).
+  const floorAllergenWarnings = useMemo(() => {
+    const seq: AllergenSequenceItem[] = allRuns.map((r, i) => ({
+      id: r.id,
+      label: `Run ${i + 1} · ${runLabel(r, i)}`,
+      allergen: normalizeAllergen(r.settings.allergen),
+    }));
+    return allergenSequenceWarnings(seq);
+  }, [allRuns]);
+
   // Smart carry-over of leftover dough/crusts into the next run.
   const hasNextRun = runIndex < runCount - 1;
   const carryOver = (() => {
@@ -254,7 +292,13 @@ export default function CalculatorScreen() {
     .filter(({ r, i }) => i !== runIndex && r.endedAt == null);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View
+      style={[styles.root, { backgroundColor: colors.background }]}
+      onStartShouldSetResponderCapture={() => {
+        if (!showFloorMode) resetIdle();
+        return false;
+      }}
+    >
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -263,6 +307,22 @@ export default function CalculatorScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        <Pressable
+          onPress={() => {
+            Haptics.selectionAsync();
+            setShowFloorMode(true);
+          }}
+          style={({ pressed }) => [
+            styles.floorLaunch,
+            { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+          ]}
+        >
+          <Feather name="maximize" size={14} color={colors.mutedForeground} />
+          <Text style={[styles.floorLaunchText, { color: colors.mutedForeground }]}>
+            Floor Mode
+          </Text>
+        </Pressable>
+
         {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
         <Card title="Current Run" icon="package" style={styles.topCard}>
           <Text style={[styles.idLabel, { color: colors.mutedForeground }]}>Brand</Text>
@@ -1065,6 +1125,32 @@ export default function CalculatorScreen() {
           );
         }}
       />
+
+      <FloorMode
+        visible={showFloorMode}
+        onClose={() => setShowFloorMode(false)}
+        run={run}
+        labelText={label}
+        calc={calc}
+        supply={supply}
+        activeStoppage={activeStoppage}
+        allergenWarningCount={floorAllergenWarnings.length}
+        onLogStop={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          setShowModal(true);
+        }}
+        onEndStop={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          endActiveStoppage();
+        }}
+        onSkidDone={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          updateProgress({
+            skidsCompleted: run.progress.skidsCompleted + 1,
+            casesOnCurrentSkid: 0,
+          });
+        }}
+      />
     </View>
   );
 }
@@ -1186,6 +1272,18 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
 
+  floorLaunch: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-end",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  floorLaunchText: { fontFamily: FONTS.semibold, fontSize: 12 },
   topCard: { marginTop: 4 },
   sectionCard: { marginTop: 16 },
 

@@ -259,3 +259,18 @@
     size: A4 portrait;
   }
 }
+
+/* Floor Mode monitor hygiene: a very slow, sub-pixel-scale drift of the panel
+   content so a floor display left on all shift never burns a fixed image into
+   the screen. Movement is small enough not to distract someone watching. */
+@keyframes floor-drift {
+  0%   { transform: translate(0px, 0px); }
+  25%  { transform: translate(7px, 5px); }
+  50%  { transform: translate(-5px, 9px); }
+  75%  { transform: translate(-7px, -4px); }
+  100% { transform: translate(0px, 0px); }
+}
+.floor-drift {
+  animation: floor-drift 90s ease-in-out infinite;
+  will-change: transform;
+}
