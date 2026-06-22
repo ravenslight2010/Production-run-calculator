@@ -8917,6 +8917,28 @@ export default function Home() {
                             </div>
                           )}
                         </div>
+                        {/* Skids / cases completed — mirrored from Packaging so the
+                            packout can be updated without switching tabs */}
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <StepperField
+                            control={form.control}
+                            name="skidsCompleted"
+                            label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
+                            max={v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined}
+                            suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
+                            onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onManualChange={onManual}
+                          />
+                          <StepperField
+                            control={form.control}
+                            name="casesOnCurrentSkid"
+                            label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
+                            max={v.casesPerSkid > 0 ? v.casesPerSkid : undefined}
+                            suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
+                            onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
+                            onManualChange={onManual}
+                          />
+                        </div>
                       </>
                     );
                   })()}

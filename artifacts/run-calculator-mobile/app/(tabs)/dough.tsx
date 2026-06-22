@@ -144,6 +144,42 @@ export default function DoughScreen() {
           ) : null}
         </CardSection>
 
+        {/* Skids / cases completed — mirrored from Packaging so the packout can be
+            updated without switching tabs */}
+        <Text style={[styles.progressTitle, { color: colors.mutedForeground, marginTop: 4 }]}>
+          SKIDS &amp; CASES
+        </Text>
+        <CardSection style={styles.stepperCard}>
+          <Stepper
+            label="Total Skids Completed"
+            value={run.progress.skidsCompleted}
+            onDecrement={() => {
+              Haptics.selectionAsync();
+              suppressAutoTrack();
+              updateProgress({ skidsCompleted: Math.max(0, run.progress.skidsCompleted - 1) });
+            }}
+            onIncrement={() => {
+              Haptics.selectionAsync();
+              suppressAutoTrack();
+              updateProgress({ skidsCompleted: run.progress.skidsCompleted + 1 });
+            }}
+          />
+          <Stepper
+            label="Cases on Current Skid"
+            value={run.progress.casesOnCurrentSkid}
+            onDecrement={() => {
+              Haptics.selectionAsync();
+              suppressAutoTrack();
+              updateProgress({ casesOnCurrentSkid: Math.max(0, run.progress.casesOnCurrentSkid - 1) });
+            }}
+            onIncrement={() => {
+              Haptics.selectionAsync();
+              suppressAutoTrack();
+              updateProgress({ casesOnCurrentSkid: run.progress.casesOnCurrentSkid + 1 });
+            }}
+          />
+        </CardSection>
+
         {/* What You Need Now */}
         <Card
           title="What You Need Now"
