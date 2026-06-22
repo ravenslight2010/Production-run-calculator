@@ -3220,15 +3220,25 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const bucketDurationMin =
       prevMs > 0 ? Math.min(10, (nowMs - prevMs) / 60000) : 5;
 
-    // Clamp to the run's total need so skids/cases freeze at their final state
-    // once production is complete instead of cycling past it (modulo wrap).
-    const expectedCasesRaw = Math.floor(
-      ((c.netElapsedSec / 60) * c.ppm) / r.settings.pizzasPerCase,
+    // Two case counts, mirroring web useAutoTrack:
+    //  • feed count (front-of-line, no tunnel offset) gates dough-feed completion.
+    //  • output count (after the freezer tunnel) drives skids/cases, since a case
+    //    isn't "completed" until it exits the tunnel.
+    // Clamp the output count to the run's total need so skids/cases freeze at
+    // their final state once production is complete instead of cycling past it.
+    const elapsedMin = c.netElapsedSec / 60;
+    const freezerMin = Number(r.settings.freezerTime) || 0;
+    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - freezerMin);
+    const feedCasesRaw = Math.floor(
+      (elapsedMin * c.ppm) / r.settings.pizzasPerCase,
+    );
+    const outputCasesRaw = Math.floor(
+      (elapsedMinAfterTunnel * c.ppm) / r.settings.pizzasPerCase,
     );
     const expectedCases =
       r.settings.casesNeeded > 0
-        ? Math.min(r.settings.casesNeeded, expectedCasesRaw)
-        : expectedCasesRaw;
+        ? Math.min(r.settings.casesNeeded, outputCasesRaw)
+        : outputCasesRaw;
 
     const prevExpected = autoExpectedCasesRef.current;
     // Advance bookkeeping even while suppressed so the suppression window
@@ -3283,7 +3293,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     // at the front (no tunnel offset), so feeding finishes when the front-of-line
     // case count reaches casesNeeded. Mirrors web mode-aware per-unit sources.
     const doughFeedComplete =
-      r.settings.casesNeeded > 0 && expectedCasesRaw >= r.settings.casesNeeded;
+      r.settings.casesNeeded > 0 && feedCasesRaw >= r.settings.casesNeeded;
     if (!doughFeedComplete) {
       const supply = computeDoughSupply(r, nowMs, r.progress.subTab);
       const perTray = supply.perTray;

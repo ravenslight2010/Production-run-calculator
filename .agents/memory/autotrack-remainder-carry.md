@@ -30,7 +30,12 @@ auto-track effect exactly (strict parity). Remainder is NOT advanced while the
 manual-edit suppression window is open (effect returns before the decrement
 block) — accepted <1-unit catch-up lag, consistent with skids/cases.
 
-**Known separate parity drift (NOT this bug):** web skids/cases expected output
-applies a freezer/tunnel offset (`elapsedMinAfterTunnel`), mobile's
-`expectedCasesRaw` uses `netElapsedSec` with no freezer subtraction. Track/fix
-separately if it surfaces.
+**Freezer/tunnel offset for skids/cases (fixed):** skids/cases count *completed
+output*, which exits the freezer tunnel `freezerTime` minutes after the dough is
+fed in — so it must use `elapsedMinAfterTunnel = max(0, elapsedMin - freezerTime)`,
+NOT raw elapsed. The `doughFeedComplete` gate counts *front-of-line feed* and
+must stay on RAW elapsed (no offset). Both apps now split these into two counts
+(`feedCasesRaw` raw → doughFeedComplete; `outputCasesRaw` after-tunnel → skids/
+cases). Never re-couple them into one count, or one timeline will be wrong.
+**Why:** mobile previously used one no-offset count for both and overcounted
+completed cases by `freezerTime` worth of production.
