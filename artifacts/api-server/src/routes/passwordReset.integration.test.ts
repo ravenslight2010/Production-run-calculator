@@ -66,6 +66,7 @@ beforeAll(async () => {
 
   // Create a uniquely named throwaway database on the same Postgres server.
   adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
+  adminPool.on("error", () => {});
   testDbName = `helium_pwreset_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   await adminPool.query(`CREATE DATABASE "${testDbName}"`);
 

@@ -47,6 +47,7 @@ beforeAll(async () => {
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
 
   adminPool = new pg.Pool({ connectionString: originalDatabaseUrl });
+  adminPool.on("error", () => {});
   testDbName = `helium_ratelimit_test_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   await adminPool.query(`CREATE DATABASE "${testDbName}"`);
 
