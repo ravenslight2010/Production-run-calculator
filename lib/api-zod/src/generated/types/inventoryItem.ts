@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { InventoryLot } from './inventoryLot';
+import type { LocationStock } from './locationStock';
 
 export interface InventoryItem {
   id: number;
@@ -16,6 +17,7 @@ export interface InventoryItem {
   reorderThreshold: number;
   onHand: number;
   lots: InventoryLot[];
+  byLocation: LocationStock[];
   createdAt: Date;
   updatedAt: Date;
 }

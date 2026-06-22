@@ -8547,6 +8547,7 @@ export default function Home() {
                   }
                   return <InventoryTab
                     candidates={candidates}
+                    runValsList={valsList}
                     substitutions={dayState.substitutions ?? []}
                     substitutionLog={dayState.substitutionLog ?? []}
                     substitutionOptions={[...optSet].sort()}

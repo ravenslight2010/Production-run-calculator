@@ -14,7 +14,7 @@ import * as ImageManipulator from "expo-image-manipulator";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Card, Button } from "@/components/UI";
+import { Card, Button, SelectField } from "@/components/UI";
 import { useRun } from "@/context/RunContext";
 import SubstitutionsManager from "@/components/SubstitutionsManager";
 import SubstitutionLog from "@/components/SubstitutionLog";
@@ -24,8 +24,16 @@ import {
   type CandidateItem,
   type InventoryItem,
   type InventoryLot,
+  type InventoryLocation,
   type LedgerEntry,
+  type TransferNeed,
   fetchInventory,
+  fetchInventoryLocations,
+  createInventoryLocation,
+  updateInventoryLocation,
+  deleteInventoryLocation,
+  transferInventory,
+  computeRunTransferNeeds,
   fetchLedger,
   createInventoryItem,
   updateInventoryItem,
@@ -104,6 +112,7 @@ export default function InventoryScreen() {
   const webBottom = Platform.OS === "web" ? 34 : 0;
 
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -114,11 +123,13 @@ export default function InventoryScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [data, settings] = await Promise.all([
+      const [data, settings, locs] = await Promise.all([
         fetchInventory(),
         fetchInventorySettings(),
+        fetchInventoryLocations(),
       ]);
       setItems(data);
+      setLocations(locs);
       setExpirySoonDays(settings.expirySoonDays);
       setExpiryInput(String(settings.expirySoonDays));
       setError(null);
@@ -166,6 +177,13 @@ export default function InventoryScreen() {
   const candidates = useMemo(
     () => deriveCandidateItems(allRuns.map((r) => r.settings)),
     [allRuns],
+  );
+
+  // Transfer warnings: roll today's runs up into total demand and compare
+  // against per-location stock. Mirrors the web app exactly (same shared math).
+  const transferNeeds = useMemo<TransferNeed[]>(
+    () => computeRunTransferNeeds(allRuns.map((r) => r.settings), items),
+    [allRuns, items],
   );
 
   const [subPrefill, setSubPrefill] = useState<string | null>(null);
@@ -291,6 +309,37 @@ export default function InventoryScreen() {
           </Card>
         )}
 
+        {/* Transfer warnings: onsite/line can't cover the day's plan but another
+            location holds stock that could be moved in. */}
+        {transferNeeds.length > 0 && (
+          <Card title="Transfer Needed" icon="repeat" accentColor={colors.primary} style={{ marginBottom: 16 }}>
+            <View style={{ gap: 8 }}>
+              {transferNeeds.map((t) => (
+                <View key={`xfer-${t.key}`} style={styles.alertRow}>
+                  <View style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                    <Text style={[styles.alertText, { color: colors.primary }]} numberOfLines={1}>
+                      {t.name}
+                    </Text>
+                    <Text style={[styles.tinyMuted, { color: colors.mutedForeground }]}>
+                      Need {fmtQty(t.needed)} {t.unit}, onsite has {fmtQty(t.onsite)}. Move{" "}
+                      {fmtQty(t.transferable)} {t.unit} from{" "}
+                      {t.sources.map((s) => s.locationName).join(", ")}.
+                    </Text>
+                  </View>
+                  <Text style={[styles.alertValue, { color: colors.primary }]} numberOfLines={1}>
+                    −{fmtQty(t.shortfall)} {t.unit}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        )}
+
+        {/* Locations (named storage). Managers add/rename/set-onsite/delete. */}
+        {canManageInventory && (
+          <LocationsCard locations={locations} onChanged={load} />
+        )}
+
         {/* Temporary substitutions overlay (day-state, reverts at daily reset) */}
         <SubstitutionsManager
           substitutions={substitutions}
@@ -335,7 +384,7 @@ export default function InventoryScreen() {
         )}
 
         {/* Photo stock intake (use-ai-tools: paid AI action) */}
-        {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+        {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} locations={locations} onCommitted={load} />}
 
         {/* AI quality/defect photo check (use-ai-tools: paid AI action) */}
         {canUseAiTools && <QualityCheckCard />}
@@ -358,6 +407,7 @@ export default function InventoryScreen() {
             title="Packaging"
             icon="package"
             items={grouped.packaging}
+            locations={locations}
             expandedId={expandedId}
             setExpandedId={setExpandedId}
             onChanged={load}
@@ -369,6 +419,7 @@ export default function InventoryScreen() {
             title="Ingredients"
             icon="box"
             items={grouped.ingredient}
+            locations={locations}
             expandedId={expandedId}
             setExpandedId={setExpandedId}
             onChanged={load}
@@ -421,6 +472,7 @@ function CategorySection({
   title,
   icon,
   items,
+  locations,
   expandedId,
   setExpandedId,
   onChanged,
@@ -429,6 +481,7 @@ function CategorySection({
   title: string;
   icon: keyof typeof Feather.glyphMap;
   items: InventoryItem[];
+  locations: InventoryLocation[];
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
   onChanged: () => void;
@@ -440,6 +493,7 @@ function CategorySection({
         <ItemRow
           key={item.id}
           item={item}
+          locations={locations}
           expanded={expandedId === item.id}
           onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
           onChanged={onChanged}
@@ -452,12 +506,14 @@ function CategorySection({
 
 function ItemRow({
   item,
+  locations,
   expanded,
   onToggle,
   onChanged,
   expirySoonDays,
 }: {
   item: InventoryItem;
+  locations: InventoryLocation[];
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => void;
@@ -494,12 +550,12 @@ function ItemRow({
           <Text style={[styles.itemUnit, { color: colors.mutedForeground }]}>{item.unit}</Text>
         </Text>
       </Pressable>
-      {expanded && <ItemDetail item={item} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
+      {expanded && <ItemDetail item={item} locations={locations} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
     </View>
   );
 }
 
-function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
+function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number }) {
   const colors = useColors();
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
@@ -580,6 +636,30 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </View>
 
+      {/* Per-location on-hand. Only shown once stock lives in more than the
+          single onsite location (otherwise the headline on-hand already says
+          everything). */}
+      {item.byLocation.length > 1 && (
+        <View>
+          <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>BY LOCATION</Text>
+          <View style={{ gap: 4 }}>
+            {item.byLocation.map((loc) => (
+              <View key={loc.locationId} style={styles.lotRow}>
+                <Text style={[styles.lotText, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  {loc.locationName}
+                  {loc.isOnsite ? (
+                    <Text style={{ color: colors.success ?? colors.primary }}> · onsite</Text>
+                  ) : null}
+                </Text>
+                <Text style={[styles.lotQty, { color: colors.foreground }]} numberOfLines={1}>
+                  {fmtQty(loc.onHand)} {item.unit}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
       {/* Reorder threshold (editing is an inventory-item write → manage-inventory) */}
       <View style={styles.thresholdRow}>
         <Text style={[styles.detailInline, { color: colors.mutedForeground }]}>Reorder at</Text>
@@ -619,8 +699,14 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
 
       <View style={[styles.sep, { backgroundColor: colors.border }]} />
 
-      <RestockForm item={item} busy={busy} run={run} />
+      <RestockForm item={item} busy={busy} locations={locations} run={run} />
       <AdjustForm item={item} busy={busy} run={run} />
+
+      {/* Transfer stock between locations. Open to any signed-in user (same as
+          restock). Hidden until at least two locations exist. */}
+      {locations.length > 1 && (
+        <TransferForm item={item} locations={locations} busy={busy} run={run} />
+      )}
 
       <View style={[styles.sep, { backgroundColor: colors.border }]} />
 
@@ -681,16 +767,21 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
 function RestockForm({
   item,
   busy,
+  locations,
   run,
 }: {
   item: InventoryItem;
   busy: boolean;
+  locations: InventoryLocation[];
   run: (fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const colors = useColors();
   const [qty, setQty] = useState("");
   const [lotNumber, setLotNumber] = useState("");
   const [expiration, setExpiration] = useState("");
+  // Default the restock destination to the onsite location (empty === server's
+  // default onsite). Only shown when more than one location exists.
+  const [locationId, setLocationId] = useState<string>("");
   const n = Number(qty);
   const inputStyle = [
     styles.input,
@@ -724,6 +815,19 @@ function RestockForm({
           style={[inputStyle, { flex: 1.4 }]}
         />
       </View>
+      {locations.length > 1 && (
+        <SelectField
+          value={locationId}
+          onChange={setLocationId}
+          options={locations.map((l) => String(l.id))}
+          optionLabel={(id) => {
+            const loc = locations.find((l) => String(l.id) === id);
+            return loc ? `${loc.name}${loc.isOnsite ? " (onsite)" : ""}` : id;
+          }}
+          allowAdd={false}
+          placeholder="Onsite (default)"
+        />
+      )}
       <Button
         label="Add stock"
         icon="plus"
@@ -740,10 +844,99 @@ function RestockForm({
               lotNumber: lotNumber.trim() || undefined,
               receivedDate: todayStr(),
               expirationDate: expiration.trim() || undefined,
+              locationId: locationId ? Number(locationId) : undefined,
             });
             setQty("");
             setLotNumber("");
             setExpiration("");
+          })
+        }
+      />
+    </View>
+  );
+}
+
+function TransferForm({
+  item,
+  locations,
+  busy,
+  run,
+}: {
+  item: InventoryItem;
+  locations: InventoryLocation[];
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const colors = useColors();
+  const onsite = locations.find((l) => l.isOnsite);
+  const offsite = locations.filter((l) => !l.isOnsite);
+  // Default: move from the first offsite location into onsite (the common case
+  // that resolves a transfer warning).
+  const [fromId, setFromId] = useState<string>(String(offsite[0]?.id ?? ""));
+  const [toId, setToId] = useState<string>(String(onsite?.id ?? ""));
+  const [qty, setQty] = useState("");
+  const n = Number(qty);
+  // On-hand at the chosen source, so the user can't move more than is there.
+  const sourceOnHand =
+    item.byLocation.find((b) => String(b.locationId) === fromId)?.onHand ?? 0;
+  const valid =
+    n > 0 && fromId !== "" && toId !== "" && fromId !== toId && n <= sourceOnHand + 1e-6;
+  const optionLabel = (id: string) => {
+    const loc = locations.find((l) => String(l.id) === id);
+    return loc ? `${loc.name}${loc.isOnsite ? " (onsite)" : ""}` : id;
+  };
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>TRANSFER</Text>
+      <View style={styles.formRow}>
+        <View style={{ flex: 1 }}>
+          <SelectField
+            value={fromId}
+            onChange={setFromId}
+            options={locations.map((l) => String(l.id))}
+            optionLabel={optionLabel}
+            allowAdd={false}
+            placeholder="From…"
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <SelectField
+            value={toId}
+            onChange={setToId}
+            options={locations.map((l) => String(l.id))}
+            optionLabel={optionLabel}
+            allowAdd={false}
+            placeholder="To…"
+          />
+        </View>
+      </View>
+      <TextInput
+        placeholder={`Qty (max ${fmtQty(sourceOnHand)})`}
+        placeholderTextColor={colors.mutedForeground}
+        value={qty}
+        onChangeText={setQty}
+        keyboardType="numeric"
+        style={inputStyle}
+      />
+      <Button
+        label="Move stock"
+        icon="repeat"
+        variant="outline"
+        size="sm"
+        disabled={busy || !valid}
+        onPress={() =>
+          run(async () => {
+            await transferInventory({
+              itemId: item.id,
+              fromLocationId: Number(fromId),
+              toLocationId: Number(toId),
+              qty: n,
+            });
+            setQty("");
           })
         }
       />
@@ -802,6 +995,161 @@ function AdjustForm({
         }
       />
     </View>
+  );
+}
+
+function LocationsCard({
+  locations,
+  onChanged,
+}: {
+  locations: InventoryLocation[];
+  onChanged: () => void;
+}) {
+  const colors = useColors();
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      onChanged();
+    } catch (e) {
+      setError(
+        e instanceof InventoryApiError && e.serverMessage
+          ? e.serverMessage
+          : e instanceof Error
+            ? e.message
+            : "Action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Locations" icon="map-pin" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "settings"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Manage"}
+        </Text>
+      </Pressable>
+      {open && (
+        <View style={{ marginTop: 12, gap: 8 }}>
+          {error && <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>}
+          <View style={{ gap: 6 }}>
+            {locations.map((loc) => (
+              <View
+                key={loc.id}
+                style={[styles.itemRow, { borderColor: colors.border, backgroundColor: colors.secondary, padding: 10 }]}
+              >
+                {editId === loc.id ? (
+                  <View style={[styles.formRow, { alignItems: "center" }]}>
+                    <TextInput
+                      value={editName}
+                      onChangeText={setEditName}
+                      style={[inputStyle, { flex: 1 }]}
+                    />
+                    <Button
+                      label="Save"
+                      size="sm"
+                      disabled={busy || !editName.trim()}
+                      onPress={() =>
+                        run(async () => {
+                          await updateInventoryLocation(loc.id, { name: editName.trim() });
+                          setEditId(null);
+                        })
+                      }
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.alertRow}>
+                    <View style={styles.itemHeaderLeft}>
+                      <Text style={[styles.itemName, { color: colors.foreground }]} numberOfLines={1}>
+                        {loc.name}
+                      </Text>
+                      {loc.isOnsite && (
+                        <View style={[styles.lowBadge, { borderColor: colors.success ?? colors.primary }]}>
+                          <Text style={[styles.lowBadgeText, { color: colors.success ?? colors.primary }]}>ONSITE</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                      {!loc.isOnsite && (
+                        <Pressable
+                          disabled={busy}
+                          onPress={() => run(() => updateInventoryLocation(loc.id, { isOnsite: true }))}
+                          hitSlop={6}
+                        >
+                          <Text style={{ color: colors.success ?? colors.primary, fontFamily: FONTS.medium, fontSize: 12 }}>
+                            Set onsite
+                          </Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        onPress={() => {
+                          setEditId(loc.id);
+                          setEditName(loc.name);
+                        }}
+                        hitSlop={6}
+                      >
+                        <Feather name="edit-2" size={14} color={colors.mutedForeground} />
+                      </Pressable>
+                      {!loc.isOnsite && (
+                        <Pressable disabled={busy} onPress={() => run(() => deleteInventoryLocation(loc.id))} hitSlop={6}>
+                          <Feather name="trash-2" size={14} color={colors.destructive} />
+                        </Pressable>
+                      )}
+                    </View>
+                  </View>
+                )}
+              </View>
+            ))}
+          </View>
+          <View style={[styles.formRow, { alignItems: "center" }]}>
+            <TextInput
+              placeholder="New location name"
+              placeholderTextColor={colors.mutedForeground}
+              value={newName}
+              onChangeText={setNewName}
+              style={[inputStyle, { flex: 1 }]}
+            />
+            <Button
+              label="Add"
+              icon="plus"
+              size="sm"
+              disabled={busy || !newName.trim()}
+              onPress={() =>
+                run(async () => {
+                  await createInventoryLocation({ name: newName.trim() });
+                  setNewName("");
+                })
+              }
+            />
+          </View>
+          <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>
+            Production deducts only from the onsite location. Stock in other locations is warned about when it could be transferred in to cover the day's plan.
+          </Text>
+        </View>
+      )}
+    </Card>
   );
 }
 
@@ -1044,12 +1392,18 @@ const NEW_ITEM = "__new__";
 
 function PhotoIntakeCard({
   candidates,
+  locations,
   onCommitted,
 }: {
   candidates: CandidateItem[];
+  locations: InventoryLocation[];
   onCommitted: () => void;
 }) {
   const colors = useColors();
+  // Destination location for all confirmed rows (empty === server default
+  // onsite). Only shown when more than one location exists, mirroring the
+  // manual RestockForm picker.
+  const [locationId, setLocationId] = useState<string>("");
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -1235,6 +1589,7 @@ function PhotoIntakeCard({
         lotNumber: row.lotNumber.trim() || undefined,
         receivedDate: todayStr(),
         expirationDate: row.expiration.trim() || undefined,
+        locationId: locationId ? Number(locationId) : undefined,
       });
       setRows((rs) => rs.filter((r) => r.id !== row.id));
       // Remember the guessName -> matched item link so future scans auto-apply
@@ -1329,6 +1684,25 @@ function PhotoIntakeCard({
                 size="sm"
                 disabled={analyzing}
                 onPress={takePhoto}
+              />
+            </View>
+          )}
+
+          {rows.length > 0 && locations.length > 1 && (
+            <View style={{ gap: 4 }}>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground }]}>
+                DESTINATION LOCATION
+              </Text>
+              <SelectField
+                value={locationId}
+                onChange={setLocationId}
+                options={locations.map((l) => String(l.id))}
+                optionLabel={(id) => {
+                  const loc = locations.find((l) => String(l.id) === id);
+                  return loc ? `${loc.name}${loc.isOnsite ? " (onsite)" : ""}` : id;
+                }}
+                allowAdd={false}
+                placeholder="Onsite (default)"
               />
             </View>
           )}

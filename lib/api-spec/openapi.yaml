@@ -484,6 +484,115 @@ paths:
         "400":
           description: Invalid input
 
+  /inventory/locations:
+    get:
+      operationId: listInventoryLocations
+      tags: [inventory]
+      summary: List stock locations (onsite first)
+      responses:
+        "200":
+          description: Locations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InventoryLocation"
+    post:
+      operationId: createInventoryLocation
+      tags: [inventory]
+      summary: Create a stock location
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInventoryLocationInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryLocation"
+        "400":
+          description: Invalid input
+        "409":
+          description: Duplicate name
+
+  /inventory/locations/{id}:
+    patch:
+      operationId: updateInventoryLocation
+      tags: [inventory]
+      summary: Rename a location or set it as onsite
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInventoryLocationInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryLocation"
+        "400":
+          description: Invalid input
+        "404":
+          description: Not found
+        "409":
+          description: Duplicate name
+    delete:
+      operationId: deleteInventoryLocation
+      tags: [inventory]
+      summary: Delete an empty, non-onsite location
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+        "409":
+          description: Location is onsite or still holds stock
+
+  /inventory/transfer:
+    post:
+      operationId: transferInventory
+      tags: [inventory]
+      summary: Move stock from one location to another (preserves lots)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferInput"
+      responses:
+        "200":
+          description: Updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InventoryItem"
+        "400":
+          description: Invalid input
+        "404":
+          description: Not found
+        "409":
+          description: No stock available at the source location
+
   /inventory/ledger:
     get:
       operationId: listInventoryLedger
@@ -1959,6 +2068,41 @@ components:
         notes:
           type: string
 
+    InventoryLocation:
+      type: object
+      required:
+        - id
+        - name
+        - isOnsite
+        - createdAt
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        isOnsite:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    LocationStock:
+      type: object
+      required:
+        - locationId
+        - locationName
+        - isOnsite
+        - onHand
+      properties:
+        locationId:
+          type: integer
+        locationName:
+          type: string
+        isOnsite:
+          type: boolean
+        onHand:
+          type: number
+
     InventoryLot:
       type: object
       required:
@@ -1973,6 +2117,8 @@ components:
           type: integer
         itemId:
           type: integer
+        locationId:
+          type: [integer, "null"]
         lotNumber:
           type: string
         qtyReceived:
@@ -1998,6 +2144,7 @@ components:
         - reorderThreshold
         - onHand
         - lots
+        - byLocation
         - createdAt
         - updatedAt
       properties:
@@ -2019,6 +2166,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/InventoryLot"
+        byLocation:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocationStock"
         createdAt:
           type: string
           format: date-time
@@ -2078,6 +2229,43 @@ components:
           type: [string, "null"]
         expirationDate:
           type: [string, "null"]
+        locationId:
+          type: integer
+
+    CreateInventoryLocationInput:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        isOnsite:
+          type: boolean
+
+    UpdateInventoryLocationInput:
+      type: object
+      properties:
+        name:
+          type: string
+        isOnsite:
+          type: boolean
+
+    TransferInput:
+      type: object
+      required:
+        - itemId
+        - fromLocationId
+        - toLocationId
+        - qty
+      properties:
+        itemId:
+          type: integer
+        fromLocationId:
+          type: integer
+        toLocationId:
+          type: integer
+        qty:
+          type: number
 
     AdjustInput:
       type: object

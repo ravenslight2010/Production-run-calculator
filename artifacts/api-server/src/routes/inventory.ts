@@ -1,14 +1,16 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, type SQL } from "drizzle-orm";
 import {
   db,
   inventoryItemsTable,
   inventoryLotsTable,
   inventoryLedgerTable,
   inventoryConsumedRunsTable,
+  inventoryLocationsTable,
   inventorySettingsTable,
   qualityChecksTable,
   type InventoryLot,
+  type InventoryLocation,
 } from "@workspace/db";
 import {
   CreateInventoryItemBody,
@@ -17,6 +19,9 @@ import {
   AdjustInventoryBody,
   ConsumeInventoryBody,
   MergeInventoryBody,
+  CreateInventoryLocationBody,
+  UpdateInventoryLocationBody,
+  TransferInventoryBody,
   UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
@@ -100,6 +105,112 @@ function broadcast(senderId: string, scope: string): void {
   }
 }
 
+// ── Locations ────────────────────────────────────────────────────────────────
+// The default name given to the implicitly-created onsite/line location. Stock
+// without an explicit location (legacy/pre-feature lots) is treated as onsite;
+// once any location work happens, those null lots are backfilled to this row.
+const DEFAULT_ONSITE_NAME = "Onsite (Line)";
+
+async function getOnsiteLocation(scope: string): Promise<InventoryLocation | undefined> {
+  const [row] = await db
+    .select()
+    .from(inventoryLocationsTable)
+    .where(and(eq(inventoryLocationsTable.scope, scope), eq(inventoryLocationsTable.isOnsite, true)))
+    .limit(1);
+  return row;
+}
+
+async function listLocations(scope: string): Promise<InventoryLocation[]> {
+  return db
+    .select()
+    .from(inventoryLocationsTable)
+    .where(eq(inventoryLocationsTable.scope, scope))
+    .orderBy(desc(inventoryLocationsTable.isOnsite), inventoryLocationsTable.name);
+}
+
+// Read-only: the current onsite location id, or null if no location rows exist
+// yet (in which case all stock is implicitly onsite). Used by the consume/adjust
+// paths so they never create rows as a side effect (keeps those paths pure for
+// integration tests that seed null-location lots).
+async function resolveOnsiteLocationId(): Promise<number | null> {
+  const row = await getOnsiteLocation(currentScope());
+  return row?.id ?? null;
+}
+
+// Guarantee an onsite location exists for the scope, creating the default one on
+// demand and backfilling any pre-feature null-location lots to it. Called by the
+// read/restock/transfer/location-CRUD routes (never by consume/adjust).
+async function ensureOnsiteLocation(): Promise<InventoryLocation> {
+  const scope = currentScope();
+  const existing = await getOnsiteLocation(scope);
+  if (existing) return existing;
+  await db
+    .insert(inventoryLocationsTable)
+    .values({ scope, name: DEFAULT_ONSITE_NAME, isOnsite: true })
+    .onConflictDoNothing({ target: [inventoryLocationsTable.name, inventoryLocationsTable.scope] });
+  let onsite = await getOnsiteLocation(scope);
+  if (!onsite) {
+    // The default-named row exists but wasn't flagged onsite (edge/race) — promote it.
+    await db
+      .update(inventoryLocationsTable)
+      .set({ isOnsite: true })
+      .where(
+        and(
+          eq(inventoryLocationsTable.scope, scope),
+          eq(inventoryLocationsTable.name, DEFAULT_ONSITE_NAME),
+        ),
+      );
+    onsite = await getOnsiteLocation(scope);
+  }
+  if (!onsite) throw new Error("failed to establish onsite location");
+  // Backfill legacy/pre-feature null-location lots so they count as onsite stock.
+  await db
+    .update(inventoryLotsTable)
+    .set({ locationId: onsite.id })
+    .where(and(eq(inventoryLotsTable.scope, scope), isNull(inventoryLotsTable.locationId)));
+  return onsite;
+}
+
+// Lot predicate for an onsite drawdown: lots explicitly at the onsite location
+// PLUS any still-null lots (which mean onsite). When no onsite row exists yet,
+// every lot is null === onsite, so the predicate is just `locationId IS NULL`.
+function onsiteLotCond(onsiteId: number | null): SQL | undefined {
+  return onsiteId == null
+    ? isNull(inventoryLotsTable.locationId)
+    : or(eq(inventoryLotsTable.locationId, onsiteId), isNull(inventoryLotsTable.locationId));
+}
+
+type LocationStockOut = {
+  locationId: number;
+  locationName: string;
+  isOnsite: boolean;
+  onHand: number;
+};
+
+// Per-location on-hand breakdown for one item. Null-location lots fold into the
+// onsite row. Onsite is always listed (even at 0) for display; other locations
+// appear only when they hold stock.
+function computeByLocation(
+  lots: InventoryLot[],
+  locations: InventoryLocation[],
+  onsiteId: number | null,
+): LocationStockOut[] {
+  const totals = new Map<number, number>();
+  for (const lot of lots) {
+    const lid = lot.locationId ?? onsiteId;
+    if (lid == null) continue;
+    totals.set(lid, (totals.get(lid) ?? 0) + lot.qtyRemaining);
+  }
+  const out: LocationStockOut[] = [];
+  for (const loc of locations) {
+    const onHand = totals.get(loc.id) ?? 0;
+    if (onHand > 0 || loc.isOnsite) {
+      out.push({ locationId: loc.id, locationName: loc.name, isOnsite: loc.isOnsite, onHand });
+    }
+  }
+  return out;
+}
+
 // ── Serialization ────────────────────────────────────────────────────────────
 async function loadItemResponse(itemId: number) {
   const [item] = await db
@@ -111,9 +222,16 @@ async function loadItemResponse(itemId: number) {
     .select()
     .from(inventoryLotsTable)
     .where(and(eq(inventoryLotsTable.itemId, itemId), eq(inventoryLotsTable.scope, currentScope())));
+  const locations = await listLocations(currentScope());
+  const onsiteId = locations.find((l) => l.isOnsite)?.id ?? null;
   const sortedLots = sortLotsForConsumption(lots);
   const onHand = lots.reduce((acc, l) => acc + l.qtyRemaining, 0);
-  return { ...item, onHand, lots: sortedLots };
+  return {
+    ...item,
+    onHand,
+    lots: sortedLots,
+    byLocation: computeByLocation(lots, locations, onsiteId),
+  };
 }
 
 // Executor type shared by the top-level db handle and a transaction handle, so
@@ -124,21 +242,29 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0];
 // returns how much was actually consumed (may be less than requested). The
 // ordering and never-negative math live in planDrawDown (pure, unit-tested);
 // this wrapper only adds the locking read and persists the planned updates.
-export async function drawDown(exec: Executor, itemId: number, qty: number): Promise<number> {
+export async function drawDown(
+  exec: Executor,
+  itemId: number,
+  qty: number,
+  locationCond?: SQL,
+): Promise<number> {
   if (qty <= 0) return 0;
   // Lock the item's lot rows FOR UPDATE so concurrent consume/adjust transactions
   // for the same item serialize here instead of reading the same stale quantities
   // and writing conflicting qtyRemaining values (lost updates / on-hand drift).
+  // When a location predicate is supplied, the drawdown is restricted to that
+  // location's lots (production deducts onsite-only); omitting it draws from all
+  // lots (kept for the standalone integration path).
+  const conds = [
+    eq(inventoryLotsTable.itemId, itemId),
+    eq(inventoryLotsTable.scope, currentScope()),
+    gt(inventoryLotsTable.qtyRemaining, 0),
+  ];
+  if (locationCond) conds.push(locationCond);
   const lots = await exec
     .select()
     .from(inventoryLotsTable)
-    .where(
-      and(
-        eq(inventoryLotsTable.itemId, itemId),
-        eq(inventoryLotsTable.scope, currentScope()),
-        gt(inventoryLotsTable.qtyRemaining, 0),
-      ),
-    )
+    .where(and(...conds))
     .for("update");
   const { consumed, updates } = planDrawDown(lots, qty);
   for (const update of updates) {
@@ -153,6 +279,8 @@ export async function drawDown(exec: Executor, itemId: number, qty: number): Pro
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 router.get("/inventory", async (_req, res): Promise<void> => {
+  const onsite = await ensureOnsiteLocation();
+  const locations = await listLocations(currentScope());
   const items = await db
     .select()
     .from(inventoryItemsTable)
@@ -174,6 +302,7 @@ router.get("/inventory", async (_req, res): Promise<void> => {
       ...item,
       onHand: lots.reduce((acc, l) => acc + l.qtyRemaining, 0),
       lots: sortLotsForConsumption(lots),
+      byLocation: computeByLocation(lots, locations, onsite.id),
     };
   });
   res.json(out);
@@ -256,11 +385,28 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { itemKey, category, name, unit, qty, lotNumber, receivedDate, expirationDate } =
+  const { itemKey, category, name, unit, qty, lotNumber, receivedDate, expirationDate, locationId } =
     parsed.data;
   if (qty <= 0) {
     res.status(400).json({ error: "qty must be positive" });
     return;
+  }
+  // New stock lands at a location: the caller's explicit location if valid for
+  // this scope, otherwise the onsite/line location (created on demand).
+  const onsite = await ensureOnsiteLocation();
+  let targetLocationId = onsite.id;
+  if (locationId != null) {
+    const [loc] = await db
+      .select()
+      .from(inventoryLocationsTable)
+      .where(
+        and(eq(inventoryLocationsTable.id, locationId), eq(inventoryLocationsTable.scope, currentScope())),
+      );
+    if (!loc) {
+      res.status(400).json({ error: "Unknown location" });
+      return;
+    }
+    targetLocationId = loc.id;
   }
   // Restock is a daily-ops, quantity-only action open to operators. It must NOT
   // mutate master data: we never overwrite an existing item's name/unit/category
@@ -300,6 +446,7 @@ router.post("/inventory/restock", async (req, res): Promise<void> => {
     .values({
       itemId: item.id,
       scope: currentScope(),
+      locationId: targetLocationId,
       lotNumber: lotNumber ?? "",
       qtyReceived: qty,
       qtyRemaining: qty,
@@ -685,13 +832,20 @@ export async function adjustInventory(
   return db.transaction(async (tx) => {
     let appliedDelta = qtyDelta;
     let lotId: number | null = null;
+    // Manual corrections target onsite stock: a positive correction lands in a
+    // new onsite lot; a negative one draws down from onsite lots only (matching
+    // where production deducts). `onsiteId` is null when no location rows exist
+    // yet, in which case the lot stays null === onsite and the drawdown spans
+    // the still-null lots.
+    const onsiteId = await resolveOnsiteLocationId();
     if (qtyDelta > 0) {
-      // Positive correction lands in a new unlotted lot.
+      // Positive correction lands in a new unlotted onsite lot.
       const [lot] = await tx
         .insert(inventoryLotsTable)
         .values({
           itemId,
           scope: currentScope(),
+          locationId: onsiteId,
           lotNumber: "",
           qtyReceived: qtyDelta,
           qtyRemaining: qtyDelta,
@@ -701,7 +855,7 @@ export async function adjustInventory(
         .returning();
       lotId = lot.id;
     } else {
-      const consumed = await drawDown(tx, itemId, -qtyDelta);
+      const consumed = await drawDown(tx, itemId, -qtyDelta, onsiteLotCond(onsiteId));
       appliedDelta = -consumed; // cap at available stock
     }
     await tx.insert(inventoryLedgerTable).values({
@@ -757,8 +911,13 @@ export async function consumeRun(
   runId: string,
   lines: ConsumeLine[],
 ): Promise<{ applied: boolean; consumed: number }> {
-  return db.transaction((tx) =>
-    applyRunConsumption(
+  return db.transaction(async (tx) => {
+    // Production only ever pulls from onsite/line stock. `onsiteId` is null when
+    // no location rows exist (all stock implicitly onsite), in which case the
+    // drawdown spans the still-null lots — same result as before this feature.
+    const onsiteId = await resolveOnsiteLocationId();
+    const onsiteCond = onsiteLotCond(onsiteId);
+    return applyRunConsumption(
       {
         claimRun: async (rid) => {
           const [claim] = await tx
@@ -777,7 +936,7 @@ export async function consumeRun(
             .where(and(eq(inventoryItemsTable.key, itemKey), eq(inventoryItemsTable.scope, currentScope())));
           return item ?? null;
         },
-        drawDown: (itemId, qty) => drawDown(tx, itemId, qty),
+        drawDown: (itemId, qty) => drawDown(tx, itemId, qty, onsiteCond),
         recordConsumption: async (itemId, consumed) => {
           await tx.insert(inventoryLedgerTable).values({
             itemId,
@@ -792,8 +951,8 @@ export async function consumeRun(
       },
       runId,
       lines,
-    ),
-  );
+    );
+  });
 }
 
 router.post("/inventory/consume", async (req, res): Promise<void> => {
@@ -814,6 +973,306 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
   }
   broadcast(headerSenderId(req), currentScope());
   res.json({ applied: true, consumed: result.consumed });
+});
+
+// ── Locations CRUD ───────────────────────────────────────────────────────────
+router.get("/inventory/locations", async (_req, res): Promise<void> => {
+  await ensureOnsiteLocation();
+  res.json(await listLocations(currentScope()));
+});
+
+router.post(
+  "/inventory/locations",
+  requireCapability("manage-inventory"),
+  async (req, res): Promise<void> => {
+    const parsed = CreateInventoryLocationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const name = parsed.data.name.trim();
+    if (!name) {
+      res.status(400).json({ error: "name required" });
+      return;
+    }
+    // Guarantee a baseline onsite exists before adding more locations.
+    await ensureOnsiteLocation();
+    const scope = currentScope();
+    const wantOnsite = parsed.data.isOnsite === true;
+    try {
+      const created = await db.transaction(async (tx) => {
+        // There is always exactly one onsite location; promoting a new one demotes
+        // the rest first (rolled back atomically if the insert collides on name).
+        if (wantOnsite) {
+          await tx
+            .update(inventoryLocationsTable)
+            .set({ isOnsite: false })
+            .where(eq(inventoryLocationsTable.scope, scope));
+        }
+        const [row] = await tx
+          .insert(inventoryLocationsTable)
+          .values({ scope, name, isOnsite: wantOnsite })
+          .returning();
+        return row;
+      });
+      broadcast(headerSenderId(req), scope);
+      res.status(201).json(created);
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        res.status(409).json({ error: "A location with that name already exists" });
+        return;
+      }
+      throw err;
+    }
+  },
+);
+
+router.patch(
+  "/inventory/locations/:id",
+  requireCapability("manage-inventory"),
+  async (req, res): Promise<void> => {
+    const id = parseId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const parsed = UpdateInventoryLocationBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.message });
+      return;
+    }
+    const scope = currentScope();
+    const [loc] = await db
+      .select()
+      .from(inventoryLocationsTable)
+      .where(and(eq(inventoryLocationsTable.id, id), eq(inventoryLocationsTable.scope, scope)));
+    if (!loc) {
+      res.status(404).json({ error: "Location not found" });
+      return;
+    }
+    let name: string | undefined;
+    if (parsed.data.name != null) {
+      name = parsed.data.name.trim();
+      if (!name) {
+        res.status(400).json({ error: "name cannot be blank" });
+        return;
+      }
+    }
+    const wantOnsite = parsed.data.isOnsite;
+    // There must always be one onsite location: you can't turn the onsite one off
+    // directly — promote another instead.
+    if (wantOnsite === false && loc.isOnsite) {
+      res.status(400).json({
+        error: "There must always be one onsite location. Make another location onsite instead.",
+      });
+      return;
+    }
+    try {
+      const updated = await db.transaction(async (tx) => {
+        if (wantOnsite === true) {
+          await tx
+            .update(inventoryLocationsTable)
+            .set({ isOnsite: false })
+            .where(eq(inventoryLocationsTable.scope, scope));
+        }
+        const set: Record<string, unknown> = {};
+        if (name != null) set.name = name;
+        if (wantOnsite === true) set.isOnsite = true;
+        if (Object.keys(set).length === 0) {
+          const [row] = await tx
+            .select()
+            .from(inventoryLocationsTable)
+            .where(and(eq(inventoryLocationsTable.id, id), eq(inventoryLocationsTable.scope, scope)));
+          return row;
+        }
+        const [row] = await tx
+          .update(inventoryLocationsTable)
+          .set(set)
+          .where(and(eq(inventoryLocationsTable.id, id), eq(inventoryLocationsTable.scope, scope)))
+          .returning();
+        return row;
+      });
+      broadcast(headerSenderId(req), scope);
+      res.json(updated);
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        res.status(409).json({ error: "A location with that name already exists" });
+        return;
+      }
+      throw err;
+    }
+  },
+);
+
+router.delete(
+  "/inventory/locations/:id",
+  requireCapability("manage-inventory"),
+  async (req, res): Promise<void> => {
+    const id = parseId(req.params.id);
+    if (id == null) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const scope = currentScope();
+    const [loc] = await db
+      .select()
+      .from(inventoryLocationsTable)
+      .where(and(eq(inventoryLocationsTable.id, id), eq(inventoryLocationsTable.scope, scope)));
+    if (!loc) {
+      res.status(404).json({ error: "Location not found" });
+      return;
+    }
+    if (loc.isOnsite) {
+      res.status(409).json({ error: "Cannot delete the onsite location" });
+      return;
+    }
+    const [held] = await db
+      .select()
+      .from(inventoryLotsTable)
+      .where(
+        and(
+          eq(inventoryLotsTable.scope, scope),
+          eq(inventoryLotsTable.locationId, id),
+          gt(inventoryLotsTable.qtyRemaining, 0),
+        ),
+      )
+      .limit(1);
+    if (held) {
+      res
+        .status(409)
+        .json({ error: "Cannot delete a location that still holds stock. Transfer it out first." });
+      return;
+    }
+    await db
+      .delete(inventoryLocationsTable)
+      .where(and(eq(inventoryLocationsTable.id, id), eq(inventoryLocationsTable.scope, scope)));
+    broadcast(headerSenderId(req), scope);
+    res.sendStatus(204);
+  },
+);
+
+// Move `qty` of an item from one location to another, drawing source lots in
+// FIFO/FEFO order and re-creating matching destination lots so expiration dates
+// and lot numbers are preserved across the move. On-hand is conserved: a paired
+// "transfer" ledger entry records the outbound (−) and inbound (+) legs. Exported
+// so the per-lot move + paired-ledger wiring can be integration-tested.
+export async function transferStock(
+  itemId: number,
+  fromLocationId: number,
+  toLocationId: number,
+  qty: number,
+  opts: { fromIsOnsite: boolean; fromName: string; toName: string },
+): Promise<{ transferred: number }> {
+  if (qty <= 0) return { transferred: 0 };
+  return db.transaction(async (tx) => {
+    // Onsite source also sweeps any still-null lots (which mean onsite); a named
+    // source draws only its own lots.
+    const cond = opts.fromIsOnsite
+      ? onsiteLotCond(fromLocationId)
+      : eq(inventoryLotsTable.locationId, fromLocationId);
+    const conds = [
+      eq(inventoryLotsTable.itemId, itemId),
+      eq(inventoryLotsTable.scope, currentScope()),
+      gt(inventoryLotsTable.qtyRemaining, 0),
+    ];
+    if (cond) conds.push(cond);
+    const lots = await tx
+      .select()
+      .from(inventoryLotsTable)
+      .where(and(...conds))
+      .for("update");
+    const { consumed, updates } = planDrawDown(lots, qty);
+    if (consumed <= 0) return { transferred: 0 };
+    const byId = new Map(lots.map((l) => [l.id, l]));
+    for (const update of updates) {
+      const src = byId.get(update.id);
+      if (!src) continue;
+      const moved = src.qtyRemaining - update.qtyRemaining;
+      if (moved <= 0) continue;
+      await tx
+        .update(inventoryLotsTable)
+        .set({ qtyRemaining: update.qtyRemaining })
+        .where(eq(inventoryLotsTable.id, update.id));
+      await tx.insert(inventoryLotsTable).values({
+        itemId,
+        scope: currentScope(),
+        locationId: toLocationId,
+        lotNumber: src.lotNumber,
+        qtyReceived: moved,
+        qtyRemaining: moved,
+        receivedDate: src.receivedDate,
+        expirationDate: src.expirationDate,
+      });
+    }
+    await tx.insert(inventoryLedgerTable).values([
+      {
+        itemId,
+        scope: currentScope(),
+        lotId: null,
+        type: "transfer",
+        qtyDelta: -consumed,
+        note: `Transfer to ${opts.toName}`,
+      },
+      {
+        itemId,
+        scope: currentScope(),
+        lotId: null,
+        type: "transfer",
+        qtyDelta: consumed,
+        note: `Transfer from ${opts.fromName}`,
+      },
+    ]);
+    await tx
+      .update(inventoryItemsTable)
+      .set({ updatedAt: new Date() })
+      .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, currentScope())));
+    return { transferred: consumed };
+  });
+}
+
+router.post("/inventory/transfer", async (req, res): Promise<void> => {
+  const parsed = TransferInventoryBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { itemId, fromLocationId, toLocationId, qty } = parsed.data;
+  if (qty <= 0) {
+    res.status(400).json({ error: "qty must be positive" });
+    return;
+  }
+  if (fromLocationId === toLocationId) {
+    res.status(400).json({ error: "Source and destination must differ" });
+    return;
+  }
+  await ensureOnsiteLocation();
+  const scope = currentScope();
+  const [item] = await db
+    .select()
+    .from(inventoryItemsTable)
+    .where(and(eq(inventoryItemsTable.id, itemId), eq(inventoryItemsTable.scope, scope)));
+  if (!item) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  const locations = await listLocations(scope);
+  const from = locations.find((l) => l.id === fromLocationId);
+  const to = locations.find((l) => l.id === toLocationId);
+  if (!from || !to) {
+    res.status(400).json({ error: "Unknown location" });
+    return;
+  }
+  const result = await transferStock(itemId, fromLocationId, toLocationId, qty, {
+    fromIsOnsite: from.isOnsite,
+    fromName: from.name,
+    toName: to.name,
+  });
+  if (result.transferred <= 0) {
+    res.status(409).json({ error: "No stock available at the source location" });
+    return;
+  }
+  broadcast(headerSenderId(req), scope);
+  res.json(await loadItemResponse(itemId));
 });
 
 // Fold one or more source inventory items into a target item when the user
@@ -1053,6 +1512,12 @@ function parseId(raw: string | string[] | undefined): number | null {
 function headerSenderId(req: Request): string {
   const h = req.header("x-client-id");
   return typeof h === "string" ? h : "";
+}
+
+// Postgres unique-violation (SQLSTATE 23505) — used to turn a duplicate location
+// name into a clean 409 instead of a 500.
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
 }
 
 function todayStr(): string {

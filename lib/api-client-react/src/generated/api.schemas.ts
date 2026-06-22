@@ -39,9 +39,25 @@ export interface ProductionRunInput {
   notes?: string;
 }
 
+export interface InventoryLocation {
+  id: number;
+  name: string;
+  isOnsite: boolean;
+  createdAt: string;
+}
+
+export interface LocationStock {
+  locationId: number;
+  locationName: string;
+  isOnsite: boolean;
+  onHand: number;
+}
+
 export interface InventoryLot {
   id: number;
   itemId: number;
+  /** @nullable */
+  locationId?: number | null;
   lotNumber: string;
   qtyReceived: number;
   qtyRemaining: number;
@@ -61,6 +77,7 @@ export interface InventoryItem {
   reorderThreshold: number;
   onHand: number;
   lots: InventoryLot[];
+  byLocation: LocationStock[];
   createdAt: string;
   updatedAt: string;
 }
@@ -89,6 +106,24 @@ export interface RestockInput {
   receivedDate?: string | null;
   /** @nullable */
   expirationDate?: string | null;
+  locationId?: number;
+}
+
+export interface CreateInventoryLocationInput {
+  name: string;
+  isOnsite?: boolean;
+}
+
+export interface UpdateInventoryLocationInput {
+  name?: string;
+  isOnsite?: boolean;
+}
+
+export interface TransferInput {
+  itemId: number;
+  fromLocationId: number;
+  toLocationId: number;
+  qty: number;
 }
 
 export interface AdjustInput {

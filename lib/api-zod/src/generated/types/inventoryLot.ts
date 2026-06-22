@@ -9,6 +9,8 @@
 export interface InventoryLot {
   id: number;
   itemId: number;
+  /** @nullable */
+  locationId?: number | null;
   lotNumber: string;
   qtyReceived: number;
   qtyRemaining: number;

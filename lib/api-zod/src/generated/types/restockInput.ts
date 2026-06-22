@@ -17,4 +17,5 @@ export interface RestockInput {
   receivedDate?: string | null;
   /** @nullable */
   expirationDate?: string | null;
+  locationId?: number;
 }

@@ -431,3 +431,113 @@ export function deriveCandidateItems(
   }
   return [...map.values()];
 }
+
+// ── Multi-location transfer warnings ─────────────────────────────────────────
+//
+// Stock can live in several named locations, but production auto-deduction only
+// draws from the single onsite/line location. `aggregateRunDemand` rolls the
+// per-run consumption lines up into the total material demand for a set of runs
+// (the planned + scheduled runs of the day), summing quantities by item key.
+// `computeTransferNeeds` then compares that demand against the per-location
+// on-hand and flags items where the onsite location can't cover demand while
+// another location holds stock that could be transferred in. Both are PURE and
+// SHARED so web and mobile raise identical warnings (replit.md parity).
+
+// Total demand across the given runs, summed by item key. Same keys/units as
+// computeRunLines (the deduction basis), so demand lines up exactly with what
+// auto-consumption will draw down.
+export function aggregateRunDemand(
+  valsList: RunLinesInput[],
+  defaultPepTypes: readonly string[],
+): RunLine[] {
+  const map = new Map<string, RunLine>();
+  for (const vals of valsList) {
+    for (const l of computeRunLines(vals, defaultPepTypes)) {
+      const ex = map.get(l.key);
+      if (ex) ex.qty += l.qty;
+      else map.set(l.key, { ...l });
+    }
+  }
+  return [...map.values()];
+}
+
+// On-hand for one item at one location. `isOnsite` marks the single location
+// production deducts from.
+export type LocationStock = {
+  locationId: number;
+  locationName: string;
+  isOnsite: boolean;
+  onHand: number;
+};
+
+// An item whose onsite stock can't cover demand while another location holds
+// transferable stock. `transferable` is the amount that could actually be moved
+// in (capped at the shortfall). `sources` lists the offsite locations holding
+// stock, largest first.
+export type TransferNeed = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  needed: number;
+  onsite: number;
+  shortfall: number;
+  offsiteAvailable: number;
+  transferable: number;
+  sources: { locationId: number; locationName: string; onHand: number }[];
+};
+
+// Demand line shape accepted by computeTransferNeeds (a RunLine, but only these
+// fields are read).
+export type TransferDemand = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  qty: number;
+};
+
+// Compare aggregated demand against per-location stock and return the items that
+// need a transfer: onsite on-hand is short of demand AND another location holds
+// stock that could be moved in. Pure; quantities are compared with a tiny
+// epsilon so floating-point batch math doesn't raise spurious sub-unit warnings.
+export function computeTransferNeeds(input: {
+  demands: TransferDemand[];
+  stockByKey: Record<string, LocationStock[]>;
+}): TransferNeed[] {
+  const EPS = 1e-6;
+  const out: TransferNeed[] = [];
+  for (const d of input.demands) {
+    const needed = Number(d.qty) || 0;
+    if (!(needed > 0)) continue;
+    const stock = input.stockByKey[d.key] ?? [];
+    let onsite = 0;
+    const sources: { locationId: number; locationName: string; onHand: number }[] = [];
+    for (const s of stock) {
+      const onHand = Number(s.onHand) || 0;
+      if (s.isOnsite) {
+        onsite += onHand;
+      } else if (onHand > 0) {
+        sources.push({ locationId: s.locationId, locationName: s.locationName, onHand });
+      }
+    }
+    const offsiteAvailable = sources.reduce((acc, s) => acc + s.onHand, 0);
+    const shortfall = needed - onsite;
+    if (shortfall > EPS && offsiteAvailable > EPS) {
+      sources.sort((a, b) => b.onHand - a.onHand);
+      out.push({
+        key: d.key,
+        name: d.name,
+        unit: d.unit,
+        category: d.category,
+        needed,
+        onsite,
+        shortfall,
+        offsiteAvailable,
+        transferable: Math.min(shortfall, offsiteAvailable),
+        sources,
+      });
+    }
+  }
+  return out;
+}

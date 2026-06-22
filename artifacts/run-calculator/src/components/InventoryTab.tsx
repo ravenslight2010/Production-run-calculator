@@ -19,6 +19,8 @@ import {
   CheckCircle2,
   Clock,
   Recycle,
+  ArrowRightLeft,
+  MapPin,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,8 +30,16 @@ import {
   type CandidateItem,
   type InventoryItem,
   type InventoryLot,
+  type InventoryLocation,
   type LedgerEntry,
+  type TransferNeed,
   fetchInventory,
+  fetchInventoryLocations,
+  createInventoryLocation,
+  updateInventoryLocation,
+  deleteInventoryLocation,
+  transferInventory,
+  computeRunTransferNeeds,
   fetchLedger,
   createInventoryItem,
   updateInventoryItem,
@@ -66,6 +76,7 @@ import {
 } from "../inventoryShared";
 import { saveFacilityKnowledge } from "../aiMemory";
 import { useMe } from "../useRole";
+import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import SubstitutionsManager from "./SubstitutionsManager";
 import SubstitutionLog from "./SubstitutionLog";
@@ -103,6 +114,7 @@ function expiryClass(status: ReturnType<typeof lotExpiryStatus>): string {
 
 export default function InventoryTab({
   candidates,
+  runValsList = [],
   substitutions = [],
   substitutionLog = [],
   substitutionOptions = [],
@@ -111,6 +123,7 @@ export default function InventoryTab({
   onClearSubstitutions = () => {},
 }: {
   candidates: CandidateItem[];
+  runValsList?: FormValues[];
   substitutions?: IngredientSubstitution[];
   substitutionLog?: SubstitutionLogEntry[];
   substitutionOptions?: string[];
@@ -119,6 +132,7 @@ export default function InventoryTab({
   onClearSubstitutions?: () => void;
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [locations, setLocations] = useState<InventoryLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -135,11 +149,13 @@ export default function InventoryTab({
 
   async function load() {
     try {
-      const [data, settings] = await Promise.all([
+      const [data, settings, locs] = await Promise.all([
         fetchInventory(),
         fetchInventorySettings(),
+        fetchInventoryLocations(),
       ]);
       setItems(data);
+      setLocations(locs);
       setExpirySoonDays(settings.expirySoonDays);
       setExpiryInput(String(settings.expirySoonDays));
       setError(null);
@@ -202,6 +218,14 @@ export default function InventoryTab({
     const ingredient = items.filter((i) => i.category !== "packaging");
     return { packaging, ingredient };
   }, [items]);
+
+  // Transfer warnings: items the onsite/line location can't cover for the day's
+  // run plan while another location holds transferable stock. Shared math with
+  // mobile so the two raise identical warnings (replit.md parity).
+  const transferNeeds = useMemo<TransferNeed[]>(
+    () => computeRunTransferNeeds(runValsList, items),
+    [runValsList, items],
+  );
 
   const existingKeys = useMemo(() => new Set(items.map((i) => i.key)), [items]);
 
@@ -268,6 +292,40 @@ export default function InventoryTab({
         </Card>
       )}
 
+      {/* Transfer warnings: onsite/line can't cover the day's plan but another
+          location holds stock that could be moved in. */}
+      {transferNeeds.length > 0 && (
+        <Card className="bg-card/50 border-sky-500/40 shadow-md">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-sky-500 flex items-center gap-1.5">
+              <ArrowRightLeft className="w-4 h-4" /> Transfer Needed
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 space-y-1.5 text-sm">
+            {transferNeeds.map((t) => (
+              <div key={`xfer-${t.key}`} className="flex items-start justify-between gap-2">
+                <span className="min-w-0">
+                  <span className="text-sky-600 dark:text-sky-400 font-medium truncate">{t.name}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Need {fmtQty(t.needed)} {t.unit}, onsite has {fmtQty(t.onsite)}. Move{" "}
+                    {fmtQty(t.transferable)} {t.unit} from{" "}
+                    {t.sources.map((s) => s.locationName).join(", ")}.
+                  </span>
+                </span>
+                <span className="text-sky-600 dark:text-sky-400 font-medium whitespace-nowrap tabular-nums">
+                  −{fmtQty(t.shortfall)} {t.unit}
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Locations (named storage). Managers add/rename/set-onsite/delete. */}
+      {canManageInventory && (
+        <LocationsCard locations={locations} onChanged={load} />
+      )}
+
       {/* Temporary substitutions overlay (day-state, reverts at daily reset) */}
       <SubstitutionsManager
         substitutions={substitutions}
@@ -314,7 +372,7 @@ export default function InventoryTab({
       )}
 
       {/* Photo stock intake (use-ai-tools: paid AI action) */}
-      {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} onCommitted={load} />}
+      {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} locations={locations} onCommitted={load} />}
 
       {canUseAiTools && <QualityCheckCard />}
 
@@ -333,6 +391,7 @@ export default function InventoryTab({
           title="Packaging"
           icon={<Package className="w-4 h-4" />}
           items={grouped.packaging}
+          locations={locations}
           expandedId={expandedId}
           setExpandedId={setExpandedId}
           onChanged={load}
@@ -344,6 +403,7 @@ export default function InventoryTab({
           title="Ingredients"
           icon={<Boxes className="w-4 h-4" />}
           items={grouped.ingredient}
+          locations={locations}
           expandedId={expandedId}
           setExpandedId={setExpandedId}
           onChanged={load}
@@ -406,6 +466,7 @@ function CategorySection({
   title,
   icon,
   items,
+  locations,
   expandedId,
   setExpandedId,
   onChanged,
@@ -414,6 +475,7 @@ function CategorySection({
   title: string;
   icon: React.ReactNode;
   items: InventoryItem[];
+  locations: InventoryLocation[];
   expandedId: number | null;
   setExpandedId: (id: number | null) => void;
   onChanged: () => void;
@@ -431,6 +493,7 @@ function CategorySection({
           <ItemRow
             key={item.id}
             item={item}
+            locations={locations}
             expanded={expandedId === item.id}
             onToggle={() => setExpandedId(expandedId === item.id ? null : item.id)}
             onChanged={onChanged}
@@ -444,12 +507,14 @@ function CategorySection({
 
 function ItemRow({
   item,
+  locations,
   expanded,
   onToggle,
   onChanged,
   expirySoonDays,
 }: {
   item: InventoryItem;
+  locations: InventoryLocation[];
   expanded: boolean;
   onToggle: () => void;
   onChanged: () => void;
@@ -472,12 +537,12 @@ function ItemRow({
           {fmtQty(item.onHand)} <span className="font-normal text-muted-foreground">{item.unit}</span>
         </span>
       </button>
-      {expanded && <ItemDetail item={item} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
+      {expanded && <ItemDetail item={item} locations={locations} onChanged={onChanged} expirySoonDays={expirySoonDays} />}
     </div>
   );
 }
 
-function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; onChanged: () => void; expirySoonDays: number }) {
+function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: InventoryItem; locations: InventoryLocation[]; onChanged: () => void; expirySoonDays: number }) {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const [busy, setBusy] = useState(false);
@@ -540,6 +605,28 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
         )}
       </div>
 
+      {/* Per-location on-hand. Only shown once stock lives in more than the
+          single onsite location (otherwise the headline on-hand already says
+          everything). */}
+      {item.byLocation.length > 1 && (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1">
+            <MapPin className="w-3 h-3" /> By location
+          </p>
+          <div className="space-y-1">
+            {item.byLocation.map((loc) => (
+              <div key={loc.locationId} className="flex items-center justify-between gap-2 text-xs">
+                <span className="truncate text-muted-foreground">
+                  {loc.locationName}
+                  {loc.isOnsite ? <span className="ml-1 text-[10px] font-bold uppercase text-emerald-500">Onsite</span> : ""}
+                </span>
+                <span className="font-mono tabular-nums whitespace-nowrap">{fmtQty(loc.onHand)} {item.unit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Reorder threshold (editing is an inventory-item write → manage-inventory) */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">Reorder at</span>
@@ -578,8 +665,14 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
 
       <Separator className="bg-border/40" />
 
-      <RestockForm item={item} busy={busy} run={run} />
+      <RestockForm item={item} locations={locations} busy={busy} run={run} />
       <AdjustForm item={item} busy={busy} run={run} />
+
+      {/* Transfer stock between locations. Open to any signed-in user (same as
+          restock). Hidden until at least two locations exist. */}
+      {locations.length > 1 && (
+        <TransferForm item={item} locations={locations} busy={busy} run={run} />
+      )}
 
       <Separator className="bg-border/40" />
 
@@ -634,15 +727,20 @@ function ItemDetail({ item, onChanged, expirySoonDays }: { item: InventoryItem; 
 function RestockForm({
   item,
   busy,
+  locations,
   run,
 }: {
   item: InventoryItem;
   busy: boolean;
+  locations: InventoryLocation[];
   run: (fn: () => Promise<unknown>) => Promise<void>;
 }) {
   const [qty, setQty] = useState("");
   const [lotNumber, setLotNumber] = useState("");
   const [expiration, setExpiration] = useState("");
+  // Default the restock destination to the onsite location (empty === server's
+  // default onsite). Only shown when more than one location exists.
+  const [locationId, setLocationId] = useState<string>("");
   const n = Number(qty);
   return (
     <div className="space-y-1.5">
@@ -652,6 +750,19 @@ function RestockForm({
         <Input placeholder="Lot #" value={lotNumber} onChange={(e) => setLotNumber(e.target.value)} className="h-8 text-xs" />
         <Input type="date" placeholder="Exp" value={expiration} onChange={(e) => setExpiration(e.target.value)} className="h-8 text-xs" />
       </div>
+      {locations.length > 1 && (
+        <select
+          value={locationId}
+          onChange={(e) => setLocationId(e.target.value)}
+          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+        >
+          {locations.map((loc) => (
+            <option key={loc.id} value={String(loc.id)}>
+              {loc.name}{loc.isOnsite ? " (onsite)" : ""}
+            </option>
+          ))}
+        </select>
+      )}
       <Button
         size="sm"
         className="h-8 w-full text-xs"
@@ -667,6 +778,7 @@ function RestockForm({
               lotNumber: lotNumber.trim() || undefined,
               receivedDate: todayStr(),
               expirationDate: expiration || undefined,
+              locationId: locationId ? Number(locationId) : undefined,
             });
             setQty("");
             setLotNumber("");
@@ -675,6 +787,91 @@ function RestockForm({
         }
       >
         <Plus className="w-3 h-3" /> Add stock
+      </Button>
+    </div>
+  );
+}
+
+function TransferForm({
+  item,
+  locations,
+  busy,
+  run,
+}: {
+  item: InventoryItem;
+  locations: InventoryLocation[];
+  busy: boolean;
+  run: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const onsite = locations.find((l) => l.isOnsite);
+  const offsite = locations.filter((l) => !l.isOnsite);
+  // Default: move from the first offsite location into onsite (the common case
+  // that resolves a transfer warning).
+  const [fromId, setFromId] = useState<string>(String(offsite[0]?.id ?? ""));
+  const [toId, setToId] = useState<string>(String(onsite?.id ?? ""));
+  const [qty, setQty] = useState("");
+  const n = Number(qty);
+  // On-hand at the chosen source, so the user can't move more than is there.
+  const sourceOnHand =
+    item.byLocation.find((b) => String(b.locationId) === fromId)?.onHand ?? 0;
+  const valid =
+    n > 0 && fromId !== "" && toId !== "" && fromId !== toId && n <= sourceOnHand + 1e-6;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+        <ArrowRightLeft className="w-3 h-3" /> Transfer
+      </p>
+      <div className="grid grid-cols-2 gap-1.5">
+        <select
+          value={fromId}
+          onChange={(e) => setFromId(e.target.value)}
+          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+        >
+          <option value="">From…</option>
+          {locations.map((loc) => (
+            <option key={loc.id} value={String(loc.id)}>
+              {loc.name}{loc.isOnsite ? " (onsite)" : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={toId}
+          onChange={(e) => setToId(e.target.value)}
+          className="h-8 w-full text-xs rounded-md border border-border/60 bg-background px-2"
+        >
+          <option value="">To…</option>
+          {locations.map((loc) => (
+            <option key={loc.id} value={String(loc.id)}>
+              {loc.name}{loc.isOnsite ? " (onsite)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+      <Input
+        type="number"
+        placeholder={`Qty (max ${fmtQty(sourceOnHand)})`}
+        value={qty}
+        onChange={(e) => setQty(e.target.value)}
+        className="h-8 text-xs"
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 w-full text-xs"
+        disabled={busy || !valid}
+        onClick={() =>
+          run(async () => {
+            await transferInventory({
+              itemId: item.id,
+              fromLocationId: Number(fromId),
+              toLocationId: Number(toId),
+              qty: n,
+            });
+            setQty("");
+          })
+        }
+      >
+        <ArrowRightLeft className="w-3 h-3" /> Move stock
       </Button>
     </div>
   );
@@ -715,6 +912,161 @@ function AdjustForm({
         Apply adjustment
       </Button>
     </div>
+  );
+}
+
+function LocationsCard({
+  locations,
+  onChanged,
+}: {
+  locations: InventoryLocation[];
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      onChanged();
+    } catch (e) {
+      setError(
+        e instanceof InventoryApiError && e.serverMessage
+          ? e.serverMessage
+          : e instanceof Error
+            ? e.message
+            : "Action failed",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <MapPin className="w-4 h-4" /> Locations
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />} {open ? "Close" : "Manage"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-2">
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          <div className="space-y-1">
+            {locations.map((loc) => (
+              <div key={loc.id} className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/10 px-3 py-2">
+                {editId === loc.id ? (
+                  <span className="flex items-center gap-1.5 flex-1 min-w-0">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="h-7 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      disabled={busy || !editName.trim()}
+                      onClick={() =>
+                        run(async () => {
+                          await updateInventoryLocation(loc.id, { name: editName.trim() });
+                          setEditId(null);
+                        })
+                      }
+                    >
+                      Save
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm font-medium truncate">{loc.name}</span>
+                    {loc.isOnsite && (
+                      <span className="text-[10px] font-bold uppercase text-emerald-500 border border-emerald-500/50 rounded px-1 shrink-0">Onsite</span>
+                    )}
+                  </span>
+                )}
+                {editId !== loc.id && (
+                  <span className="flex items-center gap-2 shrink-0">
+                    {!loc.isOnsite && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => run(() => updateInventoryLocation(loc.id, { isOnsite: true }))}
+                        className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50"
+                      >
+                        Set onsite
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditId(loc.id);
+                        setEditName(loc.name);
+                      }}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    {!loc.isOnsite && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (confirm(`Delete location "${loc.name}"?`)) {
+                            run(() => deleteInventoryLocation(loc.id));
+                          }
+                        }}
+                        className="text-red-500 hover:text-red-400 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Input
+              placeholder="New location name"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="h-8 text-xs"
+            />
+            <Button
+              size="sm"
+              className="h-8 px-3 text-xs shrink-0"
+              disabled={busy || !newName.trim()}
+              onClick={() =>
+                run(async () => {
+                  await createInventoryLocation({ name: newName.trim() });
+                  setNewName("");
+                })
+              }
+            >
+              <Plus className="w-3 h-3" /> Add
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Production deducts only from the onsite location. Stock in other locations is warned about when it could be transferred in to cover the day's plan.
+          </p>
+        </CardContent>
+      )}
+    </Card>
   );
 }
 
@@ -1372,11 +1724,17 @@ function WasteInsightCard() {
 
 function PhotoIntakeCard({
   candidates,
+  locations,
   onCommitted,
 }: {
   candidates: CandidateItem[];
+  locations: InventoryLocation[];
   onCommitted: () => void;
 }) {
+  // Destination location for all confirmed rows (empty === server default
+  // onsite). Only shown when more than one location exists, mirroring the
+  // manual RestockForm picker.
+  const [locationId, setLocationId] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
   const lastImageRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -1530,6 +1888,7 @@ function PhotoIntakeCard({
         lotNumber: row.lotNumber.trim() || undefined,
         receivedDate: todayStr(),
         expirationDate: row.expiration || undefined,
+        locationId: locationId ? Number(locationId) : undefined,
       });
       setRows((rs) => rs.filter((r) => r.id !== row.id));
       // Remember the guessName -> matched item link so future scans auto-apply
@@ -1642,6 +2001,23 @@ function PhotoIntakeCard({
                 <Camera className="w-3.5 h-3.5" /> Retake photo
               </Button>
             </div>
+          )}
+
+          {rows.length > 0 && locations.length > 1 && (
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Destination location</span>
+              <select
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                className="mt-0.5 w-full h-8 rounded-md border border-border/60 bg-background px-2 text-xs"
+              >
+                {locations.map((loc) => (
+                  <option key={loc.id} value={String(loc.id)}>
+                    {loc.name}{loc.isOnsite ? " (onsite)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
 
           {rows.length > 0 && (

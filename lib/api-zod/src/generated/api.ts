@@ -233,12 +233,19 @@ export const ListInventoryResponseItem = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.number(),
   "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
   "receivedDate": zod.string().nullish(),
   "expirationDate": zod.string().nullish(),
   "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
 })),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -281,12 +288,19 @@ export const UpdateInventoryItemResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.number(),
   "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
   "receivedDate": zod.string().nullish(),
   "expirationDate": zod.string().nullish(),
   "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
 })),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -312,7 +326,8 @@ export const RestockInventoryBody = zod.object({
   "qty": zod.number(),
   "lotNumber": zod.string().optional(),
   "receivedDate": zod.string().nullish(),
-  "expirationDate": zod.string().nullish()
+  "expirationDate": zod.string().nullish(),
+  "locationId": zod.number().optional()
 })
 
 export const RestockInventoryResponse = zod.object({
@@ -326,12 +341,19 @@ export const RestockInventoryResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.number(),
   "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
   "receivedDate": zod.string().nullish(),
   "expirationDate": zod.string().nullish(),
   "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
 })),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -358,12 +380,19 @@ export const AdjustInventoryResponse = zod.object({
   "lots": zod.array(zod.object({
   "id": zod.number(),
   "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
   "lotNumber": zod.string(),
   "qtyReceived": zod.number(),
   "qtyRemaining": zod.number(),
   "receivedDate": zod.string().nullish(),
   "expirationDate": zod.string().nullish(),
   "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
 })),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -408,6 +437,95 @@ export const MergeInventoryResponse = zod.object({
   "status": zod.enum(['applied', 'skipped']),
   "reason": zod.enum(['blank-key', 'same-key', 'source-not-tracked', 'same-item']).optional()
 }))
+})
+
+
+/**
+ * @summary List stock locations (onsite first)
+ */
+export const ListInventoryLocationsResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "isOnsite": zod.boolean(),
+  "createdAt": zod.coerce.date()
+})
+export const ListInventoryLocationsResponse = zod.array(ListInventoryLocationsResponseItem)
+
+
+/**
+ * @summary Create a stock location
+ */
+export const CreateInventoryLocationBody = zod.object({
+  "name": zod.string(),
+  "isOnsite": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Rename a location or set it as onsite
+ */
+export const UpdateInventoryLocationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateInventoryLocationBody = zod.object({
+  "name": zod.string().optional(),
+  "isOnsite": zod.boolean().optional()
+})
+
+export const UpdateInventoryLocationResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "isOnsite": zod.boolean(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete an empty, non-onsite location
+ */
+export const DeleteInventoryLocationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
+ * @summary Move stock from one location to another (preserves lots)
+ */
+export const TransferInventoryBody = zod.object({
+  "itemId": zod.number(),
+  "fromLocationId": zod.number(),
+  "toLocationId": zod.number(),
+  "qty": zod.number()
+})
+
+export const TransferInventoryResponse = zod.object({
+  "id": zod.number(),
+  "key": zod.string(),
+  "category": zod.string(),
+  "name": zod.string(),
+  "unit": zod.string(),
+  "reorderThreshold": zod.number(),
+  "onHand": zod.number(),
+  "lots": zod.array(zod.object({
+  "id": zod.number(),
+  "itemId": zod.number(),
+  "locationId": zod.number().nullish(),
+  "lotNumber": zod.string(),
+  "qtyReceived": zod.number(),
+  "qtyRemaining": zod.number(),
+  "receivedDate": zod.string().nullish(),
+  "expirationDate": zod.string().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "byLocation": zod.array(zod.object({
+  "locationId": zod.number(),
+  "locationName": zod.string(),
+  "isOnsite": zod.boolean(),
+  "onHand": zod.number()
+})),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
 })
 
 

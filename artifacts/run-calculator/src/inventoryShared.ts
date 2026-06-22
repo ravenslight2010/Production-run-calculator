@@ -5,18 +5,22 @@ import {
   computeRunLines as computeRunLinesShared,
   computeRunConsumptionLines as computeRunConsumptionLinesShared,
   deriveCandidateItems as deriveCandidateItemsShared,
+  aggregateRunDemand as aggregateRunDemandShared,
+  computeTransferNeeds,
   type RunLinesInput,
   type InventoryCategory,
   type ConsumeLine,
   type CandidateItem,
   type RunLine,
+  type TransferNeed,
+  type TransferDemand,
 } from "@workspace/inventory-math";
 
 // Consumption/summary math now lives in @workspace/inventory-math (shared with
 // mobile so the two can't drift). Re-export the types so this module's public
 // surface stays stable for existing web call sites (they're also imported above
 // for use within this file).
-export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine };
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, TransferNeed };
 
 // Web `FormValues` uses `targetDoughballWeight`; the shared lib's canonical
 // field name is `doughballWeightOz`. Map it here so the formulas stay shared.
@@ -33,12 +37,22 @@ function toRunLinesInput(vals: FormValues): RunLinesInput {
 export type InventoryLot = {
   id: number;
   itemId: number;
+  locationId: number | null;
   lotNumber: string;
   qtyReceived: number;
   qtyRemaining: number;
   receivedDate: string | null;
   expirationDate: string | null;
   createdAt: string;
+};
+
+// One location's on-hand for a given item. Null-location (legacy) stock folds
+// into the onsite row server-side.
+export type LocationStock = {
+  locationId: number;
+  locationName: string;
+  isOnsite: boolean;
+  onHand: number;
 };
 
 export type InventoryItem = {
@@ -52,6 +66,16 @@ export type InventoryItem = {
   updatedAt: string;
   onHand: number;
   lots: InventoryLot[];
+  byLocation: LocationStock[];
+};
+
+// A named storage location. `isOnsite` marks the single location production
+// deducts from; there is always exactly one onsite location.
+export type InventoryLocation = {
+  id: number;
+  name: string;
+  isOnsite: boolean;
+  createdAt: string;
 };
 
 export type LedgerEntry = {
@@ -76,6 +100,32 @@ export const computeRunConsumptionLines = (vals: FormValues) =>
 
 export const deriveCandidateItems = (valsList: FormValues[]) =>
   deriveCandidateItemsShared(valsList.map(toRunLinesInput), DEFAULT_PEP_TYPES);
+
+// ── Transfer-warning wiring (shared math) ────────────────────────────────────
+// Roll the planned + scheduled runs up into total material demand (same keys as
+// auto-deduction), then compare against per-location stock. Returns the items
+// where the onsite/line location can't cover demand while another location holds
+// transferable stock. Mobile mirrors this exactly so warnings can't drift.
+export const aggregateRunDemand = (valsList: FormValues[]): RunLine[] =>
+  aggregateRunDemandShared(valsList.map(toRunLinesInput), DEFAULT_PEP_TYPES);
+
+// Build the per-key location-stock map computeTransferNeeds expects from the
+// inventory items' byLocation breakdown.
+export function buildStockByKey(items: InventoryItem[]): Record<string, LocationStock[]> {
+  const out: Record<string, LocationStock[]> = {};
+  for (const it of items) out[it.key] = it.byLocation;
+  return out;
+}
+
+// Top-level convenience: given the day's runs and current inventory, return the
+// transfer warnings. Pure aside from reading its inputs.
+export function computeRunTransferNeeds(
+  valsList: FormValues[],
+  items: InventoryItem[],
+): TransferNeed[] {
+  const demands = aggregateRunDemand(valsList) as TransferDemand[];
+  return computeTransferNeeds({ demands, stockByKey: buildStockByKey(items) });
+}
 
 // ── Expiration helpers ───────────────────────────────────────────────────────
 // Default expiry lead time; overridden by the user-configured value loaded from
@@ -199,6 +249,7 @@ export type RestockBody = {
   lotNumber?: string;
   receivedDate?: string;
   expirationDate?: string;
+  locationId?: number;
 };
 export type AdjustBody = { itemId: number; qtyDelta: number; note?: string };
 export type InventorySettings = { expirySoonDays: number };
@@ -641,6 +692,38 @@ export const consumeRun = (runId: string, lines: ConsumeLine[]) =>
   api<{ applied: boolean; consumed: number }>("/inventory/consume", {
     method: "POST",
     body: JSON.stringify({ runId, lines }),
+  });
+
+// ── Locations (named storage) + transfers ────────────────────────────────────
+export type CreateLocationBody = { name: string; isOnsite?: boolean };
+export type UpdateLocationBody = { name?: string; isOnsite?: boolean };
+export type TransferBody = {
+  itemId: number;
+  fromLocationId: number;
+  toLocationId: number;
+  qty: number;
+};
+
+export const fetchInventoryLocations = () =>
+  api<InventoryLocation[]>("/inventory/locations");
+export const createInventoryLocation = (body: CreateLocationBody) =>
+  api<InventoryLocation>("/inventory/locations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+export const updateInventoryLocation = (id: number, body: UpdateLocationBody) =>
+  api<InventoryLocation>(`/inventory/locations/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+export const deleteInventoryLocation = (id: number) =>
+  api<null>(`/inventory/locations/${id}`, { method: "DELETE" });
+// Move stock between two locations. Returns the updated item (with fresh
+// per-location on-hand) so callers can refresh without a separate fetch.
+export const transferInventory = (body: TransferBody) =>
+  api<InventoryItem>("/inventory/transfer", {
+    method: "POST",
+    body: JSON.stringify(body),
   });
 
 export type MergeInventoryLine = {

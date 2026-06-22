@@ -72,6 +72,7 @@ let db: DbModule["db"];
 let pool: DbModule["pool"];
 let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
+let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventorySettingsTable: DbModule["inventorySettingsTable"];
@@ -133,6 +134,7 @@ beforeAll(async () => {
   pool = dbMod.pool;
   inventoryItemsTable = dbMod.inventoryItemsTable;
   inventoryLotsTable = dbMod.inventoryLotsTable;
+  inventoryLocationsTable = dbMod.inventoryLocationsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventorySettingsTable = dbMod.inventorySettingsTable;
@@ -178,7 +180,7 @@ beforeEach(async () => {
   // ids reused across tests would otherwise inherit a prior test's revocation.
   clearUserValidityCache();
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryLocationsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable}, ${inventorySettingsTable}, ${userRolesTable}, ${usersTable}, ${rolesTable} RESTART IDENTITY CASCADE`,
   );
   // Seed the role catalog (manager/operator builtins + editable starters) so the
   // capability middleware can resolve each user's role to a capability set. Plus
@@ -995,5 +997,89 @@ describe("removed staff lose access immediately", () => {
     // The surviving operator's session is untouched.
     const res = await req(OPERATOR, "GET", "/api/me");
     expect(res.status).toBe(200);
+  });
+});
+
+// Restock is the commit path shared by manual restock AND AI photo intake: both
+// post to /inventory/restock, optionally carrying a chosen destination
+// locationId. These guard the contract photo-intake relies on — explicit
+// offsite selection lands stock at that location, and an omitted location falls
+// back to the onsite/line location (created on demand).
+describe("restock honors the chosen destination location", () => {
+  async function lotLocationsFor(itemId: number): Promise<(number | null)[]> {
+    const rows = await db.execute<{ location_id: number | null }>(
+      sql`SELECT location_id FROM inventory_lots WHERE item_id = ${itemId} ORDER BY id`,
+    );
+    return rows.rows.map((r) => r.location_id);
+  }
+
+  it("lands stock at an explicitly chosen offsite location", async () => {
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({ key: "ingredient:Mozzarella:lbs", category: "ingredient", name: "Mozzarella", unit: "lbs" })
+      .returning();
+    const [onsite] = await db
+      .insert(inventoryLocationsTable)
+      .values({ name: "Onsite (Line)", isOnsite: true })
+      .returning();
+    const [cold] = await db
+      .insert(inventoryLocationsTable)
+      .values({ name: "Cold Storage", isOnsite: false })
+      .returning();
+
+    const res = await req(MANAGER, "POST", "/api/inventory/restock", {
+      itemKey: "ingredient:Mozzarella:lbs",
+      category: "ingredient",
+      name: "Mozzarella",
+      unit: "lbs",
+      qty: 12,
+      locationId: cold.id,
+    });
+    expect(res.status).toBe(200);
+
+    const locs = await lotLocationsFor(item.id);
+    expect(locs).toEqual([cold.id]);
+    expect(locs).not.toContain(onsite.id);
+  });
+
+  it("defaults to the onsite location when none is specified", async () => {
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({ key: "ingredient:Sauce:lbs", category: "ingredient", name: "Sauce", unit: "lbs" })
+      .returning();
+    const [onsite] = await db
+      .insert(inventoryLocationsTable)
+      .values({ name: "Onsite (Line)", isOnsite: true })
+      .returning();
+    await db.insert(inventoryLocationsTable).values({ name: "Cold Storage", isOnsite: false });
+
+    const res = await req(MANAGER, "POST", "/api/inventory/restock", {
+      itemKey: "ingredient:Sauce:lbs",
+      category: "ingredient",
+      name: "Sauce",
+      unit: "lbs",
+      qty: 8,
+    });
+    expect(res.status).toBe(200);
+
+    const locs = await lotLocationsFor(item.id);
+    expect(locs).toEqual([onsite.id]);
+  });
+
+  it("rejects an unknown destination location (→ 400)", async () => {
+    await db
+      .insert(inventoryItemsTable)
+      .values({ key: "ingredient:Flour:lbs", category: "ingredient", name: "Flour", unit: "lbs" });
+    await db.insert(inventoryLocationsTable).values({ name: "Onsite (Line)", isOnsite: true });
+
+    const res = await req(MANAGER, "POST", "/api/inventory/restock", {
+      itemKey: "ingredient:Flour:lbs",
+      category: "ingredient",
+      name: "Flour",
+      unit: "lbs",
+      qty: 5,
+      locationId: 999999,
+    });
+    expect(res.status).toBe(400);
   });
 });

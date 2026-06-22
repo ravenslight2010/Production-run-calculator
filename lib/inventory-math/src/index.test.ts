@@ -5,7 +5,10 @@ import {
   substitutionsForIngredient,
   computeRunConsumptionLines,
   computeSummaryStats,
+  aggregateRunDemand,
+  computeTransferNeeds,
   type IngredientSubstitution,
+  type LocationStock,
   type RecipeRow,
   type RunLinesInput,
 } from "./index";
@@ -190,5 +193,114 @@ describe("web/mobile parity", () => {
     expect(web).toEqual(mobile);
     // sanity: the swap actually flowed into the effective recipe
     expect((effective.doughRecipe as RecipeRow[])[0]).toEqual({ ingredient: "GF Flour", lbs: 55 });
+  });
+});
+
+describe("aggregateRunDemand", () => {
+  it("sums consumption quantities by item key across runs", () => {
+    // Two runs both consuming packaging circles + shippers; demand must add up.
+    const runA = baseVals({
+      casesNeeded: 10,
+      pizzasPerCase: 1,
+      cartoned: "yes",
+      circles: "12in",
+      shipper: "Std",
+      cartonsPerCase: 0,
+    }) as unknown as RunLinesInput;
+    const runB = baseVals({
+      casesNeeded: 5,
+      pizzasPerCase: 1,
+      cartoned: "yes",
+      circles: "12in",
+      shipper: "Std",
+      cartonsPerCase: 0,
+    }) as unknown as RunLinesInput;
+    const demand = aggregateRunDemand([runA, runB], PEP);
+    const circles = demand.find((d) => d.key === "packaging:circles:12in");
+    const shippers = demand.find((d) => d.key === "packaging:shippers:Std");
+    expect(circles?.qty).toBe(15); // 10 + 5 pizzas
+    expect(shippers?.qty).toBe(15); // 10 + 5 cases
+  });
+
+  it("returns an empty list for no runs", () => {
+    expect(aggregateRunDemand([], PEP)).toEqual([]);
+  });
+});
+
+describe("computeTransferNeeds", () => {
+  const loc = (over: Partial<LocationStock>): LocationStock => ({
+    locationId: over.locationId ?? 1,
+    locationName: over.locationName ?? "Loc",
+    isOnsite: over.isOnsite ?? false,
+    onHand: over.onHand ?? 0,
+  });
+
+  it("flags an item whose onsite stock is short while another location holds stock", () => {
+    const needs = computeTransferNeeds({
+      demands: [{ key: "ingredient:Mozzarella:lbs", name: "Mozzarella", unit: "lbs", category: "ingredient", qty: 100 }],
+      stockByKey: {
+        "ingredient:Mozzarella:lbs": [
+          loc({ locationId: 1, locationName: "Onsite", isOnsite: true, onHand: 40 }),
+          loc({ locationId: 2, locationName: "Cold Storage", onHand: 80 }),
+        ],
+      },
+    });
+    expect(needs).toHaveLength(1);
+    expect(needs[0]).toMatchObject({
+      key: "ingredient:Mozzarella:lbs",
+      needed: 100,
+      onsite: 40,
+      shortfall: 60,
+      offsiteAvailable: 80,
+      transferable: 60, // capped at the shortfall, not the 80 available
+    });
+    expect(needs[0].sources).toEqual([{ locationId: 2, locationName: "Cold Storage", onHand: 80 }]);
+  });
+
+  it("caps transferable at the offsite available when it is the binding constraint", () => {
+    const needs = computeTransferNeeds({
+      demands: [{ key: "k", name: "n", unit: "lbs", category: "ingredient", qty: 100 }],
+      stockByKey: { k: [loc({ isOnsite: true, onHand: 10 }), loc({ locationId: 2, onHand: 25 })] },
+    });
+    expect(needs[0].transferable).toBe(25); // shortfall 90 > 25 offsite
+  });
+
+  it("does not flag when onsite already covers demand", () => {
+    const needs = computeTransferNeeds({
+      demands: [{ key: "k", name: "n", unit: "lbs", category: "ingredient", qty: 30 }],
+      stockByKey: { k: [loc({ isOnsite: true, onHand: 50 }), loc({ locationId: 2, onHand: 100 })] },
+    });
+    expect(needs).toEqual([]);
+  });
+
+  it("does not flag a shortfall when no other location holds stock", () => {
+    const needs = computeTransferNeeds({
+      demands: [{ key: "k", name: "n", unit: "lbs", category: "ingredient", qty: 30 }],
+      stockByKey: { k: [loc({ isOnsite: true, onHand: 5 })] },
+    });
+    expect(needs).toEqual([]);
+  });
+
+  it("treats a missing item as zero onsite (no offsite means no warning)", () => {
+    expect(
+      computeTransferNeeds({
+        demands: [{ key: "missing", name: "n", unit: "lbs", category: "ingredient", qty: 10 }],
+        stockByKey: {},
+      }),
+    ).toEqual([]);
+  });
+
+  it("sorts offsite sources largest-first", () => {
+    const needs = computeTransferNeeds({
+      demands: [{ key: "k", name: "n", unit: "lbs", category: "ingredient", qty: 100 }],
+      stockByKey: {
+        k: [
+          loc({ isOnsite: true, onHand: 0 }),
+          loc({ locationId: 2, locationName: "Small", onHand: 5 }),
+          loc({ locationId: 3, locationName: "Big", onHand: 50 }),
+        ],
+      },
+    });
+    expect(needs[0].sources.map((s) => s.locationName)).toEqual(["Big", "Small"]);
   });
 });

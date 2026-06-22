@@ -33,10 +33,12 @@ let inventoryItemsTable: DbModule["inventoryItemsTable"];
 let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
+let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
 let consumeRun: InvModule["consumeRun"];
 let drawDown: InvModule["drawDown"];
 let adjustInventory: InvModule["adjustInventory"];
 let mergeInventoryItems: InvModule["mergeInventoryItems"];
+let transferStock: InvModule["transferStock"];
 
 let adminPool: pg.Pool;
 let testDbName: string;
@@ -79,10 +81,12 @@ beforeAll(async () => {
   inventoryLotsTable = dbMod.inventoryLotsTable;
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
+  inventoryLocationsTable = dbMod.inventoryLocationsTable;
   consumeRun = invMod.consumeRun;
   drawDown = invMod.drawDown;
   adjustInventory = invMod.adjustInventory;
   mergeInventoryItems = invMod.mergeInventoryItems;
+  transferStock = invMod.transferStock;
 }, 60_000);
 
 afterAll(async () => {
@@ -100,7 +104,7 @@ afterAll(async () => {
 beforeEach(async () => {
   // Each test starts from an empty inventory.
   await db.execute(
-    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryItemsTable} RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE ${inventoryLedgerTable}, ${inventoryLotsTable}, ${inventoryConsumedRunsTable}, ${inventoryLocationsTable}, ${inventoryItemsTable} RESTART IDENTITY CASCADE`,
   );
 });
 
@@ -831,5 +835,145 @@ describe("inventory merge against a real database", () => {
     const target = await findItem("ingredient:Cheese:lbs");
     expect(target).not.toBeNull();
     expect(await onHand(target!.id)).toBe(9);
+  });
+});
+
+// ── Location-aware drawdown + transfer ──────────────────────────────────────
+async function makeLocation(name: string, isOnsite = false): Promise<number> {
+  const [row] = await db
+    .insert(inventoryLocationsTable)
+    .values({ name, isOnsite })
+    .returning();
+  return row.id;
+}
+
+// Add a lot pinned to a specific location.
+async function addLotAt(
+  itemId: number,
+  locationId: number | null,
+  qty: number,
+  opts: { expirationDate?: string | null } = {},
+): Promise<void> {
+  await db.insert(inventoryLotsTable).values({
+    itemId,
+    locationId,
+    qtyReceived: qty,
+    qtyRemaining: qty,
+    receivedDate: null,
+    expirationDate: opts.expirationDate ?? null,
+  });
+}
+
+async function lotsForItem(itemId: number) {
+  const lots = await db.select().from(inventoryLotsTable);
+  return lots.filter((l) => l.itemId === itemId);
+}
+
+describe("location-aware consumption against a real database", () => {
+  it("consume only draws from onsite (and null) lots, leaving offsite stock untouched", async () => {
+    const onsite = await makeLocation("Onsite (Line)", true);
+    const cold = await makeLocation("Cold Storage", false);
+    const itemId = await makeItem("ingredient:Mozzarella:lbs");
+    await addLotAt(itemId, onsite, 5);
+    await addLotAt(itemId, cold, 50);
+
+    const result = await consumeRun("run-loc-1", [
+      { itemKey: "ingredient:Mozzarella:lbs", qty: 8 },
+    ]);
+    // Onsite only has 5, so consumption caps there; cold storage is untouched.
+    expect(result.applied).toBe(true);
+    expect(await onHand(itemId)).toBe(50); // 0 onsite + 50 cold
+    const cells = await lotsForItem(itemId);
+    expect(cells.find((l) => l.locationId === onsite)?.qtyRemaining).toBe(0);
+    expect(cells.find((l) => l.locationId === cold)?.qtyRemaining).toBe(50);
+  });
+
+  it("with no location rows, consume still draws from null lots (pre-feature parity)", async () => {
+    const itemId = await makeItem("ingredient:Sauce:lbs");
+    await addLotAt(itemId, null, 10);
+    const result = await consumeRun("run-loc-null", [
+      { itemKey: "ingredient:Sauce:lbs", qty: 4 },
+    ]);
+    expect(result.applied).toBe(true);
+    expect(await onHand(itemId)).toBe(6);
+  });
+
+  it("adjust down only touches onsite lots", async () => {
+    const onsite = await makeLocation("Onsite (Line)", true);
+    const cold = await makeLocation("Cold Storage", false);
+    const itemId = await makeItem("ingredient:Flour:lbs");
+    await addLotAt(itemId, onsite, 4);
+    await addLotAt(itemId, cold, 20);
+
+    const result = await adjustInventory(itemId, -10, "onsite spill");
+    // Capped at the 4 onsite; cold storage is not drained.
+    expect(result.appliedDelta).toBe(-4);
+    expect(await onHand(itemId)).toBe(20);
+  });
+});
+
+describe("inventory transfer against a real database", () => {
+  it("moves stock between locations, preserving expiration and conserving on-hand", async () => {
+    const onsite = await makeLocation("Onsite (Line)", true);
+    const cold = await makeLocation("Cold Storage", false);
+    const itemId = await makeItem("ingredient:Cheese:lbs");
+    await addLotAt(itemId, cold, 30, { expirationDate: "2026-02-01" });
+
+    const result = await transferStock(itemId, cold, onsite, 12, {
+      fromIsOnsite: false,
+      fromName: "Cold Storage",
+      toName: "Onsite (Line)",
+    });
+    expect(result).toEqual({ transferred: 12 });
+    // On-hand conserved across the move.
+    expect(await onHand(itemId)).toBe(30);
+
+    const cells = await lotsForItem(itemId);
+    const onsiteLots = cells.filter((l) => l.locationId === onsite);
+    const coldLots = cells.filter((l) => l.locationId === cold);
+    expect(coldLots.reduce((a, l) => a + l.qtyRemaining, 0)).toBe(18);
+    expect(onsiteLots.reduce((a, l) => a + l.qtyRemaining, 0)).toBe(12);
+    // The destination lot carries the source's expiration date.
+    expect(onsiteLots.every((l) => l.expirationDate === "2026-02-01")).toBe(true);
+
+    // Paired transfer ledger entries net to zero.
+    const ledger = await db.select().from(inventoryLedgerTable);
+    const tx = ledger.filter((r) => r.itemId === itemId && r.type === "transfer");
+    expect(tx).toHaveLength(2);
+    expect(tx.reduce((a, r) => a + r.qtyDelta, 0)).toBe(0);
+  });
+
+  it("caps a transfer at the available source stock", async () => {
+    const onsite = await makeLocation("Onsite (Line)", true);
+    const cold = await makeLocation("Cold Storage", false);
+    const itemId = await makeItem("ingredient:Pepperoni:lbs");
+    await addLotAt(itemId, cold, 5);
+
+    const result = await transferStock(itemId, cold, onsite, 100, {
+      fromIsOnsite: false,
+      fromName: "Cold Storage",
+      toName: "Onsite (Line)",
+    });
+    expect(result.transferred).toBe(5);
+    expect(await onHand(itemId)).toBe(5);
+    const cells = await lotsForItem(itemId);
+    expect(cells.filter((l) => l.locationId === cold).reduce((a, l) => a + l.qtyRemaining, 0)).toBe(0);
+    expect(cells.filter((l) => l.locationId === onsite).reduce((a, l) => a + l.qtyRemaining, 0)).toBe(5);
+  });
+
+  it("transferring from onsite also sweeps still-null (onsite) lots", async () => {
+    const onsite = await makeLocation("Onsite (Line)", true);
+    const cold = await makeLocation("Cold Storage", false);
+    const itemId = await makeItem("ingredient:Dough:lbs");
+    await addLotAt(itemId, null, 6); // legacy null === onsite
+
+    const result = await transferStock(itemId, onsite, cold, 4, {
+      fromIsOnsite: true,
+      fromName: "Onsite (Line)",
+      toName: "Cold Storage",
+    });
+    expect(result.transferred).toBe(4);
+    const cells = await lotsForItem(itemId);
+    expect(cells.filter((l) => l.locationId === cold).reduce((a, l) => a + l.qtyRemaining, 0)).toBe(4);
   });
 });

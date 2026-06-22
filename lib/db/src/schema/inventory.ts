@@ -4,6 +4,7 @@ import {
   text,
   doublePrecision,
   integer,
+  boolean,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
@@ -37,14 +38,37 @@ export const inventoryItemsTable = pgTable(
   (t) => [uniqueIndex("inventory_items_key_scope_idx").on(t.key, t.scope)],
 );
 
+// A named place stock physically lives (e.g. "Onsite (Line)", "Cold Storage",
+// "Warehouse B"). Exactly one location per scope is the `isOnsite` location:
+// production auto-deduction only draws from it, and a transfer warning surfaces
+// when onsite stock can't cover demand while another location holds stock that
+// could be moved. `scope` isolates the seeded test account's copy from live.
+// Lots with a null locationId are treated as onsite (pre-feature / backfilled).
+export const inventoryLocationsTable = pgTable(
+  "inventory_locations",
+  {
+    id: serial("id").primaryKey(),
+    scope: text("scope").notNull().default("live"),
+    name: text("name").notNull(),
+    isOnsite: boolean("is_onsite").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("inventory_locations_name_scope_idx").on(t.name, t.scope)],
+);
+
 // A received batch of a material. lotNumber/received/expiration are optional; an
-// unlotted delivery uses an empty lotNumber and null dates.
+// unlotted delivery uses an empty lotNumber and null dates. `locationId` is the
+// place this lot lives; null means the onsite/line location (additive, nullable
+// so adding it stays push-force-safe on a populated table).
 export const inventoryLotsTable = pgTable("inventory_lots", {
   id: serial("id").primaryKey(),
   scope: text("scope").notNull().default("live"),
   itemId: integer("item_id")
     .notNull()
     .references(() => inventoryItemsTable.id, { onDelete: "cascade" }),
+  locationId: integer("location_id").references(() => inventoryLocationsTable.id, {
+    onDelete: "set null",
+  }),
   lotNumber: text("lot_number").notNull().default(""),
   qtyReceived: doublePrecision("qty_received").notNull(),
   qtyRemaining: doublePrecision("qty_remaining").notNull(),
@@ -105,6 +129,7 @@ export const inventorySettingsTable = pgTable(
 );
 
 export type InventoryItem = typeof inventoryItemsTable.$inferSelect;
+export type InventoryLocation = typeof inventoryLocationsTable.$inferSelect;
 export type InventoryLot = typeof inventoryLotsTable.$inferSelect;
 export type InventoryLedgerEntry = typeof inventoryLedgerTable.$inferSelect;
 export type InventoryConsumedRun = typeof inventoryConsumedRunsTable.$inferSelect;
