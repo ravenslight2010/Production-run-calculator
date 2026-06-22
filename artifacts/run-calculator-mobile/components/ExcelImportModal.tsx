@@ -33,11 +33,17 @@ const SAVED_TINT = "#f59e0b";
 
 type ChipSource = "saved" | "ai" | "default";
 
+export type ImportCommitRunEntry = { brand: string; flavor: string; casesPlanned: number; notes: string };
+
 export type ImportCommit = {
   date: string;
-  runs: { brand: string; flavor: string; casesPlanned: number; notes: string }[];
+  runs: ImportCommitRunEntry[];
   createBrands: string[];
   createFlavors: { brand: string; flavor: string }[];
+  // Multi-sheet schedule planner: runs grouped by their own day. When set, the
+  // commit overrides previously imported runs on each of these dates.
+  multiDay?: boolean;
+  byDate?: { date: string; runs: ImportCommitRunEntry[] }[];
 };
 
 type Props = {
@@ -49,6 +55,9 @@ type Props = {
   supervisorPin: string;
   defaultDate: string;
   onConfirm: (payload: ImportCommit) => void;
+  // Multi-day commits write one date at a time; surface progress so the user
+  // knows a large planner import is still running. Null ⇒ idle.
+  progress?: { done: number; total: number } | null;
 };
 
 export default function ExcelImportModal({
@@ -60,6 +69,7 @@ export default function ExcelImportModal({
   supervisorPin,
   defaultDate,
   onConfirm,
+  progress,
 }: Props) {
   const colors = useColors();
   // Managers (server role) bypass the device PIN; operators still need it.
@@ -399,7 +409,7 @@ export default function ExcelImportModal({
   function buildCommit(): ImportCommit {
     const createBrands = new Set<string>();
     const createFlavors = new Map<string, { brand: string; flavor: string }>();
-    const out: ImportCommit["runs"] = [];
+    const out: (ImportCommitRunEntry & { srcDate?: string })[] = [];
     for (const r of rows) {
       const brandName = resolveBrandName(r.brand);
       if (!brandName) continue;
@@ -417,11 +427,40 @@ export default function ExcelImportModal({
           flavorName = fc;
         }
       }
-      out.push({ brand: brandName, flavor: flavorName, casesPlanned: r.casesPlanned, notes: r.notes });
+      out.push({ brand: brandName, flavor: flavorName, casesPlanned: r.casesPlanned, notes: r.notes, srcDate: r.date });
+    }
+    const strip = (o: ImportCommitRunEntry & { srcDate?: string }): ImportCommitRunEntry => ({
+      brand: o.brand,
+      flavor: o.flavor,
+      casesPlanned: o.casesPlanned,
+      notes: o.notes,
+    });
+    // Multi-sheet day-block file: group resolved runs by their own production
+    // date and merge duplicates within each date. Each date is committed (and
+    // overridden) independently by the caller.
+    if (result?.multiDay) {
+      const byDateMap = new Map<string, ImportCommitRunEntry[]>();
+      for (const o of out) {
+        if (!o.srcDate) continue;
+        const arr = byDateMap.get(o.srcDate) ?? [];
+        arr.push(strip(o));
+        byDateMap.set(o.srcDate, arr);
+      }
+      const byDate = [...byDateMap.entries()]
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        .map(([d, runs]) => ({ date: d, runs: mergeImportRuns(runs) }));
+      return {
+        date: "",
+        runs: byDate.flatMap((b) => b.runs),
+        multiDay: true,
+        byDate,
+        createBrands: [...createBrands],
+        createFlavors: [...createFlavors.values()],
+      };
     }
     return {
       date: date.trim(),
-      runs: mergeImportRuns(out),
+      runs: mergeImportRuns(out.map(strip)),
       createBrands: [...createBrands],
       createFlavors: [...createFlavors.values()],
     };
@@ -454,7 +493,13 @@ export default function ExcelImportModal({
   const preview = buildCommit();
   const willImport = preview.runs.length;
   const skipped = rows.length - willImport;
-  const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+  const multiDay = !!result?.multiDay;
+  // Multi-day imports have no single date picker — each run carries its own day.
+  const dateValid = multiDay || /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+  const dayCount = preview.byDate?.length ?? 0;
+  const dateRange = dayCount
+    ? `${preview.byDate![0].date} → ${preview.byDate![dayCount - 1].date}`
+    : "";
 
   const Chip = ({
     label,
@@ -501,15 +546,36 @@ export default function ExcelImportModal({
           </View>
 
           <ScrollView style={{ maxHeight: 460 }} contentContainerStyle={{ paddingBottom: 12 }}>
-            <Text style={[styles.label, { color: colors.mutedForeground }]}>SCHEDULE DATE (YYYY-MM-DD)</Text>
-            <TextInput
-              value={date}
-              onChangeText={setDate}
-              placeholder="2026-01-01"
-              placeholderTextColor={colors.mutedForeground}
-              autoCapitalize="none"
-              style={[styles.input, { color: colors.foreground, borderColor: dateValid ? colors.border : colors.destructive }]}
-            />
+            {multiDay ? (
+              <View style={[styles.summaryBox, { borderColor: colors.border }]}>
+                <Text style={[styles.summaryTitle, { color: colors.foreground }]}>
+                  Schedule planner detected
+                </Text>
+                <Text style={[styles.help, { color: colors.mutedForeground, marginTop: 4 }]}>
+                  {willImport} run{willImport === 1 ? "" : "s"} across {dayCount} day
+                  {dayCount === 1 ? "" : "s"}
+                  {dateRange ? ` (${dateRange})` : ""}. Only runs dated today or later are
+                  imported; re-importing replaces previously imported runs on each of these days.
+                </Text>
+                {willImport === 0 ? (
+                  <Text style={[styles.help, { color: colors.destructive, marginTop: 4 }]}>
+                    No runs dated today or later were found in this file.
+                  </Text>
+                ) : null}
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.label, { color: colors.mutedForeground }]}>SCHEDULE DATE (YYYY-MM-DD)</Text>
+                <TextInput
+                  value={date}
+                  onChangeText={setDate}
+                  placeholder="2026-01-01"
+                  placeholderTextColor={colors.mutedForeground}
+                  autoCapitalize="none"
+                  style={[styles.input, { color: colors.foreground, borderColor: dateValid ? colors.border : colors.destructive }]}
+                />
+              </>
+            )}
 
             {supervisorPin && !unlocked && !isManager ? (
               <View style={[styles.unlockBox, { borderColor: colors.border }]}>
@@ -678,22 +744,25 @@ export default function ExcelImportModal({
 
           <View style={[styles.footer, { borderColor: colors.border }]}>
             <Text style={[styles.summary, { color: colors.mutedForeground }]}>
-              {willImport} run{willImport === 1 ? "" : "s"} → schedule
-              {skipped > 0 ? `, ${skipped} skipped` : ""}
+              {progress
+                ? `Importing day ${progress.done} of ${progress.total}…`
+                : multiDay
+                  ? `${willImport} run${willImport === 1 ? "" : "s"} across ${dayCount} day${dayCount === 1 ? "" : "s"}`
+                  : `${willImport} run${willImport === 1 ? "" : "s"} → schedule${skipped > 0 ? `, ${skipped} skipped` : ""}`}
             </Text>
             <Pressable
-              disabled={willImport === 0 || !dateValid}
-              onPress={() => onConfirm(buildCommit())}
+              disabled={willImport === 0 || !dateValid || !!progress}
+              onPress={handleConfirm}
               style={({ pressed }) => [
                 styles.importBtn,
                 {
                   backgroundColor: colors.primary,
-                  opacity: willImport === 0 || !dateValid ? 0.4 : pressed ? 0.8 : 1,
+                  opacity: willImport === 0 || !dateValid || !!progress ? 0.4 : pressed ? 0.8 : 1,
                 },
               ]}
             >
               <Text style={[styles.importBtnText, { color: colors.primaryForeground }]}>
-                Import {willImport > 0 ? willImport : ""}
+                {progress ? "Importing…" : `Import ${willImport > 0 ? willImport : ""}`}
               </Text>
             </Pressable>
           </View>
@@ -715,6 +784,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   title: { fontSize: 18, fontWeight: "700" },
   label: { fontSize: 11, fontWeight: "600", marginBottom: 6, letterSpacing: 0.5 },
+  summaryBox: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 12, marginBottom: 4 },
+  summaryTitle: { fontSize: 14, fontWeight: "700" },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,

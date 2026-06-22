@@ -196,6 +196,10 @@ export type RunMeta = {
   gapType?: "switchover" | "break";
   gapNote?: string;
   stoppages?: Stoppage[];
+  // True when this run was created by a multi-sheet schedule import. Re-importing
+  // the schedule replaces imported runs on a given date (preserving manual runs
+  // and any imported run already started/ended). Absent ⇒ manual run.
+  imported?: boolean;
 };
 
 export type DayState = {

@@ -177,3 +177,181 @@ describe("collectImportAliases", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Multi-sheet day-block schedule planner import
+// ---------------------------------------------------------------------------
+//
+// These guard the real-file shape: per-day header rows
+// ["<label>", <date-serial>, "Brand","Flavor","Units","Customer","Ship","PO"],
+// run rows beneath, and a subtotal row with blank brand/flavor. Mirrored
+// verbatim web <-> mobile, so testing the web copy guards both.
+
+import * as XLSX from "xlsx";
+import {
+  parseScheduleWorkbook,
+  workbookIsSchedule,
+  parseWorkbookObject,
+  filterImportFromDate,
+} from "@/utils/runExcel";
+
+// 2026-06-22 and 2026-06-29 as Excel 1900-system serials.
+const SERIAL_20260622 = 46195;
+const SERIAL_20260629 = 46202;
+const SHIP_SERIAL = 46206; // 2026-07-03
+
+function sheetFromAoa(aoa: unknown[][]): XLSX.WorkSheet {
+  return XLSX.utils.aoa_to_sheet(aoa);
+}
+
+function wbWith(sheets: Record<string, unknown[][]>): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+  for (const [name, aoa] of Object.entries(sheets)) {
+    XLSX.utils.book_append_sheet(wb, sheetFromAoa(aoa), name);
+  }
+  return wb;
+}
+
+const HEADER = (serial: number) => [
+  "Monday - Day",
+  serial,
+  "Brand",
+  "Flavor",
+  "Units",
+  "Customer",
+  "Ship",
+  "PO",
+];
+
+describe("parseScheduleWorkbook", () => {
+  it("parses dated day-block rows, folding customer/PO/ship into notes", () => {
+    const wb = wbWith({
+      "Week 1": [
+        HEADER(SERIAL_20260622),
+        ["", "", "Lucias", "Pepperoni", 300, "Bernatello's", SHIP_SERIAL, 401072],
+        ["", "", "Lucias", "Supreme", 120, "Bernatello's", SHIP_SERIAL, 401072],
+        ["", "", "", "", 420, "", "", ""], // subtotal row -> skipped
+      ],
+    });
+    const res = parseScheduleWorkbook(wb);
+    expect(res.multiDay).toBe(true);
+    expect(res.rows).toHaveLength(2);
+    expect(res.rows[0]).toMatchObject({
+      date: "2026-06-22",
+      brand: "Lucias",
+      flavor: "Pepperoni",
+      casesPlanned: 300,
+    });
+    expect(res.rows[0].notes).toBe("Bernatello's • PO 401072 • Ship 2026-07-03");
+  });
+
+  it("handles multiple day-blocks across sheets with their own dates", () => {
+    const wb = wbWith({
+      "Week 1": [
+        HEADER(SERIAL_20260622),
+        ["", "", "Lucias", "Cheese", 100, "Cust", "", ""],
+        ["", "", "", "", 100, "", "", ""],
+        [],
+        HEADER(SERIAL_20260629),
+        ["", "", "Lowes", "Veggie", 96, "MDI", "", 555],
+      ],
+    });
+    const res = parseScheduleWorkbook(wb);
+    expect(res.rows.map((r) => r.date)).toEqual(["2026-06-22", "2026-06-29"]);
+    expect(res.rows[1]).toMatchObject({ brand: "Lowes", flavor: "Veggie", casesPlanned: 96 });
+  });
+
+  it("flags rows with brand/flavor but no resolvable block date as errors", () => {
+    const wb = wbWith({
+      Bad: [
+        ["Label", "not-a-date", "Brand", "Flavor", "Units", "Customer", "Ship", "PO"],
+        ["", "", "Acme", "Cheese", 5, "", "", ""],
+      ],
+    });
+    const res = parseScheduleWorkbook(wb);
+    expect(res.rows).toHaveLength(0);
+    expect(res.errors).toHaveLength(1);
+  });
+
+  it("reports blank-brand non-run marker rows (notes/holidays) as errors, not runs", () => {
+    const wb = wbWith({
+      "Week 1": [
+        HEADER(SERIAL_20260622),
+        ["", "", "", "Closed - Holiday", "", "", "", ""],
+        ["", "", "Acme", "Cheese", 10, "", "", ""],
+      ],
+    });
+    const res = parseScheduleWorkbook(wb);
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].brand).toBe("Acme");
+    expect(res.errors.some((e) => e.message === "Missing Brand")).toBe(true);
+  });
+});
+
+describe("workbookIsSchedule", () => {
+  it("detects a dated day-block workbook", () => {
+    const wb = wbWith({
+      S: [HEADER(SERIAL_20260622), ["", "", "Acme", "Cheese", 10, "", "", ""]],
+    });
+    expect(workbookIsSchedule(wb)).toBe(true);
+  });
+
+  it("returns false for a flat single-sheet workbook", () => {
+    const wb = wbWith({
+      Sheet1: [
+        ["Brand", "Flavor", "Cases Planned", "Notes"],
+        ["Acme", "Cheese", 10, "x"],
+      ],
+    });
+    expect(workbookIsSchedule(wb)).toBe(false);
+  });
+
+  it("parseWorkbookObject auto-routes: schedule -> multiDay, flat -> single", () => {
+    const sched = wbWith({
+      S: [HEADER(SERIAL_20260622), ["", "", "Acme", "Cheese", 10, "", "", ""]],
+    });
+    expect(parseWorkbookObject(sched).multiDay).toBe(true);
+
+    const flat = wbWith({
+      Sheet1: [
+        ["Brand", "Flavor", "Cases Planned", "Notes"],
+        ["Acme", "Cheese", 10, "x"],
+      ],
+    });
+    const flatRes = parseWorkbookObject(flat);
+    expect(flatRes.multiDay).toBeFalsy();
+    expect(flatRes.rows).toHaveLength(1);
+  });
+});
+
+describe("filterImportFromDate", () => {
+  const sched = (): ReturnType<typeof parseScheduleWorkbook> =>
+    parseScheduleWorkbook(
+      wbWith({
+        S: [
+          HEADER(SERIAL_20260622),
+          ["", "", "A", "x", 1, "", "", ""],
+          [],
+          HEADER(SERIAL_20260629),
+          ["", "", "B", "y", 2, "", "", ""],
+        ],
+      }),
+    );
+
+  it("keeps rows on/after fromISO and drops earlier ones", () => {
+    const out = filterImportFromDate(sched(), "2026-06-29");
+    expect(out.rows.map((r) => r.date)).toEqual(["2026-06-29"]);
+  });
+
+  it("keeps all rows when fromISO is on the earliest date (inclusive)", () => {
+    const out = filterImportFromDate(sched(), "2026-06-22");
+    expect(out.rows).toHaveLength(2);
+  });
+
+  it("passes non-multiDay results through unchanged", () => {
+    const flat = parseWorkbookObject(
+      wbWith({ Sheet1: [["Brand", "Flavor", "Cases Planned"], ["A", "x", 1]] }),
+    );
+    expect(filterImportFromDate(flat, "2099-01-01")).toBe(flat);
+  });
+});

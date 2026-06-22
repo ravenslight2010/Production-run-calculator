@@ -16,11 +16,18 @@ import ReviewBadge from "./ReviewBadge";
 const SKIP = "";
 const CREATE = "__create__";
 
+export type ImportCommitRunEntry = { brand: string; flavor: string; casesPlanned: number; notes: string };
+
 export type ImportCommit = {
   date: string;
-  runs: { brand: string; flavor: string; casesPlanned: number; notes: string }[];
+  runs: ImportCommitRunEntry[];
   createBrands: string[];
   createFlavors: { brand: string; flavor: string }[];
+  // Set for multi-sheet day-block schedule imports: runs grouped by their own
+  // production date (each date is committed/overridden independently). When
+  // present, `date` is empty and `runs` is the flattened union (for counts).
+  multiDay?: boolean;
+  byDate?: { date: string; runs: ImportCommitRunEntry[] }[];
 };
 
 type Props = {
@@ -32,6 +39,9 @@ type Props = {
   canCreate: boolean;
   defaultDate: string;
   onConfirm: (payload: ImportCommit) => void;
+  // Multi-day commits write one date at a time; surface progress so the user
+  // knows a large planner import is still running. Null ⇒ idle.
+  progress?: { done: number; total: number } | null;
 };
 
 export default function ExcelImportDialog({
@@ -43,6 +53,7 @@ export default function ExcelImportDialog({
   canCreate,
   defaultDate,
   onConfirm,
+  progress,
 }: Props) {
   const [date, setDate] = useState(defaultDate);
   const [brandChoice, setBrandChoice] = useState<Record<string, string>>({});
@@ -356,7 +367,7 @@ export default function ExcelImportDialog({
   function buildCommit(): ImportCommit {
     const createBrands = new Set<string>();
     const createFlavors = new Map<string, { brand: string; flavor: string }>();
-    const out: ImportCommit["runs"] = [];
+    const out: (ImportCommitRunEntry & { srcDate?: string })[] = [];
     for (const r of rows) {
       const brandName = resolveBrandName(r.brand);
       if (!brandName) continue;
@@ -374,11 +385,40 @@ export default function ExcelImportDialog({
           flavorName = fc;
         }
       }
-      out.push({ brand: brandName, flavor: flavorName, casesPlanned: r.casesPlanned, notes: r.notes });
+      out.push({ brand: brandName, flavor: flavorName, casesPlanned: r.casesPlanned, notes: r.notes, srcDate: r.date });
+    }
+    const strip = (o: ImportCommitRunEntry & { srcDate?: string }): ImportCommitRunEntry => ({
+      brand: o.brand,
+      flavor: o.flavor,
+      casesPlanned: o.casesPlanned,
+      notes: o.notes,
+    });
+    // Multi-sheet day-block file: group resolved runs by their own production
+    // date and merge duplicates within each date. Each date is committed (and
+    // overridden) independently by the caller.
+    if (result?.multiDay) {
+      const byDateMap = new Map<string, ImportCommitRunEntry[]>();
+      for (const o of out) {
+        if (!o.srcDate) continue;
+        const arr = byDateMap.get(o.srcDate) ?? [];
+        arr.push(strip(o));
+        byDateMap.set(o.srcDate, arr);
+      }
+      const byDate = [...byDateMap.entries()]
+        .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+        .map(([d, runs]) => ({ date: d, runs: mergeImportRuns(runs) }));
+      return {
+        date: "",
+        runs: byDate.flatMap((b) => b.runs),
+        multiDay: true,
+        byDate,
+        createBrands: [...createBrands],
+        createFlavors: [...createFlavors.values()],
+      };
     }
     return {
       date: date.trim(),
-      runs: mergeImportRuns(out),
+      runs: mergeImportRuns(out.map(strip)),
       createBrands: [...createBrands],
       createFlavors: [...createFlavors.values()],
     };
@@ -411,7 +451,13 @@ export default function ExcelImportDialog({
   const preview = buildCommit();
   const willImport = preview.runs.length;
   const skipped = rows.length - willImport;
-  const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+  const multiDay = !!result?.multiDay;
+  // Multi-day imports have no single date picker — each run carries its own day.
+  const dateValid = multiDay || /^\d{4}-\d{2}-\d{2}$/.test(date.trim());
+  const dayCount = preview.byDate?.length ?? 0;
+  const dateRange = dayCount
+    ? `${preview.byDate![0].date} → ${preview.byDate![dayCount - 1].date}`
+    : "";
 
   if (!open) return null;
 
@@ -476,19 +522,36 @@ export default function ExcelImportDialog({
         </div>
 
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          <div>
-            <label className="text-[11px] font-semibold text-muted-foreground tracking-wide">
-              SCHEDULE DATE (YYYY-MM-DD)
-            </label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className={`mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground ${
-                dateValid ? "border-border" : "border-destructive"
-              }`}
-            />
-          </div>
+          {multiDay ? (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <p className="text-sm font-semibold text-foreground">Schedule planner detected</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {willImport} run{willImport === 1 ? "" : "s"} across {dayCount} day
+                {dayCount === 1 ? "" : "s"}
+                {dateRange ? ` (${dateRange})` : ""}. Only runs dated today or later are imported;
+                re-importing replaces previously imported runs on each of these days.
+              </p>
+              {willImport === 0 && (
+                <p className="mt-1 text-xs text-destructive">
+                  No runs dated today or later were found in this file.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <label className="text-[11px] font-semibold text-muted-foreground tracking-wide">
+                SCHEDULE DATE (YYYY-MM-DD)
+              </label>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={`mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm text-foreground ${
+                  dateValid ? "border-border" : "border-destructive"
+                }`}
+              />
+            </div>
+          )}
 
           {errors.length > 0 && (
             <div className="rounded-md border border-destructive/60 p-3">
@@ -630,16 +693,19 @@ export default function ExcelImportDialog({
 
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border">
           <span className="text-sm text-muted-foreground">
-            {willImport} run{willImport === 1 ? "" : "s"} → schedule
-            {skipped > 0 ? `, ${skipped} skipped` : ""}
+            {progress
+              ? `Importing day ${progress.done} of ${progress.total}…`
+              : multiDay
+                ? `${willImport} run${willImport === 1 ? "" : "s"} across ${dayCount} day${dayCount === 1 ? "" : "s"}`
+                : `${willImport} run${willImport === 1 ? "" : "s"} → schedule${skipped > 0 ? `, ${skipped} skipped` : ""}`}
           </span>
           <button
             type="button"
-            disabled={willImport === 0 || !dateValid}
+            disabled={willImport === 0 || !dateValid || !!progress}
             onClick={handleConfirm}
             className="rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-40"
           >
-            Import {willImport > 0 ? willImport : ""}
+            {progress ? "Importing…" : `Import ${willImport > 0 ? willImport : ""}`}
           </button>
         </div>
       </div>

@@ -878,6 +878,10 @@ export interface ScheduledRun {
   casesNeeded: number;
   dieType: string;
   notes: string;
+  // True when this scheduled run was created by a multi-sheet schedule import.
+  // Re-importing the planner replaces imported runs on a given date (preserving
+  // manual runs). Absent ⇒ manually added run.
+  imported?: boolean;
 }
 
 interface AppState {
@@ -1388,6 +1392,9 @@ interface RunContextValue {
   // Scheduling
   scheduled: Record<string, ScheduledRun[]>;
   addScheduledRun: (date: string, run: Omit<ScheduledRun, "id">) => void;
+  importScheduledRuns: (
+    byDate: { date: string; runs: Omit<ScheduledRun, "id">[] }[],
+  ) => void;
   updateScheduledRun: (
     date: string,
     id: string,
@@ -3033,6 +3040,32 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Multi-sheet schedule planner import: write many days at once. Per the user's
+  // choice, a re-import OVERRIDES the prior import for each date — previously
+  // imported runs are dropped and replaced — while manually added runs are kept.
+  // Only dates present in `byDate` are touched. Mirrors web commitMultiDayImport.
+  const importScheduledRuns = useCallback(
+    (byDate: { date: string; runs: Omit<ScheduledRun, "id">[] }[]) => {
+      setAppState((prev) => {
+        const scheduled = { ...prev.scheduled };
+        for (const day of byDate) {
+          const existing = prev.scheduled[day.date] ?? [];
+          const kept = existing.filter((r) => !r.imported);
+          const added: ScheduledRun[] = day.runs.map((r) => ({
+            ...r,
+            imported: true,
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+          }));
+          scheduled[day.date] = [...kept, ...added];
+        }
+        const next = { ...prev, scheduled };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   const updateScheduledRun = useCallback(
     (date: string, id: string, patch: Partial<Omit<ScheduledRun, "id">>) => {
       setAppState((prev) => {
@@ -3296,6 +3329,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         undoMasterDataChange,
         scheduled: appState.scheduled,
         addScheduledRun,
+        importScheduledRuns,
         updateScheduledRun,
         removeScheduledRun,
         clearScheduledDay,

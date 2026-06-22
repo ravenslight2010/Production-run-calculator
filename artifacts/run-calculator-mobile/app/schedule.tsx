@@ -23,6 +23,7 @@ import { FONTS } from "@/constants/fonts";
 import {
   parseRunWorkbookBase64,
   parseWorkbookObject,
+  filterImportFromDate,
   type ImportParseResult,
 } from "@/utils/runExcel";
 
@@ -64,6 +65,7 @@ export default function ScheduleScreen() {
     brandProfiles,
     scheduled,
     addScheduledRun,
+    importScheduledRuns,
     addFlavor,
     addListItem,
     removeScheduledRun,
@@ -126,15 +128,18 @@ export default function ScheduleScreen() {
       });
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
-      let result: ImportParseResult;
+      let parsed: ImportParseResult;
       if (Platform.OS === "web") {
         const resp = await fetch(asset.uri);
         const ab = await resp.arrayBuffer();
-        result = parseWorkbookObject(XLSX.read(ab, { type: "array" }));
+        parsed = parseWorkbookObject(XLSX.read(ab, { type: "array" }));
       } else {
         const b64 = await Promise.resolve(new File(asset.uri).base64());
-        result = parseRunWorkbookBase64(b64);
+        parsed = parseRunWorkbookBase64(b64);
       }
+      // Multi-sheet schedule planner: keep only runs dated today-or-later (the
+      // user's chosen behavior) and route to the multi-date override commit.
+      const result = parsed.multiDay ? filterImportFromDate(parsed, today) : parsed;
       setImportResult(result);
       setImportOpen(true);
     } catch {
@@ -145,16 +150,32 @@ export default function ScheduleScreen() {
   function commitImport(payload: ImportCommit) {
     payload.createBrands.forEach((b) => addListItem("brands", b));
     payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
-    payload.runs.forEach((r) => {
-      const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
-      addScheduledRun(payload.date, {
-        brand: r.brand,
-        flavor: r.flavor,
-        casesNeeded: r.casesPlanned,
-        dieType,
-        notes: r.notes,
+    if (payload.multiDay) {
+      // Multi-sheet planner: write every date in one override update (drop prior
+      // imported runs per date, keep manual runs, tag the new ones imported).
+      const byDate = (payload.byDate ?? []).map((day) => ({
+        date: day.date,
+        runs: day.runs.map((r) => ({
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesPlanned,
+          dieType: brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "",
+          notes: r.notes,
+        })),
+      }));
+      importScheduledRuns(byDate);
+    } else {
+      payload.runs.forEach((r) => {
+        const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
+        addScheduledRun(payload.date, {
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesPlanned,
+          dieType,
+          notes: r.notes,
+        });
       });
-    });
+    }
     setImportOpen(false);
     setImportResult(null);
   }

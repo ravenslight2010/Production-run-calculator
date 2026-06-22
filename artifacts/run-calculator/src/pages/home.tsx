@@ -261,6 +261,7 @@ import {
   buildRunWorkbook,
   buildQuickBooksCsv,
   parseRunWorkbook,
+  filterImportFromDate,
   type ImportParseResult,
 } from "@/utils/runExcel";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
@@ -2543,6 +2544,7 @@ export default function Home() {
   const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
   const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
@@ -4377,7 +4379,10 @@ export default function Home() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
-      const result = parseRunWorkbook(buf);
+      const parsed = parseRunWorkbook(buf);
+      // Multi-sheet schedule planner: keep only runs dated today-or-later (the
+      // user's chosen behavior) and route to the multi-date override commit.
+      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
       setImportIntoEditor(false);
       setImportDefaultDate(todayStr());
       setImportResult(result);
@@ -4438,8 +4443,12 @@ export default function Home() {
     if (!file) return;
     try {
       const buf = await file.arrayBuffer();
-      const result = parseRunWorkbook(buf);
-      setImportIntoEditor(true);
+      const parsed = parseRunWorkbook(buf);
+      // A multi-sheet planner spans many days, so it can't load into the single
+      // open editor day — route it to the multi-date override commit instead
+      // (today-or-later only), exactly like the toolbar import.
+      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
+      setImportIntoEditor(!parsed.multiDay);
       setImportDefaultDate(scheduleEditorDate || todayStr());
       setImportResult(result);
       setShowImportDialog(true);
@@ -4511,6 +4520,68 @@ export default function Home() {
     // run that blocks the Save Schedule validation.
     setScheduleEditorRuns(prev => [...prev.filter(r => r.brand || r.casesNeeded), ...newRuns]);
     if (payload.date) setScheduleEditorDate(payload.date);
+    setShowImportDialog(false);
+    setImportResult(null);
+    setImportIntoEditor(false);
+  }
+
+  // Multi-sheet schedule planner commit: each date in `payload.byDate` is written
+  // independently. Per the user's choice, a re-import OVERRIDES the prior import
+  // for a date — previously imported runs are dropped and replaced — but manual
+  // runs and any imported run already started/ended are preserved (so an
+  // in-progress day isn't wiped). Only dates present in the file are touched.
+  async function commitMultiDayImport(payload: ImportCommit) {
+    for (const b of payload.createBrands) addBrand(b);
+    for (const cf of payload.createFlavors) addFlavor(cf.flavor, cf.brand);
+    const byDate = payload.byDate ?? [];
+    setImportProgress({ done: 0, total: byDate.length });
+    let done = 0;
+    for (const day of byDate) {
+      const date = day.date;
+      let existing: SyncPayload | null = null;
+      try {
+        const res = await fetch(`/api/sync/${date}`);
+        if (res.ok) existing = (await res.json()) as SyncPayload | null;
+      } catch {}
+      const existingDayState = existing?.dayState ?? { runs: [] as RunMeta[] };
+      const existingRuns: RunMeta[] = existingDayState.runs ?? [];
+      const existingRunValues: Record<string, FormValues> = existing?.runValues ?? {};
+      // Keep manual runs, and imported runs that have already been started/ended
+      // (don't disturb an in-progress/completed day). Drop untouched prior imports.
+      const keptRuns = existingRuns.filter(r => !r.imported || r.startedAt || r.endedAt);
+      const keptIds = new Set(keptRuns.map(r => r.id));
+      const keptRunValues: Record<string, FormValues> = {};
+      for (const id of keptIds) if (existingRunValues[id]) keptRunValues[id] = existingRunValues[id];
+      const newRuns: RunMeta[] = [];
+      const newRunValues: Record<string, FormValues> = {};
+      for (const r of day.runs) {
+        const id = genId();
+        const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+        const base: FormValues = profile ?? DEFAULT_VALUES;
+        newRunValues[id] = { ...base, casesNeeded: r.casesPlanned };
+        newRuns.push({ id, brand: r.brand, flavor: r.flavor, notes: r.notes || undefined, imported: true });
+      }
+      const runs = [...keptRuns, ...newRuns];
+      const runValues = { ...keptRunValues, ...newRunValues };
+      const outPayload: SyncPayload = {
+        ...(existing ?? {}),
+        dayState: { ...existingDayState, runs, date, resetAt: existingDayState.resetAt ?? Date.now() },
+        runValues,
+        brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
+        brandFlavors: loadBrandFlavors(),
+      };
+      try {
+        await fetch(`/api/sync/${date}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload: outPayload }),
+        });
+      } catch {}
+      done += 1;
+      setImportProgress({ done, total: byDate.length });
+    }
+    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    setImportProgress(null);
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
@@ -10780,7 +10851,12 @@ export default function Home() {
           brandFlavors={brandFlavors}
           canCreate={isSupervisor}
           defaultDate={importDefaultDate}
-          onConfirm={importIntoEditor ? importExcelIntoEditor : commitExcelImport}
+          onConfirm={(payload) => {
+            if (payload.multiDay) { void commitMultiDayImport(payload); return; }
+            if (importIntoEditor) importExcelIntoEditor(payload);
+            else void commitExcelImport(payload);
+          }}
+          progress={importProgress}
         />
 
         {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}

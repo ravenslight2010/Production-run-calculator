@@ -166,11 +166,19 @@ export type ImportRow = {
   flavor: string;
   casesPlanned: number;
   notes: string;
+  // Present only for multi-sheet "day-block" schedule workbooks: the production
+  // day (YYYY-MM-DD) this run is planned for. Absent for the flat single-day
+  // import format (where the user picks one target date in the dialog).
+  date?: string;
 };
 
 export type ImportParseResult = {
   rows: ImportRow[];
   errors: { rowNumber: number; message: string }[];
+  // True when the file was a multi-sheet day-block schedule planner: each row
+  // carries its own `date` and the UI imports across many days (no single date
+  // picker). Absent/false for the flat single-sheet format.
+  multiDay?: boolean;
 };
 
 function pick(obj: Record<string, unknown>, keys: string[]): string {
@@ -184,8 +192,16 @@ function pick(obj: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
-/** Parse an already-read workbook into validated import rows + per-row errors. */
+/**
+ * Parse an already-read workbook. Auto-detects the file shape:
+ *  - Multi-sheet "day-block" schedule planner → {@link parseScheduleWorkbook}
+ *    (rows carry their own date; `multiDay: true`).
+ *  - Otherwise the flat single-sheet format (header on row 1; one date chosen in
+ *    the dialog).
+ * Used by the array path (web) and the base64 path (mobile).
+ */
 export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
+  if (workbookIsSchedule(wb)) return parseScheduleWorkbook(wb);
   const sheetName = wb.SheetNames[0];
   const rows: ImportRow[] = [];
   const errors: { rowNumber: number; message: string }[] = [];
@@ -213,6 +229,198 @@ export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
     rows.push({ rowNumber, brand, flavor, casesPlanned: Math.round(casesPlanned), notes });
   });
   return { rows, errors };
+}
+
+// ---------------------------------------------------------------------------
+// Multi-sheet "day-block" schedule planner import
+// ---------------------------------------------------------------------------
+//
+// The customer's real production schedule is a weekly-tabbed planner. Each sheet
+// holds several per-day blocks. A block begins with a header row shaped like:
+//   ["Monday - Day", <excel-date-serial>, "Brand", "Flavor", "Units",
+//    "Customer", "Ship", "PO"]
+// followed by run rows (Brand/Flavor/Units/Customer/Ship/PO in those columns),
+// ending in a subtotal row whose Brand/Flavor are blank. We parse every sheet,
+// resolve each block's date, and emit one dated ImportRow per run. Customer / PO
+// / Ship are folded into the run notes so nothing is lost. Mirrored VERBATIM in
+// the web copy per the replit.md parity rule.
+
+const SCHEDULE_UNIT_HEADERS = ["units", "cases", "qty", "quantity", "cases planned"];
+
+function cellStr(v: unknown): string {
+  return v == null ? "" : String(v).trim();
+}
+
+/** Excel serial date (1900 system) → "YYYY-MM-DD" in UTC, or null if implausible. */
+function excelSerialToISO(serial: number): string | null {
+  if (!isFinite(serial) || serial < 20000 || serial > 90000) return null; // ~1954–2146
+  const ms = Math.round((serial - 25569) * 86400 * 1000);
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * Coerce a spreadsheet cell into an ISO date string (YYYY-MM-DD) when it looks
+ * like a date: an Excel serial number, a JS Date, or a recognizable date string
+ * (ISO or M/D/Y). Returns null otherwise.
+ */
+function coerceCellDate(cell: unknown): string | null {
+  if (cell == null || cell === "") return null;
+  if (typeof cell === "number") return excelSerialToISO(cell);
+  if (cell instanceof Date) {
+    if (isNaN(cell.getTime())) return null;
+    return `${cell.getUTCFullYear()}-${pad2(cell.getUTCMonth() + 1)}-${pad2(cell.getUTCDate())}`;
+  }
+  const s = String(cell).trim();
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (m) return `${m[1]}-${pad2(Number(m[2]))}-${pad2(Number(m[3]))}`;
+  m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(s);
+  if (m) {
+    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    return `${year}-${pad2(Number(m[1]))}-${pad2(Number(m[2]))}`;
+  }
+  return null;
+}
+
+/** Index of the first cell in `row` whose trimmed/lowercased text is in `wants`. */
+function findHeaderCol(row: unknown[], wants: string[]): number {
+  for (let i = 0; i < row.length; i++) {
+    const v = row[i];
+    if (typeof v === "string" && wants.includes(v.trim().toLowerCase())) return i;
+  }
+  return -1;
+}
+
+/** A row is a day-block header when it labels Brand, Flavor and a units column. */
+function isDayBlockHeader(row: unknown[]): boolean {
+  return (
+    findHeaderCol(row, ["brand"]) >= 0 &&
+    findHeaderCol(row, ["flavor"]) >= 0 &&
+    findHeaderCol(row, SCHEDULE_UNIT_HEADERS) >= 0
+  );
+}
+
+/** Cheap detector: true if ANY sheet contains a dated day-block header. */
+export function workbookIsSchedule(wb: XLSX.WorkBook): boolean {
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws) continue;
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" });
+    for (const row of aoa) {
+      if (!Array.isArray(row) || !isDayBlockHeader(row)) continue;
+      if (row.some((c) => coerceCellDate(c) != null)) return true;
+    }
+  }
+  return false;
+}
+
+function buildScheduleNotes(
+  row: unknown[],
+  customerCol: number,
+  shipCol: number,
+  poCol: number,
+): string {
+  const parts: string[] = [];
+  const customer = customerCol >= 0 ? cellStr(row[customerCol]) : "";
+  const po = poCol >= 0 ? cellStr(row[poCol]) : "";
+  const shipRaw = shipCol >= 0 ? row[shipCol] : "";
+  const ship = coerceCellDate(shipRaw) ?? cellStr(shipRaw);
+  if (customer) parts.push(customer);
+  if (po) parts.push(`PO ${po}`);
+  if (ship) parts.push(`Ship ${ship}`);
+  return parts.join(" • ");
+}
+
+/**
+ * Parse a multi-sheet day-block schedule planner into dated import rows. Every
+ * run row gets the date of the block it sits under; rows with no resolvable date
+ * or no brand are reported as errors. Always returns `multiDay: true`.
+ */
+export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
+  const rows: ImportRow[] = [];
+  const errors: { rowNumber: number; message: string }[] = [];
+  let rowCounter = 0; // synthetic 1-based counter across all sheets (UI/merge display)
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws) continue;
+    const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "" });
+    let i = 0;
+    while (i < aoa.length) {
+      const header = aoa[i];
+      if (!Array.isArray(header) || !isDayBlockHeader(header)) {
+        i++;
+        continue;
+      }
+      const brandCol = findHeaderCol(header, ["brand"]);
+      const flavorCol = findHeaderCol(header, ["flavor"]);
+      const unitsCol = findHeaderCol(header, SCHEDULE_UNIT_HEADERS);
+      const customerCol = findHeaderCol(header, ["customer"]);
+      const shipCol = findHeaderCol(header, ["ship", "ship date", "shipdate"]);
+      const poCol = findHeaderCol(header, ["po", "po #", "po#", "po number"]);
+      let date: string | null = null;
+      for (const c of header) {
+        const d = coerceCellDate(c);
+        if (d) {
+          date = d;
+          break;
+        }
+      }
+      // Walk the run rows under this header until the next header or sheet end.
+      let j = i + 1;
+      for (; j < aoa.length; j++) {
+        const r = aoa[j];
+        if (!Array.isArray(r)) continue;
+        if (isDayBlockHeader(r)) break;
+        const brand = cellStr(r[brandCol]);
+        const flavor = cellStr(r[flavorCol]);
+        const unitsStr = cellStr(r[unitsCol]);
+        if (!brand && !flavor) continue; // subtotal / spacer / blank row
+        rowCounter++;
+        if (!date) {
+          errors.push({ rowNumber: rowCounter, message: `"${brand || flavor}" has no day date` });
+          continue;
+        }
+        if (!brand) {
+          errors.push({ rowNumber: rowCounter, message: "Missing Brand" });
+          continue;
+        }
+        const casesPlanned = unitsStr === "" ? 0 : Number(unitsStr.replace(/[, ]/g, ""));
+        if (unitsStr !== "" && (!isFinite(casesPlanned) || casesPlanned < 0)) {
+          errors.push({ rowNumber: rowCounter, message: `Invalid Units "${unitsStr}"` });
+          continue;
+        }
+        rows.push({
+          rowNumber: rowCounter,
+          date,
+          brand,
+          flavor,
+          casesPlanned: Math.round(casesPlanned),
+          notes: buildScheduleNotes(r, customerCol, shipCol, poCol),
+        });
+      }
+      i = j; // resume at the next header (or end)
+    }
+  }
+  return { rows, errors, multiDay: true };
+}
+
+/**
+ * Drop dated rows that fall before `fromISO` (kept inclusive of `fromISO`).
+ * Used to honor the "import only today-or-later runs" choice for multi-day
+ * schedule files. Non-dated rows (flat format) and non-multiDay results pass
+ * through unchanged. Pure — mirrored VERBATIM web + mobile.
+ */
+export function filterImportFromDate(result: ImportParseResult, fromISO: string): ImportParseResult {
+  if (!result.multiDay) return result;
+  return {
+    ...result,
+    rows: result.rows.filter((r) => !r.date || r.date >= fromISO),
+  };
 }
 
 /** Parse a base64-encoded xlsx (used on native via expo-file-system). */
