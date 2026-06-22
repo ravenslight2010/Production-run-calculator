@@ -2543,7 +2543,7 @@ export default function Home() {
   const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
   const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
-  const [importDefaultDate, setImportDefaultDate] = useState(tomorrowStr());
+  const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
   const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
@@ -2582,7 +2582,7 @@ export default function Home() {
     }
     const newId = genId();
     setScheduleEditorRunValues({ [newId]: { ...DEFAULT_VALUES } });
-    setScheduleEditorDate(tomorrowStr());
+    setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
     setScheduleView("editor");
   }
@@ -4230,7 +4230,7 @@ export default function Home() {
       values[id] = { ...DEFAULT_VALUES };
     }
     setScheduleAdvancedRunId(null);
-    setScheduleEditorDate(plan.targetDate || tomorrowStr());
+    setScheduleEditorDate(plan.targetDate || todayStr());
     setScheduleEditorRunValues(values);
     setScheduleEditorRuns(rows);
     setScheduleView("editor");
@@ -4379,7 +4379,7 @@ export default function Home() {
       const buf = await file.arrayBuffer();
       const result = parseRunWorkbook(buf);
       setImportIntoEditor(false);
-      setImportDefaultDate(tomorrowStr());
+      setImportDefaultDate(todayStr());
       setImportResult(result);
       setShowImportDialog(true);
     } catch {
@@ -4440,7 +4440,7 @@ export default function Home() {
       const buf = await file.arrayBuffer();
       const result = parseRunWorkbook(buf);
       setImportIntoEditor(true);
-      setImportDefaultDate(scheduleEditorDate || tomorrowStr());
+      setImportDefaultDate(scheduleEditorDate || todayStr());
       setImportResult(result);
       setShowImportDialog(true);
     } catch {
@@ -10911,7 +10911,7 @@ export default function Home() {
                       <input
                         type="date"
                         value={scheduleEditorDate}
-                        min={tomorrowStr()}
+                        min={todayStr()}
                         onChange={e => setScheduleEditorDate(e.target.value)}
                         className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
                       />

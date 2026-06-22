@@ -37,15 +37,6 @@ import {
 } from "@/utils/runExcel";
 import { shareShiftReport } from "@/utils/shiftReport";
 
-function tomorrowStr(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  const y = d.getFullYear();
-  const m = (d.getMonth() + 1).toString().padStart(2, "0");
-  const day = d.getDate().toString().padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 type RunStatus = "finished" | "current" | "upcoming";
 
 function statusOf(r: RunState): RunStatus {
@@ -683,7 +674,7 @@ export default function SummaryScreen() {
         brands={brands}
         brandFlavors={brandFlavors}
         supervisorPin={supervisorPin}
-        defaultDate={tomorrowStr()}
+        defaultDate={todayStr()}
         onConfirm={commitImport}
       />
     </ScrollView>
