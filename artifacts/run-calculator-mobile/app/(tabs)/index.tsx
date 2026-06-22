@@ -500,6 +500,46 @@ export default function CalculatorScreen() {
           </Pressable>
         ) : null}
 
+        {/* Freezer status — filling at run start, emptying at run end.
+            Auto-hidden whenever the tunnel is in steady state. */}
+        {run.isRunning && run.endedAt == null ? (() => {
+          const freezerMin = Number(run.settings.freezerTime) || 0;
+          if (freezerMin <= 0) return null;
+          const elapsedMin = calc.netElapsedSec / 60;
+          const ppm = calc.ppm;
+          // No line speed yet → no product moving through the tunnel, so
+          // neither phase is meaningful.
+          if (ppm <= 0) return null;
+          const feedDoneMin =
+            run.settings.pizzasPerCase > 0 && run.settings.casesNeeded > 0
+              ? (run.settings.casesNeeded * run.settings.pizzasPerCase) / ppm
+              : Infinity;
+          const feedComplete = elapsedMin >= feedDoneMin;
+          const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
+          const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
+          const emptying = feedComplete && emptyRemainMin > 0;
+          if (!filling && !emptying) return null;
+          const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
+          const remainSec = Math.max(0, Math.floor(remainMin * 60));
+          const pct = Math.max(0, Math.min(1, 1 - remainMin / freezerMin));
+          const tone = filling ? "#38bdf8" : colors.warning;
+          return (
+            <View style={[styles.freezerBanner, { backgroundColor: tone + "22", borderColor: tone }]}>
+              <Feather name={filling ? "download" : "upload"} size={16} color={tone} />
+              <View style={styles.freezerBannerBody}>
+                <Text style={[styles.freezerBannerText, { color: tone }]}>
+                  {filling
+                    ? `Freezer filling · first cases in ${fmtElapsed(remainSec)}`
+                    : `Freezer emptying · ${fmtElapsed(remainSec)} to last cases`}
+                </Text>
+                <View style={[styles.freezerBarTrack, { backgroundColor: tone + "33" }]}>
+                  <View style={[styles.freezerBarFill, { backgroundColor: tone, width: `${pct * 100}%` }]} />
+                </View>
+              </View>
+            </View>
+          );
+        })() : null}
+
         {/* Smart carry-over prompt */}
         {carryOver && hasNextRun ? (
           <View style={[styles.carryCard, { backgroundColor: colors.card, borderColor: colors.success }]}>
@@ -1401,6 +1441,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stoppageBannerText: { color: "#000", fontFamily: FONTS.bold, fontSize: 13 },
+
+  freezerBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 12,
+  },
+  freezerBannerBody: { flex: 1, gap: 6 },
+  freezerBannerText: { fontSize: 14, fontFamily: FONTS.bold },
+  freezerBarTrack: { height: 5, borderRadius: 999, overflow: "hidden" },
+  freezerBarFill: { height: "100%", borderRadius: 999 },
 
   carryCard: {
     borderRadius: 4,
