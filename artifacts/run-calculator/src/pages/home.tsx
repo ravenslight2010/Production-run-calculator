@@ -9426,36 +9426,14 @@ export default function Home() {
                   recipes={[v.doughRecipe, v.frontlineRecipe, v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe]}
                   typeValues={[v.app1Type, v.app2Type, v.app3Type, v.app4Type, v.pep1Type, v.pep2Type]}
                 />
-                <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 {doughSubTab === "dough" && (
-                <DoughRecipeCard
-                  batchesNeeded={calc.batchesNeeded}
-                  fields={doughFields}
+                <ReadOnlyRecipeCard
+                  title="Dough Recipe"
+                  subtitle={v.doughRecipeName?.trim() || undefined}
                   recipe={v.doughRecipe ?? []}
-                  register={form.register}
-                  targetWeight={Number(v.targetDoughballWeight ?? 0)}
-                  doughBatchYield={Number(v.doughBatchYield)}
-                  ingredientOptions={doughIngredients}
-                  onAddIngredient={addDoughIngredient}
-                  onRemoveIngredient={removeDoughIngredient}
-                  onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                  onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
-                  onRemove={removeDough}
-                  onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
-                  recipeName={v.doughRecipeName ?? ""}
-                  recipeNameOptions={doughRecipeNames}
-                  onAddRecipeName={addDoughRecipeName}
-                  onRemoveRecipeName={removeDoughRecipeName}
-                  onRecipeNameChange={val => {
-                    form.setValue("doughRecipeName", val, { shouldDirty: true });
-                    if (val.trim()) {
-                      const preset = loadDoughRecipePresets()[val.trim()];
-                      if (preset) { form.setValue("doughRecipe", preset.rows, { shouldDirty: true }); replaceDough(preset.rows); }
-                    }
-                  }}
+                  accent="bg-orange-500/70"
                 />
                 )}
-                </fieldset>
               </TabsContent>
 
               {/* ─── SETUP (recipe editors) ─── */}
@@ -9468,6 +9446,32 @@ export default function Home() {
                 )}
                 <fieldset disabled={!isSupervisor} className={!isSupervisor ? "opacity-60 pointer-events-none" : ""}>
                 <div className="space-y-5">
+                  <DoughRecipeCard
+                    batchesNeeded={calc.batchesNeeded}
+                    fields={doughFields}
+                    recipe={v.doughRecipe ?? []}
+                    register={form.register}
+                    targetWeight={Number(v.targetDoughballWeight ?? 0)}
+                    doughBatchYield={Number(v.doughBatchYield)}
+                    ingredientOptions={doughIngredients}
+                    onAddIngredient={addDoughIngredient}
+                    onRemoveIngredient={removeDoughIngredient}
+                    onSetIngredient={(idx, val) => form.setValue(`doughRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                    onAppend={() => appendDough({ ingredient: "", lbs: 0 })}
+                    onRemove={removeDough}
+                    onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
+                    recipeName={v.doughRecipeName ?? ""}
+                    recipeNameOptions={doughRecipeNames}
+                    onAddRecipeName={addDoughRecipeName}
+                    onRemoveRecipeName={removeDoughRecipeName}
+                    onRecipeNameChange={val => {
+                      form.setValue("doughRecipeName", val, { shouldDirty: true });
+                      if (val.trim()) {
+                        const preset = loadDoughRecipePresets()[val.trim()];
+                        if (preset) { form.setValue("doughRecipe", preset.rows, { shouldDirty: true }); replaceDough(preset.rows); }
+                      }
+                    }}
+                  />
                   <Card className="bg-card/50 border-border/50 shadow-md">
                     <button
                       type="button"

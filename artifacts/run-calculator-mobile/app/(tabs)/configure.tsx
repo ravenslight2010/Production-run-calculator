@@ -755,6 +755,43 @@ export default function ConfigureScreen() {
           )}
         </CardSection>
 
+        {/* Dough Recipe */}
+        <SectionHeader title="Dough Recipe" />
+        <CardSection>
+          <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+            Dough recipe (overrides batch weight when set)
+          </Text>
+          <RecipeEditor
+            batchScale
+            rows={run.settings.doughRecipe}
+            onChange={(rows) => updateSettings({ doughRecipe: rows })}
+            ingredientOptions={doughIngredients}
+            onAddIngredient={(v) => addListItem("doughIngredients", v)}
+            onRemoveIngredient={(v) => removeListItem("doughIngredients", v)}
+            name={run.settings.doughRecipeName}
+            onNameChange={(n) => updateSettings({ doughRecipeName: n })}
+            presetNames={doughNames}
+            onSavePreset={() =>
+              saveRecipePreset(
+                "dough",
+                run.settings.doughRecipeName,
+                run.settings.doughRecipe,
+              )
+            }
+            onApplyPreset={(presetName) => {
+              const rows = doughRecipePresets[presetName];
+              if (rows)
+                updateSettings({
+                  doughRecipe: rows.map((r) => ({ ...r })),
+                  doughRecipeName: presetName,
+                });
+            }}
+            onDeletePreset={(presetName) =>
+              deleteRecipePreset("dough", presetName)
+            }
+          />
+        </CardSection>
+
         {/* Sauce */}
         <SectionHeader title="Sauce" />
         <CardSection>
@@ -1029,38 +1066,6 @@ export default function ConfigureScreen() {
             onBlur={save}
             placeholder="0"
             unit="pizzas"
-          />
-          <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
-            Dough recipe (overrides batch weight when set)
-          </Text>
-          <RecipeEditor
-            batchScale
-            rows={run.settings.doughRecipe}
-            onChange={(rows) => updateSettings({ doughRecipe: rows })}
-            ingredientOptions={doughIngredients}
-            onAddIngredient={(v) => addListItem("doughIngredients", v)}
-            onRemoveIngredient={(v) => removeListItem("doughIngredients", v)}
-            name={run.settings.doughRecipeName}
-            onNameChange={(n) => updateSettings({ doughRecipeName: n })}
-            presetNames={doughNames}
-            onSavePreset={() =>
-              saveRecipePreset(
-                "dough",
-                run.settings.doughRecipeName,
-                run.settings.doughRecipe,
-              )
-            }
-            onApplyPreset={(presetName) => {
-              const rows = doughRecipePresets[presetName];
-              if (rows)
-                updateSettings({
-                  doughRecipe: rows.map((r) => ({ ...r })),
-                  doughRecipeName: presetName,
-                });
-            }}
-            onDeletePreset={(presetName) =>
-              deleteRecipePreset("dough", presetName)
-            }
           />
         </CardSection>
 
