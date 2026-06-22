@@ -1626,6 +1626,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // expectedCases at the last auto-track bucket — baseline for the incremental
   // skids/cases delta. -1 = "not baselined yet" (first bucket after mount/reset).
   const autoExpectedCasesRef = useRef<number>(-1);
+  // Fractional tray/batch consumption carried between buckets so sub-unit
+  // depletion per bucket accumulates instead of being lost to Math.floor (which
+  // would freeze slow-depleting dough — especially batches — at its start value).
+  const traysRemainderRef = useRef<number>(0);
+  const batchesRemainderRef = useRef<number>(0);
 
   // ── Live-sync state/refs ───────────────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
@@ -3185,6 +3190,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     autoBucketRef.current = -1;
     autoBucketTimeMsRef.current = 0;
     autoExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
   }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
 
   // Auto-track: once per 5-minute bucket while running, derive skids completed
@@ -3285,16 +3292,20 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           ? r.settings.crustsPerCase
           : supply.perBatch;
       if (perTray > 0) {
-        const traysConsumed = Math.floor((bucketDurationMin * c.ppm) / perTray);
+        const traysExact =
+          (bucketDurationMin * c.ppm) / perTray + traysRemainderRef.current;
+        const traysConsumed = Math.floor(traysExact);
+        traysRemainderRef.current = traysExact - traysConsumed;
         if (traysConsumed > 0) {
           const nextTrays = Math.max(0, r.progress.traysOnLine - traysConsumed);
           if (nextTrays !== r.progress.traysOnLine) next.traysOnLine = nextTrays;
         }
       }
       if (perBatch > 0) {
-        const batchesConsumed = Math.floor(
-          (bucketDurationMin * c.ppm) / perBatch,
-        );
+        const batchesExact =
+          (bucketDurationMin * c.ppm) / perBatch + batchesRemainderRef.current;
+        const batchesConsumed = Math.floor(batchesExact);
+        batchesRemainderRef.current = batchesExact - batchesConsumed;
         if (batchesConsumed > 0) {
           const nextBatches = Math.max(
             0,

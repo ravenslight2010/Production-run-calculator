@@ -82,3 +82,4 @@
 - [Sandbox auto-refresh](sandbox-auto-refresh.md) — sandbox re-copies from live on stale login; server REPORTS staleness (sandbox_meta.copiedAt + 24h cutoff), client runs existing reset flow once/mount; banner shows copy time; web+mobile parity.
 - [Multi-location inventory](multi-location-inventory.md) — named stock locations, null locationId === onsite, drawdown/consume/adjust onsite-only; PURE aggregateRunDemand/computeTransferNeeds warns when offsite stock could cover an onsite shortfall; web+mobile parity.
 - [Warehouse staging checklist](warehouse-staging-checklist.md) — per-run "What Each Run Needs" check-off in synced dayState.stagedItems keyed `${runId}::${label}__${unit}`; mirrors substitutions sync/reset; web+mobile parity.
+- [Auto-track remainder carry](autotrack-remainder-carry.md) — auto-track trays/batches must carry a fractional remainder across buckets or sub-unit-per-bucket units (esp. batches) freeze; web+mobile parity.

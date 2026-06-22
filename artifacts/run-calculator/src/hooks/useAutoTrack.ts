@@ -77,6 +77,11 @@ export function useAutoTrack({
   // skids/cases delta is measured from. -1 = "not baselined yet" (first bucket
   // after a mount/reset).
   const lastExpectedCasesRef = useRef<number>(-1);
+  // Fractional tray/batch consumption carried between buckets so sub-unit
+  // depletion per bucket accumulates instead of being lost to Math.floor (which
+  // would freeze slow-depleting dough — especially batches — at its start value).
+  const traysRemainderRef = useRef<number>(0);
+  const batchesRemainderRef = useRef<number>(0);
 
   const autoTrackSuggestion = useMemo(() => {
     const ok =
@@ -187,13 +192,17 @@ export function useAutoTrack({
       v.pizzasPerCase > 0 &&
       Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase) >= v.casesNeeded;
     if (!doughFeedComplete && calc.perTray > 0 && calc.ppm > 0) {
-      const traysConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perTray);
+      const traysExact = (bucketDurationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
+      const traysConsumed = Math.floor(traysExact);
+      traysRemainderRef.current = traysExact - traysConsumed;
       if (traysConsumed > 0) {
         form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
       }
     }
     if (!doughFeedComplete && calc.perBatch > 0 && calc.ppm > 0) {
-      const batchesConsumed = Math.floor((bucketDurationMin * calc.ppm) / calc.perBatch);
+      const batchesExact = (bucketDurationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
+      const batchesConsumed = Math.floor(batchesExact);
+      batchesRemainderRef.current = batchesExact - batchesConsumed;
       if (batchesConsumed > 0) {
         form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
       }
@@ -207,6 +216,8 @@ export function useAutoTrack({
       lastBucketTimeMsRef.current = 0;
       lastAutoMinBucketRef.current = -1;
       lastExpectedCasesRef.current = -1;
+      traysRemainderRef.current = 0;
+      batchesRemainderRef.current = 0;
     }
   }, [runStatus]);
 
@@ -217,6 +228,8 @@ export function useAutoTrack({
     lastBucketTimeMsRef.current = 0;
     lastAutoMinBucketRef.current = -1;
     lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
   }, [runId]);
 
   // Re-baseline when auto-track is toggled on so the first bucket after re-enabling
@@ -226,6 +239,8 @@ export function useAutoTrack({
     lastBucketTimeMsRef.current = 0;
     lastAutoMinBucketRef.current = -1;
     lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
   }, [autoTrackProgress]);
 
   return {
