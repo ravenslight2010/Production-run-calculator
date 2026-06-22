@@ -36,7 +36,6 @@ interface AutoTrackResult {
     skids: number;
     casesOnSkid: number;
     expectedCases: number;
-    expectedCasesPrimed: number;
     trays: number | null;
     batches: number | null;
   } | null;
@@ -78,10 +77,6 @@ export function useAutoTrack({
   // skids/cases delta is measured from. -1 = "not baselined yet" (first bucket
   // after a mount/reset).
   const lastExpectedCasesRef = useRef<number>(-1);
-  // Whether the line was already primed (cases on the skid) at run start. A
-  // primed line has finished product coming off the tunnel immediately, so its
-  // output is credited with no freezer-tunnel lag. Decided on the first bucket.
-  const linePrimedRef = useRef<boolean>(false);
   // Fractional tray/batch consumption carried between buckets so sub-unit
   // depletion per bucket accumulates instead of being lost to Math.floor (which
   // would freeze slow-depleting dough — especially batches — at its start value).
@@ -101,21 +96,13 @@ export function useAutoTrack({
     const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
     // Clamp to the run's total need so skids/cases freeze at their final state
     // once production is complete instead of cycling past it (modulo wrap).
-    const clampCases = (raw: number) =>
-      v.casesNeeded > 0 ? Math.min(v.casesNeeded, raw) : raw;
-    // Output normally lags feed by the freezer-tunnel time: the tunnel starts
-    // empty at run start, so the first case only exits freezerTime later. But if
-    // the line was already primed (cases on the skid before Start), finished
-    // product comes off the tunnel immediately, so output tracks feed with no
-    // lag. The write effect picks which basis applies from the start-of-run count.
-    const expectedCases = clampCases(Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase));
-    const expectedCasesPrimed = clampCases(Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase));
+    const expectedCasesRaw = Math.floor((elapsedMinAfterTunnel * calc.ppm) / v.pizzasPerCase);
+    const expectedCases = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCasesRaw) : expectedCasesRaw;
 
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
       expectedCases,
-      expectedCasesPrimed,
       // Tray/batch suggestions are handled incrementally in the write effect;
       // returning null here means the UI falls back to the calc-based suggestion.
       trays: null,
@@ -147,19 +134,8 @@ export function useAutoTrack({
       ? Math.min(10, (nowMs - prevMs) / 60000)
       : 5; // first bucket — assume 5-min duration
 
+    const expectedCases = autoTrackSuggestion.expectedCases;
     const prevExpected = lastExpectedCasesRef.current;
-
-    // Operator's current completed total (skids + loose cases). Read up front so
-    // we can decide, on the first bucket of the run, whether the line was already
-    // primed (product on the skid before Start) — a primed line has no tunnel lag.
-    const cps = v.casesPerSkid;
-    const curTotal =
-      (Number(form.getValues("skidsCompleted")) || 0) * cps +
-      (Number(form.getValues("casesOnCurrentSkid")) || 0);
-    if (prevExpected < 0) linePrimedRef.current = curTotal > 0;
-    const expectedCases = linePrimedRef.current
-      ? autoTrackSuggestion.expectedCasesPrimed
-      : autoTrackSuggestion.expectedCases;
 
     // Always advance the bucket bookkeeping — even while suppressed — so the
     // suppression window expiring never causes a catch-up jump that wipes the
@@ -173,6 +149,10 @@ export function useAutoTrack({
     if (Date.now() < autoSuppressUntilRef.current) return;
 
     // Skids / cases.
+    const cps = v.casesPerSkid;
+    const curTotal =
+      (Number(form.getValues("skidsCompleted")) || 0) * cps +
+      (Number(form.getValues("casesOnCurrentSkid")) || 0);
     if (prevExpected < 0) {
       // First bucket after a (re)start/switch: seed the absolute count only when
       // there is no progress yet. If progress already exists (reload / switching
@@ -236,7 +216,6 @@ export function useAutoTrack({
       lastBucketTimeMsRef.current = 0;
       lastAutoMinBucketRef.current = -1;
       lastExpectedCasesRef.current = -1;
-      linePrimedRef.current = false;
       traysRemainderRef.current = 0;
       batchesRemainderRef.current = 0;
     }
@@ -249,7 +228,6 @@ export function useAutoTrack({
     lastBucketTimeMsRef.current = 0;
     lastAutoMinBucketRef.current = -1;
     lastExpectedCasesRef.current = -1;
-    linePrimedRef.current = false;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
   }, [runId]);
@@ -261,7 +239,6 @@ export function useAutoTrack({
     lastBucketTimeMsRef.current = 0;
     lastAutoMinBucketRef.current = -1;
     lastExpectedCasesRef.current = -1;
-    linePrimedRef.current = false;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
   }, [autoTrackProgress]);
