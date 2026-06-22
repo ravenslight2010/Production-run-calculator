@@ -181,6 +181,7 @@ export * from './specImportProfile';
 export * from './specImportRecipe';
 export * from './specImportRecipeKind';
 export * from './specImportRecipeRow';
+export * from './specImportRecipeTarget';
 export * from './staffMember';
 export * from './staffRoleUpdate';
 export * from './suggestMergesInput';

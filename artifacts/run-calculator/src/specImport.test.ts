@@ -5,6 +5,7 @@ import {
   canonicalize,
   collectSpecAliases,
   gridsToPromptText,
+  recipeTargets,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   SPEC_ALIAS_KINDS,
@@ -188,6 +189,62 @@ describe("sanitizeParsedSpecImport", () => {
     expect(() => sanitizeParsedSpecImport(null)).not.toThrow();
     expect(sanitizeParsedSpecImport(null).profiles).toEqual([]);
     expect(sanitizeParsedSpecImport(42).recipes).toEqual([]);
+  });
+  it("keeps a recipe's targets[] (multi-profile) and drops malformed ones", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "CRB Dough",
+          rows: [{ ingredient: "Flour", lbs: 50 }],
+          targets: [
+            { brand: "Basha's", flavor: "Original" },
+            { brand: "Lowe's CRB", flavor: "Pepperoni" },
+            { brand: "", flavor: "NoBrand" },
+            { brand: "OnlyBrand" },
+            "junk",
+          ],
+        },
+      ],
+    });
+    expect(out.recipes).toHaveLength(1);
+    expect(out.recipes[0].targets).toEqual([
+      { brand: "Basha's", flavor: "Original" },
+      { brand: "Lowe's CRB", flavor: "Pepperoni" },
+    ]);
+  });
+});
+
+describe("recipeTargets", () => {
+  it("unions the singular brand/flavor with targets[] and de-dupes case-insensitively", () => {
+    expect(
+      recipeTargets({
+        kind: "dough",
+        name: "X",
+        rows: [],
+        brand: "Tombstone",
+        flavor: "Pepperoni",
+        targets: [
+          { brand: "tombstone", flavor: "pepperoni" }, // dup of singular
+          { brand: "DiGiorno", flavor: "Supreme" },
+        ],
+      }),
+    ).toEqual([
+      { brand: "Tombstone", flavor: "Pepperoni" },
+      { brand: "DiGiorno", flavor: "Supreme" },
+    ]);
+  });
+  it("drops entries missing a brand or flavor, returns [] when none tie", () => {
+    expect(recipeTargets({ kind: "sauce", name: "S", rows: [], brand: "OnlyBrand" })).toEqual([]);
+    expect(
+      recipeTargets({
+        kind: "sauce",
+        name: "S",
+        rows: [],
+        targets: [{ brand: " Brand ", flavor: " Flavor " }],
+      }),
+    ).toEqual([{ brand: "Brand", flavor: "Flavor" }]);
   });
 });
 

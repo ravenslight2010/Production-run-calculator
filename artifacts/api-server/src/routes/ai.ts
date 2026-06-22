@@ -35,6 +35,7 @@ import {
   sanitizeParseSpecSheet,
   validateParseSpecSheetBody,
 } from "./aiParseSpecSheet";
+import { recipeTargets } from "@workspace/spec-import";
 import {
   buildSuggestMergesPrompt,
   sanitizeSuggestMerges,
@@ -1105,10 +1106,13 @@ router.post(
           id: `profile-${i}`,
           text: `Spec profile: brand "${p.brand}", flavor "${p.flavor}"${p.dieType ? `, die ${p.dieType}` : ""}`,
         })),
-        ...parsed.recipes.map((r, i) => ({
-          id: `recipe-${i}`,
-          text: `${r.kind} recipe "${r.name}"${r.brand ? ` (brand ${r.brand}${r.flavor ? `, flavor ${r.flavor}` : ""})` : ""}`,
-        })),
+        ...parsed.recipes.map((r, i) => {
+          const tgts = recipeTargets(r);
+          const ctx = tgts.length
+            ? ` (brand ${tgts[0].brand}, flavor ${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more profiles` : ""})`
+            : "";
+          return { id: `recipe-${i}`, text: `${r.kind} recipe "${r.name}"${ctx}` };
+        }),
       ],
       log: req.log,
     });

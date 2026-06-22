@@ -4659,6 +4659,17 @@ components:
         lbs:
           type: number
 
+    SpecImportRecipeTarget:
+      type: object
+      required:
+        - brand
+        - flavor
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+
     SpecImportRecipe:
       type: object
       required:
@@ -4675,6 +4686,14 @@ components:
           type: string
         flavor:
           type: string
+        targets:
+          type: array
+          description: >-
+            Brand+flavor profiles this one recipe applies to. Lets a single
+            recipe tie to many profiles instead of being duplicated per
+            brand/flavor. Unioned with the singular brand/flavor.
+          items:
+            $ref: "#/components/schemas/SpecImportRecipeTarget"
         doughballOz:
           type: number
         app:

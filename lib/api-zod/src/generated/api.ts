@@ -1304,6 +1304,10 @@ export const AiParseSpecSheetResponse = zod.object({
   "name": zod.string(),
   "brand": zod.string().optional(),
   "flavor": zod.string().optional(),
+  "targets": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string()
+})).optional().describe('Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand\/flavor. Unioned with the singular brand\/flavor.'),
   "doughballOz": zod.number().optional(),
   "app": zod.number().optional(),
   "rows": zod.array(zod.object({

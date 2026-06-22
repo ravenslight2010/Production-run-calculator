@@ -19,9 +19,11 @@ import {
   canonicalize,
   collectSpecAliases,
   gridsToPromptText,
+  recipeTargets,
   summarizeSpecImport,
   type CanonicalResult,
   type ParsedRecipe,
+  type ParsedRecipeTarget,
   type ParsedSpecImport,
   type SheetGrid,
   type SpecAliasKind,
@@ -186,6 +188,14 @@ function canonicalizeParsed(
         );
       }
     }
+    if (r.targets && r.targets.length) {
+      out.targets = r.targets.map((t): ParsedRecipeTarget => {
+        const brand = track("brand", canonicalize(t.brand, known.brands, aliases, "brand"));
+        const kf = known.flavorsByBrand[brand] ?? [];
+        const flavor = track("flavor", canonicalize(t.flavor, kf, aliases, "flavor", brand), brand);
+        return { brand, flavor };
+      });
+    }
     return out;
   });
 
@@ -240,7 +250,10 @@ export async function prepareSpecImport(
   }
   for (const r of ai.recipes) {
     if (r.review && r.review.status !== "ok") {
-      const ctx = r.brand ? ` — ${r.brand}${r.flavor ? `/${r.flavor}` : ""}` : "";
+      const tgts = recipeTargets(r);
+      const ctx = tgts.length
+        ? ` — ${tgts[0].brand}/${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more` : ""}`
+        : "";
       flagged.push({ label: `${r.kind} recipe${ctx}`, review: r.review });
     }
   }

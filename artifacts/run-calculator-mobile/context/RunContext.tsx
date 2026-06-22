@@ -19,6 +19,7 @@ import {
   CHEESE_RECIPES,
   CHEESE_BRAND_SPECS,
 } from "@/data/specSeed";
+import { recipeTargets } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
 import React, {
@@ -2893,28 +2894,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           brandProfiles[key] = prof;
         }
 
-        // ── Tie recipes that name a brand+flavor onto their profiles ──
+        // ── Tie recipes onto their profiles ──
+        // One recipe can serve many brand/flavor profiles (recipeTargets unions
+        // the singular brand/flavor with the targets[] list), so it ties to each
+        // without being duplicated in the recipe library.
         for (const r of parsed.recipes) {
-          const brand = (r.brand ?? "").trim();
-          const flavor = (r.flavor ?? "").trim();
-          if (!brand || !flavor) continue;
-          registerBrandFlavor(brand, flavor);
           const rows = r.rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs }));
-          const key = profileKey(brand, flavor);
-          const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
-          if (r.kind === "dough") {
-            prof.doughRecipeName = r.name;
-            prof.doughRecipe = rows;
-            if (r.doughballOz != null) prof.doughballWeightOz = r.doughballOz;
-          } else if (r.kind === "sauce") {
-            prof.frontlineRecipeName = r.name;
-            prof.frontlineRecipe = rows;
-          } else {
-            const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
-            (prof as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
-            (prof as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+          for (const { brand, flavor } of recipeTargets(r)) {
+            registerBrandFlavor(brand, flavor);
+            const key = profileKey(brand, flavor);
+            const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
+            if (r.kind === "dough") {
+              prof.doughRecipeName = r.name;
+              prof.doughRecipe = rows;
+              if (r.doughballOz != null) prof.doughballWeightOz = r.doughballOz;
+            } else if (r.kind === "sauce") {
+              prof.frontlineRecipeName = r.name;
+              prof.frontlineRecipe = rows;
+            } else {
+              const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
+              (prof as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
+              (prof as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+            }
+            brandProfiles[key] = prof;
           }
-          brandProfiles[key] = prof;
         }
 
         const next: AppState = {

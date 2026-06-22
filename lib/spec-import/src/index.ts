@@ -25,12 +25,23 @@ export type ParsedProfile = {
   pepperonis: ParsedPepperoni[];
 };
 
+/** One brand+flavor profile a recipe should be tied to. */
+export type ParsedRecipeTarget = { brand: string; flavor: string };
+
 /** One dough / sauce / cheese recipe, as interpreted by the AI. */
 export type ParsedRecipe = {
   kind: "dough" | "sauce" | "cheese";
   name: string;
+  /** Single brand/flavor this recipe ties to (simple case). */
   brand?: string;
   flavor?: string;
+  /**
+   * Brand+flavor profiles this ONE recipe applies to. A single recipe (e.g. a
+   * dough mixing procedure) often serves many brand/flavor combinations; listing
+   * them here keeps it one recipe tied to every profile instead of duplicating
+   * the recipe per brand/flavor. Unioned with the singular brand/flavor above.
+   */
+  targets?: ParsedRecipeTarget[];
   /** Dough only: target doughball weight in oz. */
   doughballOz?: number;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
@@ -43,6 +54,29 @@ export type ParsedSpecImport = {
   recipes: ParsedRecipe[];
   note?: string;
 };
+
+/**
+ * Every brand+flavor profile a recipe should tie to: the union of its singular
+ * brand/flavor and its `targets` list, trimmed and de-duplicated
+ * (case-insensitive). Entries missing a brand or flavor are dropped. Shared by
+ * both apps' apply step so one recipe ties to many profiles identically.
+ */
+export function recipeTargets(r: ParsedRecipe): ParsedRecipeTarget[] {
+  const out: ParsedRecipeTarget[] = [];
+  const seen = new Set<string>();
+  const add = (brand?: string, flavor?: string) => {
+    const b = (brand ?? "").trim();
+    const f = (flavor ?? "").trim();
+    if (!b || !f) return;
+    const key = `${b.toLowerCase()}\u0000${f.toLowerCase()}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ brand: b, flavor: f });
+  };
+  add(r.brand, r.flavor);
+  for (const t of r.targets ?? []) add(t.brand, t.flavor);
+  return out;
+}
 
 // ── Learned aliases ─────────────────────────────────────────────────────────
 
@@ -359,6 +393,19 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
     if (brand) recipe.brand = brand;
     const flavor = clampName(o.flavor, lim.maxNameChars);
     if (flavor) recipe.flavor = flavor;
+    const rawTargets = Array.isArray(o.targets) ? o.targets : [];
+    if (rawTargets.length) {
+      const targets: ParsedRecipeTarget[] = [];
+      for (const t of rawTargets.slice(0, lim.maxProfiles)) {
+        if (!t || typeof t !== "object") continue;
+        const to = t as Record<string, unknown>;
+        const tb = clampName(to.brand, lim.maxNameChars);
+        const tf = clampName(to.flavor, lim.maxNameChars);
+        if (!tb || !tf) continue;
+        targets.push({ brand: tb, flavor: tf });
+      }
+      if (targets.length) recipe.targets = targets;
+    }
     if (kind === "dough") {
       const oz = num(o.doughballOz);
       if (oz != null) recipe.doughballOz = oz;

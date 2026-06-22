@@ -71,6 +71,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "KNOWN NAME VERBATIM (so existing profiles/recipes are updated, not " +
     "duplicated); otherwise return the workbook's name as-is (a new one will be " +
     "created). Use the provided ALIASES as authoritative label→canonical mappings. " +
+    "A SINGLE recipe often applies to MANY brand+flavor profiles — typically a " +
+    "list of 'Brand: flavors' header rows sitting above ONE shared ingredient " +
+    "table (very common for dough mixing procedures). In that case return ONE " +
+    "recipe whose `targets` array lists every {brand, flavor} it covers; do NOT " +
+    "emit a separate duplicate recipe per brand/flavor. Expand a 'Brand: All' (or " +
+    "flavor-less) header to each KNOWN flavor of that brand from the flavors-by-" +
+    "brand list; if that brand has no known flavors, add one target with your best " +
+    "reading of its brand and flavor and mention the uncertainty in `note`. Use the " +
+    "singular `brand`/`flavor` fields only when a recipe ties to exactly one profile. " +
     "Never invent data that is not in the workbook. Omit fields you cannot find. " +
     "This is read-only; the user reviews a summary before anything is saved.";
 
@@ -118,9 +127,12 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       '"sauceOzPerPizza":number,"applicators":[{"type":string,"ozPerPizza":number}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
-      '"flavor":string,"doughballOz":number,"app":number,' +
+      '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
+      '"doughballOz":number,"app":number,' +
       '"rows":[{"ingredient":string,"lbs":number}]}],"note":string}. ' +
-      "Omit any field or row you cannot determine. For cheese recipes, set \"app\" to the " +
+      "Omit any field or row you cannot determine. Prefer `targets` for a recipe that " +
+      "serves multiple brand/flavor profiles (one recipe, many targets); use the singular " +
+      "brand/flavor only when it ties to exactly one. For cheese recipes, set \"app\" to the " +
       "applicator slot number (1-4) it belongs to when discernible. Use \"note\" only for a " +
       "brief overall comment (e.g. what you could not parse).",
   );

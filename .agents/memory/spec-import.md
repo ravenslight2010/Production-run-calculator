@@ -38,6 +38,17 @@ applying (no per-item prompts).
   sent to the AI for grounding too — keep the web/mobile `SpecSheetKnown` types,
   `loadSpecImportKnown`, and both AI `known` payloads in lockstep.
 
+## One recipe → many profiles (no duplicates)
+- A single recipe (esp. a dough mixing procedure) often covers MANY brand/flavor
+  profiles listed as header rows above one ingredient table. `ParsedRecipe` carries
+  optional `targets: {brand,flavor}[]`; the AI emits ONE recipe with `targets[]`
+  instead of N duplicates. Shared `recipeTargets(r)` = de-duped (case-insensitive)
+  union of singular brand/flavor + targets[], dropping entries missing either.
+- **Both apply paths MUST loop `recipeTargets(r)`** (web storage + mobile RunContext)
+  so the one recipe ties to every profile; canonicalize each target like singular.
+- **`summarizeSpecImport` intentionally counts by recipe (so a multi-target import
+  is 1 recipe, not N)** — do not "fix" it to count targets.
+
 ## Mobile summary parity
 - Mobile `buildSpecStore().profileExists` must mirror web `profileObjHasRealData`:
   any non-empty recipe array (dough/frontline/app{1-4}CheeseRecipe) OR any

@@ -8,12 +8,15 @@
 import type { ReviewVerdict } from './reviewVerdict';
 import type { SpecImportRecipeKind } from './specImportRecipeKind';
 import type { SpecImportRecipeRow } from './specImportRecipeRow';
+import type { SpecImportRecipeTarget } from './specImportRecipeTarget';
 
 export interface SpecImportRecipe {
   kind: SpecImportRecipeKind;
   name: string;
   brand?: string;
   flavor?: string;
+  /** Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand/flavor. Unioned with the singular brand/flavor. */
+  targets?: SpecImportRecipeTarget[];
   doughballOz?: number;
   app?: number;
   rows: SpecImportRecipeRow[];

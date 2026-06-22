@@ -1605,6 +1605,11 @@ export interface SpecImportRecipeRow {
   lbs: number;
 }
 
+export interface SpecImportRecipeTarget {
+  brand: string;
+  flavor: string;
+}
+
 export type SpecImportRecipeKind = typeof SpecImportRecipeKind[keyof typeof SpecImportRecipeKind];
 
 
@@ -1619,6 +1624,8 @@ export interface SpecImportRecipe {
   name: string;
   brand?: string;
   flavor?: string;
+  /** Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand/flavor. Unioned with the singular brand/flavor. */
+  targets?: SpecImportRecipeTarget[];
   doughballOz?: number;
   app?: number;
   rows: SpecImportRecipeRow[];

@@ -75,6 +75,7 @@ import {
   CHEESE_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
+import { recipeTargets } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -1263,27 +1264,29 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     saveProfile(brand, flavor, values);
   }
 
-  // ── Tie recipes that name a brand+flavor onto their profiles ──
+  // ── Tie recipes onto their profiles ──
+  // One recipe can serve many brand/flavor profiles (recipeTargets unions the
+  // singular brand/flavor with the targets[] list), so it ties to each without
+  // being duplicated in the recipe library.
   for (const r of parsed.recipes) {
-    const brand = (r.brand ?? "").trim();
-    const flavor = (r.flavor ?? "").trim();
-    if (!brand || !flavor) continue;
-    registerBrandFlavor(brand, flavor);
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
-    const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
-    if (r.kind === "dough") {
-      values.doughRecipeName = r.name;
-      values.doughRecipe = rows;
-      if (r.doughballOz != null) values.targetDoughballWeight = r.doughballOz;
-    } else if (r.kind === "sauce") {
-      values.frontlineRecipeName = r.name;
-      values.frontlineRecipe = rows;
-    } else {
-      const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
-      (values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
-      (values as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+    for (const { brand, flavor } of recipeTargets(r)) {
+      registerBrandFlavor(brand, flavor);
+      const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
+      if (r.kind === "dough") {
+        values.doughRecipeName = r.name;
+        values.doughRecipe = rows;
+        if (r.doughballOz != null) values.targetDoughballWeight = r.doughballOz;
+      } else if (r.kind === "sauce") {
+        values.frontlineRecipeName = r.name;
+        values.frontlineRecipe = rows;
+      } else {
+        const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
+        (values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
+        (values as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+      }
+      saveProfile(brand, flavor, values);
     }
-    saveProfile(brand, flavor, values);
   }
 
   // ── Register brands/flavors + new option-list entries ──
