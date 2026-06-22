@@ -17,15 +17,26 @@ import {
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
+import * as XLSX from "xlsx";
 import SpecImportModal from "@/components/SpecImportModal";
+import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import ProductionRulesManager from "@/components/ProductionRulesManager";
+import StaffRolesCard from "@/components/StaffRolesCard";
+import RolesManager from "@/components/RolesManager";
 import {
   profileKey,
+  todayStr,
   useRun,
   type MasterListKey,
   type MasterDataChange,
   type RunSettings,
 } from "@/context/RunContext";
+import {
+  parseRunWorkbookBase64,
+  parseWorkbookObject,
+  filterImportFromDate,
+  type ImportParseResult,
+} from "@/utils/runExcel";
 import {
   buildMergeMap,
   countMergeReferences,
@@ -751,10 +762,80 @@ export default function MasterDataScreen() {
     applySpecImport,
     changeHistory,
     undoMasterDataChange,
+    addScheduledRun,
+    importScheduledRuns,
   } = useRun();
-  const { isManager } = useMe();
+  const { isManager, hasCapability } = useMe();
+  const canEditRules = hasCapability("edit-production-rules");
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
 
   const [pinDraft, setPinDraft] = useState("");
+  const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+
+  async function handleExcelImportPick() {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      const asset = picked.assets[0];
+      let parsed: ImportParseResult;
+      if (Platform.OS === "web") {
+        const resp = await fetch(asset.uri);
+        const ab = await resp.arrayBuffer();
+        parsed = parseWorkbookObject(XLSX.read(ab, { type: "array" }));
+      } else {
+        const b64 = await Promise.resolve(new File(asset.uri).base64());
+        parsed = parseRunWorkbookBase64(b64);
+      }
+      // Multi-sheet schedule planner: keep only runs dated today-or-later and
+      // route to the multi-date override commit (mirrors the Schedule screen).
+      const result = parsed.multiDay ? filterImportFromDate(parsed, todayStr()) : parsed;
+      setImportResult(result);
+      setImportOpen(true);
+    } catch {
+      // ignore — user can retry
+    }
+  }
+
+  function commitExcelImport(payload: ImportCommit) {
+    payload.createBrands.forEach((b) => addListItem("brands", b));
+    payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
+    if (payload.multiDay) {
+      const byDate = (payload.byDate ?? []).map((day) => ({
+        date: day.date,
+        runs: day.runs.map((r) => ({
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesPlanned,
+          dieType: brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "",
+          notes: r.notes,
+        })),
+      }));
+      importScheduledRuns(byDate);
+    } else {
+      payload.runs.forEach((r) => {
+        const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
+        addScheduledRun(payload.date, {
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesPlanned,
+          dieType,
+          notes: r.notes,
+        });
+      });
+    }
+    setImportOpen(false);
+    setImportResult(null);
+  }
   const mixNames = Object.keys(mixRecipePresets);
 
   // Confirm + roll back to just before this entry (it plus every newer change).
@@ -945,34 +1026,56 @@ export default function MasterDataScreen() {
           gap: 4,
         }}
       >
-        {/* Excel spec-sheet import (managers only) */}
-        {isManager ? (
-          <>
-            <SectionHeader title="Import Spec Sheet" />
-            <CardSection>
-              <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
-                Upload an Excel (.xlsx) workbook of spec sheets and/or recipes. The
-                app interprets it and shows a summary before applying — existing
-                brand/flavor profiles and recipes are overwritten, new ones are
-                added.
+        {/* Imports: production schedule (Excel, all staff) + spec sheets/recipes (managers) */}
+        <SectionHeader title="Import" />
+        <CardSection>
+          <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+            Import a production schedule from an Excel (.xlsx) workbook. You&apos;ll
+            see a summary before anything is added.
+          </Text>
+          <Pressable
+            onPress={handleExcelImportPick}
+            style={({ pressed }) => [
+              styles.importBtn,
+              { backgroundColor: colors.primary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Feather name="upload" size={16} color={colors.primaryForeground} />
+            <Text style={[styles.importBtnText, { color: colors.primaryForeground }]}>
+              Import Excel…
+            </Text>
+          </Pressable>
+          {isManager ? (
+            <>
+              <Text
+                style={[
+                  styles.pinHint,
+                  { color: colors.mutedForeground, marginTop: 12 },
+                ]}
+              >
+                Import spec sheets and/or recipes. Existing brand/flavor profiles and
+                recipes are overwritten, new ones are added.
               </Text>
               <Pressable
                 onPress={handleSpecImportPick}
                 style={({ pressed }) => [
                   styles.importBtn,
-                  { backgroundColor: colors.primary, opacity: pressed ? 0.7 : 1 },
+                  {
+                    backgroundColor: colors.secondary,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.7 : 1,
+                  },
                 ]}
               >
-                <Feather name="upload" size={16} color={colors.primaryForeground} />
-                <Text
-                  style={[styles.importBtnText, { color: colors.primaryForeground }]}
-                >
-                  Choose Excel file…
+                <Feather name="upload" size={16} color={colors.foreground} />
+                <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                  Import Spec Sheet…
                 </Text>
               </Pressable>
-            </CardSection>
-          </>
-        ) : null}
+            </>
+          ) : null}
+        </CardSection>
 
         {/* Brands & flavors */}
         <SectionHeader title="Brands & Flavors" />
@@ -1084,13 +1187,24 @@ export default function MasterDataScreen() {
           )}
         </CardSection>
 
-        {/* Production rules (manager only) */}
-        {isManager ? (
+        {/* Production rules (edit-production-rules capability; mirrors web) */}
+        {canEditRules ? (
           <>
-            <SectionHeader title="Production Rules" />
+            <SectionHeader title="Rules" />
             <CardSection>
               <ProductionRulesManager />
             </CardSection>
+          </>
+        ) : null}
+
+        {/* Staff & roles: roster + role assignment + reset approvals (StaffRolesCard)
+            and the role/capability editor (RolesManager). Each card self-gates on
+            the precise capability; the section shows for either. */}
+        {canManageStaff || canApproveResets ? (
+          <>
+            <SectionHeader title="Staff" />
+            <StaffRolesCard />
+            <RolesManager />
           </>
         ) : null}
 
@@ -1223,6 +1337,20 @@ export default function MasterDataScreen() {
         prepared={specPrepared}
         applying={specApplying}
         onConfirm={handleSpecImportConfirm}
+      />
+
+      <ExcelImportModal
+        visible={importOpen}
+        onClose={() => {
+          setImportOpen(false);
+          setImportResult(null);
+        }}
+        result={importResult}
+        brands={brands}
+        brandFlavors={brandFlavors}
+        supervisorPin={supervisorPin}
+        defaultDate={todayStr()}
+        onConfirm={commitExcelImport}
       />
     </>
   );

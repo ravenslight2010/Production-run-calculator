@@ -70,8 +70,6 @@ import {
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
 import { useMe } from "@/hooks/useRole";
-import StaffRolesCard from "@/components/StaffRolesCard";
-import ChangePasswordCard from "@/components/ChangePasswordCard";
 import ProactiveAlertSettingsCard from "@/components/ProactiveAlertSettingsCard";
 import { saveFacilityKnowledge } from "@/context/aiMemory";
 
@@ -105,8 +103,6 @@ export default function InventoryScreen() {
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
-  const canManageStaff = hasCapability("manage-staff");
-  const canApproveResets = hasCapability("approve-password-resets");
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -456,13 +452,6 @@ export default function InventoryScreen() {
         {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
         {canUseAiTools && <ProactiveAlertSettingsCard />}
 
-        {/* Account self-service (any signed-in user) */}
-        <ChangePasswordCard />
-
-        {/* Staff & roles. Visible to anyone who can approve password resets (for
-            the approval queue) or manage staff (for the roster + roles editor);
-            each section inside gates itself on the precise capability. */}
-        {(canManageStaff || canApproveResets) && <StaffRolesCard />}
       </ScrollView>
     </View>
   );

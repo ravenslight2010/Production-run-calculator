@@ -80,9 +80,6 @@ import type { FormValues } from "../types";
 import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/inventory-math";
 import SubstitutionsManager from "./SubstitutionsManager";
 import SubstitutionLog from "./SubstitutionLog";
-import StaffRolesCard from "./StaffRolesCard";
-import ProductionRulesManager from "./ProductionRulesManager";
-import ChangePasswordCard from "./ChangePasswordCard";
 import ProactiveAlertSettingsCard from "./ProactiveAlertSettingsCard";
 
 function fmtQty(n: number): string {
@@ -143,8 +140,6 @@ export default function InventoryTab({
   const { hasCapability } = useMe();
   const canManageInventory = hasCapability("manage-inventory");
   const canUseAiTools = hasCapability("use-ai-tools");
-  const canEditRules = hasCapability("edit-production-rules");
-  const canManageStaff = hasCapability("manage-staff");
   const refetchRef = useRef<() => void>(() => {});
 
   async function load() {
@@ -447,17 +442,6 @@ export default function InventoryTab({
 
       {/* Proactive-alert tuning (use-ai-tools: AI nudge settings) */}
       {canUseAiTools && <ProactiveAlertSettingsCard />}
-
-      {/* Account self-service (any signed-in user) */}
-      <ChangePasswordCard />
-
-      {/* Production rules (edit-production-rules) */}
-      {canEditRules && <ProductionRulesManager />}
-
-      {/* Staff & roles. Visible to anyone who can approve password resets (for
-          the approval queue) or manage staff (for the roster + roles editor);
-          each section inside gates itself on the precise capability. */}
-      {(canManageStaff || hasCapability("approve-password-resets")) && <StaffRolesCard />}
     </div>
   );
 }

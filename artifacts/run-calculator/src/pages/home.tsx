@@ -112,6 +112,9 @@ import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
+import ProductionRulesManager from "../components/ProductionRulesManager";
+import StaffRolesCard from "../components/StaffRolesCard";
+import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import AssistantTab from "../components/AssistantTab";
@@ -212,7 +215,7 @@ import {
   BarChart2,
   CheckCircle2,
   Lock,
-  Shield,
+  KeyRound,
   ShieldCheck,
   Settings,
   Download,
@@ -2040,7 +2043,10 @@ export default function Home() {
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
   const unreviewedIncidentCount = useUnreviewedIncidentCount();
   // Server-side role (distinct from the local supervisor PIN toggle below).
-  const { isManager } = useMe();
+  const { isManager, hasCapability } = useMe();
+  const canEditRules = hasCapability("edit-production-rules");
+  const canManageStaff = hasCapability("manage-staff");
+  const canApproveResets = hasCapability("approve-password-resets");
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
@@ -2559,6 +2565,7 @@ export default function Home() {
   const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
   // ── Spec-sheet importer (AI-interpreted brand/flavor profiles + recipes) ──
   const [showSpecImport, setShowSpecImport] = useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [specImportLoading, setSpecImportLoading] = useState(false);
   const [specImportApplying, setSpecImportApplying] = useState(false);
   const [specImportError, setSpecImportError] = useState<string | null>(null);
@@ -6372,6 +6379,11 @@ export default function Home() {
           { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: histAdd("Mix Recipe Names", addMixRecipeName),       onRemoveName: histRemove("Mix Recipe Names", removeMixRecipeName),       onRenameName: histRename("Mix Recipe Names", renameMixRecipeName),       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: histAdd("Mix Ingredients", addMixIngredient),      onRemoveIng: histRemove("Mix Ingredients", removeMixIngredient),      onRenameIng: histRename("Mix Ingredients", renameMixIngredient) },
         ];
 
+        const settingsTabs: { key: string; label: string }[] = [
+          { key: "import", label: "Import" },
+          ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
+          ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
+        ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
         const isGrouped = groupedTabs.some(t => t.key === manageCategory);
         const groupedTab = groupedTabs.find(t => t.key === manageCategory);
@@ -6448,6 +6460,13 @@ export default function Home() {
                 ))}
                 <span className="w-px bg-border/60 self-stretch mx-1" />
                 {standaloneTabs.map(t => (
+                  <button key={t.key} type="button"
+                    onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
+                  >{t.label}</button>
+                ))}
+                {settingsTabs.length > 0 && <span className="w-px bg-border/60 self-stretch mx-1" />}
+                {settingsTabs.map(t => (
                   <button key={t.key} type="button"
                     onClick={() => { setManageCategory(t.key); setManageInput(""); setPinChangeMsg(""); setMgSelectedPreset(null); }}
                     className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${manageCategory === t.key ? "bg-primary text-primary-foreground" : "bg-muted/50 text-muted-foreground hover:bg-muted"}`}
@@ -6775,8 +6794,36 @@ export default function Home() {
                   />
                 )}
 
+                {/* Import (spec sheet + excel) */}
+                {manageCategory === "import" && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
+                    {isManager && (
+                      <button type="button" onClick={() => specImportInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                        <Upload className="w-4 h-4" /> Import Spec Sheet
+                      </button>
+                    )}
+                    <button type="button" onClick={() => importInputRef.current?.click()}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted">
+                      <Upload className="w-4 h-4" /> Import Excel
+                    </button>
+                  </div>
+                )}
+
+                {/* Rules */}
+                {manageCategory === "rules" && canEditRules && <ProductionRulesManager />}
+
+                {/* Staff (roster + roles) */}
+                {manageCategory === "staff" && (canManageStaff || canApproveResets) && (
+                  <div className="space-y-4">
+                    <StaffRolesCard />
+                    <RolesManager />
+                  </div>
+                )}
+
                 {/* Recent changes: local per-device undo trail for master-data edits */}
-                {manageCategory !== "pin" && (
+                {!["pin", "import", "rules", "staff"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
                     <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
                     <p className="text-[11px] text-muted-foreground mb-3">
@@ -7546,11 +7593,6 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("inventory")}>
                   <ClipboardList className="w-4 h-4 mr-2" /> Stock
-                  {pendingResetCount > 0 && (
-                    <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
-                      {pendingResetCount}
-                    </span>
-                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
@@ -7573,11 +7615,6 @@ export default function Home() {
                     <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
                   </DropdownMenuItem>
                 )}
-                {isManager && (
-                  <DropdownMenuItem onClick={() => setActiveTab("roles")}>
-                    <Shield className="w-4 h-4 mr-2" /> Roles &amp; access
-                  </DropdownMenuItem>
-                )}
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -7596,6 +7633,14 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
+                  {pendingResetCount > 0 && (
+                    <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                      {pendingResetCount}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setShowPasswordDialog(true)}>
+                  <KeyRound className="w-4 h-4 mr-2" /> Password
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowGetStarted(true)}>
                   <Boxes className="w-4 h-4 mr-2" /> Get Started
@@ -9059,12 +9104,6 @@ export default function Home() {
                 <QualityHistoryTab />
               </TabsContent>
 
-              <TabsContent value="roles">
-                <div className="max-w-2xl mx-auto p-4">
-                  <RolesManager />
-                </div>
-              </TabsContent>
-
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
                 <TabsTrigger value="run" data-testid="tab-run" className="flex flex-col items-center gap-0.5 px-1">
                   <Activity className="w-4 h-4 shrink-0" />
@@ -10516,39 +10555,6 @@ export default function Home() {
                         >
                           <Download className="w-3.5 h-3.5" /> QuickBooks
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => importInputRef.current?.click()}
-                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <Upload className="w-3.5 h-3.5" /> Import Excel
-                        </button>
-                        <input
-                          ref={importInputRef}
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={handleImportFile}
-                        />
-                        {isManager && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => specImportInputRef.current?.click()}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-border/50 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                              title="Import spec sheets & recipes from an Excel workbook (AI-interpreted)"
-                            >
-                              <Upload className="w-3.5 h-3.5" /> Import Spec Sheet
-                            </button>
-                            <input
-                              ref={specImportInputRef}
-                              type="file"
-                              accept=".xlsx"
-                              className="hidden"
-                              onChange={handleSpecImportFile}
-                            />
-                          </>
-                        )}
                       </div>
 
                       {/* Day Totals banner */}
@@ -11110,6 +11116,45 @@ export default function Home() {
               >
                 Reset to defaults
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Hidden file inputs for imports — kept always-mounted so they can be
+            triggered from the Manage Lists → Import section regardless of tab. */}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+        {isManager && (
+          <input
+            ref={specImportInputRef}
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            onChange={handleSpecImportFile}
+          />
+        )}
+
+        {/* ── Change Password Dialog ───────────────────────────────────────── */}
+        {showPasswordDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowPasswordDialog(false)}>
+            <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-primary" />
+                  <h2 className="font-bold text-base">Password</h2>
+                </div>
+                <button type="button" onClick={() => setShowPasswordDialog(false)} className="text-muted-foreground hover:text-foreground">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="p-4">
+                <ChangePasswordCard />
+              </div>
             </div>
           </div>
         )}
