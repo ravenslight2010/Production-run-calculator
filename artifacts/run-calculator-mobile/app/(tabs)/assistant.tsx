@@ -1385,6 +1385,7 @@ export default function AssistantScreen() {
     deleteRun: ctxDeleteRun,
     updateSettings: ctxUpdateSettings,
     updateProgress: ctxUpdateProgress,
+    suppressAutoTrack: ctxSuppressAutoTrack,
     updateRunMeta: ctxUpdateRunMeta,
     endRun: ctxEndRun,
     addStoppage: ctxAddStoppage,
@@ -1708,6 +1709,7 @@ export default function AssistantScreen() {
               ctxSwitchRun(idx);
               liveIdx = idx;
             }
+            ctxSuppressAutoTrack();
             ctxUpdateProgress({
               ...(p.skidsCompleted != null ? { skidsCompleted: p.skidsCompleted } : {}),
               ...(p.casesOnCurrentSkid != null ? { casesOnCurrentSkid: p.casesOnCurrentSkid } : {}),

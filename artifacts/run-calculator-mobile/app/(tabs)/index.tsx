@@ -94,7 +94,7 @@ export default function CalculatorScreen() {
     run,
     runIndex, runCount, allRuns,
     startRun, endRun,
-    updateProgress, addStoppage, endActiveStoppage,
+    updateProgress, suppressAutoTrack, addStoppage, endActiveStoppage,
     addRun, switchRun, deleteRun,
     runToTime, setRunToTime,
     applyCarryOver,
@@ -1145,6 +1145,7 @@ export default function CalculatorScreen() {
         }}
         onSkidDone={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          suppressAutoTrack();
           updateProgress({
             skidsCompleted: run.progress.skidsCompleted + 1,
             casesOnCurrentSkid: 0,

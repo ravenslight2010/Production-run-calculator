@@ -1,11 +1,11 @@
 ---
 name: Sandbox auto-refresh on staleness
-description: How the seeded test/test sandbox re-copies from live on stale login, and why it's client-driven not server-driven.
+description: How the seeded sandbox account re-copies from live on stale login, and why it's client-driven not server-driven.
 ---
 
 # Sandbox auto-refresh
 
-The sandbox data scope (used by the seeded `test`/`test` account) re-copies from
+The sandbox data scope (used by the seeded sandbox account) re-copies from
 live automatically when its last copy is stale, and the banner shows
 "Sandbox — copied from live at …".
 

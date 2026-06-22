@@ -27,7 +27,7 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateProgress, substitutions } = useRun();
+  const { run, updateProgress, substitutions, suppressAutoTrack } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
@@ -99,10 +99,12 @@ export default function DoughScreen() {
             value={run.progress.traysOnLine}
             onDecrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({ traysOnLine: Math.max(0, run.progress.traysOnLine - 1) });
             }}
             onIncrement={() => {
               Haptics.selectionAsync();
+              suppressAutoTrack();
               updateProgress({
                 traysOnLine: Math.min(MAX_TRAYS, run.progress.traysOnLine + 1),
               });
@@ -120,12 +122,14 @@ export default function DoughScreen() {
                 value={run.progress.batchesReady}
                 onDecrement={() => {
                   Haptics.selectionAsync();
+                  suppressAutoTrack();
                   updateProgress({
                     batchesReady: Math.max(0, run.progress.batchesReady - 1),
                   });
                 }}
                 onIncrement={() => {
                   Haptics.selectionAsync();
+                  suppressAutoTrack();
                   updateProgress({
                     batchesReady: Math.min(MAX_BATCHES, run.progress.batchesReady + 1),
                   });

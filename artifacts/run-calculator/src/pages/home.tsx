@@ -1431,6 +1431,8 @@ function NumField({
   );
 }
 
+const AUTO_SUPPRESS_MS = 10 * 60 * 1000;
+
 function StepperField({
   control,
   name,
@@ -1517,6 +1519,7 @@ function StepperField({
                   inputMode="numeric"
                   {...field}
                   onChange={(e) => {
+                    onManualChange?.();
                     const val = e.target.value === "" ? "" : Number(e.target.value);
                     field.onChange(max !== undefined && typeof val === "number" ? Math.min(max, val) : val);
                   }}
@@ -3957,6 +3960,8 @@ export default function Home() {
               form.setValue("casesOnCurrentSkid", p.casesOnCurrentSkid, { shouldDirty: true });
             if (p.casesPerSkid != null)
               form.setValue("casesPerSkid", p.casesPerSkid, { shouldDirty: true });
+            if (p.skidsCompleted != null || p.casesOnCurrentSkid != null)
+              autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
             saveRunValues(currentRunId, form.getValues());
           } else {
             const cur = loadRunValues(runId);
@@ -5896,6 +5901,7 @@ export default function Home() {
                     type="button"
                     onClick={() => {
                       navigator.vibrate?.(15);
+                      autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
                       form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
                       form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                     }}
@@ -8318,7 +8324,7 @@ export default function Home() {
                         const s = autoTrackSuggestion;
                         const suppressed = Date.now() < autoSuppressUntilRef.current;
                         const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
+                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
                         return (
                           <>
                             {autoTrackProgress && s && suppressed && (
@@ -8379,6 +8385,7 @@ export default function Home() {
                           type="button"
                           onClick={() => {
                             navigator.vibrate?.(15);
+                            autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
                             form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
                             form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
                           }}
@@ -8860,7 +8867,7 @@ export default function Home() {
                   {(() => {
                     const s = autoTrackSuggestion;
                     const suppressed = Date.now() < autoSuppressUntilRef.current;
-                    const onManual = () => { autoSuppressUntilRef.current = Date.now() + 1 * 60 * 1000; };
+                    const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
                     const suggestedTrays = calc.traysNeeded > 0
                       ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
                       : null;
