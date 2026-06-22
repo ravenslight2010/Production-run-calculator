@@ -82,7 +82,12 @@ export function useNotifications({
   // fire the instant the run starts. We only allow the complete alert after the
   // timer genuinely counted down from a positive value.
   const runWasTimedRef = useRef<string>("");
-  const freezerDoneNotifRef = useRef<string>("");
+  // Runs we've actually watched drain (remainMs > 0 observed at least once). Only
+  // these may later fire the "freezer empty" alert. Without this, selecting or
+  // scrolling to an already-long-ended run — whose freezer drained ages ago, so
+  // remainMs is already 0 — fired the alert immediately on every completed run.
+  const freezerDrainingRef = useRef<Set<string>>(new Set());
+  const freezerDoneNotifRef = useRef<Set<string>>(new Set());
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
 
@@ -166,11 +171,14 @@ export function useNotifications({
     if (runStatus !== "ended" || !currentRun?.endedAt) return;
     const freezerMs = Number(v.freezerTime) * 60000;
     if (freezerMs <= 0) return;
-    const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
-    if (remainMs > 0) return;
     const runId = currentRun.id;
-    if (freezerDoneNotifRef.current === runId) return;
-    freezerDoneNotifRef.current = runId;
+    const remainMs = Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime());
+    if (remainMs > 0) { freezerDrainingRef.current.add(runId); return; }
+    // Only fire if we actually watched this run's freezer drain down — not when
+    // selecting/scrolling to an already-drained completed run.
+    if (!freezerDrainingRef.current.has(runId)) return;
+    if (freezerDoneNotifRef.current.has(runId)) return;
+    freezerDoneNotifRef.current.add(runId);
     navigator.vibrate?.([200, 100, 200]);
     if (Notification.permission === "granted") {
       showAppNotification("❄️ Freezer empty", {

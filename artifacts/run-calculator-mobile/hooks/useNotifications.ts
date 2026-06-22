@@ -70,7 +70,12 @@ export function useNotifications({
   // fire the instant the run starts. We only allow the complete alert after the
   // timer genuinely counted down from a positive value.
   const runWasTimedRef = useRef<string>("");
-  const freezerDoneNotifRef = useRef<string>("");
+  // Runs we've actually watched drain (remainMs > 0 observed at least once). Only
+  // these may later fire the "freezer empty" alert. Without this, selecting or
+  // scrolling to an already-long-ended run — whose freezer drained ages ago, so
+  // remainMs is already 0 — fired the alert immediately on every completed run.
+  const freezerDrainingRef = useRef<Set<string>>(new Set());
+  const freezerDoneNotifRef = useRef<Set<string>>(new Set());
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
 
@@ -144,9 +149,12 @@ export function useNotifications({
     const freezerMs = Number(run.settings.freezerTime) * 60000;
     if (freezerMs <= 0) return;
     const remainMs = Math.max(0, endedAt + freezerMs - nowMs);
-    if (remainMs > 0) return;
-    if (freezerDoneNotifRef.current === run.id) return;
-    freezerDoneNotifRef.current = run.id;
+    if (remainMs > 0) { freezerDrainingRef.current.add(run.id); return; }
+    // Only fire if we actually watched this run's freezer drain down — not when
+    // selecting/scrolling to an already-drained completed run.
+    if (!freezerDrainingRef.current.has(run.id)) return;
+    if (freezerDoneNotifRef.current.has(run.id)) return;
+    freezerDoneNotifRef.current.add(run.id);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     fireNotification(
       "❄️ Freezer empty",
