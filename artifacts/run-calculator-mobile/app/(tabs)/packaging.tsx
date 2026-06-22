@@ -537,6 +537,26 @@ export default function PackagingScreen() {
             </Text>
           </View>
         </View>
+
+        {calc.extraCases > 0 && (
+          <View
+            style={[
+              styles.extraCasesCell,
+              { backgroundColor: colors.success + "22", borderColor: colors.success + "66" },
+            ]}
+          >
+            <Text
+              style={[styles.outputValue, { color: colors.success }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+            >
+              +{calc.extraCases}
+            </Text>
+            <Text style={[styles.outputLabel, { color: colors.mutedForeground }]}>
+              Extra cases beyond target
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -545,6 +565,15 @@ export default function PackagingScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 16 },
+
+  extraCasesCell: {
+    marginTop: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "center",
+  },
 
   card: {
     borderRadius: 8,

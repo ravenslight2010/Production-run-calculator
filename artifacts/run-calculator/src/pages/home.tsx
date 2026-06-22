@@ -2083,6 +2083,20 @@ export default function Home() {
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
   const [showFloorMode, setShowFloorMode] = useState(false);
+  // Floor Mode can be turned off entirely for users who don't want the big-number
+  // monitor (manual launch + idle auto-activate both gated on this). Device-local
+  // preference (not synced) so a floor TV and an office laptop can differ.
+  const [floorModeEnabled, setFloorModeEnabled] = useState<boolean>(() => {
+    try { return localStorage.getItem("run-calc-floor-mode") !== "0"; } catch { return true; }
+  });
+  function toggleFloorModeEnabled() {
+    setFloorModeEnabled(prev => {
+      const next = !prev;
+      try { localStorage.setItem("run-calc-floor-mode", next ? "1" : "0"); } catch { /* ignore */ }
+      if (!next) setShowFloorMode(false);
+      return next;
+    });
+  }
   // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
   // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
   const [floorDimmed, setFloorDimmed] = useState(false);
@@ -4637,6 +4651,7 @@ export default function Home() {
 
   // ── Idle screen-saver: auto-activate floor mode after 3 min of no activity ──
   useEffect(() => {
+    if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
     const IDLE_MS = 3 * 60 * 1000;
     let timerId: ReturnType<typeof setTimeout> | null = null;
     function resetTimer() {
@@ -4650,7 +4665,7 @@ export default function Home() {
       if (timerId) clearTimeout(timerId);
       events.forEach(ev => window.removeEventListener(ev, resetTimer));
     };
-  }, []); // setShowFloorMode is a stable setter — no deps needed
+  }, [floorModeEnabled]); // setShowFloorMode is a stable setter
 
   // Floor Mode auto-dim: once Floor Mode is showing, dim it after a stretch of
   // inactivity and restore instantly on any interaction. Paired with the slow
@@ -4922,6 +4937,9 @@ export default function Home() {
     // ── Pace gauge ──────────────────────────────────────────────────────────
     // casesCompleted = skids done + cases on current skid
     const casesCompleted = v.skidsCompleted * v.casesPerSkid + v.casesOnCurrentSkid;
+    // Extra cases produced beyond the run target (only positive once the order
+    // is met and the line keeps running).
+    const extraCases = Math.max(0, casesCompleted - v.casesNeeded);
     // Adjusted remaining time: based on cases still left rather than full run
     const adjustedTimeSec = ppm > 0 ? (casesForTiming * v.pizzasPerCase * 60) / ppm : totalTimeSec;
     // Pace: expected cases completed by now vs actual
@@ -4982,6 +5000,7 @@ export default function Home() {
       timePerCaseSec,
       totalTimeSec,
       adjustedTimeSec,
+      extraCases,
       doughMadeTimeSec,
       rackTimes,
       sauceBatches,
@@ -7452,14 +7471,16 @@ export default function Home() {
               <Monitor className="w-4 h-4" />
             </button>
             {/* Floor mode toggle */}
-            <button
-              type="button"
-              onClick={() => setShowFloorMode(true)}
-              title="Floor mode — big numbers, status color"
-              className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-            >
-              <Layers className="w-4 h-4" />
-            </button>
+            {floorModeEnabled && (
+              <button
+                type="button"
+                onClick={() => setShowFloorMode(true)}
+                title="Floor mode — big numbers, status color"
+                className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+              >
+                <Layers className="w-4 h-4" />
+              </button>
+            )}
             {/* Fullscreen / kiosk toggle */}
             <button
               type="button"
@@ -7569,6 +7590,9 @@ export default function Home() {
                 )}
                 <DropdownMenuItem onClick={() => setActiveTab("setup")}>
                   <Settings className="w-4 h-4 mr-2" /> Setup
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={(e) => { e.preventDefault(); toggleFloorModeEnabled(); }}>
+                  <Layers className="w-4 h-4 mr-2" /> Floor Mode: {floorModeEnabled ? "On" : "Off"}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => { setManageInput(""); setPinChangeMsg(""); setShowManageDialog(true); }}>
                   <ShieldCheck className="w-4 h-4 mr-2" /> Settings
@@ -8610,6 +8634,12 @@ export default function Home() {
                       <p className="text-xs text-muted-foreground mt-0.5">On line</p>
                     </div>
                   </div>
+                  {calc.extraCases > 0 && (
+                    <div className="mt-3 rounded-lg border border-emerald-700/40 bg-emerald-950/30 p-3 text-center">
+                      <p className="text-3xl font-mono font-bold tabular-nums text-emerald-400">+{fmtNum(calc.extraCases, 0)}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Extra cases beyond target</p>
+                    </div>
+                  )}
               </TabsContent>
 
               {/* ─── SAUCE ─── */}
@@ -9882,7 +9912,7 @@ export default function Home() {
                               <CircleDot className="w-3 h-3" /> End Stop
                             </button>
                           )}
-                          {!activeStopId && runStatus === "running" && (
+                          {!activeStopId && (
                             <button
                               type="button"
                               onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}

@@ -7,6 +7,8 @@ type RunStatus = "pending" | "running" | "paused" | "ended";
 interface NotifCalc {
   adjustedTimeSec: number;
   timePerBatchSec: number;
+  /** Pizzas-per-minute line speed. <= 0 means there is no valid timing basis. */
+  ppm: number;
 }
 
 interface NotifValues {
@@ -74,6 +76,12 @@ export function useNotifications({
   const notifiedRunRef = useRef<string | null>(null);
   const batchNotifRef = useRef<string>("");
   const runCompleteNotifRef = useRef<string>("");
+  // Tracks the run id that has ever shown positive remaining time. A run started
+  // before line speed or cases-needed are configured has adjustedTimeSec === 0
+  // from the very first tick; without this latch the "time's up" alert would
+  // fire the instant the run starts. We only allow the complete alert after the
+  // timer genuinely counted down from a positive value.
+  const runWasTimedRef = useRef<string>("");
   const freezerDoneNotifRef = useRef<string>("");
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
@@ -131,8 +139,16 @@ export function useNotifications({
   // ── Run time complete alert ────────────────────────────────────────────────
   useEffect(() => {
     if (runStatus !== "running" || !currentRun?.startedAt) return;
-    if (calc.adjustedTimeSec > 0) return;
+    // No valid timing basis (ppm <= 0) → adjustedTimeSec is a fallback, not a
+    // real countdown, so it can't represent completion. Matches mobile, where
+    // minutesRemaining is null whenever ppm <= 0.
+    if (calc.ppm <= 0) return;
     const runId = currentRun.id;
+    // Remember that this run had real remaining time at some point.
+    if (calc.adjustedTimeSec > 0) { runWasTimedRef.current = runId; return; }
+    // Never had positive time (line speed / cases-needed unset) → not a real
+    // countdown completion, so don't fire "time's up" right at run start.
+    if (runWasTimedRef.current !== runId) return;
     if (runCompleteNotifRef.current === runId) return;
     runCompleteNotifRef.current = runId;
     navigator.vibrate?.([300, 100, 300, 100, 300]);
@@ -143,7 +159,7 @@ export function useNotifications({
         tag: `run-complete-${runId}`,
       });
     }
-  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec]);
+  }, [runStatus, currentRun?.id, currentRun?.startedAt, calc.adjustedTimeSec, calc.ppm]);
 
   // ── Freezer drain complete alert ───────────────────────────────────────────
   useEffect(() => {

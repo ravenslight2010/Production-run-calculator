@@ -98,6 +98,7 @@ export default function CalculatorScreen() {
     addRun, switchRun, deleteRun,
     runToTime, setRunToTime,
     applyCarryOver,
+    floorModeEnabled,
     syncStatus,
     updateSettings, saveProfile, applyProfile, hasProfile,
     brands, brandFlavors, addListItem, removeListItem, addFlavor, removeFlavor,
@@ -187,8 +188,9 @@ export default function CalculatorScreen() {
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
+    if (!floorModeEnabled) return; // Floor Mode disabled — never auto-activate
     idleTimer.current = setTimeout(() => setShowFloorMode(true), 3 * 60 * 1000);
-  }, []);
+  }, [floorModeEnabled]);
   // Only arm the idle timer while the Run tab is focused — otherwise the
   // background tab could pop Floor Mode over whatever screen the user is on
   // (tabs stay mounted in expo-router).
@@ -307,21 +309,23 @@ export default function CalculatorScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Pressable
-          onPress={() => {
-            Haptics.selectionAsync();
-            setShowFloorMode(true);
-          }}
-          style={({ pressed }) => [
-            styles.floorLaunch,
-            { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
-          ]}
-        >
-          <Feather name="maximize" size={14} color={colors.mutedForeground} />
-          <Text style={[styles.floorLaunchText, { color: colors.mutedForeground }]}>
-            Floor Mode
-          </Text>
-        </Pressable>
+        {floorModeEnabled && (
+          <Pressable
+            onPress={() => {
+              Haptics.selectionAsync();
+              setShowFloorMode(true);
+            }}
+            style={({ pressed }) => [
+              styles.floorLaunch,
+              { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+            ]}
+          >
+            <Feather name="maximize" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.floorLaunchText, { color: colors.mutedForeground }]}>
+              Floor Mode
+            </Text>
+          </Pressable>
+        )}
 
         {/* Current run identity — brand / flavor / cases, edited inline (matches web) */}
         <Card title="Current Run" icon="package" style={styles.topCard}>

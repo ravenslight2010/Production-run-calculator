@@ -228,6 +228,7 @@ export interface RunState {
 export interface RunCalc {
   casesLeft: number;
   casesLeftToRun: number;
+  extraCases: number;
   pizzasLeft: number;
   ppm: number;
   minutesRemaining: number | null;
@@ -680,9 +681,16 @@ export function computeCalc(
     : 0;
   const netElapsedSec = Math.max(0, grossElapsedSec - totalDowntimeSec);
 
+  // Extra cases produced beyond the run target (only positive once the order is
+  // met and the line keeps running). Mirrors web computeCalc.extraCases.
+  const casesCompletedTotal =
+    p.skidsCompleted * s.casesPerSkid + p.casesOnCurrentSkid;
+  const extraCases = Math.max(0, casesCompletedTotal - s.casesNeeded);
+
   return {
     casesLeft,
     casesLeftToRun,
+    extraCases,
     pizzasLeft,
     ppm,
     minutesRemaining,
@@ -893,6 +901,9 @@ interface AppState {
   templates: RunTemplate[];
   history: HistoryDay[];
   autoTrack: boolean;
+  // Floor Mode (big-number idle monitor) can be turned off entirely for users
+  // who don't want it (manual launch + idle auto-activate both gated on this).
+  floorModeEnabled: boolean;
   supervisorPin: string;
   // Manageable master-data lists
   brands: string[];
@@ -1345,6 +1356,8 @@ interface RunContextValue {
   deleteTemplate: (id: string) => void;
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
+  floorModeEnabled: boolean;
+  setFloorModeEnabled: (on: boolean) => void;
   suppressAutoTrack: () => void;
   resumeAutoTrack: () => void;
   autoSuppressUntil: number;
@@ -1437,6 +1450,7 @@ const INITIAL_STATE: AppState = {
   templates: [],
   history: [],
   autoTrack: true,
+  floorModeEnabled: true,
   supervisorPin: DEFAULT_SUPERVISOR_PIN,
   brands: [...MIX_SEED.brands],
   brandFlavors: { ...MIX_SEED.brandFlavors },
@@ -1574,6 +1588,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         : t
     ),
     autoTrack: parsed.autoTrack ?? true,
+    floorModeEnabled: parsed.floorModeEnabled ?? true,
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
     brands: parsed.brands ?? [...MIX_SEED.brands],
     brandFlavors: parsed.brandFlavors ?? { ...MIX_SEED.brandFlavors },
@@ -2471,6 +2486,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (on: boolean) => {
       setAppState((prev) => {
         const next = { ...prev, autoTrack: on };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const setFloorModeEnabled = useCallback(
+    (on: boolean) => {
+      setAppState((prev) => {
+        const next = { ...prev, floorModeEnabled: on };
         persist(next);
         return next;
       });
@@ -3404,6 +3430,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         deleteTemplate,
         autoTrack: appState.autoTrack,
         setAutoTrack,
+        floorModeEnabled: appState.floorModeEnabled,
+        setFloorModeEnabled,
         suppressAutoTrack,
         resumeAutoTrack,
         autoSuppressUntil,

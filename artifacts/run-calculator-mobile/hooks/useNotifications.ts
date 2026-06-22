@@ -64,6 +64,12 @@ export function useNotifications({
   const notifiedRunRef = useRef<string | null>(null);
   const batchNotifRef = useRef<string>("");
   const runCompleteNotifRef = useRef<string>("");
+  // Tracks the run id that has ever shown positive remaining time. A run started
+  // before line speed or cases-needed are configured has minutesRemaining === 0
+  // from the very first tick; without this latch the "time's up" alert would
+  // fire the instant the run starts. We only allow the complete alert after the
+  // timer genuinely counted down from a positive value.
+  const runWasTimedRef = useRef<string>("");
   const freezerDoneNotifRef = useRef<string>("");
   const batchDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showBatchDue, setShowBatchDue] = useState(false);
@@ -120,7 +126,12 @@ export function useNotifications({
   // ── Run time complete alert ──────────────────────────────────────────────────
   useEffect(() => {
     if (!isRunning || !startedAt) return;
-    if (calc.minutesRemaining === null || calc.minutesRemaining > 0) return;
+    if (calc.minutesRemaining === null) return;
+    // Remember that this run had real remaining time at some point.
+    if (calc.minutesRemaining > 0) { runWasTimedRef.current = run.id; return; }
+    // Never had positive time (line speed / cases-needed unset) → not a real
+    // countdown completion, so don't fire "time's up" right at run start.
+    if (runWasTimedRef.current !== run.id) return;
     if (runCompleteNotifRef.current === run.id) return;
     runCompleteNotifRef.current = run.id;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

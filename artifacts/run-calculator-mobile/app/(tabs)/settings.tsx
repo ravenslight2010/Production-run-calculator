@@ -13,7 +13,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { run, runIndex, autoTrack, setAutoTrack, resetRun } = useRun();
+  const { run, runIndex, autoTrack, setAutoTrack, floorModeEnabled, setFloorModeEnabled, resetRun } = useRun();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -65,6 +65,50 @@ export default function SettingsScreen() {
                 ]}
               >
                 Auto {autoTrack ? "On" : "Off"}
+              </Text>
+            </Pressable>
+          </View>
+        </CardSection>
+
+        {/* Floor Mode */}
+        <SectionHeader title="Display" />
+        <CardSection>
+          <View style={styles.row}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={[styles.rowLabel, { color: colors.foreground }]}>
+                Floor Mode
+              </Text>
+              <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
+                Big-number idle monitor. Turn off to hide it and stop it
+                auto-opening.
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync();
+                setFloorModeEnabled(!floorModeEnabled);
+              }}
+              style={({ pressed }) => [
+                styles.autoPill,
+                {
+                  backgroundColor: floorModeEnabled ? colors.primary : colors.secondary,
+                  borderColor: floorModeEnabled ? colors.primary : colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Feather
+                name="maximize"
+                size={12}
+                color={floorModeEnabled ? "#000" : colors.mutedForeground}
+              />
+              <Text
+                style={[
+                  styles.autoPillText,
+                  { color: floorModeEnabled ? "#000" : colors.mutedForeground },
+                ]}
+              >
+                {floorModeEnabled ? "On" : "Off"}
               </Text>
             </Pressable>
           </View>
