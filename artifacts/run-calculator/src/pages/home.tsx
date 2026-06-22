@@ -5034,6 +5034,7 @@ export default function Home() {
     : 0;
   // ── Auto-track progress ───────────────────────────────────────────────────
   const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, lastAutoMinBucketRef } = useAutoTrack({
+    runId: currentRunId,
     runStatus,
     nowTime,
     elapsedBatchSec,

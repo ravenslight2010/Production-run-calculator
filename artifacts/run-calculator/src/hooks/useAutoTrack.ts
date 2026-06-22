@@ -20,6 +20,7 @@ interface AutoTrackValues {
 }
 
 interface AutoTrackParams {
+  runId: string;
   runStatus: RunStatus;
   nowTime: Date;
   elapsedBatchSec: number;
@@ -34,6 +35,7 @@ interface AutoTrackResult {
   autoTrackSuggestion: {
     skids: number;
     casesOnSkid: number;
+    expectedCases: number;
     trays: number | null;
     batches: number | null;
   } | null;
@@ -44,13 +46,20 @@ interface AutoTrackResult {
 /**
  * Tracks expected progress automatically every 5-minute bucket while running.
  *
- * Skids/cases: absolute calculation from run start (using total elapsed time).
- * Trays/batches: incremental decrement per bucket — subtracts consumption for
- * the actual duration since the last bucket fired. This is self-correcting:
- * it survives page reloads and handles mid-run replenishments correctly without
- * needing a starting-value snapshot.
+ * Skids/cases: applied INCREMENTALLY — each bucket adds the production since the
+ * last bucket on top of the current (possibly manually-entered) value. This means
+ * a manual correction by the operator becomes the new baseline and auto-track
+ * continues forward from it instead of overwriting it with its own absolute
+ * estimate. (The previous absolute approach reverted manual entries the moment the
+ * suppression window expired.) On the first bucket after a (re)start/switch the
+ * absolute count is seeded only when there is no existing progress, so reloads and
+ * run switches never double-count saved progress.
+ *
+ * Trays/batches: incremental decrement per bucket — subtracts consumption for the
+ * actual duration since the last bucket fired.
  */
 export function useAutoTrack({
+  runId,
   runStatus,
   nowTime,
   elapsedBatchSec,
@@ -64,6 +73,10 @@ export function useAutoTrack({
   // Wall-clock timestamp (ms) when the last bucket write happened.
   // Used to compute actual duration for incremental tray/batch decrement.
   const lastBucketTimeMsRef = useRef<number>(0);
+  // expectedCases value at the last bucket — the baseline the incremental
+  // skids/cases delta is measured from. -1 = "not baselined yet" (first bucket
+  // after a mount/reset).
+  const lastExpectedCasesRef = useRef<number>(-1);
 
   const autoTrackSuggestion = useMemo(() => {
     const ok =
@@ -84,6 +97,7 @@ export function useAutoTrack({
     return {
       skids: Math.min(maxSkids, Math.floor(expectedCases / v.casesPerSkid)),
       casesOnSkid: Math.min(v.casesPerSkid, expectedCases % v.casesPerSkid),
+      expectedCases,
       // Tray/batch suggestions are handled incrementally in the write effect;
       // returning null here means the UI falls back to the calc-based suggestion.
       trays: null,
@@ -104,7 +118,6 @@ export function useAutoTrack({
   // Apply expected values once per 5-minute bucket while running.
   useEffect(() => {
     if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
-    if (Date.now() < autoSuppressUntilRef.current) return;
 
     const bucket = Math.floor(nowTime.getTime() / (5 * 60 * 1000));
     if (bucket === lastAutoMinBucketRef.current) return;
@@ -116,12 +129,49 @@ export function useAutoTrack({
       ? Math.min(10, (nowMs - prevMs) / 60000)
       : 5; // first bucket — assume 5-min duration
 
+    const expectedCases = autoTrackSuggestion.expectedCases;
+    const prevExpected = lastExpectedCasesRef.current;
+
+    // Always advance the bucket bookkeeping — even while suppressed — so the
+    // suppression window expiring never causes a catch-up jump that wipes the
+    // operator's manual edit.
     lastAutoMinBucketRef.current = bucket;
     lastBucketTimeMsRef.current = nowMs;
+    lastExpectedCasesRef.current = expectedCases;
 
-    // Skids / cases: absolute calculation based on total elapsed time.
-    form.setValue("skidsCompleted", autoTrackSuggestion.skids, { shouldDirty: true });
-    form.setValue("casesOnCurrentSkid", autoTrackSuggestion.casesOnSkid, { shouldDirty: true });
+    // While the manual-edit suppression window is open, keep baselines current but
+    // do not write — the operator is taking over.
+    if (Date.now() < autoSuppressUntilRef.current) return;
+
+    // Skids / cases.
+    const cps = v.casesPerSkid;
+    const curTotal =
+      (Number(form.getValues("skidsCompleted")) || 0) * cps +
+      (Number(form.getValues("casesOnCurrentSkid")) || 0);
+    if (prevExpected < 0) {
+      // First bucket after a (re)start/switch: seed the absolute count only when
+      // there is no progress yet. If progress already exists (reload / switching
+      // into a run that's already going / a prior manual entry), just baseline so
+      // we don't double-count.
+      if (curTotal === 0 && expectedCases > 0) {
+        const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
+        form.setValue("skidsCompleted", Math.floor(seedTotal / cps), { shouldDirty: true });
+        form.setValue("casesOnCurrentSkid", seedTotal % cps, { shouldDirty: true });
+      }
+    } else {
+      // Add the production since the last bucket on top of the current value, so a
+      // manual correction is preserved and tracking continues forward from it.
+      const deltaCases = Math.max(0, expectedCases - prevExpected);
+      if (deltaCases > 0) {
+        const target = curTotal + deltaCases;
+        // Never pull a value down below what the operator already has on the floor.
+        const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
+        if (newTotal !== curTotal) {
+          form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
+          form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+        }
+      }
+    }
 
     // Trays / batches: incremental decrement for this bucket's duration.
     // Works after page reloads and naturally handles mid-run replenishments.
@@ -151,13 +201,32 @@ export function useAutoTrack({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTime]);
 
-  // Reset lastBucketTimeMsRef when the run stops so the next run starts fresh.
+  // Reset bucket bookkeeping when the run stops so the next run starts fresh.
   useEffect(() => {
     if (runStatus === "pending" || runStatus === "ended") {
       lastBucketTimeMsRef.current = 0;
       lastAutoMinBucketRef.current = -1;
+      lastExpectedCasesRef.current = -1;
     }
   }, [runStatus]);
+
+  // Re-baseline when the active run changes (switching runs / first mount) so the
+  // incremental delta is never computed against another run's numbers, and a run
+  // we switch or reload into is not double-counted.
+  useEffect(() => {
+    lastBucketTimeMsRef.current = 0;
+    lastAutoMinBucketRef.current = -1;
+    lastExpectedCasesRef.current = -1;
+  }, [runId]);
+
+  // Re-baseline when auto-track is toggled on so the first bucket after re-enabling
+  // continues from the current value instead of adding all the production that
+  // accumulated while it was off.
+  useEffect(() => {
+    lastBucketTimeMsRef.current = 0;
+    lastAutoMinBucketRef.current = -1;
+    lastExpectedCasesRef.current = -1;
+  }, [autoTrackProgress]);
 
   return {
     autoTrackProgress,

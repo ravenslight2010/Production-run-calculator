@@ -1613,6 +1613,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // tray/batch decrement (duration since the last bucket).
   const autoBucketTimeMsRef = useRef<number>(0);
   const autoSuppressRef = useRef<number>(0);
+  // expectedCases at the last auto-track bucket — baseline for the incremental
+  // skids/cases delta. -1 = "not baselined yet" (first bucket after mount/reset).
+  const autoExpectedCasesRef = useRef<number>(-1);
 
   // ── Live-sync state/refs ───────────────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
@@ -3145,7 +3148,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     autoBucketRef.current = -1;
     autoBucketTimeMsRef.current = 0;
-  }, [currentRun?.id, currentRun?.isRunning]);
+    autoExpectedCasesRef.current = -1;
+  }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
 
   // Auto-track: once per 5-minute bucket while running, derive skids completed
   // and cases on the current skid from expected output (net elapsed × ppm), and
@@ -3157,7 +3161,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const r = appState.runs[appState.currentIndex];
     if (!r?.isRunning) return;
     const nowMs = Date.now();
-    if (nowMs < autoSuppressRef.current) return;
     const c = computeCalc(r, nowMs, appState.substitutions ?? []);
     if (
       c.ppm <= 0 ||
@@ -3173,8 +3176,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const prevMs = autoBucketTimeMsRef.current;
     const bucketDurationMin =
       prevMs > 0 ? Math.min(10, (nowMs - prevMs) / 60000) : 5;
-    autoBucketRef.current = bucket;
-    autoBucketTimeMsRef.current = nowMs;
 
     // Clamp to the run's total need so skids/cases freeze at their final state
     // once production is complete instead of cycling past it (modulo wrap).
@@ -3185,23 +3186,54 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       r.settings.casesNeeded > 0
         ? Math.min(r.settings.casesNeeded, expectedCasesRaw)
         : expectedCasesRaw;
-    const maxSkids =
-      r.settings.casesNeeded > 0
-        ? Math.floor(r.settings.casesNeeded / r.settings.casesPerSkid)
-        : Number.MAX_SAFE_INTEGER;
-    const skids = Math.min(
-      maxSkids,
-      Math.floor(expectedCases / r.settings.casesPerSkid),
-    );
-    const casesOnSkid = Math.min(
-      r.settings.casesPerSkid,
-      expectedCases % r.settings.casesPerSkid,
-    );
+
+    const prevExpected = autoExpectedCasesRef.current;
+    // Advance bookkeeping even while suppressed so the suppression window
+    // expiring never causes a catch-up jump that wipes a manual edit.
+    autoBucketRef.current = bucket;
+    autoBucketTimeMsRef.current = nowMs;
+    autoExpectedCasesRef.current = expectedCases;
+
+    // While the manual-edit suppression window is open, keep baselines current
+    // but do not write — a supervisor is taking over.
+    if (nowMs < autoSuppressRef.current) return;
 
     const next: Partial<RunProgress> = {};
-    if (skids !== r.progress.skidsCompleted) next.skidsCompleted = skids;
-    if (casesOnSkid !== r.progress.casesOnCurrentSkid)
-      next.casesOnCurrentSkid = casesOnSkid;
+
+    // Skids / cases: applied INCREMENTALLY (web parity — see useAutoTrack). Each
+    // bucket adds the production since the last bucket on top of the current
+    // (possibly manually-entered) value, so a manual correction becomes the new
+    // baseline instead of being overwritten by the absolute estimate. On the
+    // first bucket after a (re)start/switch the absolute count is seeded only
+    // when there is no existing progress, so reloads/switches never double-count.
+    const cps = r.settings.casesPerSkid;
+    const curTotal =
+      r.progress.skidsCompleted * cps + r.progress.casesOnCurrentSkid;
+    let newTotal = curTotal;
+    if (prevExpected < 0) {
+      if (curTotal === 0 && expectedCases > 0) {
+        newTotal =
+          r.settings.casesNeeded > 0
+            ? Math.min(r.settings.casesNeeded, expectedCases)
+            : expectedCases;
+      }
+    } else {
+      const deltaCases = Math.max(0, expectedCases - prevExpected);
+      if (deltaCases > 0) {
+        const target = curTotal + deltaCases;
+        newTotal =
+          r.settings.casesNeeded > 0
+            ? Math.min(target, Math.max(curTotal, r.settings.casesNeeded))
+            : target;
+      }
+    }
+    if (newTotal !== curTotal) {
+      const skids = Math.floor(newTotal / cps);
+      const casesOnSkid = newTotal % cps;
+      if (skids !== r.progress.skidsCompleted) next.skidsCompleted = skids;
+      if (casesOnSkid !== r.progress.casesOnCurrentSkid)
+        next.casesOnCurrentSkid = casesOnSkid;
+    }
 
     // Trays / batches: incremental decrement for this bucket's duration. Stop
     // once all the dough the run needs has been fed onto the line — dough enters

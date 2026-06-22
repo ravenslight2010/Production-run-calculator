@@ -29,6 +29,31 @@ Two ways it used to over-provision past the run's actual need:
 **Why:** user reported dough/doughballs auto-tracking "keeps going even after we
 have what we need for the run."
 
+## Auto-tracked skids/cases must be INCREMENTAL, not absolute
+Suppression windows are NOT enough on their own: skids/cases used to be written as
+an ABSOLUTE value derived from elapsed time (`expectedCases`), so a manual edit was
+only postponed — the instant the suppression window expired, auto-track re-asserted
+its absolute estimate and permanently wiped the operator's manual entry (reported:
+"entered 4 skids/12 cases, auto came back and reverted to 0/35"). Fix: skids/cases
+are now applied INCREMENTALLY (like trays/batches always were) — each 5-min bucket
+adds `deltaCases = expectedCases_now − lastExpectedCases` onto the CURRENT (possibly
+manual) total, so a manual correction becomes the new baseline.
+**Why:** absolute writes can only ever overwrite; incremental writes accumulate on
+top of whatever the operator entered. **How to apply (web `useAutoTrack`, mobile
+RunContext auto-track effect, kept at parity):**
+- Keep a per-bucket `expectedCases` baseline ref (`lastExpectedCasesRef` /
+  `autoExpectedCasesRef`) and advance it EVERY bucket — **including suppressed
+  buckets** (advance bucket bookkeeping before the suppression `return`) — or the
+  window expiring causes a catch-up jump.
+- Sentinel `-1` = "not baselined yet": first bucket after a reset seeds the absolute
+  count ONLY when `curTotal === 0`, otherwise it baselines without writing — this is
+  what stops reloads / run-switches from double-counting saved progress.
+- Re-baseline (`-1`) on: run switch (web new `runId` param; mobile
+  `currentRun.id`/`isRunning`), `pending`/`ended`, AND the auto-track on/off toggle
+  (else re-enabling adds the whole backlog accrued while off).
+- Never pull a value below the operator's current total: clamp with
+  `Math.min(target, Math.max(curTotal, casesNeeded))`.
+
 ## Manual edits must suppress auto-track on EVERY write path
 Auto-track silently reclaims a field on the next 5-min bucket unless a manual
 suppression window is armed. **Every** user-driven write to an auto-tracked field
