@@ -1429,6 +1429,41 @@ export const DeleteDeniedMergesResponse = zod.object({
 
 
 /**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
+ * @summary List durable merged-away ingredient/die names
+ */
+export const ListMergedAwayResponse = zod.object({
+  "names": zod.array(zod.string()).describe('The factory-wide set of merged-away names')
+})
+
+
+/**
+ * Persists a batch of names that were merged away. Names are normalized (trimmed, lowercased) and deduped; a name that already exists is left as is. Available to any signed-in user.
+ * @summary Record merged-away ingredient/die names
+ */
+export const SaveMergedAwayBody = zod.object({
+  "names": zod.array(zod.string()).describe('The batch of merged-away names to add or remove')
+})
+
+export const SaveMergedAwayResponse = zod.object({
+  "names": zod.array(zod.string()).describe('The factory-wide set of merged-away names')
+})
+
+
+/**
+ * Removes a batch of names from the tombstone so they may be used again — called when the user explicitly re-adds a previously merged-away name. Matched case-insensitively. Available to any signed-in user.
+ * @summary Un-tombstone (remove) merged-away names
+ */
+export const DeleteMergedAwayBody = zod.object({
+  "names": zod.array(zod.string()).describe('The batch of merged-away names to add or remove')
+})
+
+export const DeleteMergedAwayResponse = zod.object({
+  "names": zod.array(zod.string()).describe('The factory-wide set of merged-away names')
+})
+
+
+/**
  * Returns every factory-wide production rule. Rules are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can evaluate them; editing is manager-only.
  * @summary List manager-defined production rules
  */

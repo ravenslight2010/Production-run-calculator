@@ -25,6 +25,35 @@ merge — the box closed and nothing happened" (duplicates reappear).
 
 **Why:** without this, any merge silently un-does itself on the next sync tick.
 
+## Durable factory-wide tombstone (survives the day boundary)
+The synced `mergedAway` array alone is NOT enough: it lives only inside the
+per-day, whole-blob, last-write-wins sync row. A new day's row starts empty and
+whichever device seeds it wins, so a device that was offline during the merge
+reseeds the new day with the old names + an empty tombstone → merged names
+reappear the next day. (User report: "merged duplicates yesterday, they came
+back today.")
+
+**Fix:** a durable, factory-wide server tombstone table `merged_away`, mirroring
+`denied_merges` (GET/POST/DELETE `/merged-away`, any signed-in user, names
+normalized trim+lowercase, idempotent insert, per-name delete, `currentScope()`
+isolation). Behavior, at web+mobile parity:
+- POST the merge's source names (excluding self-mapping targets) on every merge —
+  best-effort, never blocks the merge.
+- On load (web mount effect) / sync-init (mobile bootstrap), fetch the durable
+  set, union it into local `mergedAway`, and prune **every mergeable master
+  list**. Both paths are fail-safe (best-effort try/catch; mobile setState is the
+  ErrorBoundary-uncatchable async path).
+- DELETE on explicit re-add, preserving "re-add resurrects".
+
+**Parity trap (caught in review):** mobile `addListItem` is ONE generic handler
+over all `MasterListKey`s — including non-mergeable `brands`/`stopReasons` —
+whereas web has per-list `add*` handlers and only the mergeable ones clear the
+tombstone. Gate the durable DELETE on a `MERGEABLE_LIST_KEYS` set
+(die/pep/cheese/dough/frontline) or adding an unrelated brand named like a
+tombstoned ingredient silently un-tombstones it factory-wide. Mobile merge
+universe = pep+die+cheese+dough+frontline (NO ingredientTypes/mix); web prunes
+ingredientTypes/pep/die/cheese/dough/frontline/mix.
+
 ## Web merge must refresh in place, not reload (separate, also fixed)
 Web merge originally ended with `window.location.reload()`. Two problems: (1) the
 always-mounted Merge panel + its `mergeSuggestions` list were torn down, so only ONE

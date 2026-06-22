@@ -168,7 +168,7 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, type ReviewedMergeSuggestion } from "../mergeSuggest";
+import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 
@@ -1657,13 +1657,21 @@ export default function Home() {
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
 
+  // Re-adding a previously merged-away name must resurrect it everywhere: clear
+  // it from the LOCAL tombstone AND the DURABLE factory-wide one, otherwise the
+  // load-time/sync prune would strip it right back out on the next device.
+  function clearMergedAwayBoth(name: string) {
+    clearMergedAway(name);
+    void deleteMergedAwayNames([name]).catch(() => {});
+  }
+
   function addIngredientType(name: string) {
     const trimmed = name.trim();
     if (!trimmed || ingredientTypes.includes(trimmed)) return;
     const updated = [...ingredientTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1699,7 +1707,7 @@ export default function Home() {
     const updated = [...pepTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1721,7 +1729,7 @@ export default function Home() {
     const updated = [...dieTypes, trimmed].sort((a, b) => a.localeCompare(b));
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1743,7 +1751,7 @@ export default function Home() {
     const updated = [...cheeseIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1764,7 +1772,7 @@ export default function Home() {
     const updated = [...mixIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1785,7 +1793,7 @@ export default function Home() {
     const updated = [...doughIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1825,7 +1833,7 @@ export default function Home() {
     const updated = [...frontlineIngredients, trimmed].sort((a, b) => a.localeCompare(b));
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
-    clearMergedAway(trimmed);
+    clearMergedAwayBoth(trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeFrontlineIngredient(name: string) {
@@ -2460,6 +2468,16 @@ export default function Home() {
       // the merged data shows immediately and the live-sync push carries the
       // merged lists — without tearing down the open Merge panel via a reload.
       applyIngredientMerge(map);
+      // Persist the merged-away source names to the DURABLE factory-wide
+      // tombstone (best effort). Unlike the per-day sync blob, this survives a
+      // day boundary and reaches a device that was offline during the merge, so
+      // the merged names never resurface. Targets (a source mapping to itself)
+      // are never tombstoned.
+      {
+        const tombTargets = new Set(Object.values(map).map(t => t.trim().toLowerCase()));
+        const tombSources = Object.keys(map).filter(s => !tombTargets.has(s.trim().toLowerCase()));
+        void saveMergedAwayNames(tombSources).catch(() => {});
+      }
       // Persist the confirmed merge as factory-wide learned aliases (best
       // effort): feeds the AI suggester next time and powers "previously
       // merged" suggestions. Awaited so the POST completes before we push.
@@ -2986,6 +3004,48 @@ export default function Home() {
       revalidate();
     };
     return () => { setSyncConnected(false); es.close(); };
+  }, []);
+
+  // ── Durable merged-away tombstone (once on mount) ──
+  // The per-day sync blob can't carry a merge across a day boundary: a new day's
+  // row starts empty and whichever device seeds it wins. So on load we fetch the
+  // factory-wide durable tombstone, union it into the local one, and strip those
+  // names from every master list. This makes a merge stick across days and
+  // across a device that was offline during the merge. Best-effort: a failure
+  // just leaves the existing local/sync behavior unchanged.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let remoteNames: string[];
+      try {
+        remoteNames = await fetchMergedAwayNames();
+      } catch {
+        return; // offline / server error — local + sync tombstones still apply
+      }
+      if (cancelled || remoteNames.length === 0) return;
+      const mergedTomb = [...new Set([...loadMergedAway(), ...remoteNames])];
+      saveMergedAway(mergedTomb);
+      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+      const prune = (
+        key: string,
+        defaults: string[],
+        setter: (v: string[]) => void,
+      ) => {
+        const current = loadList(key, defaults);
+        const pruned = dropMergedAway(current, tombSet);
+        if (pruned.length === current.length) return;
+        saveList(key, pruned);
+        setter(pruned);
+      };
+      prune(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES, setIngredientTypes);
+      prune(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, setPepTypes);
+      prune(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, setDieTypes);
+      prune(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, setCheeseIngredients);
+      prune(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, setDoughIngredients);
+      prune(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, setFrontlineIngredients);
+      prune(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, setMixIngredients);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Periodic push every 30 s — ensures sync recovers automatically even with no user activity

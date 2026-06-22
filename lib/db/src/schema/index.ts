@@ -16,6 +16,7 @@ export * from "./photoAliases";
 export * from "./specImportAliases";
 export * from "./mergeAliases";
 export * from "./deniedMerges";
+export * from "./mergedAway";
 export * from "./aiCorrections";
 export * from "./facilityKnowledge";
 export * from "./aiConversationTurns";

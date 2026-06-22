@@ -84,6 +84,59 @@ export async function denyMerge(target: string, sources: string[]): Promise<void
   if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
 }
 
+/**
+ * Fetch the durable, factory-wide set of merged-away names. This is the
+ * authoritative tombstone that survives the per-day, last-write-wins sync blob:
+ * a device that was offline during a merge fetches this on load, unions it into
+ * its local tombstone, and strips the names from every master list so a merge
+ * never resurfaces across a day boundary.
+ */
+export async function fetchMergedAwayNames(): Promise<string[]> {
+  const res = await fetch("/api/merged-away", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`List merged-away failed (${res.status})`);
+  const data = (await res.json()) as { names: string[] };
+  return data.names ?? [];
+}
+
+/**
+ * Persist merged-away source names to the durable tombstone (best-effort caller
+ * side). Normalized + deduped server-side; idempotent. No-op on empty input.
+ */
+export async function saveMergedAwayNames(names: string[]): Promise<void> {
+  const cleaned = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (cleaned.length === 0) return;
+  const res = await fetch("/api/merged-away", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ names: cleaned }),
+  });
+  if (!res.ok) throw new Error(`Save merged-away failed (${res.status})`);
+}
+
+/**
+ * Remove names from the durable tombstone — called when the user explicitly
+ * re-adds a previously merged-away name, preserving "re-add resurrects". No-op
+ * on empty input.
+ */
+export async function deleteMergedAwayNames(names: string[]): Promise<void> {
+  const cleaned = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (cleaned.length === 0) return;
+  const res = await fetch("/api/merged-away", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ names: cleaned }),
+  });
+  if (!res.ok) throw new Error(`Delete merged-away failed (${res.status})`);
+}
+
 async function requestAiSuggestMerges(
   names: string[],
   aliases: MergeAlias[],

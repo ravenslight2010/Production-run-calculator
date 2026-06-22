@@ -1260,6 +1260,71 @@ paths:
         "400":
           description: Invalid input
 
+  /merged-away:
+    get:
+      operationId: listMergedAway
+      tags: [mergedAway]
+      summary: List durable merged-away ingredient/die names
+      description: >-
+        Returns the factory-wide tombstone of names that were merged away. The
+        list never silently shrinks (only an explicit re-add removes a name), so
+        every device can fetch it on load and strip these names from its master
+        lists regardless of which device seeded the current day. Available to any
+        signed-in user.
+      responses:
+        "200":
+          description: All merged-away names
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergedAwayList"
+    post:
+      operationId: saveMergedAway
+      tags: [mergedAway]
+      summary: Record merged-away ingredient/die names
+      description: >-
+        Persists a batch of names that were merged away. Names are normalized
+        (trimmed, lowercased) and deduped; a name that already exists is left as
+        is. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMergedAwayInput"
+      responses:
+        "200":
+          description: The full updated merged-away name list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergedAwayList"
+        "400":
+          description: Invalid input
+    delete:
+      operationId: deleteMergedAway
+      tags: [mergedAway]
+      summary: Un-tombstone (remove) merged-away names
+      description: >-
+        Removes a batch of names from the tombstone so they may be used again —
+        called when the user explicitly re-adds a previously merged-away name.
+        Matched case-insensitively. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMergedAwayInput"
+      responses:
+        "200":
+          description: The full updated merged-away name list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergedAwayList"
+        "400":
+          description: Invalid input
+
   /production-rules:
     get:
       operationId: listProductionRules
@@ -4236,6 +4301,28 @@ components:
           description: The batch of denied pairs to add or remove
           items:
             $ref: "#/components/schemas/DeniedMerge"
+
+    MergedAwayList:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: The factory-wide set of merged-away names
+          items:
+            type: string
+
+    SaveMergedAwayInput:
+      type: object
+      required:
+        - names
+      properties:
+        names:
+          type: array
+          description: The batch of merged-away names to add or remove
+          items:
+            type: string
 
     ProductionRule:
       type: object

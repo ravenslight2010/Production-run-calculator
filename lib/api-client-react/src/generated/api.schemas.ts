@@ -1411,6 +1411,16 @@ export interface SaveDeniedMergesInput {
   pairs: DeniedMerge[];
 }
 
+export interface MergedAwayList {
+  /** The factory-wide set of merged-away names */
+  names: string[];
+}
+
+export interface SaveMergedAwayInput {
+  /** The batch of merged-away names to add or remove */
+  names: string[];
+}
+
 export type ProductionRuleType = typeof ProductionRuleType[keyof typeof ProductionRuleType];
 
 

@@ -61,7 +61,7 @@ import {
   type MergeMap,
 } from "./mergeIngredients";
 import { collectMergeAliases } from "@workspace/merge-suggest";
-import { saveMergeAliases } from "./mergeSuggest";
+import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
@@ -1267,6 +1267,18 @@ export type MasterListKey =
   | "frontlineIngredients"
   | "stopReasons";
 
+// The master lists that participate in ingredient/die merges. Only these carry
+// merged-away tombstones, so only adds to these may clear the durable
+// factory-wide tombstone on re-add. brands/stopReasons are excluded (web parity:
+// web only clears tombstones from its mergeable add* handlers).
+const MERGEABLE_LIST_KEYS = new Set<MasterListKey>([
+  "dieTypes",
+  "pepTypes",
+  "cheeseIngredients",
+  "doughIngredients",
+  "frontlineIngredients",
+]);
+
 export type RecipePresetKind = "dough" | "cheese" | "frontline" | "mix";
 
 const PRESET_MAP_KEY: Record<
@@ -1926,6 +1938,38 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         if (!cancelled) setSyncStatus("offline");
       }
       if (cancelled) return;
+
+      // ── Durable merged-away tombstone (once on sync init) ──
+      // The per-day sync blob can't carry a merge across a day boundary: a new
+      // day's row starts empty and whichever device seeds it wins. So on init we
+      // fetch the factory-wide durable tombstone, union it into local mergedAway,
+      // and strip those names from every master list. Makes a merge stick across
+      // days and across a device that was offline during the merge. Best-effort
+      // and fail-safe (this runs in an async path the ErrorBoundary can't catch).
+      try {
+        const remoteNames = await fetchMergedAwayNames();
+        if (!cancelled && remoteNames.length > 0) {
+          setAppState((prev) => {
+            const mergedAway = [...new Set([...(prev.mergedAway ?? []), ...remoteNames])];
+            const tomb = new Set(mergedAway.map((n) => String(n).trim().toLowerCase()));
+            const drop = (xs: string[]) => xs.filter((x) => !tomb.has(x.trim().toLowerCase()));
+            const next: AppState = {
+              ...prev,
+              mergedAway,
+              pepTypes: drop(prev.pepTypes ?? []),
+              dieTypes: drop(prev.dieTypes ?? []),
+              cheeseIngredients: drop(prev.cheeseIngredients ?? []),
+              doughIngredients: drop(prev.doughIngredients ?? []),
+              frontlineIngredients: drop(prev.frontlineIngredients ?? []),
+            };
+            persistNow(next);
+            return next;
+          });
+        }
+      } catch {
+        // offline / server error — local + sync tombstones still apply.
+      }
+      if (cancelled) return;
       streamRef.current = openSyncStream(base, clientId, {
         onOpen: () => setSyncStatus("online"),
         onPayload: (payload, senderId) => {
@@ -2577,6 +2621,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+      // Re-adding a name must resurrect it across devices/days: drop it from the
+      // DURABLE factory-wide tombstone too, otherwise the load-time/sync prune
+      // would strip it back out on the next device. Best-effort. Only the
+      // mergeable ingredient/die lists participate in merges — brands and
+      // stopReasons never carry tombstones, so don't touch the durable set for
+      // them (matches web, where only the mergeable add* handlers clear it).
+      if (MERGEABLE_LIST_KEYS.has(list)) {
+        void deleteMergedAwayNames([v]).catch(() => {});
+      }
     },
     [persist],
   );
@@ -3069,6 +3122,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persistNow(recorded);
         return recorded;
       });
+
+      // Persist the merged-away source names to the DURABLE factory-wide
+      // tombstone (best effort). Unlike the per-day sync blob, this survives a
+      // day boundary and reaches a device that was offline during the merge, so
+      // the merged names never resurface. Web parity.
+      void saveMergedAwayNames(tombSources).catch(() => {});
 
       // Persist the confirmed merge as factory-wide learned aliases (best
       // effort): feeds the AI suggester next time and powers "previously

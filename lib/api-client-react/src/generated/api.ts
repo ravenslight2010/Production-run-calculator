@@ -65,6 +65,7 @@ import type {
   MergeAliasList,
   MergeInventoryInput,
   MergeInventoryResult,
+  MergedAwayList,
   OkResponse,
   OptimizeInput,
   OptimizeResult,
@@ -95,6 +96,7 @@ import type {
   SaveFillMissingValuesInput,
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
+  SaveMergedAwayInput,
   SavePhotoAliasesInput,
   SaveProductionRulesInput,
   SaveSpecImportAliasesInput,
@@ -4005,6 +4007,228 @@ export const useDeleteDeniedMerges = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteDeniedMergesMutationOptions(options));
+    }
+
+export const getListMergedAwayUrl = () => {
+
+
+
+
+  return `/api/merged-away`
+}
+
+/**
+ * Returns the factory-wide tombstone of names that were merged away. The list never silently shrinks (only an explicit re-add removes a name), so every device can fetch it on load and strip these names from its master lists regardless of which device seeded the current day. Available to any signed-in user.
+ * @summary List durable merged-away ingredient/die names
+ */
+export const listMergedAway = async ( options?: RequestInit): Promise<MergedAwayList> => {
+
+  return customFetch<MergedAwayList>(getListMergedAwayUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMergedAwayQueryKey = () => {
+    return [
+    `/api/merged-away`
+    ] as const;
+    }
+
+
+export const getListMergedAwayQueryOptions = <TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMergedAwayQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMergedAway>>> = ({ signal }) => listMergedAway({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMergedAwayQueryResult = NonNullable<Awaited<ReturnType<typeof listMergedAway>>>
+export type ListMergedAwayQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List durable merged-away ingredient/die names
+ */
+
+export function useListMergedAway<TData = Awaited<ReturnType<typeof listMergedAway>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergedAway>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMergedAwayQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveMergedAwayUrl = () => {
+
+
+
+
+  return `/api/merged-away`
+}
+
+/**
+ * Persists a batch of names that were merged away. Names are normalized (trimmed, lowercased) and deduped; a name that already exists is left as is. Available to any signed-in user.
+ * @summary Record merged-away ingredient/die names
+ */
+export const saveMergedAway = async (saveMergedAwayInput: SaveMergedAwayInput, options?: RequestInit): Promise<MergedAwayList> => {
+
+  return customFetch<MergedAwayList>(getSaveMergedAwayUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveMergedAwayInput,)
+  }
+);}
+
+
+
+
+export const getSaveMergedAwayMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext> => {
+
+const mutationKey = ['saveMergedAway'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveMergedAway>>, {data: BodyType<SaveMergedAwayInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveMergedAway(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveMergedAwayMutationResult = NonNullable<Awaited<ReturnType<typeof saveMergedAway>>>
+    export type SaveMergedAwayMutationBody = BodyType<SaveMergedAwayInput>
+    export type SaveMergedAwayMutationError = ErrorType<void>
+
+    /**
+ * @summary Record merged-away ingredient/die names
+ */
+export const useSaveMergedAway = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveMergedAway>>,
+        TError,
+        {data: BodyType<SaveMergedAwayInput>},
+        TContext
+      > => {
+      return useMutation(getSaveMergedAwayMutationOptions(options));
+    }
+
+export const getDeleteMergedAwayUrl = () => {
+
+
+
+
+  return `/api/merged-away`
+}
+
+/**
+ * Removes a batch of names from the tombstone so they may be used again — called when the user explicitly re-adds a previously merged-away name. Matched case-insensitively. Available to any signed-in user.
+ * @summary Un-tombstone (remove) merged-away names
+ */
+export const deleteMergedAway = async (saveMergedAwayInput: SaveMergedAwayInput, options?: RequestInit): Promise<MergedAwayList> => {
+
+  return customFetch<MergedAwayList>(getDeleteMergedAwayUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveMergedAwayInput,)
+  }
+);}
+
+
+
+
+export const getDeleteMergedAwayMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext> => {
+
+const mutationKey = ['deleteMergedAway'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMergedAway>>, {data: BodyType<SaveMergedAwayInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteMergedAway(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteMergedAwayMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMergedAway>>>
+    export type DeleteMergedAwayMutationBody = BodyType<SaveMergedAwayInput>
+    export type DeleteMergedAwayMutationError = ErrorType<void>
+
+    /**
+ * @summary Un-tombstone (remove) merged-away names
+ */
+export const useDeleteMergedAway = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMergedAway>>, TError,{data: BodyType<SaveMergedAwayInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteMergedAway>>,
+        TError,
+        {data: BodyType<SaveMergedAwayInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteMergedAwayMutationOptions(options));
     }
 
 export const getListProductionRulesUrl = () => {
