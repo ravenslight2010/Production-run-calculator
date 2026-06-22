@@ -1342,6 +1342,8 @@ interface RunContextValue {
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
   suppressAutoTrack: () => void;
+  resumeAutoTrack: () => void;
+  autoSuppressUntil: number;
   // Shift target finish time
   runToTime: string;
   setRunToTime: (t: string) => void;
@@ -1613,6 +1615,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // tray/batch decrement (duration since the last bucket).
   const autoBucketTimeMsRef = useRef<number>(0);
   const autoSuppressRef = useRef<number>(0);
+  // Reactive mirror of autoSuppressRef so UI can show the "manual override active"
+  // banner + a Resume now control. The ref stays the source of truth for the
+  // auto-track effect (avoids stale-closure reads); this state just drives render.
+  const [autoSuppressUntil, setAutoSuppressUntil] = useState(0);
+  // Bumped on a short interval ONLY while a suppression window is active, so the
+  // banner countdown stays fresh and the banner auto-clears at expiry on screens
+  // that intentionally do not re-render every second.
+  const [, setSuppressTick] = useState(0);
   // expectedCases at the last auto-track bucket — baseline for the incremental
   // skids/cases delta. -1 = "not baselined yet" (first bucket after mount/reset).
   const autoExpectedCasesRef = useRef<number>(-1);
@@ -2442,8 +2452,34 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const suppressAutoTrack = useCallback(() => {
-    autoSuppressRef.current = Date.now() + 10 * 60 * 1000;
+    const until = Date.now() + 10 * 60 * 1000;
+    autoSuppressRef.current = until;
+    setAutoSuppressUntil(until);
   }, []);
+
+  // Cancel an active manual-override window so auto-track resumes immediately.
+  // Mirrors web's "Resume now": clear suppression and force the next tick to fire
+  // a bucket (without re-baselining the expectedCases delta, so no catch-up jump).
+  const resumeAutoTrack = useCallback(() => {
+    autoSuppressRef.current = 0;
+    setAutoSuppressUntil(0);
+    autoBucketRef.current = -1;
+  }, []);
+
+  // Keep the override banner's countdown ticking and guarantee it clears at expiry
+  // even when no other state changes. Runs only during the (rare, ≤10 min) window.
+  useEffect(() => {
+    if (autoSuppressUntil <= Date.now()) return;
+    const id = setInterval(() => {
+      if (Date.now() >= autoSuppressUntil) {
+        autoSuppressRef.current = 0;
+        setAutoSuppressUntil(0);
+      } else {
+        setSuppressTick((t) => t + 1);
+      }
+    }, 20000);
+    return () => clearInterval(id);
+  }, [autoSuppressUntil]);
 
   const setRunToTime = useCallback(
     (t: string) => {
@@ -3325,6 +3361,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         autoTrack: appState.autoTrack,
         setAutoTrack,
         suppressAutoTrack,
+        resumeAutoTrack,
+        autoSuppressUntil,
         runToTime: appState.runToTime,
         setRunToTime,
         supervisorPin: appState.supervisorPin,

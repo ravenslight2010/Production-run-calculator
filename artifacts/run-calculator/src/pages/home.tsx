@@ -8868,6 +8868,7 @@ export default function Home() {
                   {(() => {
                     const s = autoTrackSuggestion;
                     const suppressed = Date.now() < autoSuppressUntilRef.current;
+                    const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
                     const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
                     const suggestedTrays = calc.traysNeeded > 0
                       ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
@@ -8879,6 +8880,12 @@ export default function Home() {
                     const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
                     return (
                       <>
+                        {autoTrackProgress && s && suppressed && (
+                          <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2">
+                            <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
+                            <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; lastAutoMinBucketRef.current = -1; }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
+                          </div>
+                        )}
                         <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
                           <div>
                             <StepperField

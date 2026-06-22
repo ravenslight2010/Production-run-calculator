@@ -24,6 +24,8 @@ export default function PackagingScreen() {
     autoTrack,
     setAutoTrack,
     suppressAutoTrack,
+    autoSuppressUntil,
+    resumeAutoTrack,
   } = useRun();
 
   const nowMs = Date.now();
@@ -98,6 +100,29 @@ export default function PackagingScreen() {
                 Skids &amp; cases update automatically from run time. Tap a stepper to take
                 over for 10 min.
               </Text>
+            ) : null}
+
+            {/* Manual override banner (mirrors web "Resume now") */}
+            {autoTrack && autoSuppressUntil > nowMs ? (
+              <View
+                style={[
+                  styles.overrideBanner,
+                  { backgroundColor: (colors.warning ?? "#f59e0b") + "1a", borderColor: (colors.warning ?? "#f59e0b") + "40" },
+                ]}
+              >
+                <Text style={[styles.overrideText, { color: colors.warning ?? "#f59e0b" }]}>
+                  Manual override active · auto resumes in ~{Math.ceil((autoSuppressUntil - nowMs) / 60000)} min
+                </Text>
+                <Pressable
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    resumeAutoTrack();
+                  }}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.overrideResume, { color: colors.warning ?? "#f59e0b" }]}>Resume now</Text>
+                </Pressable>
+              </View>
             ) : null}
 
             {/* Steppers */}
@@ -339,6 +364,20 @@ const styles = StyleSheet.create({
   },
   autoPillText: { fontSize: 11, fontFamily: FONTS.semibold },
   autoHint: { fontSize: 12, lineHeight: 16, marginTop: 4, marginBottom: 8 },
+
+  overrideBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 8,
+  },
+  overrideText: { flex: 1, fontSize: 11, fontFamily: FONTS.semibold },
+  overrideResume: { fontSize: 11, fontFamily: FONTS.bold, textDecorationLine: "underline" },
 
   skidWarn: {
     flexDirection: "row",

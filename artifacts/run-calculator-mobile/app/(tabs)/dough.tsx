@@ -27,7 +27,7 @@ const SKY_400 = "#38bdf8";
 export default function DoughScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { run, updateProgress, substitutions, suppressAutoTrack } = useRun();
+  const { run, updateProgress, substitutions, suppressAutoTrack, autoTrack, autoSuppressUntil, resumeAutoTrack } = useRun();
   const calc = computeCalc(run, Date.now());
 
   const doughSubTab: DoughSupplyMode = run.progress.subTab;
@@ -89,6 +89,29 @@ export default function DoughScreen() {
                 );
               })}
             </View>
+          </View>
+        ) : null}
+
+        {/* Manual override banner (mirrors web "Resume now") */}
+        {autoTrack && autoSuppressUntil > nowMs ? (
+          <View
+            style={[
+              styles.overrideBanner,
+              { backgroundColor: (colors.warning ?? "#f59e0b") + "1a", borderColor: (colors.warning ?? "#f59e0b") + "40" },
+            ]}
+          >
+            <Text style={[styles.overrideText, { color: colors.warning ?? "#f59e0b" }]}>
+              Manual override active · auto resumes in ~{Math.ceil((autoSuppressUntil - nowMs) / 60000)} min
+            </Text>
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync();
+                resumeAutoTrack();
+              }}
+              hitSlop={8}
+            >
+              <Text style={[styles.overrideResume, { color: colors.warning ?? "#f59e0b" }]}>Resume now</Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -312,6 +335,20 @@ const styles = StyleSheet.create({
 
   section: { marginTop: 12 },
   stepperCard: { paddingTop: 2, paddingBottom: 4 },
+
+  overrideBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 10,
+  },
+  overrideText: { flex: 1, fontSize: 11, fontFamily: FONTS.semibold },
+  overrideResume: { fontSize: 11, fontFamily: FONTS.bold, textDecorationLine: "underline" },
 
   needContent: { paddingTop: 10, paddingBottom: 14 },
   bigStatRow: { flexDirection: "row", gap: 12 },
