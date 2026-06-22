@@ -39,3 +39,15 @@ must stay on RAW elapsed (no offset). Both apps now split these into two counts
 cases). Never re-couple them into one count, or one timeline will be wrong.
 **Why:** mobile previously used one no-offset count for both and overcounted
 completed cases by `freezerTime` worth of production.
+
+**Primed-line exception to the tunnel offset:** the tunnel offset only holds
+when the tunnel starts EMPTY at run start. If the line is already primed —
+completed cases on the skid *before* Start — finished product exits immediately,
+so the OUTPUT count must use raw elapsed (no tunnel offset). Latch "primed" once
+per run from the start-of-run completed total on the first bucket; reset it with
+the other auto-track baselines. The feed-completion gate stays on raw elapsed
+regardless.
+**Why:** an operator with cases already on the skid saw auto-track keep the
+pre-start count but not climb for a full extra skid — it was waiting out a
+freezer tunnel that didn't apply to an already-running line. Keep web+mobile at
+parity.

@@ -1645,6 +1645,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // expectedCases at the last auto-track bucket — baseline for the incremental
   // skids/cases delta. -1 = "not baselined yet" (first bucket after mount/reset).
   const autoExpectedCasesRef = useRef<number>(-1);
+  // Whether the line was already primed (cases on the skid) at run start — a
+  // primed line credits output with no freezer-tunnel lag. Set on first bucket.
+  const autoPrimedRef = useRef<boolean>(false);
   // Fractional tray/batch consumption carried between buckets so sub-unit
   // depletion per bucket accumulates instead of being lost to Math.floor (which
   // would freeze slow-depleting dough — especially batches — at its start value).
@@ -3238,6 +3241,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     autoBucketRef.current = -1;
     autoBucketTimeMsRef.current = 0;
     autoExpectedCasesRef.current = -1;
+    autoPrimedRef.current = false;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
   }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
@@ -3276,19 +3280,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     // their final state once production is complete instead of cycling past it.
     const elapsedMin = c.netElapsedSec / 60;
     const freezerMin = Number(r.settings.freezerTime) || 0;
-    const elapsedMinAfterTunnel = Math.max(0, elapsedMin - freezerMin);
     const feedCasesRaw = Math.floor(
       (elapsedMin * c.ppm) / r.settings.pizzasPerCase,
     );
+
+    const prevExpected = autoExpectedCasesRef.current;
+    // Operator's current completed total. Read up front so that on the first
+    // bucket we can tell whether the line was already primed (cases on the skid
+    // before Start). A primed line has finished product coming off the tunnel
+    // immediately, so its output is credited with NO freezer-tunnel lag.
+    const cps = r.settings.casesPerSkid;
+    const curTotal =
+      r.progress.skidsCompleted * cps + r.progress.casesOnCurrentSkid;
+    if (prevExpected < 0) autoPrimedRef.current = curTotal > 0;
+    const elapsedMinForOutput = autoPrimedRef.current
+      ? elapsedMin
+      : Math.max(0, elapsedMin - freezerMin);
     const outputCasesRaw = Math.floor(
-      (elapsedMinAfterTunnel * c.ppm) / r.settings.pizzasPerCase,
+      (elapsedMinForOutput * c.ppm) / r.settings.pizzasPerCase,
     );
     const expectedCases =
       r.settings.casesNeeded > 0
         ? Math.min(r.settings.casesNeeded, outputCasesRaw)
         : outputCasesRaw;
 
-    const prevExpected = autoExpectedCasesRef.current;
     // Advance bookkeeping even while suppressed so the suppression window
     // expiring never causes a catch-up jump that wipes a manual edit.
     autoBucketRef.current = bucket;
@@ -3307,9 +3322,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     // baseline instead of being overwritten by the absolute estimate. On the
     // first bucket after a (re)start/switch the absolute count is seeded only
     // when there is no existing progress, so reloads/switches never double-count.
-    const cps = r.settings.casesPerSkid;
-    const curTotal =
-      r.progress.skidsCompleted * cps + r.progress.casesOnCurrentSkid;
     let newTotal = curTotal;
     if (prevExpected < 0) {
       if (curTotal === 0 && expectedCases > 0) {
