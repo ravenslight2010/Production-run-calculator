@@ -31,7 +31,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { appStateToPayload, applyPayloadToState } from "./sync/mapping";
+import { appStateToPayload, applyPayloadToState, flavorNamespace } from "./sync/mapping";
 import {
   fetchToday,
   getApiBaseUrl,
@@ -917,6 +917,10 @@ interface AppState {
   // Tombstones: ingredient/die names merged away. Synced so the additive list
   // union in live-sync can't resurrect a merged-away name from a stale peer.
   mergedAway: string[];
+  // Deletion tombstones, namespaced per list (lowercased names). Synced so the
+  // additive list union in live-sync can't resurrect a deleted item from a stale
+  // peer. Flavors use namespace `flavor:<brandLower>` (web parity).
+  deletedItems: Record<string, string[]>;
   // Today-only temporary recipe substitutions (overlay; reverts at daily reset).
   substitutions: IngredientSubstitution[];
   // Read-only timestamped trail of substitution add/clear actions (audit log
@@ -1280,6 +1284,57 @@ const MERGEABLE_LIST_KEYS = new Set<MasterListKey>([
   "frontlineIngredients",
 ]);
 
+// ── Deletion tombstone helpers (web parity) ──────────────────────────────────
+// deletedItems is a per-namespace map of lowercased deleted names. A delete adds
+// the name to its namespace; a re-add removes it. The live-sync apply strips
+// each list's namespace from its additive union so a delete can't be resurrected
+// by a stale peer.
+
+function tombstoneDeletedItemNs(
+  map: Record<string, string[]> | undefined,
+  ns: string,
+  name: string,
+): Record<string, string[]> {
+  const lower = String(name).trim().toLowerCase();
+  if (!lower) return map ?? {};
+  const out = { ...(map ?? {}) };
+  const set = new Set(out[ns] ?? []);
+  set.add(lower);
+  out[ns] = [...set];
+  return out;
+}
+
+function clearDeletedItemNs(
+  map: Record<string, string[]> | undefined,
+  ns: string,
+  name: string,
+): Record<string, string[]> {
+  const lower = String(name).trim().toLowerCase();
+  const cur = (map ?? {})[ns];
+  if (!cur || cur.length === 0) return map ?? {};
+  const out = { ...(map ?? {}) };
+  out[ns] = cur.filter((n) => n !== lower);
+  return out;
+}
+
+// A MasterListKey's namespace in the deletion map is the list key itself (matches
+// the web payload keys: brands, dieTypes, pepTypes, cheese/dough/frontline).
+function tombstoneDeletedItem(
+  map: Record<string, string[]> | undefined,
+  list: MasterListKey,
+  name: string,
+): Record<string, string[]> {
+  return tombstoneDeletedItemNs(map, list, name);
+}
+
+function clearDeletedItem(
+  map: Record<string, string[]> | undefined,
+  list: MasterListKey,
+  name: string,
+): Record<string, string[]> {
+  return clearDeletedItemNs(map, list, name);
+}
+
 export type RecipePresetKind = "dough" | "cheese" | "frontline" | "mix";
 
 const PRESET_MAP_KEY: Record<
@@ -1478,6 +1533,7 @@ const INITIAL_STATE: AppState = {
     ]),
   ],
   mergedAway: [],
+  deletedItems: {},
   substitutions: [],
   substitutionLog: [],
   stagedItems: {},
@@ -1617,6 +1673,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         ]),
       ],
     mergedAway: parsed.mergedAway ?? [],
+    deletedItems: parsed.deletedItems ?? {},
     substitutions: parsed.substitutions ?? [],
     substitutionLog: parsed.substitutionLog ?? [],
     stagedItems: parsed.stagedItems ?? {},
@@ -2623,9 +2680,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const mergedAway = MERGEABLE_LIST_KEYS.has(list)
           ? (prev.mergedAway ?? []).filter((n) => n.trim().toLowerCase() !== lower)
           : (prev.mergedAway ?? []);
+        // Re-adding clears the deletion tombstone for this list's namespace so the
+        // sync union won't strip it back out (web parity).
+        const deletedItems = clearDeletedItem(prev.deletedItems, list, v);
         const next = withChangeRecord(
           prev,
-          { ...prev, mergedAway, [list]: [...prev[list], v] },
+          { ...prev, mergedAway, deletedItems, [list]: [...prev[list], v] },
           "add",
           `Added "${v}" to ${LIST_LABELS[list]}`,
         );
@@ -2649,9 +2709,19 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (list: MasterListKey, value: string) => {
       setAppState((prev) => {
         const base = { ...prev, [list]: prev[list].filter((x) => x !== value) };
+        // Tombstone the deletion so the live-sync additive union can't resurrect
+        // it from a stale peer (web parity).
+        base.deletedItems = tombstoneDeletedItem(prev.deletedItems, list, value);
         // Deleting a brand also deletes every flavor that belonged to it — a
-        // flavor only exists in the context of its brand.
+        // flavor only exists in the context of its brand. Tombstone each flavor
+        // too, so a later re-add of the brand (which clears the brand tombstone)
+        // can't let a stale peer resurrect the old flavors via the additive
+        // brandFlavors union (web parity).
         if (list === "brands" && prev.brandFlavors[value]) {
+          const ns = flavorNamespace(value);
+          for (const f of prev.brandFlavors[value]) {
+            base.deletedItems = tombstoneDeletedItemNs(base.deletedItems, ns, f);
+          }
           const brandFlavors = { ...prev.brandFlavors };
           delete brandFlavors[value];
           base.brandFlavors = brandFlavors;
@@ -2678,11 +2748,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const cur = prev.brandFlavors[b] ?? [];
         if (cur.includes(f)) return prev;
         const brands = prev.brands.includes(b) ? prev.brands : [...prev.brands, b];
+        // Re-adding a flavor (and possibly its brand) clears the deletion
+        // tombstones so the sync union won't strip them back out (web parity).
+        let deletedItems = clearDeletedItemNs(prev.deletedItems, flavorNamespace(b), f);
+        deletedItems = clearDeletedItemNs(deletedItems, "brands", b);
         const next = withChangeRecord(
           prev,
           {
             ...prev,
             brands,
+            deletedItems,
             brandFlavors: { ...prev.brandFlavors, [b]: [...cur, f] },
           },
           "add",
@@ -2699,10 +2774,18 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (brand: string, flavor: string) => {
       setAppState((prev) => {
         const cur = prev.brandFlavors[brand] ?? [];
+        // Tombstone the flavor deletion so the sync union can't resurrect it from
+        // a stale peer (web parity).
+        const deletedItems = tombstoneDeletedItemNs(
+          prev.deletedItems,
+          flavorNamespace(brand),
+          flavor,
+        );
         const next = withChangeRecord(
           prev,
           {
             ...prev,
+            deletedItems,
             brandFlavors: {
               ...prev.brandFlavors,
               [brand]: cur.filter((x) => x !== flavor),

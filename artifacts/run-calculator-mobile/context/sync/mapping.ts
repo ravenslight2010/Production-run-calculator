@@ -55,6 +55,7 @@ export interface SyncableState {
   doughIngredients: string[];
   frontlineIngredients: string[];
   mergedAway: string[];
+  deletedItems: Record<string, string[]>;
   substitutions: IngredientSubstitution[];
   substitutionLog: SubstitutionLogEntry[];
   stagedItems: Record<string, boolean>;
@@ -348,7 +349,48 @@ export function appStateToPayload(
     doughIngredients: state.doughIngredients,
     frontlineIngredients: state.frontlineIngredients,
     mergedAway: state.mergedAway ?? [],
+    deletedItems: state.deletedItems ?? {},
   };
+}
+
+// Namespace for a brand's flavor list in the deletion-tombstone map. Must match
+// the web app's `flavorNamespace` exactly so deletions cross-sync.
+export function flavorNamespace(brand: string): string {
+  return `flavor:${String(brand).trim().toLowerCase()}`;
+}
+
+// Union two deletion-tombstone maps (case-insensitive, per namespace). Mirrors
+// web's unionDeletedItems.
+function unionDeletedItems(
+  local: Record<string, string[]>,
+  remote: unknown,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [ns, names] of Object.entries(local ?? {})) {
+    out[ns] = [...new Set(names.map((n) => String(n).trim().toLowerCase()))];
+  }
+  if (remote && typeof remote === "object") {
+    for (const [ns, names] of Object.entries(remote as Record<string, unknown>)) {
+      if (!Array.isArray(names)) continue;
+      const set = new Set(out[ns] ?? []);
+      for (const n of names) if (typeof n === "string") set.add(n.trim().toLowerCase());
+      out[ns] = [...set];
+    }
+  }
+  return out;
+}
+
+// Strip names tombstoned in deletedItems[ns] from a list (case-insensitive).
+// Mirrors web's dropDeleted.
+function dropDeleted(
+  list: string[],
+  map: Record<string, string[]>,
+  ns: string,
+): string[] {
+  const del = map[ns];
+  if (!del || del.length === 0) return list;
+  const set = new Set(del.map((n) => String(n).trim().toLowerCase()));
+  return list.filter((n) => !set.has(String(n).trim().toLowerCase()));
 }
 
 function unionList(local: string[], remote: unknown): string[] {
@@ -399,16 +441,33 @@ export function applyPayloadToState(
   patch.mergedAway = mergedAway;
   const tomb = new Set(mergedAway.map((n) => String(n).trim().toLowerCase()));
 
+  // Deletion tombstones (union remote+local). A plain delete removes a name
+  // locally, but the additive list unions below would resurrect it from a stale
+  // peer. Union the per-namespace tombstone map and strip each list's namespace
+  // from its union so a delete sticks (web parity).
+  const deletedItems = unionDeletedItems(prev.deletedItems ?? {}, payload.deletedItems);
+  patch.deletedItems = deletedItems;
+
   // Master-data (union, always)
-  if (payload.brands) patch.brands = unionList(prev.brands, payload.brands);
-  if (payload.brandFlavors) patch.brandFlavors = unionBrandFlavors(prev.brandFlavors, payload.brandFlavors);
+  if (payload.brands) patch.brands = dropDeleted(unionList(prev.brands, payload.brands), deletedItems, "brands");
+  if (payload.brandFlavors) {
+    const merged = unionBrandFlavors(prev.brandFlavors, payload.brandFlavors);
+    const delBrands = new Set((deletedItems.brands ?? []).map((b) => b.trim().toLowerCase()));
+    const out: Record<string, string[]> = {};
+    for (const [brand, flavors] of Object.entries(merged)) {
+      // Drop flavors of a deleted brand entirely.
+      if (delBrands.has(brand.trim().toLowerCase())) continue;
+      out[brand] = dropDeleted(flavors, deletedItems, flavorNamespace(brand));
+    }
+    patch.brandFlavors = out;
+  }
   // Clean incoming pep types (rename legacy + drop retired) so a legacy peer can't
   // reintroduce "Pep - Cured"/"Pep - Natural"/"Diced Pepperoni" via sync.
-  if (payload.pepTypes) patch.pepTypes = dropTomb(renamePepList(unionList(prev.pepTypes, payload.pepTypes)), tomb);
-  if (payload.dieTypes) patch.dieTypes = dropTomb(unionList(prev.dieTypes, payload.dieTypes), tomb);
-  if (payload.cheeseIngredients) patch.cheeseIngredients = dropTomb(renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients)), tomb);
-  if (payload.doughIngredients) patch.doughIngredients = dropTomb(unionList(prev.doughIngredients, payload.doughIngredients), tomb);
-  if (payload.frontlineIngredients) patch.frontlineIngredients = dropTomb(unionList(prev.frontlineIngredients, payload.frontlineIngredients), tomb);
+  if (payload.pepTypes) patch.pepTypes = dropDeleted(dropTomb(renamePepList(unionList(prev.pepTypes, payload.pepTypes)), tomb), deletedItems, "pepTypes");
+  if (payload.dieTypes) patch.dieTypes = dropDeleted(dropTomb(unionList(prev.dieTypes, payload.dieTypes), tomb), deletedItems, "dieTypes");
+  if (payload.cheeseIngredients) patch.cheeseIngredients = dropDeleted(dropTomb(renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients)), tomb), deletedItems, "cheeseIngredients");
+  if (payload.doughIngredients) patch.doughIngredients = dropDeleted(dropTomb(unionList(prev.doughIngredients, payload.doughIngredients), tomb), deletedItems, "doughIngredients");
+  if (payload.frontlineIngredients) patch.frontlineIngredients = dropDeleted(dropTomb(unionList(prev.frontlineIngredients, payload.frontlineIngredients), tomb), deletedItems, "frontlineIngredients");
 
   const ds = payload.dayState;
   const remoteResetAt = ds?.resetAt ?? 0;

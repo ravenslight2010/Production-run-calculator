@@ -153,5 +153,8 @@ export interface SyncPayload {
   // Tombstones: ingredient/die names merged away. Synced so the additive list
   // union can't resurrect a merged-away name from a stale peer/server.
   mergedAway?: string[];
+  // Deletion tombstones, namespaced per list (lowercased names). Synced so the
+  // additive list union can't resurrect a deleted item from a stale peer/server.
+  deletedItems?: Record<string, string[]>;
   [key: string]: unknown;
 }

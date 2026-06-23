@@ -249,6 +249,12 @@ export type SyncPayload = {
   // Tombstones: ingredient/die names that were merged away. Synced so the
   // additive list-union below can't resurrect a merged-away name on any client.
   mergedAway?: string[];
+  // Per-list deletion tombstones: names a user deleted from a master list,
+  // keyed by list namespace (e.g. "brands", "pepTypes", or "flavor:<brandLower>"
+  // for per-brand flavors). Synced so the additive list-union can't resurrect a
+  // deleted item from a stale peer. Namespaced (unlike mergedAway) so deleting a
+  // flavor "Pepperoni" never strips a pep-type "Pepperoni".
+  deletedItems?: Record<string, string[]>;
 };
 
 export type HistoryDay = { date: string; runs: RunMeta[]; runValues: Record<string, FormValues> };
@@ -296,6 +302,9 @@ export const INGREDIENT_TYPES_KEY = "run-calc-ingredient-types";
 // Merge tombstones: names removed by an ingredient merge. Kept so live-sync's
 // additive union can't bring a merged-away name back from a stale peer/server.
 export const MERGED_AWAY_KEY = "run-calc-merged-away";
+// Per-list deletion tombstones (see SyncPayload.deletedItems). Persisted + synced
+// so a user-deleted master-list item can't be resurrected by live-sync's union.
+export const DELETED_ITEMS_KEY = "run-calc-deleted-items";
 export const DEFAULT_INGREDIENT_TYPES = [
   "Cheese", "Pepperoni", "Sausage",
   "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",

@@ -101,6 +101,13 @@ import {
   saveMergedAway,
   dropMergedAway,
   clearMergedAway,
+  loadDeletedItems,
+  saveDeletedItems,
+  tombstoneDeleted,
+  clearDeleted,
+  unionDeletedItems,
+  dropDeleted,
+  flavorNamespace,
   captureMasterDataSnapshot,
   recordMasterDataChange,
   loadChangeHistory,
@@ -1653,6 +1660,7 @@ export default function Home() {
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("ingredientTypes", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1660,6 +1668,7 @@ export default function Home() {
     const updated = ingredientTypes.filter(t => t !== name);
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+    tombstoneDeleted("ingredientTypes", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1689,6 +1698,7 @@ export default function Home() {
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("pepTypes", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1697,6 +1707,7 @@ export default function Home() {
     const updated = pepTypes.filter(t => t !== name);
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+    tombstoneDeleted("pepTypes", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1711,6 +1722,7 @@ export default function Home() {
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("dieTypes", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1719,6 +1731,7 @@ export default function Home() {
     const updated = dieTypes.filter(t => t !== name);
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
+    tombstoneDeleted("dieTypes", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1733,6 +1746,7 @@ export default function Home() {
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("cheeseIngredients", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1740,6 +1754,7 @@ export default function Home() {
     const updated = cheeseIngredients.filter(t => t !== name);
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("cheeseIngredients", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1754,6 +1769,7 @@ export default function Home() {
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("mixIngredients", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1761,6 +1777,7 @@ export default function Home() {
     const updated = mixIngredients.filter(t => t !== name);
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("mixIngredients", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1775,6 +1792,7 @@ export default function Home() {
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("doughIngredients", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1782,6 +1800,7 @@ export default function Home() {
     const updated = doughIngredients.filter(t => t !== name);
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("doughIngredients", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1795,6 +1814,7 @@ export default function Home() {
     const updated = [...doughRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setDoughRecipeNames(updated);
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    clearDeleted("doughRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -1802,6 +1822,7 @@ export default function Home() {
     const updated = doughRecipeNames.filter(t => t !== name);
     setDoughRecipeNames(updated);
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    tombstoneDeleted("doughRecipeNames", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1815,12 +1836,14 @@ export default function Home() {
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
     clearMergedAwayBoth(trimmed);
+    clearDeleted("frontlineIngredients", trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeFrontlineIngredient(name: string) {
     const updated = frontlineIngredients.filter(t => t !== name);
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("frontlineIngredients", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1833,12 +1856,14 @@ export default function Home() {
     const updated = [...frontlineRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setFrontlineRecipeNames(updated);
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    clearDeleted("frontlineRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeFrontlineRecipeName(name: string) {
     const updated = frontlineRecipeNames.filter(t => t !== name);
     setFrontlineRecipeNames(updated);
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    tombstoneDeleted("frontlineRecipeNames", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1851,12 +1876,14 @@ export default function Home() {
     const updated = [...cheeseRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    clearDeleted("cheeseRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeCheeseRecipeName(name: string) {
     const updated = cheeseRecipeNames.filter(t => t !== name);
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    tombstoneDeleted("cheeseRecipeNames", name);
     schedulePush(dayStateRef.current);
   }
 
@@ -1915,12 +1942,14 @@ export default function Home() {
     const updated = [...mixRecipeNames, trimmed].sort((a, b) => a.localeCompare(b));
     setMixRecipeNames(updated);
     saveList(MIX_RECIPE_NAMES_KEY, updated);
+    clearDeleted("mixRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
   function removeMixRecipeName(name: string) {
     const updated = mixRecipeNames.filter(t => t !== name);
     setMixRecipeNames(updated);
     saveList(MIX_RECIPE_NAMES_KEY, updated);
+    tombstoneDeleted("mixRecipeNames", name);
     schedulePush(dayStateRef.current);
   }
   // Merged mix recipe name options: factory presets (xlsx) + user-added names, deduped + sorted
@@ -2658,6 +2687,7 @@ export default function Home() {
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
+        deletedItems: loadDeletedItems(),
       };
       const res = await fetch(`/api/sync/${scheduleEditorDate}`, {
         method: "PUT",
@@ -2815,11 +2845,31 @@ export default function Home() {
         }
       }
 
+      // ── Merge tombstones (union remote+local) ──
+      // A merge removes source names locally, but the additive list-union below
+      // would resurrect them from a stale peer/server. Union the synced tombstone
+      // set and strip those names from every list merge so a merge sticks.
+      const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
+      saveMergedAway(mergedTomb);
+      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+
+      // ── Deletion tombstones (union remote+local, per list namespace) ──
+      // A plain delete removes an item locally, but the additive list-union below
+      // would resurrect it from a stale peer. Union the synced per-list deletion
+      // tombstones and strip each list's namespace from its merge so a delete sticks.
+      const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems);
+      saveDeletedItems(deletedMap);
+      const deletedBrandSet = new Set((deletedMap["brands"] ?? []).map(b => b.trim().toLowerCase()));
+
       // ── Brands ──
       if (payload.brands && payload.brands.length > 0) {
         const local = loadList(BRANDS_KEY, []).filter((b: string) => !STALE_BRANDS.includes(b));
         const remoteSanitized = payload.brands.filter((b: string) => !STALE_BRANDS.includes(b));
-        const merged = [...new Set([...local, ...remoteSanitized])].sort((a, b) => a.localeCompare(b));
+        const merged = dropDeleted(
+          [...new Set([...local, ...remoteSanitized])],
+          deletedMap,
+          "brands",
+        ).sort((a, b) => a.localeCompare(b));
         saveList(BRANDS_KEY, merged);
         setBrands(prev => (arraysEqual(prev, merged) ? prev : merged));
       }
@@ -2830,11 +2880,19 @@ export default function Home() {
         const merged: Record<string, string[]> = {};
         for (const [brand, flavors] of Object.entries(local)) {
           if (STALE_BRANDS.includes(brand)) continue;
-          merged[brand] = flavors;
+          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
+          merged[brand] = dropDeleted(flavors, deletedMap, flavorNamespace(brand));
         }
         for (const [brand, flavors] of Object.entries(payload.brandFlavors)) {
           if (STALE_BRANDS.includes(brand)) continue;
-          merged[brand] = [...new Set([...(merged[brand] ?? []), ...flavors])].sort((a, b) => a.localeCompare(b));
+          // A brand deleted on any peer takes its flavors with it — don't let an
+          // incoming flavor list resurrect a deleted brand.
+          if (deletedBrandSet.has(brand.trim().toLowerCase())) continue;
+          merged[brand] = dropDeleted(
+            [...new Set([...(merged[brand] ?? []), ...flavors])],
+            deletedMap,
+            flavorNamespace(brand),
+          ).sort((a, b) => a.localeCompare(b));
         }
         saveBrandFlavors(merged);
         setBrandFlavors(prev =>
@@ -2842,23 +2900,16 @@ export default function Home() {
         );
       }
 
-      // ── Merge tombstones (union remote+local) ──
-      // A merge removes source names locally, but the additive list-union below
-      // would resurrect them from a stale peer/server. Union the synced tombstone
-      // set and strip those names from every list merge so a merge sticks.
-      const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
-      saveMergedAway(mergedTomb);
-      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
-
       // ── Ingredient types ──
       // Rename legacy/near-duplicate names from incoming sync so an un-migrated
       // peer can't re-add old spellings to the list.
       if (payload.ingredientTypes && payload.ingredientTypes.length > 0) {
         const local = dropMergedAway(loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES), tombSet);
         const cleanedRemote = payload.ingredientTypes.map(t => INGREDIENT_RENAMES[t] ?? t);
-        const merged = dropMergedAway(
-          [...new Set([...local, ...cleanedRemote])],
-          tombSet,
+        const merged = dropDeleted(
+          dropMergedAway([...new Set([...local, ...cleanedRemote])], tombSet),
+          deletedMap,
+          "ingredientTypes",
         ).sort((a, b) => a.localeCompare(b));
         if (!arraysEqual(merged, loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES))) {
           saveList(INGREDIENT_TYPES_KEY, merged);
@@ -2881,12 +2932,13 @@ export default function Home() {
       // Skip the setState (and the re-render it triggers) when the merged result is
       // identical to what's already stored. Sync runs on every SSE message (~10s),
       // so unconditional setState caused a re-render storm that reset menu scroll.
-      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void) {
+      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void, namespace: string) {
         if (!remote || remote.length === 0) return;
         const local = dropMergedAway(loadList(key, defaults), tombSet);
-        const merged = dropMergedAway(
-          [...new Set([...local, ...remote])],
-          tombSet,
+        const merged = dropDeleted(
+          dropMergedAway([...new Set([...local, ...remote])], tombSet),
+          deletedMap,
+          namespace,
         ).sort((a, b) => a.localeCompare(b));
         if (arraysEqual(merged, loadList(key, defaults))) return;
         saveList(key, merged);
@@ -2897,33 +2949,33 @@ export default function Home() {
       const cleanedRemotePep = (payload.pepTypes ?? [])
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
-      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes);
-      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes);
+      mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
+      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes, "dieTypes");
       const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
-      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients);
-      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients);
+      mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
+      mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
       // Strip topping items from incoming frontline payload — old server payloads may still carry them
       const toppingSet = new Set(MIX_SEED.frontlineIngredients);
       const cleanedIncomingFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => !toppingSet.has(i));
-      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients);
+      mergeList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS, cleanedIncomingFrontline, setFrontlineIngredients, "frontlineIngredients");
       // Redirect any toppings from the incoming frontline payload into mix ingredients
       const toppingsFromFrontline = (payload.frontlineIngredients ?? []).filter((i: string) => toppingSet.has(i));
       const incomingMix = [...new Set([...(payload.mixIngredients ?? []), ...toppingsFromFrontline])];
-      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients);
-      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames);
+      mergeList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS, incomingMix, setMixIngredients, "mixIngredients");
+      mergeList(DOUGH_RECIPE_NAMES_KEY, [], payload.doughRecipeNames, setDoughRecipeNames, "doughRecipeNames");
       // Filter mix-category names out of the incoming frontline list (server may still have old data)
       // Pre-clean localStorage so mergeList doesn't re-add mix names from the local side
       const cleanedLocalFrontline = loadList(FRONTLINE_RECIPE_NAMES_KEY, []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
       saveList(FRONTLINE_RECIPE_NAMES_KEY, cleanedLocalFrontline);
       const incomingFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => !SEED_MIX_RECIPE_NAMES.has(n));
       const incomingMixFromFrontline = (payload.frontlineRecipeNames ?? []).filter((n: string) => SEED_MIX_RECIPE_NAMES.has(n));
-      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames);
+      mergeList(FRONTLINE_RECIPE_NAMES_KEY, [], incomingFrontline, setFrontlineRecipeNames, "frontlineRecipeNames");
       // Merge mix recipe names from both the redirected frontline names and the dedicated payload field
       const allIncomingMix = [...new Set([...incomingMixFromFrontline, ...(payload.mixRecipeNames ?? [])])];
       if (allIncomingMix.length > 0) {
-        mergeList(MIX_RECIPE_NAMES_KEY, [], allIncomingMix, setMixRecipeNames);
+        mergeList(MIX_RECIPE_NAMES_KEY, [], allIncomingMix, setMixRecipeNames, "mixRecipeNames");
       }
-      mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames);
+      mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames, "cheeseRecipeNames");
 
       // ── Recipe presets (remote wins for same name, local-only kept) ──
       if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
@@ -3251,6 +3303,7 @@ export default function Home() {
       brandProfiles,
       crustProfiles,
       mergedAway: loadMergedAway(),
+      deletedItems: loadDeletedItems(),
     };
   }
 
@@ -3465,6 +3518,7 @@ export default function Home() {
     const updated = [...brands, trimmed].sort((a, b) => a.localeCompare(b));
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    clearDeleted("brands", trimmed);
     schedulePush(dayStateRef.current);
     return trimmed;
   }
@@ -3473,9 +3527,15 @@ export default function Home() {
     const updated = brands.filter(b => b !== name);
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    // Tombstone so live-sync's additive union can't resurrect it from a stale peer.
+    tombstoneDeleted("brands", name);
     // Deleting a brand also deletes every flavor that belonged to it — a flavor
-    // only exists in the context of its brand.
+    // only exists in the context of its brand. Tombstone each flavor too, so a
+    // later re-add of the brand (which clears the brand tombstone) can't let a
+    // stale peer resurrect the old flavors via the additive brandFlavors union.
     if (brandFlavors[name]) {
+      const ns = flavorNamespace(name);
+      for (const f of brandFlavors[name]) tombstoneDeleted(ns, f);
       const next = { ...brandFlavors };
       delete next[name];
       setBrandFlavors(next);
@@ -3515,6 +3575,10 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: [...current, trimmed].sort((a, bv) => a.localeCompare(bv)) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    // Re-adding a flavor clears its deletion tombstone; also clear the brand's so
+    // the brand can resurrect alongside it (mirrors mobile addFlavor parity).
+    clearDeleted(flavorNamespace(b), trimmed);
+    clearDeleted("brands", b);
     schedulePush(dayStateRef.current);
     return trimmed;
   }
@@ -3525,6 +3589,8 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: (brandFlavors[b] ?? []).filter(f => f !== name) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    // Tombstone so live-sync's additive union can't resurrect it from a stale peer.
+    tombstoneDeleted(flavorNamespace(b), name);
     schedulePush(dayStateRef.current);
   }
 
@@ -4640,6 +4706,7 @@ export default function Home() {
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
+      deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
     };
     try {
       const res = await fetch(`/api/sync/${date}`, {
@@ -4720,6 +4787,7 @@ export default function Home() {
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
+        deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
       };
       try {
         await fetch(`/api/sync/${date}`, {

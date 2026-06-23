@@ -29,6 +29,7 @@ import {
   INGREDIENT_TYPES_KEY,
   DEFAULT_INGREDIENT_TYPES,
   MERGED_AWAY_KEY,
+  DELETED_ITEMS_KEY,
   PEP_TYPES_KEY,
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
@@ -114,6 +115,75 @@ export function clearMergedAway(name: string): void {
   if (!v) return;
   const next = loadMergedAway().filter((n) => n.trim().toLowerCase() !== v);
   saveMergedAway(next);
+}
+
+// ── Per-list deletion tombstones ────────────────────────────────────────────
+// A user-deleted master-list item removed locally would be resurrected by the
+// additive list-union in live-sync from a stale peer. Record the deletion under
+// the list's namespace so the union can strip it. Namespaced (unlike the flat
+// mergedAway set) so deleting a flavor "Pepperoni" never strips a pep-type of the
+// same name. Flavor namespace is `flavor:<brandLower>`.
+export function flavorNamespace(brand: string): string {
+  return `flavor:${brand.trim().toLowerCase()}`;
+}
+export function loadDeletedItems(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(DELETED_ITEMS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, string[]>;
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {}
+  return {};
+}
+export function saveDeletedItems(map: Record<string, string[]>): void {
+  try { localStorage.setItem(DELETED_ITEMS_KEY, JSON.stringify(map)); } catch {}
+}
+/** Record a deletion of `name` from the list `namespace`. */
+export function tombstoneDeleted(namespace: string, name: string): void {
+  const v = name.trim().toLowerCase();
+  if (!v) return;
+  const map = loadDeletedItems();
+  const cur = map[namespace] ?? [];
+  if (cur.includes(v)) return;
+  map[namespace] = [...cur, v];
+  saveDeletedItems(map);
+}
+/** Un-tombstone `name` in `namespace` so a re-add sticks. */
+export function clearDeleted(namespace: string, name: string): void {
+  const v = name.trim().toLowerCase();
+  if (!v) return;
+  const map = loadDeletedItems();
+  const cur = map[namespace];
+  if (!cur || !cur.includes(v)) return;
+  const next = cur.filter((n) => n !== v);
+  if (next.length > 0) map[namespace] = next;
+  else delete map[namespace];
+  saveDeletedItems(map);
+}
+/** Union two deletedItems maps (case-insensitive within each namespace). */
+export function unionDeletedItems(
+  a: Record<string, string[]>,
+  b: Record<string, string[]> | undefined,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [ns, names] of Object.entries(a)) out[ns] = [...new Set(names.map((n) => n.trim().toLowerCase()))];
+  if (b) {
+    for (const [ns, names] of Object.entries(b)) {
+      if (!Array.isArray(names)) continue;
+      const set = new Set(out[ns] ?? []);
+      for (const n of names) if (typeof n === "string") set.add(n.trim().toLowerCase());
+      out[ns] = [...set];
+    }
+  }
+  return out;
+}
+/** Drop names tombstoned under `namespace` from a list (case-insensitive). */
+export function dropDeleted(list: string[], map: Record<string, string[]>, namespace: string): string[] {
+  const tomb = map[namespace];
+  if (!tomb || tomb.length === 0) return list;
+  const set = new Set(tomb.map((n) => n.trim().toLowerCase()));
+  return list.filter((n) => !set.has(n.trim().toLowerCase()));
 }
 
 export function loadBrandFlavors(): Record<string, string[]> {
