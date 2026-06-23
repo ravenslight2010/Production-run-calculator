@@ -213,7 +213,7 @@ function ListManager({
 
 // Combine duplicate / similar ingredient names into one canonical target.
 // Mirrors the web "Merge" panel in `run-calculator/src/pages/home.tsx`.
-function MergeManager() {
+function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   const colors = useColors();
   const {
     pepTypes,
@@ -243,6 +243,9 @@ function MergeManager() {
   const [suggestError, setSuggestError] = useState("");
   const [suggestNote, setSuggestNote] = useState("");
   const [suggestRan, setSuggestRan] = useState(false);
+  // True when this scan was kicked off automatically by a recipe import, so we
+  // can explain to the user why suggestions appeared.
+  const [fromImport, setFromImport] = useState(false);
 
   // The mergeable universe: master-data lists whose values a merge rewrites —
   // ingredient names plus die types (the `dieType` selection field is rewritten
@@ -331,7 +334,8 @@ function MergeManager() {
   // Ask for duplicate-group suggestions (AI clustering + learned aliases).
   // Reviewed, never auto-applied: "Load" pre-fills the form, "Apply" merges
   // directly through the same destructive merge path.
-  const suggest = async () => {
+  const suggest = async (importTriggered = false) => {
+    if (!importTriggered) setFromImport(false);
     setSuggestBusy(true);
     setSuggestError("");
     setSuggestNote("");
@@ -351,9 +355,21 @@ function MergeManager() {
     }
   };
 
+  // After a recipe import the parent bumps `autoSuggest`; run the merge check
+  // once (imported recipe ingredients can duplicate standalone ones) and flag
+  // the run as import-triggered so the explainer banner shows. Fire-and-forget
+  // — suggest() handles its own errors and never throws.
+  React.useEffect(() => {
+    if (autoSuggest === 0) return;
+    setFromImport(true);
+    void suggest(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSuggest]);
+
   const loadSuggestion = (s: ReviewedMergeSuggestion) => {
     setError("");
     setConfirming(false);
+    setFromImport(false);
     // Snap names to the universe's exact spelling so the source rows actually
     // select (AI/learned suggestion names can differ in case). Mirrors web.
     const canon = (n: string) =>
@@ -375,6 +391,7 @@ function MergeManager() {
   const applySuggestion = async (s: ReviewedMergeSuggestion) => {
     const srcs = s.sources.filter((n) => n !== s.target);
     if (srcs.length === 0) return;
+    setFromImport(false);
     setBusy(true);
     setError("");
     try {
@@ -396,6 +413,7 @@ function MergeManager() {
   const ignoreSuggestion = async (s: ReviewedMergeSuggestion) => {
     const srcs = s.sources.filter((n) => n !== s.target);
     if (srcs.length === 0) return;
+    setFromImport(false);
     setSuggestions((prev) => prev.filter((x) => x !== s));
     try {
       await denyMerge(s.target, srcs);
@@ -431,6 +449,25 @@ function MergeManager() {
 
   return (
     <View style={{ gap: 12 }}>
+      {fromImport ? (
+        <View
+          style={{
+            borderWidth: 1,
+            borderColor: colors.primary,
+            backgroundColor: colors.secondary,
+            borderRadius: 10,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <Text style={[styles.previewText, { color: colors.foreground }]}>
+            Recipes were imported. Since recipe ingredients can also be used on their
+            own, we checked them for possible duplicates below — review any suggestions
+            before they become separate items.
+          </Text>
+        </View>
+      ) : null}
+
       <Text style={[styles.pinHint, { color: colors.mutedForeground, marginBottom: 0 }]}>
         Combine duplicate or similar ingredients into one. Pick the ingredient(s) to
         merge away, then the one to keep. Every recipe, list, preset, profile, run,
@@ -456,7 +493,7 @@ function MergeManager() {
             </Text>
           </View>
           <Pressable
-            onPress={suggest}
+            onPress={() => suggest()}
             disabled={suggestBusy || busy}
             style={({ pressed }) => [
               styles.suggestBtn,
@@ -877,6 +914,9 @@ export default function MasterDataScreen() {
   const [specError, setSpecError] = useState<string | null>(null);
   const [specPrepared, setSpecPrepared] = useState<SpecImportPrepared | null>(null);
   const [specProgress, setSpecProgress] = useState<{ done: number; total: number } | null>(null);
+  // Bumped after a recipe import to make MergeManager auto-run a merge check
+  // (imported recipe ingredients can duplicate standalone individual ones).
+  const [mergeCheckSignal, setMergeCheckSignal] = useState(0);
 
   // Build the store the orchestration glue needs from live context (web reads
   // localStorage directly; mobile injects the same shape here).
@@ -1005,11 +1045,16 @@ export default function MasterDataScreen() {
   async function handleSpecImportConfirm() {
     if (!specPrepared) return;
     setSpecApplying(true);
+    // Capture before clearing: only run the merge check when recipes were
+    // actually imported (that's where standalone-duplicate ingredients arise).
+    const importedRecipes = (specPrepared.summary?.totalRecipes ?? 0) > 0;
     try {
       await commitSpecImport(specPrepared, buildSpecStore());
       setSpecOpen(false);
       setSpecPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Fire-and-forget: tells MergeManager to scan the updated lists once.
+      if (importedRecipes) setMergeCheckSignal((c) => c + 1);
     } catch (e) {
       setSpecError(
         e instanceof Error ? e.message : "Could not apply the import. Please retry.",
@@ -1226,7 +1271,7 @@ export default function MasterDataScreen() {
         {/* Merge ingredients */}
         <SectionHeader title="Merge Ingredients" />
         <CardSection>
-          <MergeManager />
+          <MergeManager autoSuggest={mergeCheckSignal} />
         </CardSection>
 
         {/* Supervisor PIN */}

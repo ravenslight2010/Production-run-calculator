@@ -38,3 +38,17 @@ factory-wide learned memory of past merges. Strict web+mobile parity.
   don't reimplement the prompt or sanitizer per client — call the lib/route.
 - Alias save is intentionally best-effort: a failed `/merge-aliases` POST must
   never block or roll back the actual merge.
+
+## Auto merge-check after recipe import
+A spec/recipe import auto-runs the merge check (imported cheese/mix recipe
+ingredients can duplicate standalone individual ones). Trigger only when the
+import actually added recipes (`summary.totalRecipes > 0`).
+**Why timing matters:** bump the trigger counter AFTER the import is committed +
+lists reloaded, then run the scan from a counter-keyed effect — so `mergeUniverse`
+already reflects the new ingredients (running it inline would scan the stale list).
+**Fire-and-forget:** the scan must never block/fail the already-committed import
+(`suggest()`/`handleSuggestMerges()` swallow their own errors).
+**Parity:** web navigates to Setup→Merge and shows an explainer banner; mobile
+(single scroll screen, no tabs) just runs the scan in the always-rendered
+MergeManager via an `autoSuggest` counter prop + same banner. Both clear the
+banner on manual load/apply/ignore.

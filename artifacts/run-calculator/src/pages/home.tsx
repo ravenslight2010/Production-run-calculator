@@ -2214,6 +2214,12 @@ export default function Home() {
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  // Bumped after a recipe/spec import so an effect can auto-run the merge check
+  // (imported recipe ingredients can duplicate standalone individual ones).
+  const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  // True when the merge review was opened automatically by an import, so we can
+  // show a one-line explainer of why the user landed here.
+  const [mergeFromImport, setMergeFromImport] = useState(false);
 
   // Local (per-device) master-data change history for the undo trail.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
@@ -2335,7 +2341,8 @@ export default function Home() {
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges() {
+  async function handleSuggestMerges(fromImport = false) {
+    if (!fromImport) setMergeFromImport(false);
     setMergeSuggestBusy(true);
     setMergeSuggestError("");
     setMergeSuggestNote("");
@@ -2359,6 +2366,20 @@ export default function Home() {
     }
   }
 
+  // After a spec/recipe import that added recipes, auto-run the merge check:
+  // imported cheese/mix recipe ingredients can duplicate standalone individual
+  // ingredients. We navigate to the Merge review and scan once (fire-and-forget,
+  // never blocks the already-committed import). The effect re-runs only when the
+  // request counter is bumped, so by then `mergeUniverse` reflects the new lists.
+  useEffect(() => {
+    if (mergeCheckRequest === 0) return;
+    setActiveTab("setup");
+    setManageCategory("merge");
+    setMergeFromImport(true);
+    void handleSuggestMerges(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeCheckRequest]);
+
   // Pre-fill the manual merge form from a suggested group so the user can review
   // and tweak the source selection before confirming. Names are snapped to the
   // universe's exact spelling so the source checkboxes actually tick (AI/learned
@@ -2367,6 +2388,7 @@ export default function Home() {
   function loadMergeSuggestion(s: MergeSuggestion) {
     setMergeError("");
     setMergeConfirming(false);
+    setMergeFromImport(false);
     const canon = (n: string) =>
       mergeUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
     const tgt = canon(s.target);
@@ -2392,6 +2414,7 @@ export default function Home() {
   async function applyMergeSuggestion(s: ReviewedMergeSuggestion) {
     const sources = s.sources.filter((n) => n !== s.target);
     if (sources.length === 0) return;
+    setMergeFromImport(false);
     const ok = await handleApplyMerge(sources, s.target);
     if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
   }
@@ -2403,6 +2426,7 @@ export default function Home() {
   async function ignoreMergeSuggestion(s: ReviewedMergeSuggestion) {
     const sources = s.sources.filter((n) => n !== s.target);
     if (sources.length === 0) return;
+    setMergeFromImport(false);
     setMergeSuggestions((prev) => prev.filter((x) => x !== s));
     try {
       await denyMerge(s.target, sources);
@@ -4535,12 +4559,19 @@ export default function Home() {
   async function handleSpecImportConfirm() {
     if (!specImportPrepared) return;
     setSpecImportApplying(true);
+    // Imported recipes can introduce ingredients that duplicate standalone ones,
+    // so kick off a merge check afterwards (only when recipes were actually
+    // imported). Capture before clearing the prepared payload.
+    const importedRecipes = (specImportPrepared.summary?.totalRecipes ?? 0) > 0;
     try {
       await commitSpecImport(specImportPrepared);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
       setShowSpecImport(false);
       setSpecImportPrepared(null);
+      // Fire-and-forget: a bump runs the merge-check effect after the new lists
+      // have re-rendered. Never blocks or fails the already-committed import.
+      if (importedRecipes) setMergeCheckRequest((c) => c + 1);
     } catch (err) {
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
@@ -6654,6 +6685,15 @@ export default function Home() {
                 {/* Standalone: Merge ingredients */}
                 {manageCategory === "merge" && (
                   <div className="space-y-4">
+                    {mergeFromImport && (
+                      <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2.5">
+                        <p className="text-xs text-foreground">
+                          Recipes were imported. Since recipe ingredients can also be used on
+                          their own, we checked them for possible duplicates below — review any
+                          suggestions before they become separate items.
+                        </p>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Combine duplicate or similar ingredients into one. Pick the ingredient(s)
                       to merge away (sources), then the one to keep (target). Every recipe,
@@ -6675,7 +6715,7 @@ export default function Home() {
                           <button
                             type="button"
                             disabled={mergeSuggestBusy || mergeBusy}
-                            onClick={handleSuggestMerges}
+                            onClick={() => handleSuggestMerges()}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
                           >{mergeSuggestBusy ? "Scanning…" : "Suggest with AI"}</button>
                         </div>
