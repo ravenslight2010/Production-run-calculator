@@ -3179,6 +3179,13 @@ export default function Home() {
   }, []);
 
   function doFetch(payload: SyncPayload, retriesLeft: number, sig?: string) {
+    // Guard the retry path too: buildSyncPayload stamps the payload with the
+    // date it was built on. A push queued just before midnight could otherwise
+    // retry after midnight and write yesterday's runs into the new day's
+    // /api/sync/today row — the same leak schedulePush guards. If the payload's
+    // build-date is no longer today, drop it (the rollover will push the fresh
+    // day instead).
+    if (payload.dayState.date && payload.dayState.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
     fetch("/api/sync/today", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -3251,6 +3258,14 @@ export default function Home() {
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
     pushAcknowledgedRef.current = false;
     pushTimerRef.current = setTimeout(() => {
+      // Never push a stale-dated day into today's sync row. A tab left open
+      // across midnight still holds yesterday's runs until the rollover fires;
+      // pushing them to /api/sync/today (the server resolves "today" by its own
+      // clock) would leak yesterday's runs into today's row. The rollover then
+      // fetches that row and "pulls them up" as if they were pre-scheduled, so
+      // the daily reset never clears. Skip until the rollover swaps in the fresh
+      // day. The SSE-onopen reconnect re-push is the main offender here.
+      if (ds.date && ds.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
       const payload = buildSyncPayload(ds);
       // Skip re-pushing an unchanged state (idle periodic/reconnect pushes).
       // Without this, a second open tab keeps broadcasting its stale copy and

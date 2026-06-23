@@ -1843,6 +1843,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const base = getApiBaseUrl();
     const clientId = clientIdRef.current;
     if (!base || !clientId) return;
+    // Never push a stale-dated day into today's sync row (web parity). If the
+    // app sits open across midnight, appState still holds yesterday's runs until
+    // the rollover fires; pushing them to /api/sync/today (server resolves
+    // "today" by its own clock) would leak yesterday's runs into today's row and
+    // defeat the daily reset. Skip until the rollover swaps in the fresh day.
+    if (appStateRef.current.date && appStateRef.current.date !== todayStr()) return;
     let payload: SyncPayload;
     let sig: string;
     try {

@@ -52,3 +52,19 @@ day; the on-mount rollover stamps its own `resetAt` when a real rollover occurs.
 cold-start path and the live path so they can't drift. When importing RN's
 `AppState`, alias it (`AppState as RNAppState`) — the mobile RunContext has its
 own local `AppState` interface.
+
+**The stale-day sync-push leak (defeats the reset):** ALL sync pushes target
+`/api/sync/today`, which the *server* resolves by its own clock — the URL has no
+date param. So pushing a day-state whose date is yesterday writes yesterday's
+runs into TODAY's row. The rollover then fetches `/api/sync/today` to pull any
+*pre-scheduled* runs for the new day; if a stale push leaked yesterday's runs
+there, it loads them as "scheduled" and the reset never clears. Trigger: a tab
+left open across midnight — web's SSE `onopen` re-pushes `dayStateRef.current`
+(still yesterday) on every reconnect, before `checkDateRollover` swaps in the
+fresh day. **Fix/rule:** never push a day whose `date !== todayStr()`. Web guards
+both `schedulePush` (at push time) AND `doFetch` (retry path — `buildSyncPayload`
+stamps the build-time date into `payload.dayState.date`, so a pre-midnight push
+retrying post-midnight is dropped). Mobile guards `doPush`; its retry rebuilds
+the payload from `appStateRef` and re-checks, so no stale payload is reused.
+Genuine scheduled-for-today rows are written by the schedule dialog to a FUTURE
+date key (a different path) and are unaffected.
