@@ -6,6 +6,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   loading: boolean;
+  /** Multi-file parse progress; null for a single file. */
+  progress?: { done: number; total: number } | null;
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
@@ -21,6 +23,7 @@ export default function SpecImportDialog({
   open,
   onClose,
   loading,
+  progress,
   error,
   prepared,
   applying,
@@ -59,7 +62,9 @@ export default function SpecImportDialog({
             <div className="flex flex-col items-center gap-3 py-8 text-center">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
               <p className="text-sm text-muted-foreground">
-                Reading the workbook and interpreting spec sheets &amp; recipes…
+                {progress && progress.total > 1
+                  ? `Reading file ${Math.min(progress.done + 1, progress.total)} of ${progress.total} and interpreting spec sheets & recipes…`
+                  : "Reading the workbook and interpreting spec sheets & recipes…"}
               </p>
             </div>
           )}

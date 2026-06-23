@@ -269,7 +269,7 @@ import {
 } from "@/utils/runExcel";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
-import { prepareSpecImport, commitSpecImport, type SpecImportPrepared } from "@/specImport";
+import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 
 import {
   Form,
@@ -2588,6 +2588,7 @@ export default function Home() {
   const [specImportApplying, setSpecImportApplying] = useState(false);
   const [specImportError, setSpecImportError] = useState<string | null>(null);
   const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
+  const [specImportProgress, setSpecImportProgress] = useState<{ done: number; total: number } | null>(null);
   const specImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
@@ -4499,16 +4500,27 @@ export default function Home() {
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
   async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_SPEC_IMPORT_FILES);
     e.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
     setSpecImportPrepared(null);
     setSpecImportError(null);
+    setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
     setSpecImportLoading(true);
     setShowSpecImport(true);
     try {
-      const buf = await file.arrayBuffer();
-      const prepared = await prepareSpecImport(buf);
+      // Read each workbook independently so one unreadable file doesn't sink the
+      // batch — prepareSpecImportMulti skips unparseable buffers and throws only
+      // if every file failed.
+      const buffers = await Promise.all(
+        files.map((f) => f.arrayBuffer().catch(() => new ArrayBuffer(0))),
+      );
+      const prepared =
+        buffers.length === 1
+          ? await prepareSpecImport(buffers[0])
+          : await prepareSpecImportMulti(buffers, (done, total) =>
+              setSpecImportProgress({ done, total }),
+            );
       setSpecImportPrepared(prepared);
     } catch (err) {
       setSpecImportError(
@@ -4516,6 +4528,7 @@ export default function Home() {
       );
     } finally {
       setSpecImportLoading(false);
+      setSpecImportProgress(null);
     }
   }
 
@@ -11211,6 +11224,7 @@ export default function Home() {
             ref={specImportInputRef}
             type="file"
             accept=".xlsx"
+            multiple
             className="hidden"
             onChange={handleSpecImportFile}
           />
@@ -11258,6 +11272,7 @@ export default function Home() {
           open={showSpecImport}
           onClose={() => { setShowSpecImport(false); setSpecImportPrepared(null); setSpecImportError(null); }}
           loading={specImportLoading}
+          progress={specImportProgress}
           error={specImportError}
           prepared={specImportPrepared}
           applying={specImportApplying}

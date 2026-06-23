@@ -87,3 +87,4 @@
 - [Run-complete alert timing](run-complete-alert-timing.md) — "time's up" fires only when ppm>0 AND time counted down (runWasTimedRef latch); web adjustedTimeSec falls back to totalTimeSec so it needs an explicit ppm>0 guard to match mobile's null minutesRemaining.
 - [Auto-track remainder carry](autotrack-remainder-carry.md) — auto-track trays/batches must carry a fractional remainder across buckets or sub-unit-per-bucket units (esp. batches) freeze; web+mobile parity.
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
+- [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.

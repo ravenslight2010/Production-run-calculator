@@ -56,6 +56,34 @@ export type ParsedSpecImport = {
 };
 
 /**
+ * Merge several parsed spec imports (e.g. from importing multiple workbooks at
+ * once) into one combined result. Profiles are de-duplicated by brand+flavor and
+ * recipes by kind+name, both case-insensitively, with LATER entries winning so a
+ * more recent file overrides an earlier one — matching the single-file
+ * overwrite-by-name apply semantics. Notes are concatenated. Pure.
+ */
+export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImport {
+  const profileMap = new Map<string, ParsedProfile>();
+  const recipeMap = new Map<string, ParsedRecipe>();
+  const notes: string[] = [];
+  for (const item of list) {
+    for (const p of item.profiles) {
+      profileMap.set(`${p.brand.trim().toLowerCase()}|${p.flavor.trim().toLowerCase()}`, p);
+    }
+    for (const r of item.recipes) {
+      recipeMap.set(`${r.kind}|${r.name.trim().toLowerCase()}`, r);
+    }
+    if (item.note && item.note.trim()) notes.push(item.note.trim());
+  }
+  const result: ParsedSpecImport = {
+    profiles: [...profileMap.values()],
+    recipes: [...recipeMap.values()],
+  };
+  if (notes.length) result.note = notes.join("\n");
+  return result;
+}
+
+/**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated
  * (case-insensitive). Entries missing a brand or flavor are dropped. Shared by

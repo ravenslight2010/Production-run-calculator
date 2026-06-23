@@ -1724,6 +1724,7 @@ function PhotoIntakeCard({
   const [open, setOpen] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryIn, setRetryIn] = useState(0);
   const [rows, setRows] = useState<ReviewRow[]>([]);
@@ -1812,21 +1813,72 @@ function PhotoIntakeCard({
     }
   }
 
-  async function onPick(file: File | null) {
-    if (!file) return;
-    let imageBase64: string;
+  // Analyze several photos in ONE intake: each image is its own AI call (run
+  // sequentially to respect the endpoint's cost/rate guards) and the identified
+  // rows are ACCUMULATED into the review list rather than clobbering it, so the
+  // user confirms one combined list. Mirrors the mobile multi-image picker.
+  async function analyzeMany(images: string[]) {
+    lastImageRef.current = images[images.length - 1] ?? null;
+    setError(null);
+    setNoResults(false);
+    setRows([]);
+    setRetryIn(0);
+    setAnalyzing(true);
+    setAnalyzeProgress({ done: 0, total: images.length });
+    let any = false;
+    try {
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const { items } = await identifyInventoryPhoto({
+            imageBase64: images[i],
+            mimeType: "image/jpeg",
+            candidates,
+          });
+          const next = toRows(items);
+          if (next.length) {
+            any = true;
+            setRows((rs) => [...rs, ...next]);
+          }
+        } catch (e) {
+          // Surface the error but keep going so one bad photo doesn't sink the batch.
+          setError(photoErrorMessage(e));
+          if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+            setRetryIn(e.retryAfterSec);
+            break; // rate-limited: stop hammering the endpoint
+          }
+        } finally {
+          setAnalyzeProgress({ done: i + 1, total: images.length });
+        }
+      }
+      setNoResults(!any);
+    } finally {
+      setAnalyzing(false);
+      setAnalyzeProgress(null);
+    }
+  }
+
+  async function onPick(files: File[]) {
+    if (files.length === 0) return;
+    let images: string[];
     setError(null);
     setPreparing(true);
     try {
-      imageBase64 = await fileToBase64Jpeg(file);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to read photo");
-      return;
+      // Convert each file independently so one unreadable photo doesn't sink the
+      // whole batch — keep the ones that succeed.
+      const settled = await Promise.all(
+        files.map((f) => fileToBase64Jpeg(f).catch(() => null)),
+      );
+      images = settled.filter((b): b is string => !!b);
     } finally {
       setPreparing(false);
       if (fileRef.current) fileRef.current.value = "";
     }
-    await analyze(imageBase64);
+    if (images.length === 0) {
+      setError("Failed to read photo");
+      return;
+    }
+    if (images.length === 1) await analyze(images[0]);
+    else await analyzeMany(images);
   }
 
   // Re-run analysis on the last picked image without re-opening the picker.
@@ -1928,9 +1980,9 @@ function PhotoIntakeCard({
             ref={fileRef}
             type="file"
             accept="image/*"
-            capture="environment"
+            multiple
             className="hidden"
-            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+            onChange={(e) => onPick(Array.from(e.target.files ?? []))}
           />
           <Button
             size="sm"
@@ -1940,15 +1992,18 @@ function PhotoIntakeCard({
           >
             {preparing ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photos…
               </>
             ) : analyzing ? (
               <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />{" "}
+                {analyzeProgress && analyzeProgress.total > 1
+                  ? `Analyzing photo ${Math.min(analyzeProgress.done + 1, analyzeProgress.total)} of ${analyzeProgress.total}…`
+                  : "Analyzing…"}
               </>
             ) : (
               <>
-                <Camera className="w-3.5 h-3.5" /> Choose photo
+                <Camera className="w-3.5 h-3.5" /> Choose photos
               </>
             )}
           </Button>

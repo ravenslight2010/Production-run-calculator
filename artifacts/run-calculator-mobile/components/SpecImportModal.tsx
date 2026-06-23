@@ -17,6 +17,8 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   loading: boolean;
+  /** Multi-file parse progress; null for a single file. */
+  progress?: { done: number; total: number } | null;
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
@@ -33,6 +35,7 @@ export default function SpecImportModal({
   visible,
   onClose,
   loading,
+  progress,
   error,
   prepared,
   applying,
@@ -73,7 +76,9 @@ export default function SpecImportModal({
               <View style={styles.center}>
                 <ActivityIndicator color={colors.primary} />
                 <Text style={[styles.help, { color: colors.mutedForeground, textAlign: "center" }]}>
-                  Reading the workbook and interpreting spec sheets &amp; recipes…
+                  {progress && progress.total > 1
+                    ? `Reading file ${Math.min(progress.done + 1, progress.total)} of ${progress.total} and interpreting spec sheets & recipes…`
+                    : "Reading the workbook and interpreting spec sheets & recipes…"}
                 </Text>
               </View>
             ) : null}

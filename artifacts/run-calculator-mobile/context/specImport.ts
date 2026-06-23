@@ -19,6 +19,7 @@ import {
   canonicalize,
   collectSpecAliases,
   gridsToPromptText,
+  mergeParsedSpecImports,
   recipeTargets,
   summarizeSpecImport,
   type CanonicalResult,
@@ -205,25 +206,27 @@ function canonicalizeParsed(
   };
 }
 
+type ParseCore = {
+  parsed: ParsedSpecImport;
+  resolved: ReturnType<typeof canonicalizeParsed>["resolved"];
+  flagged: SpecFlaggedItem[];
+};
+
 /**
- * Full read → AI → canonicalize → summarize step. Throws on a hard failure
- * (e.g. empty workbook, AI unavailable/forbidden) so the UI can show why.
+ * Read one workbook's grids → AI parse → canonicalize, returning the
+ * canonicalized parse, resolved alias pairs, and reviewer-AI flags for that
+ * single file. Throws on a hard failure (empty workbook, AI unavailable). Shared
+ * by the single- and multi-file prepare paths so they stay identical. Mirrors
+ * web parseWorkbookCore.
  */
-export async function prepareSpecImport(
+async function parseGridsCore(
   grids: SheetGrid[],
   store: SpecImportStore,
-): Promise<SpecImportPrepared> {
+  aliases: SpecImportAlias[],
+): Promise<ParseCore> {
   const workbookText = gridsToPromptText(grids);
   if (!workbookText.trim()) {
     throw new Error("That workbook looks empty — nothing to import.");
-  }
-
-  // Learned aliases are best-effort; proceed without them if the fetch fails.
-  let aliases: SpecImportAlias[] = [];
-  try {
-    aliases = await fetchSpecImportAliases();
-  } catch {
-    aliases = [];
   }
 
   const ai = await requestParseSpecSheet({
@@ -237,9 +240,6 @@ export async function prepareSpecImport(
     store.known,
     aliases,
   );
-
-  const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
-  const newAliases = collectSpecAliases(resolved);
 
   // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
   const flagged: SpecFlaggedItem[] = [];
@@ -258,7 +258,91 @@ export async function prepareSpecImport(
     }
   }
 
+  return { parsed, resolved, flagged };
+}
+
+/** Learned aliases are best-effort; proceed without them if the fetch fails. */
+async function loadSpecImportAliases(): Promise<SpecImportAlias[]> {
+  try {
+    return await fetchSpecImportAliases();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Full read → AI → canonicalize → summarize step. Throws on a hard failure
+ * (e.g. empty workbook, AI unavailable/forbidden) so the UI can show why.
+ */
+export async function prepareSpecImport(
+  grids: SheetGrid[],
+  store: SpecImportStore,
+): Promise<SpecImportPrepared> {
+  const aliases = await loadSpecImportAliases();
+  const { parsed, resolved, flagged } = await parseGridsCore(grids, store, aliases);
+
+  const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
+  const newAliases = collectSpecAliases(resolved);
+
   return { parsed, summary, newAliases, flagged, ...(parsed.note ? { note: parsed.note } : {}) };
+}
+
+/** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
+export const MAX_SPEC_IMPORT_FILES = 10;
+
+/**
+ * Multi-file variant: parse several workbooks in ONE import. Each file is its
+ * own AI call (run sequentially to respect the endpoint's cost/rate guards),
+ * then the per-file parses are merged into a single review (profiles deduped by
+ * brand+flavor, recipes by kind+name, later files winning). Files that fail to
+ * read are skipped and surfaced as a note; it only throws if EVERY file failed.
+ * Mirrors web prepareSpecImportMulti (replit.md parity).
+ */
+export async function prepareSpecImportMulti(
+  gridsList: SheetGrid[][],
+  store: SpecImportStore,
+  onProgress?: (done: number, total: number) => void,
+): Promise<SpecImportPrepared> {
+  const aliases = await loadSpecImportAliases();
+
+  const parsedList: ParsedSpecImport[] = [];
+  const allResolved: ParseCore["resolved"] = [];
+  const flagged: SpecFlaggedItem[] = [];
+  const errors: string[] = [];
+
+  let done = 0;
+  for (const grids of gridsList) {
+    try {
+      const core = await parseGridsCore(grids, store, aliases);
+      parsedList.push(core.parsed);
+      allResolved.push(...core.resolved);
+      flagged.push(...core.flagged);
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : "Could not read a file.");
+    } finally {
+      done += 1;
+      onProgress?.(done, gridsList.length);
+    }
+  }
+
+  if (parsedList.length === 0) {
+    throw new Error(errors[0] ?? "Nothing to import.");
+  }
+
+  const merged = mergeParsedSpecImports(parsedList);
+  const summary = summarizeSpecImport(merged, store.profileExists, store.recipeExists);
+  const newAliases = collectSpecAliases(allResolved);
+
+  const noteParts: string[] = [];
+  if (merged.note) noteParts.push(merged.note);
+  if (errors.length) {
+    noteParts.push(
+      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
+    );
+  }
+  const note = noteParts.length ? noteParts.join("\n") : undefined;
+
+  return { parsed: merged, summary, newAliases, flagged, ...(note ? { note } : {}) };
 }
 
 /** Apply a prepared import: write profiles + recipes, then persist new aliases. */

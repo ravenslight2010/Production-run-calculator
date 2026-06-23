@@ -1397,6 +1397,7 @@ function PhotoIntakeCard({
   const [open, setOpen] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retryIn, setRetryIn] = useState(0);
   const [rows, setRows] = useState<ReviewRow[]>([]);
@@ -1496,6 +1497,50 @@ function PhotoIntakeCard({
     if (lastImageRef.current) void analyze(lastImageRef.current);
   }
 
+  // Analyze several photos in ONE intake: each image is its own AI call (run
+  // sequentially to respect the endpoint's cost/rate guards) and the identified
+  // rows are ACCUMULATED into the review list rather than clobbering it, so the
+  // user confirms one combined list. Mirrors the web multi-image picker.
+  async function analyzeMany(images: string[]) {
+    lastImageRef.current = images[images.length - 1] ?? null;
+    setError(null);
+    setNoResults(false);
+    setRows([]);
+    setRetryIn(0);
+    setAnalyzing(true);
+    setAnalyzeProgress({ done: 0, total: images.length });
+    let any = false;
+    try {
+      for (let i = 0; i < images.length; i++) {
+        try {
+          const { items } = await identifyInventoryPhoto({
+            imageBase64: images[i],
+            mimeType: "image/jpeg",
+            candidates,
+          });
+          const next = toRows(items);
+          if (next.length) {
+            any = true;
+            setRows((rs) => [...rs, ...next]);
+          }
+        } catch (e) {
+          // Surface the error but keep going so one bad photo doesn't sink the batch.
+          setError(photoErrorMessage(e));
+          if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+            setRetryIn(e.retryAfterSec);
+            break; // rate-limited: stop hammering the endpoint
+          }
+        } finally {
+          setAnalyzeProgress({ done: i + 1, total: images.length });
+        }
+      }
+      setNoResults(!any);
+    } finally {
+      setAnalyzing(false);
+      setAnalyzeProgress(null);
+    }
+  }
+
   // Downscale/compress the chosen asset before handing it to analyze(), so the
   // payload stays under the server's size cap regardless of the original size.
   async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
@@ -1517,6 +1562,39 @@ function PhotoIntakeCard({
     await analyze(base64);
   }
 
+  // Prepare several picked assets (compress each, skip any that fail) and hand
+  // the resulting images to analyzeMany for accumulation.
+  async function analyzeAssets(assets: ImagePicker.ImagePickerAsset[]) {
+    const usable = assets.filter((a) => a?.uri);
+    if (usable.length === 0) return;
+    if (usable.length === 1) {
+      await analyzeAsset(usable[0]);
+      return;
+    }
+    let images: string[];
+    setPreparing(true);
+    try {
+      const prepared = await Promise.all(
+        usable.map((a) =>
+          prepareImageBase64(a.uri, a.width ?? MAX_PHOTO_EDGE, a.height ?? MAX_PHOTO_EDGE).catch(
+            () => null,
+          ),
+        ),
+      );
+      images = prepared.filter((b): b is string => !!b);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process photos");
+      return;
+    } finally {
+      setPreparing(false);
+    }
+    if (images.length === 0) {
+      setError("Failed to process photos");
+      return;
+    }
+    await analyzeMany(images);
+  }
+
   async function takePhoto() {
     setError(null);
     const perm = await ImagePicker.requestCameraPermissionsAsync();
@@ -1536,8 +1614,9 @@ function PhotoIntakeCard({
     const res = await ImagePicker.launchImageLibraryAsync({
       quality: 1,
       mediaTypes: ["images"],
+      allowsMultipleSelection: true,
     });
-    if (!res.canceled) await analyzeAsset(res.assets[0]);
+    if (!res.canceled) await analyzeAssets(res.assets);
   }
 
   function patch(id: string, p: Partial<ReviewRow>) {
@@ -1642,7 +1721,11 @@ function PhotoIntakeCard({
             <View style={styles.analyzingRow}>
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
-                {preparing ? "Preparing photo…" : "Analyzing photo…"}
+                {preparing
+                  ? "Preparing photos…"
+                  : analyzeProgress && analyzeProgress.total > 1
+                    ? `Analyzing photo ${Math.min(analyzeProgress.done + 1, analyzeProgress.total)} of ${analyzeProgress.total}…`
+                    : "Analyzing photo…"}
               </Text>
             </View>
           )}

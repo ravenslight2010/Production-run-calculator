@@ -47,9 +47,11 @@ import { suggestMerges, denyMerge, type ReviewedMergeSuggestion } from "@/contex
 import ReviewBadge from "@/components/ReviewBadge";
 import {
   prepareSpecImport,
+  prepareSpecImportMulti,
   commitSpecImport,
   readWorkbookGridsFromArrayBuffer,
   readWorkbookGridsFromBase64,
+  MAX_SPEC_IMPORT_FILES,
   type SpecImportPrepared,
   type SpecImportStore,
 } from "@/context/specImport";
@@ -874,6 +876,7 @@ export default function MasterDataScreen() {
   const [specApplying, setSpecApplying] = useState(false);
   const [specError, setSpecError] = useState<string | null>(null);
   const [specPrepared, setSpecPrepared] = useState<SpecImportPrepared | null>(null);
+  const [specProgress, setSpecProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Build the store the orchestration glue needs from live context (web reads
   // localStorage directly; mobile injects the same shape here).
@@ -962,21 +965,32 @@ export default function MasterDataScreen() {
           "*/*",
         ],
         copyToCacheDirectory: true,
-        multiple: false,
+        multiple: true,
       });
-      if (picked.canceled || !picked.assets?.[0]) return;
-      const asset = picked.assets[0];
+      if (picked.canceled || !picked.assets?.length) return;
+      const assets = picked.assets.slice(0, MAX_SPEC_IMPORT_FILES);
       setSpecOpen(true);
+      setSpecProgress(assets.length > 1 ? { done: 0, total: assets.length } : null);
       setSpecLoading(true);
-      const grids =
+      const readGrids = async (uri: string) =>
         Platform.OS === "web"
-          ? readWorkbookGridsFromArrayBuffer(
-              await (await fetch(asset.uri)).arrayBuffer(),
-            )
-          : readWorkbookGridsFromBase64(
-              await Promise.resolve(new File(asset.uri).base64()),
-            );
-      const prepared = await prepareSpecImport(grids, buildSpecStore());
+          ? readWorkbookGridsFromArrayBuffer(await (await fetch(uri)).arrayBuffer())
+          : readWorkbookGridsFromBase64(await Promise.resolve(new File(uri).base64()));
+      const store = buildSpecStore();
+      let prepared: SpecImportPrepared;
+      if (assets.length === 1) {
+        prepared = await prepareSpecImport(await readGrids(assets[0].uri), store);
+      } else {
+        // Read each workbook independently so one unreadable file doesn't sink
+        // the batch — prepareSpecImportMulti skips empties and throws only if
+        // every file failed.
+        const settled = await Promise.all(
+          assets.map((a) => readGrids(a.uri).catch(() => [])),
+        );
+        prepared = await prepareSpecImportMulti(settled, store, (done, total) =>
+          setSpecProgress({ done, total }),
+        );
+      }
       setSpecPrepared(prepared);
     } catch (e) {
       setSpecError(
@@ -984,6 +998,7 @@ export default function MasterDataScreen() {
       );
     } finally {
       setSpecLoading(false);
+      setSpecProgress(null);
     }
   }
 
@@ -1333,6 +1348,7 @@ export default function MasterDataScreen() {
           setSpecError(null);
         }}
         loading={specLoading}
+        progress={specProgress}
         error={specError}
         prepared={specPrepared}
         applying={specApplying}

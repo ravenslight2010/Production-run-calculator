@@ -8,6 +8,7 @@ import {
   recipeTargets,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
+  mergeParsedSpecImports,
   SPEC_ALIAS_KINDS,
   type SpecImportAlias,
   type CanonicalResult,
@@ -273,6 +274,51 @@ describe("summarizeSpecImport", () => {
       totalProfiles: 2,
       totalRecipes: 2,
     });
+  });
+});
+
+describe("mergeParsedSpecImports", () => {
+  it("dedupes profiles by brand|flavor and recipes by kind|name with last-wins, joining notes", () => {
+    const a = {
+      profiles: [
+        { brand: "Tombstone", flavor: "Pepperoni", applicators: [], pepperonis: [], note: "first" },
+        { brand: "DiGiorno", flavor: "Supreme", applicators: [], pepperonis: [] },
+      ],
+      recipes: [
+        { kind: "dough" as const, name: "Base Dough", rows: [{ ingredient: "Flour", lbs: 1 }] },
+      ],
+      note: "file A",
+    };
+    const b = {
+      profiles: [
+        // same brand+flavor (different case/spacing) → overrides a's entry
+        { brand: " tombstone ", flavor: "PEPPERONI", applicators: [], pepperonis: [], note: "second" },
+        { brand: "Newman", flavor: "Cheese", applicators: [], pepperonis: [] },
+      ],
+      recipes: [
+        // same kind+name → overrides
+        { kind: "dough" as const, name: "base dough", rows: [{ ingredient: "Flour", lbs: 2 }] },
+        { kind: "sauce" as const, name: "Red Sauce", rows: [{ ingredient: "Tomato", lbs: 3 }] },
+      ],
+      note: "file B",
+    };
+    const merged = mergeParsedSpecImports([a, b]);
+    expect(merged.profiles).toHaveLength(3);
+    const tomb = merged.profiles.find(
+      (p) => p.brand.trim().toLowerCase() === "tombstone" && p.flavor.toLowerCase() === "pepperoni",
+    );
+    expect(tomb?.note).toBe("second");
+    expect(merged.recipes).toHaveLength(2);
+    const dough = merged.recipes.find((r) => r.kind === "dough");
+    expect(dough?.rows[0]?.lbs).toBe(2);
+    expect(merged.note).toBe("file A\nfile B");
+  });
+
+  it("omits note when no inputs carry one", () => {
+    const merged = mergeParsedSpecImports([{ profiles: [], recipes: [] }]);
+    expect(merged.note).toBeUndefined();
+    expect(merged.profiles).toEqual([]);
+    expect(merged.recipes).toEqual([]);
   });
 });
 
