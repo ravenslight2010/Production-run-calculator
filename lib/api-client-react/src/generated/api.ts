@@ -37,6 +37,7 @@ import type {
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
   CreateRole,
+  DeleteFreezerPullItemsInput,
   DeleteProductionRulesInput,
   DeniedMergeList,
   FacilityKnowledgeList,
@@ -48,6 +49,7 @@ import type {
   ForecastInput,
   ForecastResult,
   ForgotPasswordRequest,
+  FreezerPullItemList,
   HealthStatus,
   IdentifyPhotoInput,
   IdentifyPhotoResult,
@@ -94,6 +96,7 @@ import type {
   SaveDeniedMergesInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
+  SaveFreezerPullItemsInput,
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
   SaveMergedAwayInput,
@@ -4527,6 +4530,228 @@ export const useDeleteProductionRules = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteProductionRulesMutationOptions(options));
+    }
+
+export const getListFreezerPullItemsUrl = () => {
+
+
+
+
+  return `/api/freezer-pull-items`
+}
+
+/**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
+ * @summary List manager-defined freezer-pull items
+ */
+export const listFreezerPullItems = async ( options?: RequestInit): Promise<FreezerPullItemList> => {
+
+  return customFetch<FreezerPullItemList>(getListFreezerPullItemsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFreezerPullItemsQueryKey = () => {
+    return [
+    `/api/freezer-pull-items`
+    ] as const;
+    }
+
+
+export const getListFreezerPullItemsQueryOptions = <TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFreezerPullItemsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFreezerPullItems>>> = ({ signal }) => listFreezerPullItems({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListFreezerPullItemsQueryResult = NonNullable<Awaited<ReturnType<typeof listFreezerPullItems>>>
+export type ListFreezerPullItemsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined freezer-pull items
+ */
+
+export function useListFreezerPullItems<TData = Awaited<ReturnType<typeof listFreezerPullItems>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFreezerPullItems>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListFreezerPullItemsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveFreezerPullItemsUrl = () => {
+
+
+
+
+  return `/api/freezer-pull-items`
+}
+
+/**
+ * Upserts a batch of freezer-pull items by id. Each item is normalized and validated server-side; malformed items are dropped. Manager role required.
+ * @summary Create or update freezer-pull items (manager only)
+ */
+export const saveFreezerPullItems = async (saveFreezerPullItemsInput: SaveFreezerPullItemsInput, options?: RequestInit): Promise<FreezerPullItemList> => {
+
+  return customFetch<FreezerPullItemList>(getSaveFreezerPullItemsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveFreezerPullItemsInput,)
+  }
+);}
+
+
+
+
+export const getSaveFreezerPullItemsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFreezerPullItems>>, TError,{data: BodyType<SaveFreezerPullItemsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveFreezerPullItems>>, TError,{data: BodyType<SaveFreezerPullItemsInput>}, TContext> => {
+
+const mutationKey = ['saveFreezerPullItems'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveFreezerPullItems>>, {data: BodyType<SaveFreezerPullItemsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveFreezerPullItems(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveFreezerPullItemsMutationResult = NonNullable<Awaited<ReturnType<typeof saveFreezerPullItems>>>
+    export type SaveFreezerPullItemsMutationBody = BodyType<SaveFreezerPullItemsInput>
+    export type SaveFreezerPullItemsMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update freezer-pull items (manager only)
+ */
+export const useSaveFreezerPullItems = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveFreezerPullItems>>, TError,{data: BodyType<SaveFreezerPullItemsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveFreezerPullItems>>,
+        TError,
+        {data: BodyType<SaveFreezerPullItemsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveFreezerPullItemsMutationOptions(options));
+    }
+
+export const getDeleteFreezerPullItemsUrl = () => {
+
+
+
+
+  return `/api/freezer-pull-items`
+}
+
+/**
+ * Removes a batch of freezer-pull items by id. Manager role required.
+ * @summary Delete freezer-pull items by id (manager only)
+ */
+export const deleteFreezerPullItems = async (deleteFreezerPullItemsInput: DeleteFreezerPullItemsInput, options?: RequestInit): Promise<FreezerPullItemList> => {
+
+  return customFetch<FreezerPullItemList>(getDeleteFreezerPullItemsUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteFreezerPullItemsInput,)
+  }
+);}
+
+
+
+
+export const getDeleteFreezerPullItemsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFreezerPullItems>>, TError,{data: BodyType<DeleteFreezerPullItemsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteFreezerPullItems>>, TError,{data: BodyType<DeleteFreezerPullItemsInput>}, TContext> => {
+
+const mutationKey = ['deleteFreezerPullItems'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteFreezerPullItems>>, {data: BodyType<DeleteFreezerPullItemsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteFreezerPullItems(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteFreezerPullItemsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteFreezerPullItems>>>
+    export type DeleteFreezerPullItemsMutationBody = BodyType<DeleteFreezerPullItemsInput>
+    export type DeleteFreezerPullItemsMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete freezer-pull items by id (manager only)
+ */
+export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteFreezerPullItems>>, TError,{data: BodyType<DeleteFreezerPullItemsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteFreezerPullItems>>,
+        TError,
+        {data: BodyType<DeleteFreezerPullItemsInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
     }
 
 export const getListAiCorrectionsUrl = () => {

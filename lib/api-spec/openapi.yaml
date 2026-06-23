@@ -1419,6 +1419,72 @@ paths:
         "403":
           description: Manager role required
 
+  /freezer-pull-items:
+    get:
+      operationId: listFreezerPullItems
+      tags: [freezerPullItems]
+      summary: List manager-defined freezer-pull items
+      description: >-
+        Returns every factory-wide freezer-pull item (ingredients that must be
+        pulled from the freezer a set number of days before the run that uses
+        them). These are global policy (not part of the per-day sync payload).
+        Reading is available to any signed-in user so both apps can build the
+        warehouse pull notices; editing is manager-only.
+      responses:
+        "200":
+          description: All freezer-pull items
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerPullItemList"
+    post:
+      operationId: saveFreezerPullItems
+      tags: [freezerPullItems]
+      summary: Create or update freezer-pull items (manager only)
+      description: >-
+        Upserts a batch of freezer-pull items by id. Each item is normalized and
+        validated server-side; malformed items are dropped. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFreezerPullItemsInput"
+      responses:
+        "200":
+          description: The full updated item list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerPullItemList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteFreezerPullItems
+      tags: [freezerPullItems]
+      summary: Delete freezer-pull items by id (manager only)
+      description: >-
+        Removes a batch of freezer-pull items by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteFreezerPullItemsInput"
+      responses:
+        "200":
+          description: The full updated item list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FreezerPullItemList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
   /ai-corrections:
     get:
       operationId: listAiCorrections
@@ -4677,6 +4743,62 @@ components:
         ids:
           type: array
           description: The ids of the rules to delete
+          items:
+            type: string
+
+    FreezerPullItem:
+      type: object
+      description: >-
+        A manager-defined factory-wide freezer-pull item: an ingredient that
+        must be pulled from the freezer `daysEarly` days before the run that
+        uses it. Disabled items are kept but produce no warehouse notice.
+      required:
+        - id
+        - ingredient
+        - daysEarly
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        ingredient:
+          type: string
+          description: Ingredient name, matched case-insensitively against run need rows
+        daysEarly:
+          type: integer
+          description: Days before the run this item must be pulled (default 3)
+        enabled:
+          type: boolean
+
+    FreezerPullItemList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FreezerPullItem"
+
+    SaveFreezerPullItemsInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of freezer-pull items to create or update (by id)
+          items:
+            $ref: "#/components/schemas/FreezerPullItem"
+
+    DeleteFreezerPullItemsInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the freezer-pull items to delete
           items:
             type: string
 

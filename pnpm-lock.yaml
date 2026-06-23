@@ -182,6 +182,9 @@ importers:
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
+      '@workspace/freezer-pull':
+        specifier: workspace:*
+        version: link:../../lib/freezer-pull
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
@@ -456,6 +459,9 @@ importers:
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
+      '@workspace/freezer-pull':
+        specifier: workspace:*
+        version: link:../../lib/freezer-pull
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
@@ -706,6 +712,9 @@ importers:
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
+      '@workspace/freezer-pull':
+        specifier: workspace:*
+        version: link:../../lib/freezer-pull
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
@@ -947,6 +956,12 @@ importers:
         version: 0.31.10
 
   lib/fill-missing: {}
+
+  lib/freezer-pull:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/integrations-openai-ai-server:
     dependencies:

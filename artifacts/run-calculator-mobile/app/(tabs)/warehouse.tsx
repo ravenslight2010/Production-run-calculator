@@ -8,12 +8,18 @@ import {
   computeCalc,
   runLabel,
   todayStr,
+  profileKey,
+  DEFAULT_SETTINGS,
+  DEFAULT_PROGRESS,
   DEFAULT_PEP_TYPES,
   type RunCalc,
   type RunSettings,
+  type RunState,
 } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
+import { useFreezerPullItems } from "@/hooks/useFreezerPullItems";
+import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -98,7 +104,8 @@ function buildRunPackagingRows(s: RunSettings): NeedRow[] {
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, scheduled, stagedItems, toggleStagedItem } = useRun();
+  const { allRuns, scheduled, brandProfiles, stagedItems, toggleStagedItem } = useRun();
+  const { items: freezerPullItems } = useFreezerPullItems();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -193,6 +200,54 @@ export default function WarehouseScreen() {
     .filter((d) => (scheduled[d]?.length ?? 0) > 0 && d >= today)
     .sort();
 
+  // Pull Out Freezer: scheduled runs carry no recipe rows, so resolve each via
+  // its brand/flavor profile -> RunSettings -> RunCalc -> per-run need rows
+  // (exactly like the per-run breakdown), then let the shared lib decide which
+  // tagged freezer items are now within their pull window. Mirrors the web
+  // warehouse card (replit.md parity).
+  const freezerRuns = Object.entries(scheduled).flatMap(([date, runs]) =>
+    (runs ?? [])
+      .filter((r) => r.brand)
+      .map((r) => {
+        const profile = brandProfiles[profileKey(r.brand, r.flavor)] ?? {};
+        const settings: RunSettings = {
+          ...DEFAULT_SETTINGS,
+          ...profile,
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesNeeded,
+          ...(r.dieType ? { dieType: r.dieType } : {}),
+        };
+        const runState: RunState = {
+          id: r.id,
+          settings,
+          progress: { ...DEFAULT_PROGRESS },
+          stoppages: [],
+          isRunning: false,
+        };
+        const c = computeCalc(runState, nowMs);
+        const needRows = [
+          ...buildRunNeedRows(c, settings),
+          ...buildRunPackagingRows(settings),
+        ];
+        return {
+          date,
+          brand: r.brand,
+          flavor: r.flavor,
+          ingredients: needRows.map((row) => ({
+            name: row.label,
+            quantity: row.value,
+            unit: row.sub,
+          })),
+        };
+      }),
+  );
+  const freezerPlan = buildFreezerPullPlan({
+    runs: freezerRuns,
+    freezerItems: freezerPullItems,
+    today,
+  });
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
@@ -202,6 +257,58 @@ export default function WarehouseScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* Pull Out Freezer: grouped by run date, only items now within their
+            days-early window whose recipe uses them, with quantities. */}
+        {freezerPlan.map((group) => (
+          <Card
+            key={`freezer-${group.date}`}
+            title={`Pull Out Freezer for ${group.date === today ? "Today" : fmtDate(group.date)}`}
+            icon="alert-circle"
+            style={{ marginBottom: 16 }}
+          >
+            <Text style={[styles.freezerSubhead, { color: colors.mutedForeground }]}>
+              {group.daysUntil === 0
+                ? "Runs today"
+                : `In ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`}
+            </Text>
+            <View style={{ gap: 10 }}>
+              {group.runs.map((run, ri) => (
+                <View
+                  key={ri}
+                  style={[
+                    styles.freezerRun,
+                    { backgroundColor: colors.secondary, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.freezerRunTitle, { color: colors.foreground }]} numberOfLines={1}>
+                    {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                  </Text>
+                  <View style={styles.needList}>
+                    {run.items.map((it, ii) => (
+                      <View key={ii} style={styles.needRow}>
+                        <Text style={[styles.needLabel, { color: colors.mutedForeground }]} numberOfLines={1}>
+                          {it.name}
+                          <Text style={[styles.freezerEarly, { color: colors.mutedForeground }]}>
+                            {"  "}pull {it.daysEarly}d early
+                          </Text>
+                        </Text>
+                        <Text style={styles.needValueWrap} numberOfLines={1}>
+                          <Text style={[styles.needValue, { color: colors.foreground }]}>
+                            {it.quantity}{" "}
+                          </Text>
+                          <Text style={[styles.needSub, { color: colors.mutedForeground }]}>
+                            {it.unit}
+                          </Text>
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ))}
+
         {/* Total ingredient needs across all active runs (mixed units) */}
         <Card title="Total Ingredient Needs — All Runs" icon="archive">
           {needRows.length === 0 ? (
@@ -434,6 +541,11 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.mono,
     fontVariant: ["tabular-nums"],
   },
+
+  freezerSubhead: { fontSize: 12, fontFamily: FONTS.regular, marginBottom: 8 },
+  freezerRun: { borderRadius: 8, borderWidth: 1, padding: 12 },
+  freezerRunTitle: { fontSize: 15, fontFamily: FONTS.medium, marginBottom: 8 },
+  freezerEarly: { fontSize: 11, fontFamily: FONTS.regular },
 
   scheduleList: { gap: 6 },
   dayPill: {

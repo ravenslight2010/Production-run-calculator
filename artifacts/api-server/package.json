@@ -17,6 +17,7 @@
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
+    "@workspace/freezer-pull": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",

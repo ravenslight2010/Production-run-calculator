@@ -63,6 +63,7 @@
   "dependencies": {
     "@expo-google-fonts/space-mono": "^0.4.2",
     "@workspace/fill-missing": "workspace:*",
+    "@workspace/freezer-pull": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",

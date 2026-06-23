@@ -25,6 +25,9 @@
       "path": "../../lib/fill-missing"
     },
     {
+      "path": "../../lib/freezer-pull"
+    },
+    {
       "path": "../../lib/inventory-math"
     },
     {

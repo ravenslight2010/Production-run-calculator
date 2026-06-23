@@ -341,6 +341,22 @@ const ROUTES: GatedRoute[] = [
     body: { ids: [] },
     okStatus: 200,
   },
+  {
+    name: "POST /freezer-pull-items",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/freezer-pull-items",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /freezer-pull-items",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/freezer-pull-items",
+    body: { ids: [] },
+    okStatus: 200,
+  },
   // --- approve-password-resets ---
   {
     name: "GET /password-reset-requests",
@@ -458,6 +474,22 @@ describe("capability-based access control", () => {
       }
     });
   }
+});
+
+// Freezer-pull config writes are manager-gated (covered in GATED_ROUTES), but the
+// LIST is intentionally readable by any signed-in user so the warehouse tab can
+// render "Pull Out Freezer" cards for floor staff. These lock that read policy:
+// no token → 401, but a capability-less operator → 200.
+describe("GET /freezer-pull-items read policy", () => {
+  it("rejects an unauthenticated read with 401", async () => {
+    const res = await req(null, "GET", "/api/freezer-pull-items");
+    expect(res.status).toBe(401);
+  });
+
+  it("allows a capability-less operator to read (→ 200)", async () => {
+    const res = await req(OPERATOR, "GET", "/api/freezer-pull-items");
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("identity and role assignment", () => {

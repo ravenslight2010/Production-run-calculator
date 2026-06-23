@@ -120,6 +120,9 @@ import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import ProductionRulesManager from "../components/ProductionRulesManager";
+import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
+import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
+import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import StaffRolesCard from "../components/StaffRolesCard";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
@@ -264,6 +267,7 @@ import {
   Menu,
   LogOut,
   Smartphone,
+  Snowflake,
 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
 import * as XLSX from "xlsx";
@@ -2060,9 +2064,13 @@ export default function Home() {
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
   const unreviewedIncidentCount = useUnreviewedIncidentCount();
+  // Factory-wide freezer-pull items (open to all signed-in users) — drives the
+  // Warehouse "Pull Out Freezer" notices.
+  const { items: freezerPullItems } = useFreezerPullItems();
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
+  const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
   const [showReportIssue, setShowReportIssue] = useState(false);
@@ -6558,6 +6566,7 @@ export default function Home() {
         const settingsTabs: { key: string; label: string }[] = [
           { key: "import", label: "Import" },
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
+          ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -6998,6 +7007,20 @@ export default function Home() {
 
                 {/* Rules */}
                 {manageCategory === "rules" && canEditRules && <ProductionRulesManager />}
+
+                {/* Freezer-pull items */}
+                {manageCategory === "freezer" && canManageInventory && (
+                  <FreezerPullItemsManager
+                    suggestions={[
+                      ...doughIngredients,
+                      ...frontlineIngredients,
+                      ...cheeseIngredients,
+                      ...mixIngredients,
+                      ...ingredientTypes,
+                      ...pepTypes,
+                    ]}
+                  />
+                )}
 
                 {/* Staff (roster + roles) */}
                 {manageCategory === "staff" && (canManageStaff || canApproveResets) && (
@@ -9063,6 +9086,88 @@ export default function Home() {
 
               {/* ─── WAREHOUSE ─── */}
               <TabsContent value="warehouse">
+                {/* Pull Out Freezer: for each upcoming scheduled run within an
+                    item's days-early window whose recipe uses a tagged
+                    freezer-pull ingredient, show what to pull now, grouped by
+                    run date. Scheduled runs carry no recipe rows, so resolve
+                    each via its profile -> FormValues -> need rows, exactly like
+                    the schedule editor / per-run breakdown. */}
+                {(() => {
+                  const runs = scheduledDays.flatMap((day) =>
+                    (day.runs ?? [])
+                      .filter((r) => r.brand)
+                      .map((r) => {
+                        const profile = loadProfile(r.brand, r.flavor);
+                        const vals: FormValues = {
+                          ...(profile ?? DEFAULT_VALUES),
+                          casesNeeded: r.casesNeeded,
+                          ...(r.dieType ? { dieType: r.dieType } : {}),
+                        };
+                        const needRows = [
+                          ...aggregateNeedRows([vals]),
+                          ...aggregatePackagingNeeds([vals]),
+                        ];
+                        return {
+                          date: day.date,
+                          brand: r.brand,
+                          flavor: r.flavor,
+                          ingredients: needRows.map((row) => ({
+                            name: row.label,
+                            quantity: row.value,
+                            unit: row.sub ?? "",
+                          })),
+                        };
+                      }),
+                  );
+                  const plan = buildFreezerPullPlan({
+                    runs,
+                    freezerItems: freezerPullItems,
+                    today: todayStr(),
+                  });
+                  if (plan.length === 0) return null;
+                  return (
+                    <div className="space-y-3 mb-4">
+                      {plan.map((group) => (
+                        <Card
+                          key={group.date}
+                          className="bg-sky-950/30 border-sky-700/40 shadow-md"
+                          data-testid={`freezer-pull-${group.date}`}
+                        >
+                          <CardHeader className="pb-2 pt-4 px-5">
+                            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+                              <Snowflake className="w-4 h-4" /> Pull Out Freezer for {group.date}
+                              <span className="ml-1 font-normal normal-case text-xs text-sky-400/80">
+                                ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
+                              </span>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="px-4 pb-4 space-y-3">
+                            {group.runs.map((run, ri) => (
+                              <div key={ri} className="rounded-md border border-sky-800/40 bg-sky-950/20 p-3">
+                                <div className="font-semibold text-sm text-sky-100 mb-1.5 truncate">
+                                  {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                                </div>
+                                <div className="space-y-1">
+                                  {run.items.map((it, ii) => (
+                                    <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
+                                      <span className="text-sky-200/90 truncate">
+                                        {it.name}
+                                        <span className="ml-1.5 text-[11px] text-sky-400/70">pull {it.daysEarly}d early</span>
+                                      </span>
+                                      <span className="font-bold tabular-nums whitespace-nowrap text-sky-50">
+                                        {it.quantity} <span className="font-normal text-sky-300/80">{it.unit}</span>
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {(() => {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);
                   const valsList = activeRuns.map(r => loadRunValues(r.id));

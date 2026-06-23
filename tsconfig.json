@@ -40,6 +40,9 @@
       "path": "./lib/production-rules"
     },
     {
+      "path": "./lib/freezer-pull"
+    },
+    {
       "path": "./lib/ai-memory"
     },
     {

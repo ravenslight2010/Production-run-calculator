@@ -90,3 +90,4 @@
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
 - [Saved spec sheets + AI reconcile](saved-spec-reconcile.md) — max-2 saved spec sheets cross-ref'd vs CURRENT recipes; deterministic diff in @workspace/spec-reconcile, AI only narrates, must be rate-limited.
+- [Freezer-pull notification](freezer-pull.md) — warehouse "Pull Out Freezer for [date]" cards; manager-tagged items w/ per-item daysEarly; factory-wide master-data (NOT synced); GET authed-only, writes manage-inventory; web+mobile parity.

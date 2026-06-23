@@ -1603,6 +1603,61 @@ export const DeleteProductionRulesResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide freezer-pull item (ingredients that must be pulled from the freezer a set number of days before the run that uses them). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse pull notices; editing is manager-only.
+ * @summary List manager-defined freezer-pull items
+ */
+export const ListFreezerPullItemsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
+  "daysEarly": zod.number().describe('Days before the run this item must be pulled (default 3)'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
+})
+
+
+/**
+ * Upserts a batch of freezer-pull items by id. Each item is normalized and validated server-side; malformed items are dropped. Manager role required.
+ * @summary Create or update freezer-pull items (manager only)
+ */
+export const SaveFreezerPullItemsBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
+  "daysEarly": zod.number().describe('Days before the run this item must be pulled (default 3)'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.')).describe('The batch of freezer-pull items to create or update (by id)')
+})
+
+export const SaveFreezerPullItemsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
+  "daysEarly": zod.number().describe('Days before the run this item must be pulled (default 3)'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
+})
+
+
+/**
+ * Removes a batch of freezer-pull items by id. Manager role required.
+ * @summary Delete freezer-pull items by id (manager only)
+ */
+export const DeleteFreezerPullItemsBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the freezer-pull items to delete')
+})
+
+export const DeleteFreezerPullItemsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "ingredient": zod.string().describe('Ingredient name, matched case-insensitively against run need rows'),
+  "daysEarly": zod.number().describe('Days before the run this item must be pulled (default 3)'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.'))
+})
+
+
+/**
  * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
  * @summary List the shared factory-wide AI name corrections
  */

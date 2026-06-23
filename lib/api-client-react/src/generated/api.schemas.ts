@@ -1588,6 +1588,33 @@ export interface DeleteProductionRulesInput {
   ids: string[];
 }
 
+/**
+ * A manager-defined factory-wide freezer-pull item: an ingredient that must be pulled from the freezer `daysEarly` days before the run that uses it. Disabled items are kept but produce no warehouse notice.
+ */
+export interface FreezerPullItem {
+  /** Stable client-generated id */
+  id: string;
+  /** Ingredient name, matched case-insensitively against run need rows */
+  ingredient: string;
+  /** Days before the run this item must be pulled (default 3) */
+  daysEarly: number;
+  enabled: boolean;
+}
+
+export interface FreezerPullItemList {
+  items: FreezerPullItem[];
+}
+
+export interface SaveFreezerPullItemsInput {
+  /** The batch of freezer-pull items to create or update (by id) */
+  items: FreezerPullItem[];
+}
+
+export interface DeleteFreezerPullItemsInput {
+  /** The ids of the freezer-pull items to delete */
+  ids: string[];
+}
+
 export interface SuggestMergesInput {
   /** The full pool of mergeable ingredient/die names to cluster */
   names: string[];

@@ -89,6 +89,7 @@
     "@workspace/ai-review": "workspace:*",
     "@workspace/allergen": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
+    "@workspace/freezer-pull": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",

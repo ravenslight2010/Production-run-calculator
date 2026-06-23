@@ -21,6 +21,7 @@ import * as XLSX from "xlsx";
 import SpecImportModal from "@/components/SpecImportModal";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import ProductionRulesManager from "@/components/ProductionRulesManager";
+import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
 import StaffRolesCard from "@/components/StaffRolesCard";
 import RolesManager from "@/components/RolesManager";
 import {
@@ -814,6 +815,7 @@ export default function MasterDataScreen() {
   } = useRun();
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
+  const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
 
@@ -1443,6 +1445,23 @@ export default function MasterDataScreen() {
             <SectionHeader title="Rules" />
             <CardSection>
               <ProductionRulesManager />
+            </CardSection>
+          </>
+        ) : null}
+
+        {/* Freezer-pull items (manage-inventory capability; mirrors web) */}
+        {canManageInventory ? (
+          <>
+            <SectionHeader title="Freezer Pull" />
+            <CardSection>
+              <FreezerPullItemsManager
+                suggestions={[
+                  ...doughIngredients,
+                  ...frontlineIngredients,
+                  ...cheeseIngredients,
+                  ...pepTypes,
+                ]}
+              />
             </CardSection>
           </>
         ) : null}
