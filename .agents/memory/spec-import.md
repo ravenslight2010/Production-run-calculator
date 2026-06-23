@@ -49,6 +49,15 @@ applying (no per-item prompts).
 - **`summarizeSpecImport` intentionally counts by recipe (so a multi-target import
   is 1 recipe, not N)** — do not "fix" it to count targets.
 
+## Size variants fold into the BRAND, not the flavor
+When one brand's spec sheet has multiple SIZE variants (e.g. Lowes 7in vs 11in),
+the AI prompt instructs that the size become part of the BRAND name
+(`Lowes 7in`, `Lowes 11in`) — flavor stays just the flavor (`Pepperoni`). NOT
+brand `Lowes` + flavor `7in Pepperoni`. **Why:** each size is a distinct profile
+with its own die/applicators; sizes differ by ~0.5 levenshtein ratio so they
+won't fuzzy-collapse into the base brand. Instruction lives ONLY in the
+server prompt (`buildParseSpecSheetPrompt`); clients are thin, no parity edit.
+
 ## Mobile summary parity
 - Mobile `buildSpecStore().profileExists` must mirror web `profileObjHasRealData`:
   any non-empty recipe array (dough/frontline/app{1-4}CheeseRecipe) OR any

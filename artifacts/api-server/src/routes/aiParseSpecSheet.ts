@@ -65,7 +65,12 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "brand+flavor — with the cheese/topping applicators (type + oz per pizza, up " +
     "to 4), pepperonis (type + sticks + oz per pizza, up to 2), the die type, and " +
     "the sauce oz per pizza; and (2) RECIPES — dough, sauce, and cheese ingredient " +
-    "lists (each row an ingredient name + pounds). Spreadsheets are messy: merged " +
+    "lists (each row an ingredient name + pounds). When a brand's sheet covers " +
+    "multiple SIZE variants (e.g. a 7in and an 11in version), fold the size INTO " +
+    "THE BRAND name (e.g. brand 'Lowes 7in' and brand 'Lowes 11in') — never put " +
+    "the size in the flavor. So a 7in pepperoni Lowes pizza is brand='Lowes 7in', " +
+    "flavor='Pepperoni', NOT brand='Lowes', flavor='7in Pepperoni'. Apply this to " +
+    "recipe brand/flavor and `targets` the same way. Spreadsheets are messy: merged " +
     "headers, abbreviations, varied layouts, blanks. Infer the structure. When a " +
     "name closely matches one of the provided KNOWN canonical names, RETURN THE " +
     "KNOWN NAME VERBATIM (so existing profiles/recipes are updated, not " +
