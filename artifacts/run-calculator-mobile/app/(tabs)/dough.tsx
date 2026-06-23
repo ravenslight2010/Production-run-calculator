@@ -271,7 +271,7 @@ export default function DoughScreen() {
                 batches needed
               </Text>
             </View>
-            <ReadOnlyRecipe rows={run.settings.doughRecipe ?? []} />
+            <ReadOnlyRecipe rows={run.settings.doughRecipe ?? []} scalable />
           </Card>
         ) : null}
       </ScrollView>

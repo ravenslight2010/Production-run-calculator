@@ -1047,11 +1047,22 @@ export function RecipeEditor({
 export function ReadOnlyRecipe({
   rows,
   emptyText = "No recipe configured. Add ingredients in Setup.",
+  scalable = false,
 }: {
   rows: RecipeRow[];
   emptyText?: string;
+  scalable?: boolean;
 }) {
   const colors = useColors();
+  // Batch-size scaler: shows the recipe weights at a different batch size.
+  // "4" is the base recipe (1×); other sizes scale the displayed weights.
+  const SCALE_OPTIONS: { label: string; value: number }[] = [
+    { label: "½", value: 0.5 },
+    { label: "4", value: 1 },
+    { label: "5", value: 1.25 },
+    { label: "6", value: 1.5 },
+  ];
+  const [scale, setScale] = React.useState(1);
   const filtered = (rows ?? []).filter(
     (r) => (r.ingredient ?? "").trim() !== "" || (Number(r.lbs) || 0) > 0,
   );
@@ -1065,6 +1076,42 @@ export function ReadOnlyRecipe({
   }
   return (
     <View style={roStyles.wrap}>
+      {scalable ? (
+        <View style={roStyles.scaleRow}>
+          <Text style={[roStyles.scaleLabel, { color: colors.mutedForeground }]}>
+            Batch size
+          </Text>
+          <View style={[roStyles.scaleGroup, { backgroundColor: colors.secondary }]}>
+            {SCALE_OPTIONS.map((opt) => {
+              const active = scale === opt.value;
+              return (
+                <Pressable
+                  key={opt.value}
+                  onPress={() => setScale(opt.value)}
+                  style={[
+                    roStyles.scaleBtn,
+                    active && { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      roStyles.scaleBtnText,
+                      { color: active ? "#fff" : colors.foreground },
+                    ]}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {scale !== 1 ? (
+            <Text style={[roStyles.scaleHint, { color: colors.mutedForeground }]}>
+              ×{scale} · view only
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       <View style={roStyles.headRow}>
         <Text style={[roStyles.headIng, { color: colors.mutedForeground }]}>
           INGREDIENT
@@ -1082,7 +1129,7 @@ export function ReadOnlyRecipe({
             {r.ingredient || "—"}
           </Text>
           <Text style={[roStyles.lbs, { color: colors.foreground }]}>
-            {(Number(r.lbs) || 0).toFixed(1)}
+            {((Number(r.lbs) || 0) * scale).toFixed(1)}
           </Text>
         </View>
       ))}
@@ -1091,7 +1138,7 @@ export function ReadOnlyRecipe({
           Total / Batch
         </Text>
         <Text style={[roStyles.totalValue, { color: colors.foreground }]}>
-          {total.toFixed(1)} lbs
+          {(total * scale).toFixed(1)} lbs
         </Text>
       </View>
     </View>
@@ -1101,6 +1148,19 @@ export function ReadOnlyRecipe({
 const roStyles = StyleSheet.create({
   wrap: { gap: 0 },
   empty: { fontSize: 13, fontStyle: "italic" },
+  scaleRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  scaleLabel: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, fontFamily: FONTS.regular },
+  scaleGroup: { flexDirection: "row", borderRadius: 4, padding: 3, gap: 3 },
+  scaleBtn: {
+    minWidth: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  scaleBtnText: { fontSize: 13, fontFamily: FONTS.bold },
+  scaleHint: { fontSize: 11, fontFamily: FONTS.regular },
   headRow: {
     flexDirection: "row",
     justifyContent: "space-between",
