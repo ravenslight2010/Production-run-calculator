@@ -32,6 +32,10 @@ args = "test:rules"
 task = "workflow.run"
 args = "test:inventory-math"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test:spec-reconcile"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -75,6 +79,17 @@ args = "pnpm --filter @workspace/inventory-math run test"
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "test:spec-reconcile"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/spec-reconcile run test"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [agent]
 stack = "PNPM_WORKSPACE"

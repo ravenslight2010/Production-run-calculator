@@ -118,6 +118,7 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import AssistantTab from "../components/AssistantTab";
+import SpecReconcilePanel from "../components/SpecReconcilePanel";
 import {
   dispatchVoiceCommand,
   type VoiceCommandAction,
@@ -9219,6 +9220,9 @@ export default function Home() {
                     })
                   }
                 />
+                <div className="mt-3">
+                  <SpecReconcilePanel />
+                </div>
               </TabsContent>
 
               <TabsContent value="incidents">

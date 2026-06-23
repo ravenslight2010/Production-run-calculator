@@ -1,13 +1,18 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   db,
   proactiveAlertSettingsTable,
   inventoryItemsTable,
   inventoryLotsTable,
   inventorySettingsTable,
+  savedSpecSheetsTable,
   type InventoryLot,
 } from "@workspace/db";
+import {
+  reconcileSpecWithRecipes,
+  toReconcileRecipes,
+} from "@workspace/spec-reconcile";
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
@@ -69,6 +74,12 @@ import {
   sanitizeRecipeAnswer,
   validateRecipeAssistBody,
 } from "./aiRecipeAssistant";
+import {
+  buildSpecReconcilePrompt,
+  sanitizeSpecReconcileSummary,
+  toCurrentReconcileRecipes,
+  validateSpecReconcileBody,
+} from "./aiSpecReconcile";
 import {
   aggregateForecastHistory,
   buildForecastPrompt,
@@ -191,6 +202,15 @@ const FORECAST_RATE_MAX = 10;
 const forecastRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(FORECAST_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the saved spec-sheet cross-reference: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const SPEC_RECONCILE_RATE_WINDOW_MS = 60_000;
+const SPEC_RECONCILE_RATE_MAX = 10;
+const specReconcileRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(SPEC_RECONCILE_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -515,6 +535,91 @@ router.post(
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
       ...(suggestion ? { suggestion } : {}),
+    });
+  },
+);
+
+// Cross-reference a saved spec sheet against the current recipe library. The
+// diff itself is deterministic (the shared @workspace/spec-reconcile lib runs
+// here AND on both clients), so the discrepancy list is always returned even if
+// the AI summary is unavailable. The AI only narrates the already-computed
+// discrepancies — it can't invent or miss one. Read-only; not manager-gated.
+router.post(
+  "/ai/spec-reconcile",
+  rateLimit({
+    windowMs: SPEC_RECONCILE_RATE_WINDOW_MS,
+    max: SPEC_RECONCILE_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: specReconcileRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateSpecReconcileBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Load the saved spec sheet in the caller's scope.
+    let dataRecipesRaw: unknown;
+    let label = "Spec sheet";
+    try {
+      const rows = await db
+        .select()
+        .from(savedSpecSheetsTable)
+        .where(
+          and(
+            eq(savedSpecSheetsTable.scope, currentScope()),
+            eq(savedSpecSheetsTable.id, validation.data.specSheetId),
+          ),
+        )
+        .limit(1);
+      const row = rows[0];
+      if (!row) {
+        res.status(404).json({ error: "No saved spec sheet with that id" });
+        return;
+      }
+      label = row.label;
+      const data = (row.data ?? {}) as { recipes?: unknown };
+      dataRecipesRaw = data.recipes;
+    } catch (err) {
+      req.log.error({ err }, "ai-spec-reconcile failed to load saved spec sheet");
+      res.status(500).json({ error: "Failed to load saved spec sheet" });
+      return;
+    }
+
+    // Deterministic diff: saved spec sheet's recipes vs the current recipe library.
+    const discrepancies = reconcileSpecWithRecipes({
+      specRecipes: toReconcileRecipes(dataRecipesRaw),
+      currentRecipes: toCurrentReconcileRecipes(validation.data),
+    });
+
+    // Advisory plain-language summary. Fail-safe: any AI error still returns the
+    // deterministic discrepancies (with an empty summary) rather than a 502.
+    let summary = "";
+    try {
+      const { system, user } = buildSpecReconcilePrompt(label, discrepancies);
+      const grounded = await groundPromptWithMemory(req.log, user, {
+        facilityDomains: ["ingredient", "general"],
+      });
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: grounded },
+        ],
+      });
+      summary = sanitizeSpecReconcileSummary(response.choices[0]?.message?.content ?? "");
+    } catch (err) {
+      req.log.error({ err }, "ai-spec-reconcile summary call failed");
+    }
+
+    res.json({
+      specSheetId: validation.data.specSheetId,
+      discrepancies,
+      generatedAt: Date.now(),
+      ...(summary ? { summary } : {}),
     });
   },
 );

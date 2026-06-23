@@ -3,7 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { Stack } from "expo-router";
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -55,6 +55,14 @@ import {
   type SpecImportPrepared,
   type SpecImportStore,
 } from "@/context/specImport";
+import {
+  fetchSavedSpecSheets,
+  reconcileSpecSheet,
+  deleteSpecSheet,
+  presetMapsToReconcileRecipes,
+  type SavedSpecSheet,
+  type SpecReconcileResult,
+} from "@/context/savedSpecSheets";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 import { FONTS } from "@/constants/fonts";
@@ -918,6 +926,68 @@ export default function MasterDataScreen() {
   // (imported recipe ingredients can duplicate standalone individual ones).
   const [mergeCheckSignal, setMergeCheckSignal] = useState(0);
 
+  // ── Saved spec sheets: cross-reference against current recipes ──
+  const [savedSheets, setSavedSheets] = useState<SavedSpecSheet[]>([]);
+  const [sheetsLoading, setSheetsLoading] = useState(true);
+  const [sheetBusyId, setSheetBusyId] = useState<number | null>(null);
+  const [reconResult, setReconResult] = useState<SpecReconcileResult | null>(null);
+  const [reconError, setReconError] = useState<string | null>(null);
+
+  const refreshSavedSheets = useCallback(async () => {
+    setSheetsLoading(true);
+    try {
+      setSavedSheets(await fetchSavedSpecSheets());
+    } catch {
+      // best-effort; leave list as-is
+    } finally {
+      setSheetsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSavedSheets();
+  }, [refreshSavedSheets]);
+
+  async function handleCheckSheet(id: number) {
+    setSheetBusyId(id);
+    setReconResult(null);
+    setReconError(null);
+    try {
+      const currentRecipes = presetMapsToReconcileRecipes({
+        dough: doughRecipePresets,
+        sauce: frontlineRecipePresets,
+        cheese: cheeseRecipePresets,
+      });
+      setReconResult(await reconcileSpecSheet(id, currentRecipes));
+    } catch {
+      setReconError("Couldn't cross-reference that spec sheet. Please try again.");
+    } finally {
+      setSheetBusyId(null);
+    }
+  }
+
+  function handleDeleteSheet(id: number) {
+    Alert.alert("Delete saved spec sheet?", "This removes the saved snapshot.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setSheetBusyId(id);
+          try {
+            const next = await deleteSpecSheet(id);
+            setSavedSheets(next);
+            if (reconResult?.specSheetId === id) setReconResult(null);
+          } catch {
+            setReconError("Couldn't delete that spec sheet.");
+          } finally {
+            setSheetBusyId(null);
+          }
+        },
+      },
+    ]);
+  }
+
   // Build the store the orchestration glue needs from live context (web reads
   // localStorage directly; mobile injects the same shape here).
   const buildSpecStore = (): SpecImportStore => {
@@ -1134,6 +1204,126 @@ export default function MasterDataScreen() {
                 </Text>
               </Pressable>
             </>
+          ) : null}
+        </CardSection>
+
+        {/* Saved spec sheets: cross-reference against current recipes */}
+        <SectionHeader title="Saved Spec Sheets" />
+        <CardSection>
+          <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+            Your two most recently imported spec sheets are saved here.
+            Cross-reference one against your current recipes to see whether the
+            recipes still match the spec.
+          </Text>
+          {sheetsLoading ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : savedSheets.length === 0 ? (
+            <Text style={[styles.pinHint, { color: colors.mutedForeground, marginBottom: 0 }]}>
+              No saved spec sheets yet. Import a spec sheet and it will appear here.
+            </Text>
+          ) : (
+            savedSheets.map((s) => (
+              <View
+                key={s.id}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 8,
+                  padding: 12,
+                  marginBottom: 8,
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 14, fontFamily: FONTS.medium, color: colors.foreground }}>
+                  {s.label}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
+                  Imported {new Date(s.createdAt).toLocaleString()}
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  <Pressable
+                    onPress={() => handleCheckSheet(s.id)}
+                    disabled={sheetBusyId !== null}
+                    style={({ pressed }) => [
+                      styles.importBtn,
+                      {
+                        backgroundColor: colors.primary,
+                        opacity: sheetBusyId !== null || pressed ? 0.7 : 1,
+                        flex: 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.importBtnText, { color: colors.primaryForeground }]}>
+                      {sheetBusyId === s.id ? "Checking…" : "Check against recipes"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDeleteSheet(s.id)}
+                    disabled={sheetBusyId !== null}
+                    style={({ pressed }) => [
+                      styles.importBtn,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        opacity: sheetBusyId !== null || pressed ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                      Delete
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))
+          )}
+
+          {reconError ? (
+            <Text style={{ fontSize: 13, color: colors.destructive, marginTop: 4 }}>
+              {reconError}
+            </Text>
+          ) : null}
+
+          {reconResult ? (
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 8,
+                padding: 12,
+                marginTop: 4,
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 14, fontFamily: FONTS.bold, color: colors.foreground }}>
+                {reconResult.discrepancies.length === 0
+                  ? "Everything matches"
+                  : `${reconResult.discrepancies.length} difference${
+                      reconResult.discrepancies.length === 1 ? "" : "s"
+                    }`}
+              </Text>
+              {reconResult.summary ? (
+                <Text style={{ fontSize: 13, color: colors.foreground }}>
+                  {reconResult.summary}
+                </Text>
+              ) : null}
+              {reconResult.discrepancies.length === 0 ? (
+                <Text style={{ fontSize: 13, color: colors.mutedForeground }}>
+                  Every recipe on this spec sheet matches your current recipes exactly.
+                </Text>
+              ) : (
+                reconResult.discrepancies.map((d, i) => (
+                  <Text key={i} style={{ fontSize: 13, color: colors.mutedForeground }}>
+                    <Text style={{ fontFamily: FONTS.medium, color: colors.foreground }}>
+                      {d.kind} · {d.recipeName}
+                    </Text>
+                    {" — "}
+                    {d.message}
+                  </Text>
+                ))
+              )}
+            </View>
           ) : null}
         </CardSection>
 

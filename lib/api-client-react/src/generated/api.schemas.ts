@@ -908,6 +908,103 @@ export interface RecipeAssistResult {
   suggestion?: RecipeAssistSuggestion;
 }
 
+export interface SpecReconcileRow {
+  ingredient: string;
+  lbs: number;
+}
+
+export type SpecReconcileRecipeKind = typeof SpecReconcileRecipeKind[keyof typeof SpecReconcileRecipeKind];
+
+
+export const SpecReconcileRecipeKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+} as const;
+
+/**
+ * A single recipe (dough/sauce/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet's richer recipe objects pass through unchanged.
+ */
+export interface SpecReconcileRecipe {
+  kind: SpecReconcileRecipeKind;
+  name: string;
+  rows: SpecReconcileRow[];
+  [key: string]: unknown;
+ }
+
+export type SavedSpecSheetDataProfilesItem = { [key: string]: unknown };
+
+/**
+ * The canonicalized ParsedSpecImport snapshot captured at import time.
+ */
+export interface SavedSpecSheetData {
+  profiles?: SavedSpecSheetDataProfilesItem[];
+  recipes?: SpecReconcileRecipe[];
+  note?: string;
+  [key: string]: unknown;
+ }
+
+export interface SavedSpecSheet {
+  id: number;
+  label: string;
+  /** Epoch milliseconds the snapshot was saved */
+  createdAt: number;
+  data: SavedSpecSheetData;
+}
+
+export interface SavedSpecSheetList {
+  specSheets: SavedSpecSheet[];
+}
+
+export interface SaveSpecSheetInput {
+  label: string;
+  data: SavedSpecSheetData;
+}
+
+export interface SpecReconcileInput {
+  /** The id of the saved spec sheet to check against */
+  specSheetId: number;
+  /** The app's current recipe library (dough/sauce/cheese) */
+  currentRecipes: SpecReconcileRecipe[];
+}
+
+export type ReconcileDiscrepancyKind = typeof ReconcileDiscrepancyKind[keyof typeof ReconcileDiscrepancyKind];
+
+
+export const ReconcileDiscrepancyKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+} as const;
+
+export type ReconcileDiscrepancyType = typeof ReconcileDiscrepancyType[keyof typeof ReconcileDiscrepancyType];
+
+
+export const ReconcileDiscrepancyType = {
+  'missing-recipe': 'missing-recipe',
+  'missing-ingredient': 'missing-ingredient',
+  'extra-ingredient': 'extra-ingredient',
+  'amount-mismatch': 'amount-mismatch',
+} as const;
+
+export interface ReconcileDiscrepancy {
+  kind: ReconcileDiscrepancyKind;
+  recipeName: string;
+  type: ReconcileDiscrepancyType;
+  ingredient?: string;
+  specLbs?: number;
+  currentLbs?: number;
+  message: string;
+}
+
+export interface SpecReconcileResult {
+  specSheetId: number;
+  discrepancies: ReconcileDiscrepancy[];
+  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
+  summary?: string;
+  generatedAt: number;
+}
+
 export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
 
 

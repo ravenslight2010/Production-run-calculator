@@ -95,6 +95,7 @@
     "@workspace/production-rules": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
     "@workspace/spec-import": "workspace:*",
+    "@workspace/spec-reconcile": "workspace:*",
     "@workspace/voice-commands": "workspace:*"
   }
 }

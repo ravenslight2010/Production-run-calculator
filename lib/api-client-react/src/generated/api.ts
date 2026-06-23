@@ -100,7 +100,11 @@ import type {
   SavePhotoAliasesInput,
   SaveProductionRulesInput,
   SaveSpecImportAliasesInput,
+  SaveSpecSheetInput,
+  SavedSpecSheetList,
   SpecImportAliasList,
+  SpecReconcileInput,
+  SpecReconcileResult,
   StaffMember,
   StaffRoleUpdate,
   SuggestMergesInput,
@@ -2985,6 +2989,78 @@ export const useAiRecipeAssistant = <TError = ErrorType<void>,
       return useMutation(getAiRecipeAssistantMutationOptions(options));
     }
 
+export const getAiSpecReconcileUrl = () => {
+
+
+
+
+  return `/api/ai/spec-reconcile`
+}
+
+/**
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), then asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: the deterministic discrepancy list is always returned even if the AI summary is unavailable. Available to any signed-in user.
+ * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+ */
+export const aiSpecReconcile = async (specReconcileInput: SpecReconcileInput, options?: RequestInit): Promise<SpecReconcileResult> => {
+
+  return customFetch<SpecReconcileResult>(getAiSpecReconcileUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      specReconcileInput,)
+  }
+);}
+
+
+
+
+export const getAiSpecReconcileMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,{data: BodyType<SpecReconcileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,{data: BodyType<SpecReconcileInput>}, TContext> => {
+
+const mutationKey = ['aiSpecReconcile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSpecReconcile>>, {data: BodyType<SpecReconcileInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiSpecReconcile(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiSpecReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiSpecReconcile>>>
+    export type AiSpecReconcileMutationBody = BodyType<SpecReconcileInput>
+    export type AiSpecReconcileMutationError = ErrorType<void>
+
+    /**
+ * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+ */
+export const useAiSpecReconcile = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSpecReconcile>>, TError,{data: BodyType<SpecReconcileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiSpecReconcile>>,
+        TError,
+        {data: BodyType<SpecReconcileInput>},
+        TContext
+      > => {
+      return useMutation(getAiSpecReconcileMutationOptions(options));
+    }
+
 export const getAiProactiveAlertUrl = () => {
 
 
@@ -5051,6 +5127,226 @@ export const useSaveSpecImportAliases = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveSpecImportAliasesMutationOptions(options));
+    }
+
+export const getListSpecSheetsUrl = () => {
+
+
+
+
+  return `/api/spec-sheets`
+}
+
+/**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
+export const listSpecSheets = async ( options?: RequestInit): Promise<SavedSpecSheetList> => {
+
+  return customFetch<SavedSpecSheetList>(getListSpecSheetsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSpecSheetsQueryKey = () => {
+    return [
+    `/api/spec-sheets`
+    ] as const;
+    }
+
+
+export const getListSpecSheetsQueryOptions = <TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSpecSheetsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSpecSheets>>> = ({ signal }) => listSpecSheets({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSpecSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof listSpecSheets>>>
+export type ListSpecSheetsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
+
+export function useListSpecSheets<TData = Awaited<ReturnType<typeof listSpecSheets>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSpecSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSpecSheetsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveSpecSheetUrl = () => {
+
+
+
+
+  return `/api/spec-sheets`
+}
+
+/**
+ * Persists a snapshot of an imported spec sheet so it can later be cross-referenced against the current recipes. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
+ * @summary Save a spec-sheet snapshot (keeps only the two most recent)
+ */
+export const saveSpecSheet = async (saveSpecSheetInput: SaveSpecSheetInput, options?: RequestInit): Promise<SavedSpecSheetList> => {
+
+  return customFetch<SavedSpecSheetList>(getSaveSpecSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveSpecSheetInput,)
+  }
+);}
+
+
+
+
+export const getSaveSpecSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSpecSheet>>, TError,{data: BodyType<SaveSpecSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveSpecSheet>>, TError,{data: BodyType<SaveSpecSheetInput>}, TContext> => {
+
+const mutationKey = ['saveSpecSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveSpecSheet>>, {data: BodyType<SaveSpecSheetInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveSpecSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveSpecSheetMutationResult = NonNullable<Awaited<ReturnType<typeof saveSpecSheet>>>
+    export type SaveSpecSheetMutationBody = BodyType<SaveSpecSheetInput>
+    export type SaveSpecSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Save a spec-sheet snapshot (keeps only the two most recent)
+ */
+export const useSaveSpecSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSpecSheet>>, TError,{data: BodyType<SaveSpecSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveSpecSheet>>,
+        TError,
+        {data: BodyType<SaveSpecSheetInput>},
+        TContext
+      > => {
+      return useMutation(getSaveSpecSheetMutationOptions(options));
+    }
+
+export const getDeleteSpecSheetUrl = (id: number,) => {
+
+
+
+
+  return `/api/spec-sheets/${id}`
+}
+
+/**
+ * @summary Delete a saved spec sheet by id
+ */
+export const deleteSpecSheet = async (id: number, options?: RequestInit): Promise<SavedSpecSheetList> => {
+
+  return customFetch<SavedSpecSheetList>(getDeleteSpecSheetUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteSpecSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSpecSheet>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSpecSheet>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deleteSpecSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSpecSheet>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteSpecSheet(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSpecSheetMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSpecSheet>>>
+
+    export type DeleteSpecSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a saved spec sheet by id
+ */
+export const useDeleteSpecSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSpecSheet>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSpecSheet>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeleteSpecSheetMutationOptions(options));
     }
 
 export const getListImportAliasesUrl = () => {

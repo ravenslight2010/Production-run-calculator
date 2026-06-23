@@ -88,3 +88,4 @@
 - [Auto-track remainder carry](autotrack-remainder-carry.md) — auto-track trays/batches must carry a fractional remainder across buckets or sub-unit-per-bucket units (esp. batches) freeze; web+mobile parity.
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
+- [Saved spec sheets + AI reconcile](saved-spec-reconcile.md) — keep max-2 imported spec sheets server-side, cross-ref vs CURRENT recipes; deterministic diff in @workspace/spec-reconcile, AI only narrates + must be rate-limited; web+mobile parity.

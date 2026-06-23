@@ -985,6 +985,38 @@ export const AiRecipeAssistantResponse = zod.object({
 
 
 /**
+ * Loads the saved spec sheet by id, deterministically diffs its recipes against the supplied current recipe library (missing recipes, missing / extra ingredients, pound mismatches), then asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: the deterministic discrepancy list is always returned even if the AI summary is unavailable. Available to any signed-in user.
+ * @summary Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+ */
+export const AiSpecReconcileBody = zod.object({
+  "specSheetId": zod.number().describe('The id of the saved spec sheet to check against'),
+  "currentRecipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough\/sauce\/cheese)')
+})
+
+export const AiSpecReconcileResponse = zod.object({
+  "specSheetId": zod.number(),
+  "discrepancies": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "recipeName": zod.string(),
+  "type": zod.enum(['missing-recipe', 'missing-ingredient', 'extra-ingredient', 'amount-mismatch']),
+  "ingredient": zod.string().optional(),
+  "specLbs": zod.number().optional(),
+  "currentLbs": zod.number().optional(),
+  "message": zod.string()
+})),
+  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
+  "generatedAt": zod.number()
+})
+
+
+/**
  * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
  * @summary At-most-one proactive shift alert (AI); read-only
  */
@@ -1703,6 +1735,100 @@ export const SaveSpecImportAliasesResponse = zod.object({
   "canonicalName": zod.string().describe('The saved canonical name the label resolves to'),
   "context": zod.string().nullish().describe('Disambiguator within a kind (e.g. the canonical brand for a flavor alias); null\/omitted otherwise.')
 }).describe('A learned mapping from a raw spreadsheet label to a canonical app name.'))
+})
+
+
+/**
+ * Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport captured when a spec sheet was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved spec sheets (most recent first, up to two)
+ */
+export const ListSpecSheetsResponse = zod.object({
+  "specSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "recipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "note": zod.string().optional()
+}).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
+}))
+})
+
+
+/**
+ * Persists a snapshot of an imported spec sheet so it can later be cross-referenced against the current recipes. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
+ * @summary Save a spec-sheet snapshot (keeps only the two most recent)
+ */
+export const SaveSpecSheetBody = zod.object({
+  "label": zod.string(),
+  "data": zod.object({
+  "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "recipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "note": zod.string().optional()
+}).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
+})
+
+export const SaveSpecSheetResponse = zod.object({
+  "specSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "recipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "note": zod.string().optional()
+}).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
+}))
+})
+
+
+/**
+ * @summary Delete a saved spec sheet by id
+ */
+export const DeleteSpecSheetParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteSpecSheetResponse = zod.object({
+  "specSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.object({
+  "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "recipes": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']),
+  "name": zod.string(),
+  "rows": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "lbs": zod.number()
+}))
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
+  "note": zod.string().optional()
+}).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
+}))
 })
 
 

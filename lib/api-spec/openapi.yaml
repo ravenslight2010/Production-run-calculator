@@ -913,6 +913,36 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/spec-reconcile:
+    post:
+      operationId: aiSpecReconcile
+      tags: [ai]
+      summary: Cross-reference a saved spec sheet against the current recipes (AI summary); read-only
+      description: >-
+        Loads the saved spec sheet by id, deterministically diffs its recipes
+        against the supplied current recipe library (missing recipes, missing /
+        extra ingredients, pound mismatches), then asks the AI for a short
+        plain-language summary of what's off. Read-only and fail-safe: the
+        deterministic discrepancy list is always returned even if the AI summary
+        is unavailable. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpecReconcileInput"
+      responses:
+        "200":
+          description: Deterministic discrepancies plus an advisory plain-language summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpecReconcileResult"
+        "400":
+          description: Invalid input
+        "404":
+          description: No saved spec sheet with that id
+
   /ai/proactive-alert:
     post:
       operationId: aiProactiveAlert
@@ -1559,6 +1589,66 @@ paths:
                 $ref: "#/components/schemas/SpecImportAliasList"
         "400":
           description: Invalid input
+
+  /spec-sheets:
+    get:
+      operationId: listSpecSheets
+      tags: [specImport]
+      summary: List saved spec sheets (most recent first, up to two)
+      description: >-
+        Returns the saved spec-sheet snapshots (the canonicalized ParsedSpecImport
+        captured when a spec sheet was imported), most recent first. At most two
+        are kept. Available to any signed-in user.
+      responses:
+        "200":
+          description: All saved spec sheets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedSpecSheetList"
+    post:
+      operationId: saveSpecSheet
+      tags: [specImport]
+      summary: Save a spec-sheet snapshot (keeps only the two most recent)
+      description: >-
+        Persists a snapshot of an imported spec sheet so it can later be
+        cross-referenced against the current recipes. After insert, older
+        snapshots beyond the two most recent are pruned. Available to any
+        signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveSpecSheetInput"
+      responses:
+        "200":
+          description: The full updated spec-sheet list after the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedSpecSheetList"
+        "400":
+          description: Invalid input
+
+  /spec-sheets/{id}:
+    delete:
+      operationId: deleteSpecSheet
+      tags: [specImport]
+      summary: Delete a saved spec sheet by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The full updated spec-sheet list after the delete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedSpecSheetList"
 
   /import-aliases:
     get:
@@ -3468,6 +3558,154 @@ components:
           description: The COMPLETE new set of ingredient rows for that recipe after the change
           items:
             $ref: "#/components/schemas/RecipeAssistRow"
+
+    SpecReconcileRow:
+      type: object
+      required:
+        - ingredient
+        - lbs
+      properties:
+        ingredient:
+          type: string
+        lbs:
+          type: number
+
+    SpecReconcileRecipe:
+      type: object
+      description: >-
+        A single recipe (dough/sauce/cheese) reduced to the fields the reconcile
+        diff needs. Extra fields are allowed so a saved spec sheet's richer
+        recipe objects pass through unchanged.
+      required:
+        - kind
+        - name
+        - rows
+      additionalProperties: true
+      properties:
+        kind:
+          type: string
+          enum: [dough, sauce, cheese]
+        name:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecReconcileRow"
+
+    SavedSpecSheetData:
+      type: object
+      description: The canonicalized ParsedSpecImport snapshot captured at import time.
+      additionalProperties: true
+      properties:
+        profiles:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        recipes:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecReconcileRecipe"
+        note:
+          type: string
+
+    SavedSpecSheet:
+      type: object
+      required:
+        - id
+        - label
+        - createdAt
+        - data
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        createdAt:
+          type: number
+          description: Epoch milliseconds the snapshot was saved
+        data:
+          $ref: "#/components/schemas/SavedSpecSheetData"
+
+    SavedSpecSheetList:
+      type: object
+      required:
+        - specSheets
+      properties:
+        specSheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedSpecSheet"
+
+    SaveSpecSheetInput:
+      type: object
+      required:
+        - label
+        - data
+      properties:
+        label:
+          type: string
+        data:
+          $ref: "#/components/schemas/SavedSpecSheetData"
+
+    SpecReconcileInput:
+      type: object
+      required:
+        - specSheetId
+        - currentRecipes
+      properties:
+        specSheetId:
+          type: integer
+          description: The id of the saved spec sheet to check against
+        currentRecipes:
+          type: array
+          description: The app's current recipe library (dough/sauce/cheese)
+          items:
+            $ref: "#/components/schemas/SpecReconcileRecipe"
+
+    ReconcileDiscrepancy:
+      type: object
+      required:
+        - kind
+        - recipeName
+        - type
+        - message
+      properties:
+        kind:
+          type: string
+          enum: [dough, sauce, cheese]
+        recipeName:
+          type: string
+        type:
+          type: string
+          enum: [missing-recipe, missing-ingredient, extra-ingredient, amount-mismatch]
+        ingredient:
+          type: string
+        specLbs:
+          type: number
+        currentLbs:
+          type: number
+        message:
+          type: string
+
+    SpecReconcileResult:
+      type: object
+      required:
+        - specSheetId
+        - discrepancies
+        - generatedAt
+      properties:
+        specSheetId:
+          type: integer
+        discrepancies:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReconcileDiscrepancy"
+        summary:
+          type: string
+          description: Advisory plain-language summary; absent/empty when the AI is unavailable
+        generatedAt:
+          type: number
 
     ProactiveAlert:
       type: object

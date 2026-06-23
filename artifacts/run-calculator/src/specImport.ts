@@ -33,6 +33,7 @@ import {
   applySpecImport,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
+import { saveSpecSheet, buildSpecSheetLabel } from "./savedSpecSheets";
 import { requestParseSpecSheet } from "./parseSpecSheet";
 import { saveAiCorrections } from "./aiCorrections";
 import type { ReviewVerdict } from "@workspace/ai-review";
@@ -314,6 +315,19 @@ export async function prepareSpecImportMulti(
 /** Apply a prepared import: write profiles + recipes, then persist new aliases. */
 export async function commitSpecImport(prepared: SpecImportPrepared): Promise<void> {
   applySpecImport(prepared.parsed);
+
+  // Snapshot this import server-side (factory-wide; only the two most recent are
+  // kept) so it can later be cross-referenced against the current recipe library
+  // (see /ai/spec-reconcile). Best-effort: the import already applied locally, so
+  // a failed snapshot must never surface as an import error.
+  if ((prepared.parsed.recipes?.length ?? 0) > 0) {
+    try {
+      await saveSpecSheet(buildSpecSheetLabel(prepared.parsed), prepared.parsed);
+    } catch {
+      // best-effort
+    }
+  }
+
   if (prepared.newAliases.length) {
     try {
       await saveSpecImportAliases(prepared.newAliases);
