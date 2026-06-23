@@ -314,7 +314,7 @@ function RuleEditor({
 // Manager-defined exceptions shared by every rule type: bypass conditions (run
 // matches field=value -> rule waived entirely) and a required checklist (operator
 // must acknowledge each step per-run before a strict block clears).
-function RuleExceptionsEditor({
+export function RuleExceptionsEditor({
   rule,
   disabled,
   patch,

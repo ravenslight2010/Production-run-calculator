@@ -22,11 +22,21 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- **Web app:** `artifacts/run-calculator` (React + Vite). The bulk of the UI/logic lives in `src/pages/home.tsx` (Tabs/activeTab system, run identity, packaging, draining panel). Per-run form values are persisted in localStorage.
+- **Mobile app:** `artifacts/run-calculator-mobile` (Expo / React Native). Local-only state in `app/RunContext.tsx` (+ a per-second clock in `useRunClock()`), AsyncStorage key `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`. Tabs under `app/(tabs)/`.
+- **API server:** `artifacts/api-server` (Express 5). Routes in `src/routes/*` (~70 files; AI endpoints prefixed `ai*`). Server validates with Zod schemas from `@workspace/api-zod` and never uses `console.log` (use `req.log` / the singleton `logger`).
+- **API contract (source of truth):** `lib/api-spec/openapi.yaml`. Run `pnpm --filter @workspace/api-spec run codegen` to regenerate React Query hooks (`@workspace/api-client-react`) and Zod schemas (`@workspace/api-zod`). Do NOT edit generated files or the OpenAPI `info.title` (it controls generated filenames).
+- **DB schema (source of truth):** `lib/db/src/schema/*` (Drizzle), barrelled via `lib/db/src/schema/index.ts`. Push with `pnpm --filter @workspace/db run push`.
+- **Shared pure logic:** `lib/*` — e.g. `inventory-math`, `fill-missing`, `recipe-apply`, `spec-import`, `production-rules`, `allergen`, `voice-commands`, `merge-suggest`, `ai-memory`, `ai-review`, `onboarding`. Web/mobile keep only thin platform glue and re-export from these; tests import the lib directly.
+- **Shared web+mobile vitest harness:** lives in the web artifact; the mobile module is loaded via strip-imports → transpile → temp-mjs (see `.agents/memory/web-test-harness.md`).
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- **Contract-first API.** The OpenAPI spec is authoritative; clients consume generated hooks and the server validates with generated Zod schemas. Heavy shaping (e.g. AI prompt building) lives server-side so both clients stay thin and identical.
+- **Pure logic lives in `lib/*`, not in the apps.** Any non-trivial formula or decision belongs in a shared lib so web and mobile can't drift; the apps keep only platform glue (storage, UI). This is how strict web+mobile parity is kept enforceable.
+- **Live day-state sync via `/api/sync`** with additive, non-clobber union merges (echo / lost-update guards). Merges need a synced `mergedAway` tombstone to survive the additive union. Some master-data (production rules, denied merges, change history) is intentionally NOT in sync.
+- **Auth is self-contained username+password** (Clerk removed): web uses an httpOnly cookie, mobile threads a bearer token; `requireAuth` gates all `/api` except `/healthz` and `/auth/*`. First registered user becomes a manager. Roles are DB rows resolved per-request via `requireCapability`.
+- **AI features never edit code or auto-write data.** They are advisory/fail-safe: a "fix" is an explanation, suggestions require per-field user confirmation through existing write paths, and AI output is canonicalized/sanitized server-side before use.
 
 ## Product
 
@@ -39,7 +49,13 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- **Web+mobile parity is mandatory** (see User preferences). Every behavior change must land in BOTH apps with formulas matching exactly. Most logic lives in `lib/*` to make this enforceable — change the lib, then update each app's thin wrapper.
+- **Run `pnpm run typecheck:libs` after any `lib/*` change** before leaf typechecks. "Missing `@workspace/db` export" usually means stale lib declarations, not a bad import.
+- **Verify artifacts with `typecheck`, not `build`.** `build` needs workflow-provided `PORT`/`BASE_PATH` and can fail from a plain shell even when the code is fine. Don't run `pnpm dev` at the workspace root — use workflows.
+- **Run tests via the configured test workflows** (`test`, `test:client`, `test:rules`, `test:inventory-math`); web tests run single-file (`fileParallelism: false`) with big timeouts because validation runs alongside dev workflows. A single test file from bash is fine; the full suite from bash can starve.
+- **Don't edit generated code or `artifact.toml`/`.replit` directly.** Regenerate API code via codegen; change artifact/workflow config through the artifact skills.
+- **DB schema changes must be additive** on populated tables, and `post-merge.sh` must use `db push-force` (plain push hangs on the TTY rename prompt). See `.agents/memory/additive-push-force-schema.md` and `post-merge-setup.md`.
+- **Deep institutional knowledge lives in `.agents/memory/`** — many sharp edges (sync semantics, daily-reset auth boundary, RN font weights, expo-secure-store web crash, etc.) are documented there. Check it before touching an unfamiliar area.
 
 ## Pointers
 

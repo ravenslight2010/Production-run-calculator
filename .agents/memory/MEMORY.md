@@ -86,3 +86,4 @@
 - [Notification view re-fire](notification-view-refire.md) — sticky-true "completion" alerts (e.g. freezer empty) need an "armed while pending" Set latch, not a last-id ref, or browsing completed runs re-fires them; web+mobile parity.
 - [Run-complete alert timing](run-complete-alert-timing.md) — "time's up" fires only when ppm>0 AND time counted down (runWasTimedRef latch); web adjustedTimeSec falls back to totalTimeSec so it needs an explicit ppm>0 guard to match mobile's null minutesRemaining.
 - [Auto-track remainder carry](autotrack-remainder-carry.md) — auto-track trays/batches must carry a fractional remainder across buckets or sub-unit-per-bucket units (esp. batches) freeze; web+mobile parity.
+- [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.

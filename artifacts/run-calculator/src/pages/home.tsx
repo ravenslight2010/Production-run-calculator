@@ -8495,26 +8495,43 @@ export default function Home() {
                 </Card>
                 {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
                 {(() => {
-                  if (!lastEndedRun?.endedAt) return null;
-                  // The active run shows its own card (incl. its own emptying bar);
-                  // the draining panel is only for a DIFFERENT, just-ended run.
-                  if (lastEndedRun.id === currentRunId) return null;
-                  const dv = loadRunValues(lastEndedRun.id);
+                  // Pick the most-recently-ended run (other than the active one)
+                  // whose freezer is STILL draining AND that still has unpackaged
+                  // cases. Filter for eligibility FIRST, then take the latest, so a
+                  // newer ended-but-finished run can't hide an older still-draining one.
+                  // (The active run shows its own emptying bar elsewhere.)
+                  const nowMsT = nowTime.getTime();
+                  let drainingRun: RunMeta | undefined;
+                  let dv: FormValues | undefined;
+                  for (const r of dayState.runs) {
+                    if (!r.endedAt) continue;
+                    if (r.id === currentRunId) continue;
+                    const rv = loadRunValues(r.id);
+                    const rfT = Number(rv.freezerTime) || 0;
+                    if (rfT <= 0) continue;
+                    if (nowMsT >= r.endedAt + rfT * 60000) continue; // freezer fully empty
+                    const cps = Number(rv.casesPerSkid) || 0;
+                    const cn = Number(rv.casesNeeded) || 0;
+                    const cDone = (Number(rv.skidsCompleted) || 0) * cps + (Number(rv.casesOnCurrentSkid) || 0);
+                    if (cn > 0 && Math.max(0, cn - cDone) <= 0) continue; // all packaged
+                    if (!drainingRun?.endedAt || r.endedAt > drainingRun.endedAt) {
+                      drainingRun = r;
+                      dv = rv;
+                    }
+                  }
+                  if (!drainingRun?.endedAt || !dv) return null;
                   const fT = Number(dv.freezerTime) || 0;
-                  if (fT <= 0) return null;
                   const freezerMs = fT * 60000;
-                  const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
-                  if (remainMs <= 0) return null; // freezer fully empty
+                  const remainMs = Math.max(0, drainingRun.endedAt + freezerMs - nowTime.getTime());
                   const casesPerSkid = Number(dv.casesPerSkid) || 0;
                   const casesNeeded = Number(dv.casesNeeded) || 0;
                   const skids = Number(dv.skidsCompleted) || 0;
                   const casesOnSkid = Number(dv.casesOnCurrentSkid) || 0;
                   const casesDone = skids * casesPerSkid + casesOnSkid;
                   const casesLeft = Math.max(0, casesNeeded - casesDone);
-                  if (casesNeeded > 0 && casesLeft <= 0) return null; // all packaged
-                  const id = lastEndedRun.id;
+                  const id = drainingRun.id;
                   const name =
-                    `${lastEndedRun.brand ?? ""}${lastEndedRun.flavor ? ` – ${lastEndedRun.flavor}` : ""}`.trim() ||
+                    `${drainingRun.brand ?? ""}${drainingRun.flavor ? ` – ${drainingRun.flavor}` : ""}`.trim() ||
                     "Finished run";
                   const maxSkids = casesPerSkid > 0 ? Math.floor(casesNeeded / casesPerSkid) : undefined;
                   const maxCasesOnSkid = casesPerSkid > 0 ? casesPerSkid : undefined;

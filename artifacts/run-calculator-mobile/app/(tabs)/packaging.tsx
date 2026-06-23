@@ -45,15 +45,16 @@ export default function PackagingScreen() {
     for (const r of allRuns) {
       if (r.id === run.id) continue;
       if (r.endedAt == null) continue;
+      const fT = r.settings.freezerTime;
+      if (fT <= 0) continue;
+      if (nowMs >= r.endedAt + fT * 60000) continue; // freezer fully empty
+      const dCalc = computeCalc(r, nowMs);
+      if (r.settings.casesNeeded > 0 && dCalc.casesLeft <= 0) continue; // all packaged
+      // Eligible: keep the most-recently-ended one, so a newer FINISHED run can't
+      // hide an older run that's still draining with cases left to package.
       if (!best || r.endedAt > (best.endedAt ?? 0)) best = r;
     }
-    if (!best || best.endedAt == null) return null;
-    const fT = best.settings.freezerTime;
-    if (fT <= 0) return null;
-    if (nowMs >= best.endedAt + fT * 60000) return null; // freezer fully empty
-    const dCalc = computeCalc(best, nowMs);
-    if (best.settings.casesNeeded > 0 && dCalc.casesLeft <= 0) return null; // all packaged
-    return best;
+    return best ?? null;
   })();
 
   const dr = drainingRun;
