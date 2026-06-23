@@ -55,6 +55,17 @@ Persistence: `bypass`/`checklist` are nullable JSONB columns on `production_rule
 (stored only when non-empty). `normalizeBypass`/`normalizeChecklist` drop malformed
 entries (unknown field, blank value/step) and cap at 20 each.
 
+## Gotcha: exception "Add" buttons must edit LOCAL state, not the server round-trip
+`RuleExceptionsEditor` (web + mobile) must hold `bypass`/`checklist` in local
+component state seeded once from the rule, and render from that — NOT re-derive them
+from `rule.bypass`/`rule.checklist`. **Why:** every edit POSTs and the UI is replaced
+from the mutation result (`qc.setQueryData`), but `normalizeBypass`/`normalizeChecklist`
+strip empty entries on save. A newly-added empty placeholder row therefore vanished on
+the round-trip → "Add bypass condition / Add checklist step do nothing." Persist both
+lists together via one `commit(nextBypass, nextChecklist)` so editing one never ships a
+stale copy of the other. Tradeoff (accepted): an already-open editor won't resync
+concurrent external edits to the same rule's exceptions (manager-only, low concurrency).
+
 ## Gotcha: numeric-range needs a seeded bound
 `normalizeRule` rejects a numeric-range rule with neither min nor max, and the server
 drops malformed rules. So `newRule("numeric-range")` MUST seed a bound (currently

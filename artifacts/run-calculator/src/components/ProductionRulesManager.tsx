@@ -323,40 +323,51 @@ function RuleExceptionsEditor({
   disabled: boolean;
   patch: (p: Partial<ProductionRule>) => void;
 }) {
-  const bypass = rule.bypass ?? [];
-  const checklist = rule.checklist ?? [];
+  // Exception rows are edited in LOCAL state, seeded once from the rule. A new
+  // bypass/checklist row starts empty, but the server normalize drops empty
+  // entries on every save round-trip — if we re-derived these lists from that
+  // round-trip the freshly-added row would vanish instantly ("nothing happens").
+  // Keeping them local lets the manager build a row up before it has a value;
+  // empties are simply never persisted.
+  const [bypass, setBypassState] = useState<RuleBypassCondition[]>(rule.bypass ?? []);
+  const [checklist, setChecklistState] = useState<string[]>(rule.checklist ?? []);
 
-  function setBypass(next: RuleBypassCondition[]) {
-    patch({ bypass: next.length > 0 ? next : undefined });
+  // Persist both exception lists together from local state so a change to one
+  // never ships a stale copy of the other.
+  function commit(nextBypass: RuleBypassCondition[], nextChecklist: string[]) {
+    setBypassState(nextBypass);
+    setChecklistState(nextChecklist);
+    patch({
+      bypass: nextBypass.length > 0 ? nextBypass : undefined,
+      checklist: nextChecklist.length > 0 ? nextChecklist : undefined,
+    });
   }
+
   function addBypass() {
-    setBypass([...bypass, { field: RULE_FIELDS[0].key, value: "" }]);
+    commit([...bypass, { field: RULE_FIELDS[0].key, value: "" }], checklist);
   }
   function patchBypass(i: number, p: Partial<RuleBypassCondition>) {
-    setBypass(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
+    commit(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)), checklist);
   }
   function removeBypass(i: number) {
-    setBypass(bypass.filter((_, idx) => idx !== i));
+    commit(bypass.filter((_, idx) => idx !== i), checklist);
   }
 
-  function setChecklist(next: string[]) {
-    patch({ checklist: next.length > 0 ? next : undefined });
-  }
   function addStep() {
-    setChecklist([...checklist, ""]);
+    commit(bypass, [...checklist, ""]);
   }
   function patchStep(i: number, value: string) {
-    setChecklist(checklist.map((s, idx) => (idx === i ? value : s)));
+    commit(bypass, checklist.map((s, idx) => (idx === i ? value : s)));
   }
   function removeStep(i: number) {
-    setChecklist(checklist.filter((_, idx) => idx !== i));
+    commit(bypass, checklist.filter((_, idx) => idx !== i));
   }
   function moveStep(i: number, dir: -1 | 1) {
     const j = i + dir;
     if (j < 0 || j >= checklist.length) return;
     const next = [...checklist];
     [next[i], next[j]] = [next[j], next[i]];
-    setChecklist(next);
+    commit(bypass, next);
   }
 
   return (

@@ -380,28 +380,44 @@ function RuleExceptionsEditor({
   patch: (p: Partial<ProductionRule>) => void;
 }) {
   const colors = useColors();
-  const bypass = rule.bypass ?? [];
-  const checklist = rule.checklist ?? [];
+  // Exception rows are edited in LOCAL state, seeded once from the rule. A new
+  // bypass/checklist row starts empty, but the server normalize drops empty
+  // entries on every save round-trip — if we re-derived these lists from that
+  // round-trip the freshly-added row would vanish instantly ("nothing happens").
+  // Keeping them local lets the manager build a row up before it has a value;
+  // empties are simply never persisted.
+  const [bypass, setBypassState] = React.useState<RuleBypassCondition[]>(rule.bypass ?? []);
+  const [checklist, setChecklistState] = React.useState<string[]>(rule.checklist ?? []);
 
-  const setBypass = (next: RuleBypassCondition[]) =>
-    patch({ bypass: next.length > 0 ? next : undefined });
-  const addBypass = () => setBypass([...bypass, { field: RULE_FIELDS[0].key, value: "" }]);
+  // Persist both exception lists together from local state so a change to one
+  // never ships a stale copy of the other.
+  const commit = (nextBypass: RuleBypassCondition[], nextChecklist: string[]) => {
+    setBypassState(nextBypass);
+    setChecklistState(nextChecklist);
+    patch({
+      bypass: nextBypass.length > 0 ? nextBypass : undefined,
+      checklist: nextChecklist.length > 0 ? nextChecklist : undefined,
+    });
+  };
+
+  const addBypass = () =>
+    commit([...bypass, { field: RULE_FIELDS[0].key, value: "" }], checklist);
   const patchBypass = (i: number, p: Partial<RuleBypassCondition>) =>
-    setBypass(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)));
-  const removeBypass = (i: number) => setBypass(bypass.filter((_, idx) => idx !== i));
+    commit(bypass.map((c, idx) => (idx === i ? { ...c, ...p } : c)), checklist);
+  const removeBypass = (i: number) =>
+    commit(bypass.filter((_, idx) => idx !== i), checklist);
 
-  const setChecklist = (next: string[]) =>
-    patch({ checklist: next.length > 0 ? next : undefined });
-  const addStep = () => setChecklist([...checklist, ""]);
+  const addStep = () => commit(bypass, [...checklist, ""]);
   const patchStep = (i: number, value: string) =>
-    setChecklist(checklist.map((s, idx) => (idx === i ? value : s)));
-  const removeStep = (i: number) => setChecklist(checklist.filter((_, idx) => idx !== i));
+    commit(bypass, checklist.map((s, idx) => (idx === i ? value : s)));
+  const removeStep = (i: number) =>
+    commit(bypass, checklist.filter((_, idx) => idx !== i));
   const moveStep = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= checklist.length) return;
     const next = [...checklist];
     [next[i], next[j]] = [next[j], next[i]];
-    setChecklist(next);
+    commit(bypass, next);
   };
 
   const labelStyle = {
