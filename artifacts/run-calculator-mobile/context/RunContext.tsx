@@ -2648,9 +2648,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const removeListItem = useCallback(
     (list: MasterListKey, value: string) => {
       setAppState((prev) => {
+        const base = { ...prev, [list]: prev[list].filter((x) => x !== value) };
+        // Deleting a brand also deletes every flavor that belonged to it — a
+        // flavor only exists in the context of its brand.
+        if (list === "brands" && prev.brandFlavors[value]) {
+          const brandFlavors = { ...prev.brandFlavors };
+          delete brandFlavors[value];
+          base.brandFlavors = brandFlavors;
+        }
         const next = withChangeRecord(
           prev,
-          { ...prev, [list]: prev[list].filter((x) => x !== value) },
+          base,
           "remove",
           `Removed "${value}" from ${LIST_LABELS[list]}`,
         );

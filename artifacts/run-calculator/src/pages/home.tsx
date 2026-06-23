@@ -3473,6 +3473,14 @@ export default function Home() {
     const updated = brands.filter(b => b !== name);
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    // Deleting a brand also deletes every flavor that belonged to it — a flavor
+    // only exists in the context of its brand.
+    if (brandFlavors[name]) {
+      const next = { ...brandFlavors };
+      delete next[name];
+      setBrandFlavors(next);
+      saveBrandFlavors(next);
+    }
     schedulePush(dayStateRef.current);
   }
 
@@ -6464,7 +6472,7 @@ export default function Home() {
         };
         type StandaloneTab = { key: string; label: string; items: string[]; protected?: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void; onRename?: (o: string, n: string) => void; };
         const standaloneTabs: StandaloneTab[] = [
-          { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", (v) => { const u = brands.filter(b => b !== v); setBrands(u); saveList(BRANDS_KEY, u); }), onRename: histRename("Brands", renameBrand) },
+          { key: "brands", label: "Brands", items: brands, onAdd: histAdd("Brands", addBrand), onRemove: histRemove("Brands", removeBrand), onRename: histRename("Brands", renameBrand) },
           { key: "flavors", label: "Flavors", items: manageBrandFilter ? (brandFlavors[manageBrandFilter] ?? []) : [], onAdd: histAdd("Flavors", (v) => addFlavor(v, manageBrandFilter)), onRemove: histRemove("Flavors", (v) => removeFlavor(v, manageBrandFilter)), onRename: histRename("Flavors", (o, n) => renameFlavor(o, n, manageBrandFilter)) },
           { key: "ingredientTypes", label: "Applicator Types", items: ingredientTypes, onAdd: histAdd("Applicator Types", addIngredientType), onRemove: histRemove("Applicator Types", removeIngredientType), onRename: histRename("Applicator Types", renameIngredientType) },
           { key: "pepTypes", label: "Pep Types", items: pepTypes, protected: [...DEFAULT_PEP_TYPES], onAdd: histAdd("Pep Types", addPepType), onRemove: histRemove("Pep Types", removePepType), onRename: histRename("Pep Types", renamePepType) },
