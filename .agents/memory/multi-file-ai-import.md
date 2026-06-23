@@ -16,3 +16,17 @@ Rules that must hold for any batched AI import:
 **Why:** strict web+mobile parity (replit.md) + the AI endpoints are rate/cost limited, so an all-or-nothing batch both violates "one bad input shouldn't sink the batch" and risks tripping the limiter.
 
 **How to apply:** when extending any AI import to more inputs, mirror this shape in BOTH apps; camera capture (single shot) and the quality-check photo card intentionally stay single-image.
+
+## Workbook flatten cap must track the server cap (silent-truncation trap)
+The client flattens each Excel workbook with `gridsToPromptText` (shared
+`@workspace/spec-import`), whose `DEFAULT_LIMITS.maxTotalChars` bounds the text
+sent per file. If this client cap is well below the server's
+`MAX_WORKBOOK_CHARS` (parse-spec-sheet route), large/multi-sheet workbooks are
+truncated client-side ("… (truncated)") BEFORE the AI sees them — the user just
+sees "it didn't get everything," with no error. Keep the client cap just under
+the server cap (currently 56k client vs 60k server) and raise both together if
+more capacity is needed. The AI output side has a matching trap:
+`max_completion_tokens` on the parse route must be large enough that a big parse
+result isn't cut into invalid JSON (truncated JSON → JSON.parse fail → that file
+yields nothing). Both apps call `gridsToPromptText(grids)` with no overrides, so
+raising the lib defaults keeps web+mobile at parity automatically.

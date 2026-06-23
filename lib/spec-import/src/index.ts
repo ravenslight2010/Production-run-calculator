@@ -273,11 +273,14 @@ export type GridTextLimits = {
 };
 
 const DEFAULT_LIMITS: Required<GridTextLimits> = {
-  maxSheets: 12,
-  maxRows: 200,
-  maxCols: 40,
+  maxSheets: 24,
+  maxRows: 1000,
+  maxCols: 60,
   maxCellChars: 80,
-  maxTotalChars: 24000,
+  // Kept just under the server's MAX_WORKBOOK_CHARS (60k) so a large or
+  // multi-sheet workbook is sent in full instead of being truncated client-side
+  // before the AI ever sees it (was 24k, which silently dropped big imports).
+  maxTotalChars: 56000,
 };
 
 /**
