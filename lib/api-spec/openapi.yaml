@@ -3456,6 +3456,17 @@ components:
           description: Recent finished runs from prior days
           items:
             $ref: "#/components/schemas/OptimizeRun"
+        reorderDemandByKey:
+          type: object
+          description: >-
+            Client-resolved material demand from upcoming (today-or-later)
+            scheduled runs, keyed by inventory item key. Brand/recipe profiles
+            live client-side, so the server can't resolve scheduled-run demand
+            itself; the client sends it so the proactive reorder nudge can
+            project on-hand exactly like the warehouse "Reorder Now" card.
+            Optional; omitted/empty means demand is not subtracted.
+          additionalProperties:
+            type: number
 
     OptimizeAction:
       type: object

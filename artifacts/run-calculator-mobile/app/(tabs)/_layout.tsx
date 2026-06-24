@@ -17,8 +17,15 @@ import GuidedTour from "@/components/GuidedTour";
 import ProactiveAlertBanner from "@/components/ProactiveAlertBanner";
 import SandboxBanner from "@/components/SandboxBanner";
 import { useGetStartedOverview } from "@workspace/onboarding";
-import { resetSandboxRequest } from "@/context/inventoryShared";
-import { useRun, todayStr, clearLocalStateForSandboxReset } from "@/context/RunContext";
+import { resetSandboxRequest, buildReorderDemandByKey } from "@/context/inventoryShared";
+import {
+  useRun,
+  todayStr,
+  clearLocalStateForSandboxReset,
+  profileKey,
+  DEFAULT_SETTINGS,
+  type RunSettings,
+} from "@/context/RunContext";
 import { buildOptimizeInput } from "@/context/aiOptimize";
 import { useProactiveAlert } from "@/context/aiProactive";
 
@@ -74,26 +81,55 @@ export default function TabLayout() {
   // hook owns cooldown + de-dup (see context/aiProactive.ts). Mounted here
   // (persistent across tab switches) to mirror the web hook in home.tsx
   // (replit.md parity).
-  const { allRuns, history, runToTime, scheduled } = useRun();
+  const { allRuns, history, runToTime, scheduled, brandProfiles } = useRun();
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
     enabled: isManager,
-    buildInput: () =>
-      buildOptimizeInput({
-        date: todayStr(),
-        nowMs: Date.now(),
-        runToTime,
-        runs: allRuns,
-        history,
-        scheduledDays: Object.entries(scheduled).map(([date, runs]) => ({
-          date,
-          runs: runs.map((r) => ({
-            brand: r.brand,
-            flavor: r.flavor,
-            casesNeeded: r.casesNeeded,
-            dieType: r.dieType,
+    buildInput: () => {
+      // Resolve UPCOMING (today-or-later) scheduled runs to their RunSettings
+      // (scheduled runs carry no recipe rows) exactly like the warehouse "Reorder
+      // Now" card does, then aggregate to a per-item demand map. Sent to the
+      // server so the proactive reorder nudge subtracts the SAME projected demand
+      // as the card and the two can never disagree (the server can't resolve this
+      // itself — profiles are client-side). The `date >= today` filter mirrors the
+      // card's basis; a past-date leak here would be a silent parity bug.
+      const today = todayStr();
+      const scheduledSettingsList: RunSettings[] = Object.keys(scheduled)
+        .filter((d) => (scheduled[d]?.length ?? 0) > 0 && d >= today)
+        .flatMap((date) =>
+          (scheduled[date] ?? [])
+            .filter((r) => r.brand)
+            .map((r) => {
+              const profile = brandProfiles[profileKey(r.brand, r.flavor)] ?? {};
+              return {
+                ...DEFAULT_SETTINGS,
+                ...profile,
+                brand: r.brand,
+                flavor: r.flavor,
+                casesNeeded: r.casesNeeded,
+                ...(r.dieType ? { dieType: r.dieType } : {}),
+              };
+            }),
+        );
+      return {
+        ...buildOptimizeInput({
+          date: today,
+          nowMs: Date.now(),
+          runToTime,
+          runs: allRuns,
+          history,
+          scheduledDays: Object.entries(scheduled).map(([date, runs]) => ({
+            date,
+            runs: runs.map((r) => ({
+              brand: r.brand,
+              flavor: r.flavor,
+              casesNeeded: r.casesNeeded,
+              dieType: r.dieType,
+            })),
           })),
-        })),
-      }),
+        }),
+        reorderDemandByKey: buildReorderDemandByKey(scheduledSettingsList),
+      };
+    },
   });
 
   // Sandbox "Reset" — re-copy live → sandbox on the server, then drop this

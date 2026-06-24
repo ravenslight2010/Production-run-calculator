@@ -146,6 +146,18 @@ function toReorderInput(it: InventoryItem): ReorderInput {
   };
 }
 
+// Roll a list of resolved scheduled runs up into a per-item-key demand map (the
+// SAME aggregation the reorder card uses). Shared so the warehouse "Reorder Now"
+// card and the proactive reorder nudge subtract identical demand and can never
+// disagree (replit.md parity). The proactive nudge sends this map to the server.
+export function buildReorderDemandByKey(
+  scheduledValsList: FormValues[],
+): Record<string, number> {
+  const demandByKey: Record<string, number> = {};
+  for (const d of aggregateRunDemand(scheduledValsList)) demandByKey[d.key] = d.qty;
+  return demandByKey;
+}
+
 // Top-level convenience: given current inventory and the upcoming scheduled runs
 // (resolved to their FormValues via brand profiles), return the items that have
 // dropped to/below their reorder threshold once projected scheduled demand is
@@ -156,9 +168,7 @@ export function computeRunReorderList(
   items: InventoryItem[],
   scheduledValsList: FormValues[],
 ): ReorderItem[] {
-  const demandByKey: Record<string, number> = {};
-  for (const d of aggregateRunDemand(scheduledValsList)) demandByKey[d.key] = d.qty;
-  return computeReorderListShared(items.map(toReorderInput), demandByKey);
+  return computeReorderListShared(items.map(toReorderInput), buildReorderDemandByKey(scheduledValsList));
 }
 
 // Re-export the use-first entry type for the card.

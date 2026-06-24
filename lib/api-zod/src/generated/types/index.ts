@@ -107,6 +107,7 @@ export * from './okResponse';
 export * from './optimizeAction';
 export * from './optimizeActionKind';
 export * from './optimizeInput';
+export * from './optimizeInputReorderDemandByKey';
 export * from './optimizeRecommendation';
 export * from './optimizeRecommendationCategory';
 export * from './optimizeRecommendationImpact';

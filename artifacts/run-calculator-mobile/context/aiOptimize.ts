@@ -59,6 +59,14 @@ export type OptimizeInput = {
   runs: OptimizeRun[];
   scheduledRuns: OptimizeScheduledRun[];
   historyRuns: OptimizeRun[];
+  /**
+   * Client-resolved material demand from upcoming (today-or-later) scheduled
+   * runs, keyed by inventory item key. Only the proactive reorder nudge reads
+   * it; /ai/optimize ignores it. Lets the nudge project on-hand exactly like the
+   * warehouse "Reorder Now" card (the server can't resolve scheduled-run demand
+   * itself because brand/recipe profiles live client-side). Optional.
+   */
+  reorderDemandByKey?: Record<string, number>;
 };
 
 export type OptimizeActionKind = "set_target_time" | "set_run_target" | "reorder_run";

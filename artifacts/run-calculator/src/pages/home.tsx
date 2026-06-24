@@ -171,6 +171,7 @@ import {
   fetchInventory,
   mergeInventory,
   scoreNameMatch,
+  buildReorderDemandByKey,
   type MergeInventoryLine,
 } from "../inventoryShared";
 import {
@@ -2789,24 +2790,46 @@ export default function Home() {
   // provider in (tabs)/_layout.tsx (replit.md parity).
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
     enabled: isManager,
-    buildInput: () =>
-      buildOptimizeInput({
-        date: todayStr(),
-        nowMs: Date.now(),
-        runToTime,
-        runs: dayState.runs,
-        runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
-        history,
-        scheduledDays: scheduledDays.map((d) => ({
-          date: d.date,
-          runs: (d.runs ?? []).map((r) => ({
-            brand: r.brand,
-            flavor: r.flavor,
-            casesNeeded: r.casesNeeded,
-            dieType: r.dieType,
+    buildInput: () => {
+      // Resolve upcoming scheduled runs to their FormValues (scheduled runs carry
+      // no recipe rows) exactly like the warehouse "Reorder Now" card does, then
+      // aggregate to a per-item demand map. Sent to the server so the proactive
+      // reorder nudge subtracts the SAME projected demand as the card and the two
+      // can never disagree (the server can't resolve this itself — profiles are
+      // client-side). scheduledDays is already today-or-later (server-filtered).
+      const scheduledValsList: FormValues[] = scheduledDays.flatMap((day) =>
+        (day.runs ?? [])
+          .filter((r) => r.brand)
+          .map((r) => {
+            const profile = loadProfile(r.brand, r.flavor);
+            return {
+              ...(profile ?? DEFAULT_VALUES),
+              casesNeeded: r.casesNeeded,
+              ...(r.dieType ? { dieType: r.dieType } : {}),
+            } as FormValues;
+          }),
+      );
+      return {
+        ...buildOptimizeInput({
+          date: todayStr(),
+          nowMs: Date.now(),
+          runToTime,
+          runs: dayState.runs,
+          runValuesFor: (id) => (id === currentRunId ? form.getValues() : loadRunValues(id)),
+          history,
+          scheduledDays: scheduledDays.map((d) => ({
+            date: d.date,
+            runs: (d.runs ?? []).map((r) => ({
+              brand: r.brand,
+              flavor: r.flavor,
+              casesNeeded: r.casesNeeded,
+              dieType: r.dieType,
+            })),
           })),
-        })),
-      }),
+        }),
+        reorderDemandByKey: buildReorderDemandByKey(scheduledValsList),
+      };
+    },
   });
 
   // Update the apply-sync callback so it always captures fresh form/state refs

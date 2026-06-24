@@ -681,15 +681,18 @@ async function loadFlaggedAtRiskStock(
 // the warehouse "Reorder Now" card does (shared computeReorderList from
 // @workspace/inventory-math), so the proactive watcher can surface an
 // auto-deduped reorder nudge without anyone opening the Warehouse tab.
-// Demand is deliberately NOT subtracted here: the server can't resolve scheduled
-// runs to material demand (brand profiles live client-side), so this triggers on
-// the current cross-location on-hand vs the reorder point — exactly "an item has
-// dropped to its reorder point". This is a conservative SUBSET of the card
-// (which subtracts upcoming scheduled demand, so it flags at least these items),
-// so the nudge can never disagree with the card. Best-effort: any DB failure
-// returns an empty list and the watcher simply omits the low-stock section.
+// `demandByKey` is the client-resolved material demand from upcoming scheduled
+// runs (brand/recipe profiles live client-side, so the server can't resolve it):
+// when present it is subtracted from cross-location on-hand exactly like the
+// card, so the nudge fires as early as the card and the two can never disagree.
+// When absent/empty this reduces to `onHand <= reorderThreshold` (a conservative
+// SUBSET of the card). computeReorderList already clamps each demand to a
+// non-negative number, so an untrusted client map is safe. Best-effort: any DB
+// failure returns an empty list and the watcher simply omits the low-stock
+// section.
 async function loadLowStockReorderItems(
   log: { error: (obj: unknown, msg?: string) => void },
+  demandByKey: Record<string, number> = {},
 ): Promise<ReorderItem[]> {
   try {
     const items = await db
@@ -713,7 +716,7 @@ async function loadLowStockReorderItems(
       onHand: onHandByItem.get(item.id) ?? 0,
       reorderThreshold: item.reorderThreshold,
     }));
-    return computeReorderList(reorderInputs);
+    return computeReorderList(reorderInputs, demandByKey);
   } catch (err) {
     log.error({ err }, "proactive-alert: failed to load low-stock reorder items (non-fatal)");
     return [];
@@ -741,7 +744,7 @@ router.post(
 
     const [flaggedAtRisk, lowStock] = await Promise.all([
       loadFlaggedAtRiskStock(req.log),
-      loadLowStockReorderItems(req.log),
+      loadLowStockReorderItems(req.log, validation.data.reorderDemandByKey ?? {}),
     ]);
 
     // On an idle day (no run started) the only nudges worth surfacing are stock

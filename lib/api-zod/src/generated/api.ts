@@ -774,7 +774,8 @@ export const AiOptimizeBody = zod.object({
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
 }))
-})).optional().describe('Recent finished runs from prior days')
+})).optional().describe('Recent finished runs from prior days'),
+  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
 })
 
 export const AiOptimizeResponse = zod.object({
@@ -862,7 +863,8 @@ export const AiAskBody = zod.object({
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
 }))
-})).optional().describe('Recent finished runs from prior days')
+})).optional().describe('Recent finished runs from prior days'),
+  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
 })
 }).describe('A free-form question about the day plus the full live day-state the answer must be grounded in. Reuses the OptimizeInput shape so both clients send identically-shaped data.')
 
@@ -937,7 +939,8 @@ export const AiCommandBody = zod.object({
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
 }))
-})).optional().describe('Recent finished runs from prior days')
+})).optional().describe('Recent finished runs from prior days'),
+  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
 })
 }).describe('A single spoken utterance plus the full live day-state it must be interpreted against. Reuses the OptimizeInput shape so both clients send identically-shaped grounding data (the same data \/ai\/ask uses), letting the server resolve fuzzy run references to concrete run ids.')
 
@@ -1074,7 +1077,8 @@ export const AiProactiveAlertBody = zod.object({
   "durationSec": zod.number(),
   "open": zod.boolean().describe('True if the stoppage is still in progress (no end time)')
 }))
-})).optional().describe('Recent finished runs from prior days')
+})).optional().describe('Recent finished runs from prior days'),
+  "reorderDemandByKey": zod.record(zod.string(), zod.number()).optional().describe('Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand\/recipe profiles live client-side, so the server can\'t resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse \"Reorder Now\" card. Optional; omitted\/empty means demand is not subtracted.')
 })
 
 export const AiProactiveAlertResponse = zod.object({

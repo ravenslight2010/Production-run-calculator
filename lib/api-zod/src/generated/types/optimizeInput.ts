@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OptimizeInputReorderDemandByKey } from './optimizeInputReorderDemandByKey';
 import type { OptimizeRun } from './optimizeRun';
 import type { OptimizeScheduledRun } from './optimizeScheduledRun';
 
@@ -27,4 +28,6 @@ export interface OptimizeInput {
   scheduledRuns?: OptimizeScheduledRun[];
   /** Recent finished runs from prior days */
   historyRuns?: OptimizeRun[];
+  /** Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted. */
+  reorderDemandByKey?: OptimizeInputReorderDemandByKey;
 }

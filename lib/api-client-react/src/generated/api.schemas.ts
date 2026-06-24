@@ -664,6 +664,11 @@ export interface OptimizeScheduledRun {
   casesNeeded: number;
 }
 
+/**
+ * Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted.
+ */
+export type OptimizeInputReorderDemandByKey = {[key: string]: number};
+
 export interface OptimizeInput {
   date: string;
   /** Client clock (ms epoch) so the model can reason about timing */
@@ -683,6 +688,8 @@ export interface OptimizeInput {
   scheduledRuns?: OptimizeScheduledRun[];
   /** Recent finished runs from prior days */
   historyRuns?: OptimizeRun[];
+  /** Client-resolved material demand from upcoming (today-or-later) scheduled runs, keyed by inventory item key. Brand/recipe profiles live client-side, so the server can't resolve scheduled-run demand itself; the client sends it so the proactive reorder nudge can project on-hand exactly like the warehouse "Reorder Now" card. Optional; omitted/empty means demand is not subtracted. */
+  reorderDemandByKey?: OptimizeInputReorderDemandByKey;
 }
 
 export type OptimizeActionKind = typeof OptimizeActionKind[keyof typeof OptimizeActionKind];
