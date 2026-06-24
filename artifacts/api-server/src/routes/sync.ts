@@ -104,6 +104,7 @@ router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void>
       };
       if (includeRuns) {
         base.runs = runs.map((run: any) => ({
+          id: run.id ?? "",
           brand: run.brand ?? "",
           flavor: run.flavor ?? "",
           casesNeeded: runValues[run.id]?.casesNeeded ?? 0,

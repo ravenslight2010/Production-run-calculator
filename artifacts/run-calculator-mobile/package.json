@@ -72,6 +72,7 @@
     "@workspace/premix-import": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
+    "@workspace/schedule-move": "workspace:*",
     "@workspace/scheduled-recipe-check": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/mix-reconcile": "workspace:*",

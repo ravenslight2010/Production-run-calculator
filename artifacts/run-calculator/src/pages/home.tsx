@@ -167,6 +167,7 @@ import {
   type RecipeFieldId,
 } from "../aiRecipe";
 import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
+import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
@@ -2234,7 +2235,7 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -2678,7 +2679,7 @@ export default function Home() {
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
-  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
+  const [scheduledDays, setScheduledDays] = useState<{date: string; runCount: number; runs?: {id: string; brand: string; flavor: string; casesNeeded: number; dieType: string}[]}[]>([]);
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
@@ -2687,6 +2688,9 @@ export default function Home() {
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const [scheduleDeleteConfirm, setScheduleDeleteConfirm] = useState<string | null>(null);
+  const [scheduleMove, setScheduleMove] = useState<{ from: string; runId: string | null } | null>(null);
+  const [scheduleMoveDate, setScheduleMoveDate] = useState("");
+  const [scheduleMoving, setScheduleMoving] = useState(false);
   function tomorrowStr() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -2746,7 +2750,7 @@ export default function Home() {
         body: JSON.stringify({ payload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
       }
     } catch {}
@@ -2758,6 +2762,70 @@ export default function Home() {
       setScheduledDays(prev => prev.filter(d => d.date !== date));
       setScheduleDeleteConfirm(null);
     } catch {}
+  }
+  async function fetchSchedulePayload(date: string): Promise<SyncPayload | null> {
+    try {
+      const res = await fetch(`/api/sync/${date}`);
+      if (!res.ok) return null;
+      return (await res.json()) as SyncPayload | null;
+    } catch { return null; }
+  }
+  async function refreshScheduledDays() {
+    try {
+      const d = await fetch("/api/sync/scheduled?include=runs").then(r => r.json());
+      setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[]);
+    } catch {}
+  }
+  // Move a whole scheduled day (sel "all") or a single run (sel.runId) to another
+  // future date. Web schedule pool is future days only — the live "today" runs are
+  // never a move source or target (mobile allows today; see schedule-move memory).
+  // Target is written before the source is trimmed/deleted, so a partial network
+  // failure can only leave a duplicate (visible, user-fixable) — never lose runs.
+  async function performScheduleMove(fromDate: string, sel: "all" | { runId: string }, toDate: string) {
+    if (!toDate || toDate === fromDate) return;
+    const src = await fetchSchedulePayload(fromDate);
+    if (!src?.dayState) return;
+    let ids: string[] | "all";
+    if (sel === "all") ids = "all";
+    else {
+      if (!src.dayState.runs.some(r => r.id === sel.runId)) return;
+      ids = [sel.runId];
+    }
+    const tgt = await fetchSchedulePayload(toDate);
+    const { source, target, idMap } = moveEntries(src.dayState.runs, tgt?.dayState?.runs ?? [], ids, genId);
+    if (idMap.length === 0) return;
+    const vals = relocateValues(
+      (src.runValues ?? {}) as Record<string, FormValues>,
+      (tgt?.runValues ?? {}) as Record<string, FormValues>,
+      idMap,
+    );
+    const base = tgt ?? src;
+    const targetPayload: SyncPayload = {
+      ...base,
+      dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: Date.now() },
+      runValues: vals.target,
+    };
+    const tRes = await fetch(`/api/sync/${toDate}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload: targetPayload }),
+    });
+    if (!tRes.ok) return;
+    if (source.length === 0) {
+      await fetch(`/api/sync/${fromDate}`, { method: "DELETE" });
+    } else {
+      const sourcePayload: SyncPayload = {
+        ...src,
+        dayState: { ...src.dayState, runs: source, date: fromDate },
+        runValues: vals.source,
+      };
+      await fetch(`/api/sync/${fromDate}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: sourcePayload }),
+      });
+    }
+    await refreshScheduledDays();
   }
   function updateAdvancedField<K extends keyof FormValues>(runId: string, field: K, value: FormValues[K]) {
     setScheduleEditorRunValues(prev => ({
@@ -3266,7 +3334,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               // The new day's resetAt becomes the server-side session boundary
               // (pushed above), so the daily reset signs everyone out. Drop this
               // device to the login screen now instead of waiting for its next
@@ -4838,7 +4906,7 @@ export default function Home() {
         body: JSON.stringify({ payload: outPayload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
     setShowImportDialog(false);
@@ -4922,7 +4990,7 @@ export default function Home() {
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
-    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
     setImportProgress(null);
     setShowImportDialog(false);
     setImportResult(null);
@@ -5045,7 +5113,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               scheduleReset();
               return;
             }
@@ -7975,7 +8043,7 @@ export default function Home() {
                   </DropdownMenuItem>
                 )}
                 {isSupervisor && (
-                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
+                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
                       <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center leading-none">
@@ -9556,7 +9624,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
                         }}
                         title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
@@ -11992,6 +12060,21 @@ export default function Home() {
                             <div className="flex gap-1.5 shrink-0 items-center">
                               <button
                                 type="button"
+                                onClick={() => {
+                                  setScheduleDeleteConfirm(null);
+                                  if (scheduleMove?.from === day.date && scheduleMove.runId === null) {
+                                    setScheduleMove(null);
+                                  } else {
+                                    setScheduleMove({ from: day.date, runId: null });
+                                    setScheduleMoveDate(tomorrowStr());
+                                  }
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <ArrowRight className="w-3 h-3" /> Move
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => openScheduleEditor(day.date)}
                                 className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors"
                               >
@@ -12013,22 +12096,105 @@ export default function Home() {
                               )}
                             </div>
                           </div>
+                          {/* ── Move whole-day panel ── */}
+                          {scheduleMove?.from === day.date && scheduleMove.runId === null && (
+                            <div className="border-t border-border/40 px-3 py-2.5 bg-primary/5">
+                              <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground block mb-1.5">Move all runs to</label>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="date"
+                                  value={scheduleMoveDate}
+                                  min={tomorrowStr()}
+                                  onChange={e => setScheduleMoveDate(e.target.value)}
+                                  className="flex-1 h-8 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                  onClick={async () => {
+                                    setScheduleMoving(true);
+                                    await performScheduleMove(day.date, "all", scheduleMoveDate);
+                                    setScheduleMoving(false);
+                                    setScheduleMove(null);
+                                  }}
+                                  className="px-3 py-1.5 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                                >
+                                  {scheduleMoving ? "Moving…" : "Move"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleMove(null)}
+                                  className="px-3 py-1.5 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          )}
                           {/* ── Expandable run list ── */}
                           <div
                             className="overflow-hidden transition-all duration-200"
-                            style={{ maxHeight: isExpanded ? `${(day.runs?.length ?? 0) * 44 + 8}px` : "0px", opacity: isExpanded ? 1 : 0 }}
+                            style={{ maxHeight: isExpanded ? `${(day.runs?.length ?? 0) * 72 + 8}px` : "0px", opacity: isExpanded ? 1 : 0 }}
                           >
                             <div className="border-t border-border/40 px-3 pb-2 pt-1 space-y-1">
                               {(day.runs ?? []).length === 0 ? (
                                 <p className="text-xs text-muted-foreground/60 py-1 pl-5">No runs recorded</p>
                               ) : (day.runs ?? []).map((run, i) => (
-                                <div key={i} className="flex items-center gap-2 py-1 pl-5">
-                                  <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
-                                  <span className="text-xs font-medium truncate flex-1">
-                                    {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
-                                  </span>
-                                  {run.casesNeeded > 0 && (
-                                    <span className="text-xs text-muted-foreground shrink-0">{run.casesNeeded} cs</span>
+                                <div key={i} className="py-1 pl-5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
+                                    <span className="text-xs font-medium truncate flex-1">
+                                      {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                                    </span>
+                                    {run.casesNeeded > 0 && (
+                                      <span className="text-xs text-muted-foreground shrink-0">{run.casesNeeded} cs</span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      disabled={!run.id}
+                                      onClick={() => {
+                                        if (scheduleMove?.from === day.date && scheduleMove.runId === run.id) {
+                                          setScheduleMove(null);
+                                        } else {
+                                          setScheduleMove({ from: day.date, runId: run.id });
+                                          setScheduleMoveDate(tomorrowStr());
+                                        }
+                                      }}
+                                      className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0 disabled:opacity-40"
+                                    >
+                                      <ArrowRight className="w-2.5 h-2.5" /> Move
+                                    </button>
+                                  </div>
+                                  {scheduleMove?.from === day.date && scheduleMove.runId === run.id && run.id && (
+                                    <div className="flex items-center gap-2 mt-1.5 ml-6">
+                                      <input
+                                        type="date"
+                                        value={scheduleMoveDate}
+                                        min={tomorrowStr()}
+                                        onChange={e => setScheduleMoveDate(e.target.value)}
+                                        className="flex-1 h-7 px-2 rounded-md bg-muted/40 border border-border/60 text-xs outline-none focus:border-primary/60 transition-colors"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={scheduleMoving || !scheduleMoveDate || scheduleMoveDate === day.date}
+                                        onClick={async () => {
+                                          setScheduleMoving(true);
+                                          await performScheduleMove(day.date, { runId: run.id }, scheduleMoveDate);
+                                          setScheduleMoving(false);
+                                          setScheduleMove(null);
+                                        }}
+                                        className="px-2.5 py-1 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                                      >
+                                        {scheduleMoving ? "Moving…" : "Move"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setScheduleMove(null)}
+                                        className="px-2.5 py-1 text-xs rounded-md bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ))}

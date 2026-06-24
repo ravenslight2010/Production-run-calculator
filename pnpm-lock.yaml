@@ -504,6 +504,9 @@ importers:
       '@workspace/recipe-apply':
         specifier: workspace:*
         version: link:../../lib/recipe-apply
+      '@workspace/schedule-move':
+        specifier: workspace:*
+        version: link:../../lib/schedule-move
       '@workspace/scheduled-recipe-check':
         specifier: workspace:*
         version: link:../../lib/scheduled-recipe-check
@@ -772,6 +775,9 @@ importers:
       '@workspace/recipe-apply':
         specifier: workspace:*
         version: link:../../lib/recipe-apply
+      '@workspace/schedule-move':
+        specifier: workspace:*
+        version: link:../../lib/schedule-move
       '@workspace/scheduled-recipe-check':
         specifier: workspace:*
         version: link:../../lib/scheduled-recipe-check
@@ -1090,6 +1096,12 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/recipe-apply: {}
+
+  lib/schedule-move:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/scheduled-recipe-check:
     devDependencies:

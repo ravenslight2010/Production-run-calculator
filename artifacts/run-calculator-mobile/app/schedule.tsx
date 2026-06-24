@@ -70,6 +70,8 @@ export default function ScheduleScreen() {
     addListItem,
     removeScheduledRun,
     clearScheduledDay,
+    moveScheduledDay,
+    moveScheduledRun,
     applyScheduledDay,
     supervisorPin,
   } = useRun();
@@ -86,6 +88,18 @@ export default function ScheduleScreen() {
 
   const dayRuns = scheduled[selectedDate] ?? [];
   const flavorOptions = brand ? brandFlavors[brand] ?? [] : [];
+
+  // Move a single run (runId set) or the whole day (runId null) to another date.
+  // Mobile's schedule pool is today + future (the live `runs` list is never touched).
+  const [moveTarget, setMoveTarget] = useState<{ runId: string | null } | null>(null);
+  const doMove = (toDate: string) => {
+    if (!moveTarget || toDate === selectedDate) return;
+    if (moveTarget.runId === null) moveScheduledDay(selectedDate, toDate);
+    else moveScheduledRun(selectedDate, moveTarget.runId, toDate);
+    setMoveTarget(null);
+    setSelectedDate(toDate);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
 
   const canAdd = brand.trim().length > 0 && flavor.trim().length > 0;
 
@@ -288,6 +302,16 @@ export default function ScheduleScreen() {
                 </View>
                 <Pressable
                   onPress={() => {
+                    setMoveTarget({ runId: r.id });
+                    tap();
+                  }}
+                  hitSlop={8}
+                  style={styles.planDelBtn}
+                >
+                  <Feather name="corner-up-right" size={16} color={colors.mutedForeground} />
+                </Pressable>
+                <Pressable
+                  onPress={() => {
                     removeScheduledRun(selectedDate, r.id);
                     tap();
                   }}
@@ -300,6 +324,54 @@ export default function ScheduleScreen() {
             ))
           )}
         </CardSection>
+
+        {moveTarget ? (
+          <CardSection>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
+              {moveTarget.runId === null
+                ? "Move all runs to…"
+                : "Move this run to…"}
+            </Text>
+            <View style={[styles.optionWrap, { marginTop: 8 }]}>
+              {dates
+                .filter((d) => d !== selectedDate)
+                .map((d) => {
+                  const { weekday, day } = fmtDayShort(d);
+                  return (
+                    <Pressable
+                      key={d}
+                      onPress={() => doMove(d)}
+                      style={[
+                        styles.optionChip,
+                        { borderColor: colors.border, backgroundColor: colors.secondary },
+                      ]}
+                    >
+                      <Text style={[styles.optionText, { color: colors.foreground }]}>
+                        {d === today ? "Today" : `${weekday} ${day}`}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+            </View>
+            <Pressable
+              onPress={() => {
+                setMoveTarget(null);
+                tap();
+              }}
+              style={({ pressed }) => [
+                styles.clearBtn,
+                {
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.6 : 1,
+                  alignSelf: "flex-start",
+                  marginTop: 10,
+                },
+              ]}
+            >
+              <Feather name="x" size={15} color={colors.foreground} />
+            </Pressable>
+          </CardSection>
+        ) : null}
 
         {dayRuns.length > 0 ? (
           <View style={styles.actionRow}>
@@ -314,6 +386,18 @@ export default function ScheduleScreen() {
               <Text style={[styles.applyText, { color: colors.primaryForeground }]}>
                 Load into today&apos;s runs
               </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setMoveTarget({ runId: null });
+                tap();
+              }}
+              style={({ pressed }) => [
+                styles.clearBtn,
+                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Feather name="corner-up-right" size={15} color={colors.foreground} />
             </Pressable>
             <Pressable
               onPress={() => {

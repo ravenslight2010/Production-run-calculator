@@ -29,6 +29,9 @@
     },
     {
       "path": "../../lib/inventory-math"
+    },
+    {
+      "path": "../../lib/schedule-move"
     }
   ]
 }

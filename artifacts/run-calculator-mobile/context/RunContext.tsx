@@ -62,6 +62,7 @@ import {
   type MergeMap,
 } from "./mergeIngredients";
 import { collectMergeAliases } from "@workspace/merge-suggest";
+import { moveEntries } from "@workspace/schedule-move";
 import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 
@@ -1489,6 +1490,8 @@ interface RunContextValue {
   ) => void;
   removeScheduledRun: (date: string, id: string) => void;
   clearScheduledDay: (date: string) => void;
+  moveScheduledDay: (fromDate: string, toDate: string) => void;
+  moveScheduledRun: (fromDate: string, id: string, toDate: string) => void;
   applyScheduledDay: (date: string) => boolean;
   // Live multi-device sync connection status.
   syncStatus: SyncStatus;
@@ -3367,6 +3370,46 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // Move scheduled runs to another date. Mobile's schedule pool includes today
+  // (today's scheduled bucket is distinct from the live `runs` list, which is never
+  // touched here) plus future days. Whole-day move (sel "all") or a single run.
+  // Append onto the target (no auto-collapse), regenerate colliding ids, drop the
+  // source day if it empties. Shares @workspace/schedule-move with web.
+  const moveScheduledEntries = useCallback(
+    (fromDate: string, sel: "all" | string, toDate: string) => {
+      if (!toDate || toDate === fromDate) return;
+      setAppState((prev) => {
+        const srcDay = prev.scheduled[fromDate] ?? [];
+        if (srcDay.length === 0) return prev;
+        const ids: string[] | "all" = sel === "all" ? "all" : [sel];
+        const { source, target, idMap } = moveEntries(
+          srcDay,
+          prev.scheduled[toDate] ?? [],
+          ids,
+          () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+        );
+        if (idMap.length === 0) return prev;
+        const scheduled = { ...prev.scheduled, [toDate]: target };
+        if (source.length === 0) delete scheduled[fromDate];
+        else scheduled[fromDate] = source;
+        const next = { ...prev, scheduled };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const moveScheduledDay = useCallback(
+    (fromDate: string, toDate: string) => moveScheduledEntries(fromDate, "all", toDate),
+    [moveScheduledEntries],
+  );
+
+  const moveScheduledRun = useCallback(
+    (fromDate: string, id: string, toDate: string) => moveScheduledEntries(fromDate, id, toDate),
+    [moveScheduledEntries],
+  );
+
   const applyScheduledDay = useCallback(
     (date: string): boolean => {
       let applied = false;
@@ -3643,6 +3686,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         updateScheduledRun,
         removeScheduledRun,
         clearScheduledDay,
+        moveScheduledDay,
+        moveScheduledRun,
         applyScheduledDay,
         syncStatus,
     }),

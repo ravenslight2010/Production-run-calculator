@@ -58,6 +58,9 @@
       "path": "./lib/scheduled-recipe-check"
     },
     {
+      "path": "./lib/schedule-move"
+    },
+    {
       "path": "./lib/ai-memory"
     },
     {
