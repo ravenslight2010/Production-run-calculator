@@ -91,3 +91,4 @@
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
 - [Saved spec sheets + AI reconcile](saved-spec-reconcile.md) — max-2 saved spec sheets cross-ref'd vs CURRENT recipes; deterministic diff in @workspace/spec-reconcile, AI only narrates, must be rate-limited.
 - [Freezer-pull notification](freezer-pull.md) — warehouse "Pull Out Freezer for [date]" cards; manager-tagged items w/ per-item daysEarly; factory-wide master-data (NOT synced); GET authed-only, writes manage-inventory; web+mobile parity.
+- [Low-stock reorder list](reorder-list.md) — advisory "Reorder Now" warehouse card; flags on-hand≤reorderThreshold(>0) minus SCHEDULED-run demand; math in @workspace/inventory-math; read-only; web+mobile parity.

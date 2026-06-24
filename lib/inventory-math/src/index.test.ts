@@ -7,9 +7,11 @@ import {
   computeSummaryStats,
   aggregateRunDemand,
   computeTransferNeeds,
+  computeReorderList,
   type IngredientSubstitution,
   type LocationStock,
   type RecipeRow,
+  type ReorderInput,
   type RunLinesInput,
 } from "./index";
 
@@ -302,5 +304,102 @@ describe("computeTransferNeeds", () => {
       },
     });
     expect(needs[0].sources.map((s) => s.locationName)).toEqual(["Big", "Small"]);
+  });
+});
+
+describe("computeReorderList", () => {
+  const item = (over: Partial<ReorderInput>): ReorderInput => ({
+    key: over.key ?? "ingredient:Mozzarella:lbs",
+    name: over.name ?? "Mozzarella",
+    unit: over.unit ?? "lbs",
+    category: over.category ?? "ingredient",
+    onHand: over.onHand ?? 0,
+    reorderThreshold: over.reorderThreshold ?? 0,
+  });
+
+  it("flags an item at or below its threshold and suggests restoring to threshold", () => {
+    const list = computeReorderList([
+      item({ key: "k", name: "Cheese", onHand: 4, reorderThreshold: 10 }),
+    ]);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      key: "k",
+      onHand: 4,
+      reorderThreshold: 10,
+      demand: 0,
+      projectedOnHand: 4,
+      suggestedQty: 6, // 10 - 4
+    });
+  });
+
+  it("flags an item exactly at threshold (dropped 'to or below') with a min suggestion of 1", () => {
+    const list = computeReorderList([
+      item({ key: "k", onHand: 10, reorderThreshold: 10 }),
+    ]);
+    expect(list).toHaveLength(1);
+    expect(list[0].suggestedQty).toBe(1);
+  });
+
+  it("does not flag an item comfortably above threshold", () => {
+    expect(
+      computeReorderList([item({ onHand: 50, reorderThreshold: 10 })]),
+    ).toEqual([]);
+  });
+
+  it("never flags an item with a zero threshold (untracked)", () => {
+    expect(
+      computeReorderList([item({ onHand: 0, reorderThreshold: 0 })]),
+    ).toEqual([]);
+  });
+
+  it("with no demand reduces to onHand <= reorderThreshold (matches the LOW badge)", () => {
+    const items = [
+      item({ key: "low", onHand: 5, reorderThreshold: 5 }), // == threshold → flagged
+      item({ key: "ok", onHand: 6, reorderThreshold: 5 }), // above → not flagged
+      item({ key: "off", onHand: 0, reorderThreshold: 0 }), // untracked
+    ];
+    expect(computeReorderList(items).map((r) => r.key)).toEqual(["low"]);
+  });
+
+  it("subtracts upcoming scheduled-run demand so an item fine today still surfaces", () => {
+    // 20 on hand, threshold 8 → fine today, but 15 will be consumed by scheduled
+    // runs, leaving a projected 5 (< 8) → flagged, suggest enough to cover demand
+    // and restore to the threshold: 8 - (20 - 15) = 3.
+    const list = computeReorderList(
+      [item({ key: "k", onHand: 20, reorderThreshold: 8 })],
+      { k: 15 },
+    );
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      demand: 15,
+      projectedOnHand: 5,
+      suggestedQty: 3,
+    });
+  });
+
+  it("does not double-flag when demand keeps projected on-hand above threshold", () => {
+    expect(
+      computeReorderList(
+        [item({ key: "k", onHand: 20, reorderThreshold: 8 })],
+        { k: 5 }, // projected 15 > 8
+      ),
+    ).toEqual([]);
+  });
+
+  it("rounds the suggested quantity up to a whole unit", () => {
+    const list = computeReorderList(
+      [item({ key: "k", onHand: 2, reorderThreshold: 10 })],
+      { k: 0.5 }, // projected 1.5, deficit 8.5 → ceil 9
+    );
+    expect(list[0].suggestedQty).toBe(9);
+  });
+
+  it("sorts most-urgent first (largest shortfall below threshold), then by name", () => {
+    const list = computeReorderList([
+      item({ key: "a", name: "Apples", onHand: 9, reorderThreshold: 10 }), // short 1
+      item({ key: "b", name: "Bananas", onHand: 1, reorderThreshold: 10 }), // short 9
+      item({ key: "c", name: "Cherries", onHand: 5, reorderThreshold: 10 }), // short 5
+    ]);
+    expect(list.map((r) => r.name)).toEqual(["Bananas", "Cherries", "Apples"]);
   });
 });

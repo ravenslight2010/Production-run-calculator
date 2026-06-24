@@ -121,6 +121,7 @@ import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
+import ReorderCard from "../components/ReorderCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import StaffRolesCard from "../components/StaffRolesCard";
@@ -9167,6 +9168,26 @@ export default function Home() {
                       ))}
                     </div>
                   );
+                })()}
+                {/* Reorder Now: cross-location on-hand at/below reorder threshold
+                    once upcoming scheduled-run demand is subtracted. Scheduled
+                    runs carry no recipe rows, so resolve each via its profile ->
+                    FormValues (same pattern as the freezer-pull / per-run blocks)
+                    and feed them as the demand basis. Advisory only. */}
+                {(() => {
+                  const scheduledValsList: FormValues[] = scheduledDays.flatMap((day) =>
+                    (day.runs ?? [])
+                      .filter((r) => r.brand)
+                      .map((r) => {
+                        const profile = loadProfile(r.brand, r.flavor);
+                        return {
+                          ...(profile ?? DEFAULT_VALUES),
+                          casesNeeded: r.casesNeeded,
+                          ...(r.dieType ? { dieType: r.dieType } : {}),
+                        } as FormValues;
+                      }),
+                  );
+                  return <ReorderCard scheduledValsList={scheduledValsList} />;
                 })()}
                 {(() => {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);

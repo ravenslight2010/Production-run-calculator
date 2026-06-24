@@ -7,6 +7,7 @@ import {
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
+  computeReorderList as computeReorderListShared,
   type RunLinesInput,
   type InventoryCategory,
   type ConsumeLine,
@@ -14,13 +15,15 @@ import {
   type RunLine,
   type TransferNeed,
   type TransferDemand,
+  type ReorderInput,
+  type ReorderItem,
 } from "@workspace/inventory-math";
 
 // Consumption/summary math now lives in @workspace/inventory-math (shared with
 // mobile so the two can't drift). Re-export the types so this module's public
 // surface stays stable for existing web call sites (they're also imported above
 // for use within this file).
-export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, TransferNeed };
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, TransferNeed, ReorderItem };
 
 // Web `FormValues` uses `targetDoughballWeight`; the shared lib's canonical
 // field name is `doughballWeightOz`. Map it here so the formulas stay shared.
@@ -125,6 +128,34 @@ export function computeRunTransferNeeds(
 ): TransferNeed[] {
   const demands = aggregateRunDemand(valsList) as TransferDemand[];
   return computeTransferNeeds({ demands, stockByKey: buildStockByKey(items) });
+}
+
+// Map an inventory item to the shared reorder input shape (item.category is a
+// plain string on the API type; the lib uses the InventoryCategory union).
+function toReorderInput(it: InventoryItem): ReorderInput {
+  return {
+    key: it.key,
+    name: it.name,
+    unit: it.unit,
+    category: it.category as InventoryCategory,
+    onHand: it.onHand,
+    reorderThreshold: it.reorderThreshold,
+  };
+}
+
+// Top-level convenience: given current inventory and the upcoming scheduled runs
+// (resolved to their FormValues via brand profiles), return the items that have
+// dropped to/below their reorder threshold once projected scheduled demand is
+// subtracted, each with a suggested reorder quantity. Demand is aggregated on
+// the SAME basis as the transfer warnings, so web and mobile flag identically.
+// Advisory only — never writes stock.
+export function computeRunReorderList(
+  items: InventoryItem[],
+  scheduledValsList: FormValues[],
+): ReorderItem[] {
+  const demandByKey: Record<string, number> = {};
+  for (const d of aggregateRunDemand(scheduledValsList)) demandByKey[d.key] = d.qty;
+  return computeReorderListShared(items.map(toReorderInput), demandByKey);
 }
 
 // ── Expiration helpers ───────────────────────────────────────────────────────

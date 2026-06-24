@@ -19,6 +19,7 @@ import {
   deriveCandidateItems as deriveCandidateItemsShared,
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
+  computeReorderList as computeReorderListShared,
   applySubstitutions as applySubstitutionsShared,
   type InventoryCategory,
   type ConsumeLine,
@@ -26,6 +27,8 @@ import {
   type RunLine,
   type TransferNeed,
   type TransferDemand,
+  type ReorderInput,
+  type ReorderItem,
   type LocationStock as LocationStockMath,
   type IngredientSubstitution,
   type SubstitutionAction,
@@ -40,7 +43,7 @@ import { notifyUnauthorized } from "./authEvents";
 // imported above for use within this file). RunSettings already uses the lib's
 // canonical `doughballWeightOz` field name, so it is passed straight through;
 // only DEFAULT_PEP_TYPES is injected (owned per-app).
-export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, TransferNeed, IngredientSubstitution, SubstitutionAction, SubstitutionLogEntry };
+export type { InventoryCategory, ConsumeLine, CandidateItem, RunLine, TransferNeed, ReorderItem, IngredientSubstitution, SubstitutionAction, SubstitutionLogEntry };
 
 // Overlay today's temporary substitutions onto a run's settings before computing
 // totals/consumption. Pure (clones) so the override reverts cleanly when subs are
@@ -150,6 +153,34 @@ export function computeRunTransferNeeds(
 ): TransferNeed[] {
   const demands = aggregateRunDemand(settingsList) as TransferDemand[];
   return computeTransferNeeds({ demands, stockByKey: buildStockByKey(items) });
+}
+
+// Map an inventory item to the shared reorder input shape (item.category is a
+// plain string on the API type; the lib uses the InventoryCategory union).
+function toReorderInput(it: InventoryItem): ReorderInput {
+  return {
+    key: it.key,
+    name: it.name,
+    unit: it.unit,
+    category: it.category as InventoryCategory,
+    onHand: it.onHand,
+    reorderThreshold: it.reorderThreshold,
+  };
+}
+
+// Top-level convenience: given current inventory and the upcoming scheduled runs
+// (resolved to their RunSettings via brand profiles), return the items that have
+// dropped to/below their reorder threshold once projected scheduled demand is
+// subtracted, each with a suggested reorder quantity. Demand is aggregated on
+// the SAME basis as the transfer warnings, so web and mobile flag identically.
+// Advisory only — never writes stock.
+export function computeRunReorderList(
+  items: InventoryItem[],
+  scheduledSettingsList: RunSettings[],
+): ReorderItem[] {
+  const demandByKey: Record<string, number> = {};
+  for (const d of aggregateRunDemand(scheduledSettingsList)) demandByKey[d.key] = d.qty;
+  return computeReorderListShared(items.map(toReorderInput), demandByKey);
 }
 
 // ── Expiration helpers ───────────────────────────────────────────────────────

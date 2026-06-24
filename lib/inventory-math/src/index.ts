@@ -541,3 +541,90 @@ export function computeTransferNeeds(input: {
   }
   return out;
 }
+
+// ── Low-stock reorder list (shared, pure) ────────────────────────────────────
+// Powers the warehouse "Reorder Now" card on BOTH web and mobile. PURE and
+// SHARED so the two apps flag the exact same items with the exact same suggested
+// quantities (replit.md parity). Advisory only: it never writes stock or places
+// an order — it just produces a shopping list.
+
+// One inventory item fed into the reorder check. `onHand` is the cross-location
+// total (what the server's GET /inventory returns); `reorderThreshold` is the
+// user-set minimum (0 means the item is untracked and is never flagged).
+export type ReorderInput = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  onHand: number;
+  reorderThreshold: number;
+};
+
+// A flagged item that is at/below its reorder threshold once optional upcoming
+// scheduled-run demand is subtracted. `projectedOnHand = onHand - demand`;
+// `suggestedQty` is the whole-unit amount to order to bring projected on-hand
+// back up to the threshold.
+export type ReorderItem = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  onHand: number;
+  reorderThreshold: number;
+  demand: number;
+  projectedOnHand: number;
+  suggestedQty: number;
+};
+
+// Flag inventory items that need reordering: cross-location on-hand — minus any
+// demand from upcoming scheduled runs (`demandByKey`, optional) — has dropped to
+// or below the item's reorder threshold. Items with a threshold of 0 are
+// untracked and never flagged (matches `isLowStock`). When `demandByKey` is
+// empty this reduces to exactly `onHand <= reorderThreshold`, so the card and
+// the per-item LOW badge agree. Subtracting demand first means an item that is
+// fine today but will be consumed by scheduled runs still surfaces.
+//
+// `suggestedQty` brings projected on-hand back up to the threshold (the safe
+// minimum), rounded UP to a whole unit since you order whole bags/cases, with a
+// floor of 1 so a flagged item always has an actionable amount. Because demand
+// is already subtracted, the suggestion automatically covers the coming usage.
+//
+// Result is sorted most-urgent first (largest shortfall below threshold), then
+// by name for a stable order. Pure.
+export function computeReorderList(
+  items: ReorderInput[],
+  demandByKey: Record<string, number> = {},
+): ReorderItem[] {
+  const EPS = 1e-6;
+  const out: ReorderItem[] = [];
+  for (const it of items) {
+    const threshold = Number(it.reorderThreshold) || 0;
+    if (!(threshold > 0)) continue;
+    const onHand = Number(it.onHand) || 0;
+    const demand = Math.max(0, Number(demandByKey[it.key]) || 0);
+    const projectedOnHand = onHand - demand;
+    if (projectedOnHand > threshold + EPS) continue;
+    const suggestedQty = Math.max(
+      1,
+      Math.ceil(threshold - projectedOnHand - EPS),
+    );
+    out.push({
+      key: it.key,
+      name: it.name,
+      unit: it.unit,
+      category: it.category,
+      onHand,
+      reorderThreshold: threshold,
+      demand,
+      projectedOnHand,
+      suggestedQty,
+    });
+  }
+  out.sort((a, b) => {
+    const da = a.reorderThreshold - a.projectedOnHand;
+    const db = b.reorderThreshold - b.projectedOnHand;
+    if (Math.abs(db - da) > EPS) return db - da;
+    return a.name.localeCompare(b.name);
+  });
+  return out;
+}

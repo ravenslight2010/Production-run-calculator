@@ -20,6 +20,7 @@ import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import { useFreezerPullItems } from "@/hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import ReorderCard from "@/components/ReorderCard";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -248,6 +249,27 @@ export default function WarehouseScreen() {
     today,
   });
 
+  // Reorder Now demand basis: UPCOMING (today-or-later) scheduled runs resolved
+  // to RunSettings via their brand/flavor profile, exactly like the freezer-pull
+  // resolution above. Web filters scheduledDays to `d >= today`, so mobile must
+  // too — otherwise past scheduled runs would inflate demand and the two cards
+  // would drift (replit.md parity).
+  const scheduledSettingsList: RunSettings[] = scheduledDays.flatMap((date) =>
+    (scheduled[date] ?? [])
+      .filter((r) => r.brand)
+      .map((r) => {
+        const profile = brandProfiles[profileKey(r.brand, r.flavor)] ?? {};
+        return {
+          ...DEFAULT_SETTINGS,
+          ...profile,
+          brand: r.brand,
+          flavor: r.flavor,
+          casesNeeded: r.casesNeeded,
+          ...(r.dieType ? { dieType: r.dieType } : {}),
+        };
+      }),
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
@@ -308,6 +330,10 @@ export default function WarehouseScreen() {
             </View>
           </Card>
         ))}
+
+        {/* Reorder Now: cross-location on-hand at/below reorder threshold once
+            upcoming scheduled-run demand is subtracted. Advisory only. */}
+        <ReorderCard scheduledSettingsList={scheduledSettingsList} />
 
         {/* Total ingredient needs across all active runs (mixed units) */}
         <Card title="Total Ingredient Needs — All Runs" icon="archive">
