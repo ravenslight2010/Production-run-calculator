@@ -1,4 +1,4 @@
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import {
   buildReviewPrompt,
   sanitizeReviewVerdicts,
@@ -39,7 +39,7 @@ export async function reviewSuggestions(opts: {
   let content = "";
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5.4",
+      model: pickModel("full"),
       max_completion_tokens: 4096,
       response_format: { type: "json_object" },
       messages: [

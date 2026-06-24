@@ -24,7 +24,7 @@ import {
   TransferInventoryBody,
   UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -519,7 +519,7 @@ router.post(
   let content = "";
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5.4",
+      model: pickModel("full"),
       max_completion_tokens: 8192,
       response_format: { type: "json_object" },
       messages: [
@@ -585,7 +585,7 @@ router.post(
     let content = "";
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-5.4",
+        model: pickModel("full"),
         max_completion_tokens: 8192,
         response_format: { type: "json_object" },
         messages: [
@@ -762,7 +762,7 @@ router.post(
     let content = "";
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-5.4",
+        model: pickModel("full"),
         max_completion_tokens: 4096,
         response_format: { type: "json_object" },
         messages: [

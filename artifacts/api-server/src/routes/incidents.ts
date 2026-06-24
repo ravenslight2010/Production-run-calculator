@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -118,7 +118,7 @@ router.post(
     let workaround = FALLBACK_WORKAROUND;
     try {
       const response = await openai.chat.completions.create({
-        model: "gpt-5.4",
+        model: pickModel("full"),
         max_completion_tokens: 2048,
         response_format: { type: "json_object" },
         messages: [
