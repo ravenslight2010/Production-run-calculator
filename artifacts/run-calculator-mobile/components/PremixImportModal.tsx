@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -10,6 +10,9 @@ import {
   View,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { SelectField } from "@/components/UI";
+import { rematchPremixCandidate, type PremixCandidate } from "@workspace/premix-import";
+import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/context/premixImport";
 
 type Props = {
@@ -21,15 +24,21 @@ type Props = {
   error: string | null;
   prepared: PremixImportPrepared | null;
   applying: boolean;
-  /** Confirm with the ids the manager chose to apply. */
-  onConfirm: (selectedIds: string[]) => void;
+  /** Confirm with the reviewed mixes the manager chose to apply. */
+  onConfirm: (mixesToApply: Mix[]) => void;
 };
+
+// Local stable handle for a reviewable mix: a key that survives a re-match (the
+// candidate's own id changes when its product changes) plus the current
+// candidate value. Keyed by the original parsed id so selection state sticks.
+type Item = { key: string; candidate: PremixCandidate };
 
 // Review screen for the Excel premix-sheet importer. Each tab/block is parsed
 // deterministically into a Mix and product names are matched against the app's
 // known lists (AI only disambiguates names). The manager reviews every parsed
 // mix — its matched product, batch size, components and days-early note — and
-// can include/exclude each one before confirming. Mirrors the web dialog in
+// can include/exclude or re-match (correct a wrong product) each one before
+// confirming. Mirrors the web dialog in
 // artifacts/run-calculator/src/components/PremixImportDialog.tsx (replit.md parity).
 export default function PremixImportModal({
   visible,
@@ -42,31 +51,63 @@ export default function PremixImportModal({
   onConfirm,
 }: Props) {
   const colors = useColors();
-  // Selected mix ids (default: all parsed mixes are selected for apply).
+  // Editable per-mix review list and the selected (included) stable keys.
+  const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Reset the selection whenever a fresh prepared result arrives.
+  // Reset the review state whenever a fresh prepared result arrives.
   useEffect(() => {
-    if (prepared) setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
-    else setSelected(new Set());
+    if (prepared) {
+      setItems(prepared.candidates.map((c) => ({ key: c.mix.id, candidate: c })));
+      setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
+    } else {
+      setItems([]);
+      setSelected(new Set());
+    }
   }, [prepared]);
+
+  const existing = useMemo(() => new Set(prepared?.existingIds ?? []), [prepared]);
 
   if (!visible) return null;
 
   const s = prepared?.summary;
   const nothing = s != null && s.total === 0;
-  const candidates = prepared?.candidates ?? [];
-  const selectedCount = candidates.filter((c) => selected.has(c.mix.id)).length;
+  const selectedCount = items.filter((it) => selected.has(it.key)).length;
   const confirmDisabled =
     loading || applying || !!error || !prepared || nothing || selectedCount === 0;
 
-  const toggle = (id: string) =>
+  const brands = prepared?.brands ?? [];
+  const flavorsByBrand = prepared?.flavorsByBrand ?? {};
+
+  const toggle = (key: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
+
+  // Re-point a candidate to a different brand/flavor. The mix id is rebuilt and
+  // its new-vs-update status recomputed; the include/exclude pick (stable key)
+  // is preserved.
+  const rematch = (key: string, brand: string, flavor: string) =>
+    setItems((prev) =>
+      prev.map((it) =>
+        it.key === key
+          ? {
+              key,
+              candidate: rematchPremixCandidate(it.candidate, brand, flavor, (id) =>
+                existing.has(id),
+              ),
+            }
+          : it,
+      ),
+    );
+
+  const confirm = () => {
+    const mixes = items.filter((it) => selected.has(it.key)).map((it) => it.candidate.mix);
+    onConfirm(mixes);
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -119,8 +160,8 @@ export default function PremixImportModal({
             {!loading && !error && prepared ? (
               <>
                 <Text style={[styles.help, { color: colors.mutedForeground }]}>
-                  Review each mix below and uncheck any you don't want. Checked mixes
-                  marked{" "}
+                  Review each mix below. Uncheck any you don't want, or fix a wrong
+                  product match. Checked mixes marked{" "}
                   <Text style={{ color: colors.foreground, fontWeight: "600" }}>
                     update
                   </Text>{" "}
@@ -138,95 +179,120 @@ export default function PremixImportModal({
                   <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>
                     of {s!.total} mixes selected
                   </Text>
-                  <View style={{ flexDirection: "row", gap: 12, marginTop: 6 }}>
-                    <Text style={[styles.summaryStat, { color: colors.success }]}>
-                      {s!.created} new
-                    </Text>
-                    <Text style={[styles.summaryStat, { color: colors.primary }]}>
-                      {s!.updated} updated
-                    </Text>
-                  </View>
                 </View>
 
-                {candidates.map((c) => {
+                {items.map((it) => {
+                  const c = it.candidate;
                   const m = c.mix;
-                  const isSel = selected.has(m.id);
-                  const product = [m.brand, m.flavor].filter(Boolean).join(" — ");
+                  const isSel = selected.has(it.key);
                   const isNew = c.status === "new";
+                  const flavorOpts = m.brand ? flavorsByBrand[m.brand] ?? [] : [];
                   return (
-                    <Pressable
-                      key={m.id}
-                      onPress={() => toggle(m.id)}
-                      testID={`premix-candidate-${m.id}`}
+                    <View
+                      key={it.key}
+                      testID={`premix-candidate-${it.key}`}
                       style={[styles.candidate, { borderColor: colors.border }]}
                     >
-                      <View
-                        style={[
-                          styles.checkbox,
-                          {
-                            borderColor: isSel ? colors.primary : colors.border,
-                            backgroundColor: isSel ? colors.primary : "transparent",
-                          },
-                        ]}
+                      <Pressable
+                        onPress={() => toggle(it.key)}
+                        style={styles.candidateRow}
+                        accessibilityLabel={`Include ${m.name}`}
                       >
-                        {isSel ? (
-                          <Feather name="check" size={13} color={colors.primaryForeground} />
-                        ) : null}
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <View style={styles.candidateHead}>
-                          <Text
-                            style={[styles.candidateName, { color: colors.foreground }]}
-                            numberOfLines={1}
-                          >
-                            {m.name}
-                          </Text>
-                          <View
-                            style={[
-                              styles.badge,
-                              {
-                                backgroundColor: isNew
-                                  ? "rgba(34,197,94,0.15)"
-                                  : "rgba(59,130,246,0.15)",
-                              },
-                            ]}
-                          >
+                        <View
+                          style={[
+                            styles.checkbox,
+                            {
+                              borderColor: isSel ? colors.primary : colors.border,
+                              backgroundColor: isSel ? colors.primary : "transparent",
+                            },
+                          ]}
+                        >
+                          {isSel ? (
+                            <Feather name="check" size={13} color={colors.primaryForeground} />
+                          ) : null}
+                        </View>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={styles.candidateHead}>
                             <Text
+                              style={[styles.candidateName, { color: colors.foreground }]}
+                              numberOfLines={1}
+                            >
+                              {m.name}
+                            </Text>
+                            <View
                               style={[
-                                styles.badgeText,
-                                { color: isNew ? colors.success : colors.primary },
+                                styles.badge,
+                                {
+                                  backgroundColor: isNew
+                                    ? "rgba(34,197,94,0.15)"
+                                    : "rgba(59,130,246,0.15)",
+                                },
                               ]}
                             >
-                              {c.status.toUpperCase()}
-                            </Text>
+                              <Text
+                                style={[
+                                  styles.badgeText,
+                                  { color: isNew ? colors.success : colors.primary },
+                                ]}
+                              >
+                                {c.status.toUpperCase()}
+                              </Text>
+                            </View>
                           </View>
                         </View>
-                        <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
-                          {product ? `Matched to ${product}` : "No product match"}
-                        </Text>
-                        <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
-                          Batch{" "}
-                          {m.batchSize.toLocaleString(undefined, {
-                            maximumFractionDigits: 4,
-                          })}{" "}
-                          lbs · {m.components.length} ingredient
-                          {m.components.length === 1 ? "" : "s"}
-                          {m.daysEarly > 0
-                            ? ` · pull ${m.daysEarly} day${m.daysEarly === 1 ? "" : "s"} early`
-                            : ""}
-                        </Text>
-                        {m.notes ? (
-                          <Text
-                            style={[
-                              styles.candidateMeta,
-                              { color: colors.mutedForeground, fontStyle: "italic" },
-                            ]}
-                          >
-                            {m.notes}
-                          </Text>
-                        ) : null}
+                      </Pressable>
+
+                      {/* Re-match: brand + flavor pickers (correct a wrong AI/auto match). */}
+                      <View style={styles.matchRow}>
+                        <View style={{ flex: 1 }}>
+                          <SelectField
+                            value={m.brand}
+                            onChange={(v) => rematch(it.key, v, "")}
+                            options={brands}
+                            allowAdd={false}
+                            allowClear
+                            placeholder="No brand"
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <SelectField
+                            value={m.flavor}
+                            onChange={(v) => rematch(it.key, m.brand, v)}
+                            options={flavorOpts}
+                            allowAdd={false}
+                            allowClear
+                            placeholder={m.brand ? "No flavor" : "Pick brand first"}
+                          />
+                        </View>
                       </View>
-                    </Pressable>
+                      {!m.brand ? (
+                        <Text style={[styles.warn, { color: colors.destructive }]}>
+                          No product match — pick a brand or it won't match a run.
+                        </Text>
+                      ) : null}
+
+                      <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
+                        Batch{" "}
+                        {m.batchSize.toLocaleString(undefined, {
+                          maximumFractionDigits: 4,
+                        })}{" "}
+                        lbs · {m.components.length} ingredient
+                        {m.components.length === 1 ? "" : "s"}
+                        {m.daysEarly > 0
+                          ? ` · pull ${m.daysEarly} day${m.daysEarly === 1 ? "" : "s"} early`
+                          : ""}
+                      </Text>
+                      {m.notes ? (
+                        <Text
+                          style={[
+                            styles.candidateMeta,
+                            { color: colors.mutedForeground, fontStyle: "italic" },
+                          ]}
+                        >
+                          {m.notes}
+                        </Text>
+                      ) : null}
+                    </View>
                   );
                 })}
 
@@ -276,7 +342,7 @@ export default function PremixImportModal({
               <Text style={{ color: colors.foreground, fontWeight: "600" }}>Cancel</Text>
             </Pressable>
             <Pressable
-              onPress={() => onConfirm([...selected])}
+              onPress={confirm}
               disabled={confirmDisabled}
               style={({ pressed }) => [
                 styles.btn,
@@ -328,11 +394,13 @@ const styles = StyleSheet.create({
   summaryCard: { borderWidth: 1, borderRadius: 10, padding: 12 },
   summaryTotal: { fontSize: 24, fontWeight: "800" },
   summaryLabel: { fontSize: 12, fontWeight: "600" },
-  summaryStat: { fontSize: 12, fontWeight: "600" },
   candidate: {
     borderWidth: 1,
     borderRadius: 10,
     padding: 12,
+    gap: 8,
+  },
+  candidateRow: {
     flexDirection: "row",
     gap: 10,
     alignItems: "flex-start",
@@ -353,7 +421,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   candidateName: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
-  candidateMeta: { fontSize: 12, marginTop: 2 },
+  candidateMeta: { fontSize: 12 },
+  matchRow: { flexDirection: "row", gap: 8 },
+  warn: { fontSize: 12 },
   badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   badgeText: { fontSize: 10, fontWeight: "700" },
   note: { fontSize: 12 },

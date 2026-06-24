@@ -9,6 +9,7 @@ import {
   applyPremixMatches,
   summarizePremixImport,
   buildPremixCandidates,
+  rematchPremixCandidate,
   mergePremixIntoMixes,
   type PremixKnown,
   type SheetGrid,
@@ -229,5 +230,28 @@ describe("conversion + summary", () => {
     expect(candidates).toHaveLength(2);
     expect(candidates[0]).toEqual({ mix: mixes[0], status: "update" });
     expect(candidates[1]).toEqual({ mix: mixes[1], status: "new" });
+  });
+
+  it("re-matches a candidate to a new product, rebuilding id + status", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    const mix = premixToMix(groundPremix(parsed, KNOWN, []).mix)!;
+    const candidate = { mix, status: "new" as const };
+
+    // Re-point to a known brand+flavor; id is rebuilt and quantities untouched.
+    const expectedId = premixId({ brand: "Bobos", flavor: "Deluxe", name: mix.name });
+    const rematched = rematchPremixCandidate(candidate, "Bobos", "Deluxe", (id) =>
+      id === expectedId,
+    );
+    expect(rematched.mix.brand).toBe("Bobos");
+    expect(rematched.mix.flavor).toBe("Deluxe");
+    expect(rematched.mix.id).toBe(expectedId);
+    expect(rematched.mix.batchSize).toBe(mix.batchSize);
+    expect(rematched.mix.components).toEqual(mix.components);
+    // The rebuilt id now matches an existing mix → flips to "update".
+    expect(rematched.status).toBe("update");
+
+    // Re-pointing to an unknown id stays "new".
+    const stillNew = rematchPremixCandidate(candidate, "Bobos", "Deluxe", () => false);
+    expect(stillNew.status).toBe("new");
   });
 });

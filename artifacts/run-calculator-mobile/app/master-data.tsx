@@ -67,6 +67,7 @@ import {
   type PremixImportPrepared,
   type PremixImportStore,
 } from "@/context/premixImport";
+import type { Mix } from "@workspace/mixes";
 import {
   fetchSavedSpecSheets,
   reconcileSpecSheet,
@@ -1218,11 +1219,11 @@ export default function MasterDataScreen() {
     }
   }
 
-  async function handlePremixImportConfirm(selectedIds: string[]) {
+  async function handlePremixImportConfirm(mixesToApply: Mix[]) {
     if (!premixPrepared) return;
     setPremixApplying(true);
     try {
-      await commitPremixImport(premixPrepared, selectedIds);
+      await commitPremixImport(premixPrepared, mixesToApply);
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void mixesQc.invalidateQueries({ queryKey: ["mixes"] });

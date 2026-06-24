@@ -461,6 +461,34 @@ export function buildPremixCandidates(
 }
 
 /**
+ * Re-point one reviewable candidate to a different brand/flavor — a manual
+ * correction of the auto/AI match the manager makes in the review dialog. The
+ * mix's deterministic id is rebuilt from the new product (so re-importing still
+ * upserts correctly) and its new-vs-update status is recomputed against the
+ * existing mixes. The mix name and parsed quantities are untouched. Pure.
+ */
+export function rematchPremixCandidate(
+  candidate: PremixCandidate,
+  brand: string,
+  flavor: string,
+  exists: (id: string) => boolean,
+): PremixCandidate {
+  const nextBrand = brand.trim();
+  const nextFlavor = flavor.trim();
+  const mix =
+    normalizeMix({
+      ...candidate.mix,
+      brand: nextBrand,
+      flavor: nextFlavor,
+      id: premixId({ brand: nextBrand, flavor: nextFlavor, name: candidate.mix.name }),
+    }) ??
+    // normalizeMix only returns null for a mix with no usable name; a reviewed
+    // candidate always has one, so fall back to the original mix defensively.
+    candidate.mix;
+  return { mix, status: exists(mix.id) ? "update" : "new" };
+}
+
+/**
  * Count how many imported mixes are new vs would overwrite an existing one.
  * `exists(id)` is supplied by the caller (reads platform storage). Pure.
  */

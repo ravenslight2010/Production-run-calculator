@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { rematchPremixCandidate, type PremixCandidate } from "@workspace/premix-import";
+import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/premixImport";
 
 type Props = {
@@ -11,16 +13,22 @@ type Props = {
   error: string | null;
   prepared: PremixImportPrepared | null;
   applying: boolean;
-  /** Confirm with the ids the manager chose to apply. */
-  onConfirm: (selectedIds: string[]) => void;
+  /** Confirm with the reviewed mixes the manager chose to apply. */
+  onConfirm: (mixesToApply: Mix[]) => void;
 };
+
+// Local stable handle for a reviewable mix: a key that survives a re-match (the
+// candidate's own id changes when its product changes) plus the current
+// candidate value. Keyed by the original parsed id so selection state sticks.
+type Item = { key: string; candidate: PremixCandidate };
 
 // Review screen for the Excel premix-sheet importer. Each tab/block is parsed
 // deterministically into a Mix and product names are matched against the app's
 // known lists (AI only disambiguates names). The manager reviews every parsed
 // mix — its matched product, batch size, components and days-early note — and
-// can include/exclude each one before confirming. Mirrors the mobile modal in
-// artifacts/run-calculator-mobile (replit.md parity).
+// can include/exclude or re-match (correct a wrong product) each one before
+// confirming. Mirrors the mobile modal in artifacts/run-calculator-mobile
+// (replit.md parity).
 export default function PremixImportDialog({
   open,
   onClose,
@@ -31,29 +39,64 @@ export default function PremixImportDialog({
   applying,
   onConfirm,
 }: Props) {
-  // Selected mix ids (default: all parsed mixes are selected for apply).
+  // Editable per-mix review list and the selected (included) stable keys.
+  const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Reset the selection whenever a fresh prepared result arrives.
+  // Reset the review state whenever a fresh prepared result arrives.
   useEffect(() => {
-    if (prepared) setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
-    else setSelected(new Set());
+    if (prepared) {
+      setItems(prepared.candidates.map((c) => ({ key: c.mix.id, candidate: c })));
+      setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
+    } else {
+      setItems([]);
+      setSelected(new Set());
+    }
   }, [prepared]);
+
+  const existing = useMemo(
+    () => new Set(prepared?.existingIds ?? []),
+    [prepared],
+  );
 
   if (!open) return null;
 
   const s = prepared?.summary;
   const nothing = s != null && s.total === 0;
-  const candidates = prepared?.candidates ?? [];
-  const selectedCount = candidates.filter((c) => selected.has(c.mix.id)).length;
+  const selectedCount = items.filter((it) => selected.has(it.key)).length;
 
-  const toggle = (id: string) =>
+  const toggle = (key: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
+
+  // Re-point a candidate to a different brand/flavor. The mix id is rebuilt and
+  // its new-vs-update status recomputed; the manager's include/exclude pick (the
+  // stable key) is preserved.
+  const rematch = (key: string, brand: string, flavor: string) =>
+    setItems((prev) =>
+      prev.map((it) =>
+        it.key === key
+          ? {
+              key,
+              candidate: rematchPremixCandidate(it.candidate, brand, flavor, (id) =>
+                existing.has(id),
+              ),
+            }
+          : it,
+      ),
+    );
+
+  const brands = prepared?.brands ?? [];
+  const flavorsByBrand = prepared?.flavorsByBrand ?? {};
+
+  const confirm = () => {
+    const mixes = items.filter((it) => selected.has(it.key)).map((it) => it.candidate.mix);
+    onConfirm(mixes);
+  };
 
   return (
     <div
@@ -103,8 +146,9 @@ export default function PremixImportDialog({
           {!loading && !error && prepared && (
             <>
               <p className="text-sm text-muted-foreground">
-                Review each mix below and uncheck any you don't want. Checked mixes
-                marked <span className="font-medium text-foreground">update</span> will
+                Review each mix below. Uncheck any you don't want, or fix a wrong
+                product match. Checked mixes marked{" "}
+                <span className="font-medium text-foreground">update</span> will
                 replace the existing mix; <span className="font-medium text-foreground">new</span>{" "}
                 ones will be added.
               </p>
@@ -114,29 +158,26 @@ export default function PremixImportDialog({
                 <div className="text-xs font-medium text-muted-foreground">
                   of {s!.total} mixes selected
                 </div>
-                <div className="mt-2 flex gap-3 text-xs">
-                  <span className="text-green-600">{s!.created} new</span>
-                  <span className="text-primary">{s!.updated} updated</span>
-                </div>
               </div>
 
-              {candidates.length > 0 && (
+              {items.length > 0 && (
                 <ul className="space-y-2">
-                  {candidates.map((c) => {
+                  {items.map((it) => {
+                    const c = it.candidate;
                     const m = c.mix;
-                    const isSel = selected.has(m.id);
-                    const product = [m.brand, m.flavor].filter(Boolean).join(" — ");
+                    const isSel = selected.has(it.key);
+                    const flavorOpts = m.brand ? flavorsByBrand[m.brand] ?? [] : [];
                     return (
                       <li
-                        key={m.id}
+                        key={it.key}
                         className="rounded-lg border border-border p-3"
-                        data-testid={`premix-candidate-${m.id}`}
+                        data-testid={`premix-candidate-${it.key}`}
                       >
-                        <label className="flex items-start gap-3 cursor-pointer">
+                        <div className="flex items-start gap-3">
                           <input
                             type="checkbox"
                             checked={isSel}
-                            onChange={() => toggle(m.id)}
+                            onChange={() => toggle(it.key)}
                             className="mt-1 h-4 w-4 accent-primary"
                             aria-label={`Include ${m.name}`}
                           />
@@ -155,9 +196,45 @@ export default function PremixImportDialog({
                                 {c.status}
                               </span>
                             </div>
-                            <div className="mt-0.5 text-xs text-muted-foreground">
-                              {product ? `Matched to ${product}` : "No product match"}
+
+                            {/* Re-match: brand + flavor pickers (correct a wrong AI/auto match). */}
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <select
+                                value={m.brand}
+                                onChange={(e) => rematch(it.key, e.target.value, "")}
+                                aria-label={`Brand for ${m.name}`}
+                                data-testid={`premix-brand-${it.key}`}
+                                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                              >
+                                <option value="">No brand</option>
+                                {brands.map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                value={m.flavor}
+                                onChange={(e) => rematch(it.key, m.brand, e.target.value)}
+                                disabled={!m.brand}
+                                aria-label={`Flavor for ${m.name}`}
+                                data-testid={`premix-flavor-${it.key}`}
+                                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground disabled:opacity-50"
+                              >
+                                <option value="">No flavor</option>
+                                {flavorOpts.map((f) => (
+                                  <option key={f} value={f}>
+                                    {f}
+                                  </option>
+                                ))}
+                              </select>
                             </div>
+                            {!m.brand && (
+                              <div className="mt-1 text-xs text-amber-600">
+                                No product match — pick a brand or it won't match a run.
+                              </div>
+                            )}
+
                             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                               <span>
                                 Batch:{" "}
@@ -186,7 +263,7 @@ export default function PremixImportDialog({
                               </div>
                             )}
                           </div>
-                        </label>
+                        </div>
                       </li>
                     );
                   })}
@@ -229,7 +306,7 @@ export default function PremixImportDialog({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm([...selected])}
+            onClick={confirm}
             disabled={loading || applying || !!error || !prepared || nothing || selectedCount === 0}
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >

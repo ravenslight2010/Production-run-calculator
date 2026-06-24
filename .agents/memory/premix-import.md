@@ -13,13 +13,19 @@ are parsed DETERMINISTICALLY in the shared lib; AI ONLY disambiguates product na
 
 ## Decisions / gotchas
 
-- **The import is per-mix confirmation-based, not all-or-nothing.** The review dialog/modal
-  MUST list every parsed mix (matched product, batch size, ingredient count, days-early note,
-  new/update badge) with an include/exclude toggle, and commit only the selected ids.
-  **Why:** an aggregate "N new / M updated" summary alone was rejected in review — a bulk
-  operation that overwrites existing master-data needs candidate-level sign-off.
-  **How to apply:** keep `buildPremixCandidates` (lib) feeding the prepared result and pass the
-  selected ids into `commitPremixImport(prepared, selectedIds)` on both platforms.
+- **The import is per-mix confirmation-based AND per-mix re-matchable, not all-or-nothing.** The
+  review dialog/modal MUST list every parsed mix (matched product, batch size, ingredient count,
+  days-early note, new/update badge) with an include/exclude toggle AND brand/flavor re-match
+  pickers so a manager can correct a wrong AI/auto product match before applying.
+  **Why:** an aggregate "N new / M updated" summary alone was rejected — a bulk operation that
+  overwrites existing master-data needs candidate-level sign-off; and a wrong product match must
+  be fixable in the same pass rather than re-importing.
+  **How to apply:** `buildPremixCandidates` (lib) feeds the prepared result; re-match goes through
+  the pure `rematchPremixCandidate(candidate, brand, flavor, exists)` (rebuilds the mix id via
+  `premixId`, recomputes new/update). `commitPremixImport(prepared, mixesToApply: Mix[])` now takes
+  the FINAL reviewed `Mix[]` (NOT selected ids) so edited matches are carried through. Selection
+  state in the UI MUST be keyed by the ORIGINAL parsed mix.id (a stable key), because re-match
+  changes the candidate's own id. Changing brand resets flavor (`rematch(key, newBrand, "")`).
 
 - **Match-premix request body field is `unmatchedNames`, NOT `names`.** The server contract
   requires `unmatchedNames`. The client glue uses a hand-written local request type + raw

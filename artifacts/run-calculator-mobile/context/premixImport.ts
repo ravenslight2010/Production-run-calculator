@@ -57,6 +57,12 @@ export type PremixImportPrepared = {
   summary: PremixImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
+  /** Known brands the manager can re-match a candidate to in the review modal. */
+  brands: string[];
+  /** Known flavors per brand, for the re-match flavor picker. */
+  flavorsByBrand: Record<string, string[]>;
+  /** Ids of mixes already saved, so a re-match can recompute new-vs-update. */
+  existingIds: string[];
   note?: string;
 };
 
@@ -162,25 +168,32 @@ export async function preparePremixImport(
   }
   const note = noteParts.length ? noteParts.join("\n") : undefined;
 
-  return { mixes, candidates, summary, newAliases, ...(note ? { note } : {}) };
+  return {
+    mixes,
+    candidates,
+    summary,
+    newAliases,
+    brands: known.brands,
+    flavorsByBrand: known.flavorsByBrand,
+    existingIds: [...existingIds],
+    ...(note ? { note } : {}),
+  };
 }
 
 /**
- * Apply a prepared premix import: upsert mixes by id, then persist new aliases.
- * Only the mixes whose ids are in `selectedIds` are written; pass `undefined`
- * (or omit) to apply all parsed mixes.
+ * Apply a prepared premix import: upsert the manager-approved mixes by id, then
+ * persist new aliases. `mixesToApply` is the reviewed selection from the modal
+ * (already deselected/re-matched as the manager chose).
  */
 export async function commitPremixImport(
   prepared: PremixImportPrepared,
-  selectedIds?: Iterable<string>,
+  mixesToApply: ReadonlyArray<Mix>,
 ): Promise<void> {
-  const allow = selectedIds ? new Set(selectedIds) : null;
-  const toApply = allow ? prepared.mixes.filter((m) => allow.has(m.id)) : prepared.mixes;
-  if (toApply.length === 0) return;
+  if (mixesToApply.length === 0) return;
   // Re-read current mixes right before writing so we merge onto the freshest
   // list (another manager may have edited mixes since prepare).
   const existing = await fetchMixes();
-  const merged = mergePremixIntoMixes(existing, toApply);
+  const merged = mergePremixIntoMixes(existing, mixesToApply);
   await saveMixes(merged);
 
   if (prepared.newAliases.length) {

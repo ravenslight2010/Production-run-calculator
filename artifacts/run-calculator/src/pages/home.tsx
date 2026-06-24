@@ -129,7 +129,7 @@ import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
-import { buildMixPlan } from "@workspace/mixes";
+import { buildMixPlan, type Mix } from "@workspace/mixes";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
@@ -4753,11 +4753,11 @@ export default function Home() {
     }
   }
 
-  async function handlePremixImportConfirm(selectedIds: string[]) {
+  async function handlePremixImportConfirm(mixesToApply: Mix[]) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
     try {
-      await commitPremixImport(premixImportPrepared, selectedIds);
+      await commitPremixImport(premixImportPrepared, mixesToApply);
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
