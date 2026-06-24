@@ -13,6 +13,17 @@ import {
   reconcileSpecWithRecipes,
   toReconcileRecipes,
 } from "@workspace/spec-reconcile";
+import {
+  buildMixReconcilePrompt,
+  sanitizeMixReconcileSummary,
+  toMixDiscrepancies,
+  validateMixReconcileBody,
+} from "./aiMixReconcile";
+import {
+  buildMixAssistPrompt,
+  sanitizeMixAnswer,
+  validateMixAssistBody,
+} from "./aiMixAssistant";
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
 import { rateLimit } from "../middlewares/rateLimit";
@@ -230,6 +241,24 @@ const SPEC_RECONCILE_RATE_MAX = 10;
 const specReconcileRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(SPEC_RECONCILE_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the mix-reconcile narration: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const MIX_RECONCILE_RATE_WINDOW_MS = 60_000;
+const MIX_RECONCILE_RATE_MAX = 10;
+const mixReconcileRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(MIX_RECONCILE_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the Mixes helper (staff-facing chat): per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const MIX_ASSIST_RATE_WINDOW_MS = 60_000;
+const MIX_ASSIST_RATE_MAX = 10;
+const mixAssistRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(MIX_ASSIST_RATE_WINDOW_MS)
     : undefined;
 
 router.post(
@@ -639,6 +668,115 @@ router.post(
       discrepancies,
       generatedAt: Date.now(),
       ...(summary ? { summary } : {}),
+    });
+  },
+);
+
+// Narrate the already-computed mix discrepancies. The deterministic diff (the
+// shared @workspace/mix-reconcile lib) runs on BOTH clients, so the client sends
+// the exact discrepancy list and the AI only summarizes it — it can't invent or
+// miss one. Read-only and fail-safe: any AI error returns an empty summary
+// rather than a 502. Not manager-gated (any signed-in user).
+router.post(
+  "/ai/mix-reconcile",
+  rateLimit({
+    windowMs: MIX_RECONCILE_RATE_WINDOW_MS,
+    max: MIX_RECONCILE_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: mixReconcileRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateMixReconcileBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const discrepancies = toMixDiscrepancies(validation.data);
+
+    // Advisory plain-language summary. Fail-safe: any AI error still returns a
+    // (empty) summary rather than a 502 — the deterministic diff already lives
+    // on the client.
+    let summary = "";
+    try {
+      const { system, user } = buildMixReconcilePrompt(
+        validation.data.label ?? "",
+        discrepancies,
+      );
+      const grounded = await groundPromptWithMemory(req.log, user, {
+        facilityDomains: ["ingredient", "general"],
+      });
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: grounded },
+        ],
+      });
+      summary = sanitizeMixReconcileSummary(response.choices[0]?.message?.content ?? "");
+    } catch (err) {
+      req.log.error({ err }, "ai-mix-reconcile summary call failed");
+    }
+
+    res.json({
+      generatedAt: Date.now(),
+      ...(summary ? { summary } : {}),
+    });
+  },
+);
+
+// Mixes helper: a single-shot, staff-facing Q&A over the current mixes —
+// explain a mix, total an ingredient, compare amounts. Grounded strictly in the
+// supplied mix definitions and the facility memory. Advisory only — never edits
+// a mix, never writes anything, and (by design) returns no structured apply.
+// Not manager-gated: floor staff use it, exactly like /ai/ask.
+router.post(
+  "/ai/mix-assistant",
+  rateLimit({
+    windowMs: MIX_ASSIST_RATE_WINDOW_MS,
+    max: MIX_ASSIST_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: mixAssistRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateMixAssistBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const { system, user } = buildMixAssistPrompt(validation.data);
+    const grounded = await groundPromptWithMemory(req.log, user, {
+      facilityDomains: ["ingredient", "general"],
+    });
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: grounded },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-mix-assistant call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    const { answer, note } = sanitizeMixAnswer(content);
+    const replyText = answer || note || "I couldn't answer that from the mix data.";
+
+    res.json({
+      answer: replyText,
+      generatedAt: Date.now(),
+      ...(note ? { note } : {}),
     });
   },
 );

@@ -40,6 +40,7 @@ import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAlias
 import { fetchMixes, saveMixes } from "./mixes";
 import { requestMatchPremix } from "./premixMatch";
 import { saveAiCorrections } from "./aiCorrections";
+import { savePremixSheet, buildPremixSheetLabel } from "./savedPremixSheets";
 
 /**
  * Everything this module needs from the RunContext, injected by the UI (mobile
@@ -195,6 +196,15 @@ export async function commitPremixImport(
   const existing = await fetchMixes();
   const merged = mergePremixIntoMixes(existing, mixesToApply);
   await saveMixes(merged);
+
+  // Snapshot the imported mixes server-side so the Mixes section can later
+  // reconcile the current mixes against this premix sheet (new/drifted mixes).
+  // Best-effort: the import already applied; the snapshot is a monitoring bonus.
+  try {
+    await savePremixSheet(buildPremixSheetLabel(mixesToApply), [...mixesToApply]);
+  } catch {
+    // ignore — monitoring snapshot is non-critical
+  }
 
   if (prepared.newAliases.length) {
     try {

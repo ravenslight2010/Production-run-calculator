@@ -143,6 +143,8 @@ import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
 import { describeSubstitution } from "../components/SubstitutionsManager";
 import AssistantTab from "../components/AssistantTab";
 import SpecReconcilePanel from "../components/SpecReconcilePanel";
+import MixReconcilePanel from "../components/MixReconcilePanel";
+import MixAssistChat from "../components/MixAssistChat";
 import {
   dispatchVoiceCommand,
   type VoiceCommandAction,
@@ -7158,6 +7160,8 @@ export default function Home() {
                         ...pepTypes,
                       ]}
                     />
+                    <MixReconcilePanel isManager={isManager} />
+                    <MixAssistChat />
                   </div>
                 )}
 

@@ -74,6 +74,7 @@
     "@workspace/recipe-apply": "workspace:*",
     "@workspace/scheduled-recipe-check": "workspace:*",
     "@workspace/spec-import": "workspace:*",
+    "@workspace/mix-reconcile": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",
     "@workspace/voice-commands": "workspace:*",
     "expo-file-system": "~19.0.23",

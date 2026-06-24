@@ -24,6 +24,8 @@ import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportMod
 import ProductionRulesManager from "@/components/ProductionRulesManager";
 import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
 import MixesManager from "@/components/MixesManager";
+import MixReconcilePanel from "@/components/MixReconcilePanel";
+import MixAssistChat from "@/components/MixAssistChat";
 import CycleCountManager from "@/components/CycleCountManager";
 import { DEFAULT_CYCLE_COUNT_SECTIONS } from "@workspace/cycle-count";
 import StaffRolesCard from "@/components/StaffRolesCard";
@@ -1612,6 +1614,16 @@ export default function MasterDataScreen() {
                   ...pepTypes,
                 ]}
               />
+            </CardSection>
+
+            <SectionHeader title="Mix Monitoring" />
+            <CardSection>
+              <MixReconcilePanel isManager={isManager} />
+            </CardSection>
+
+            <SectionHeader title="Ask about Mixes" />
+            <CardSection>
+              <MixAssistChat />
             </CardSection>
           </>
         ) : null}

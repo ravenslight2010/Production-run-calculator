@@ -1020,6 +1020,59 @@ export const AiSpecReconcileResponse = zod.object({
 
 
 /**
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint takes that exact discrepancy list and asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: an AI error simply yields an empty summary, never an error. It never invents or applies anything. Available to any signed-in user.
+ * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ */
+export const AiMixReconcileBody = zod.object({
+  "label": zod.string().optional().describe('Optional label for what was compared (e.g. the sheet name)'),
+  "discrepancies": zod.array(zod.object({
+  "source": zod.enum(['premix', 'spec']),
+  "type": zod.enum(['missing-mix', 'missing-component', 'extra-component', 'amount-mismatch']),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "mixName": zod.string(),
+  "ingredient": zod.string().optional(),
+  "sheetPerPizza": zod.number().optional(),
+  "mixPerPizza": zod.number().optional(),
+  "message": zod.string()
+})).describe('The deterministic discrepancies computed client-side')
+})
+
+export const AiMixReconcileResponse = zod.object({
+  "summary": zod.string().optional().describe('Advisory plain-language summary; absent\/empty when the AI is unavailable'),
+  "generatedAt": zod.number()
+})
+
+
+/**
+ * Answers a plain-language question grounded strictly in the current mix definitions and the facility memory. Advisory only: it explains and computes but never edits a mix or applies anything (no structured suggestion). Available to any signed-in user.
+ * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
+ */
+export const AiMixAssistantBody = zod.object({
+  "question": zod.string(),
+  "mixes": zod.array(zod.object({
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "batchSize": zod.number().optional(),
+  "daysEarly": zod.number().optional(),
+  "amountAlreadyMade": zod.number().optional(),
+  "enabled": zod.boolean().optional(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+}))
+}))
+})
+
+export const AiMixAssistantResponse = zod.object({
+  "answer": zod.string(),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional()
+})
+
+
+/**
  * Same live-day input as /ai/optimize, but evaluated on a cadence while a day is running. Returns at most a single timely, dismissible nudge (falling behind plan, or a natural break/changeover window) — or null when nothing is worth surfacing right now. Read-only; the client owns de-duplication and cooldown via the returned stable alert key.
  * @summary At-most-one proactive shift alert (AI); read-only
  */
@@ -2085,6 +2138,116 @@ export const DeleteSpecSheetResponse = zod.object({
 }).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).optional(),
   "note": zod.string().optional()
 }).describe('The canonicalized ParsedSpecImport snapshot captured at import time.')
+}))
+})
+
+
+/**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
+export const ListPremixSheetsResponse = zod.object({
+  "premixSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "scope": zod.string().optional(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "batchSize": zod.number(),
+  "daysEarly": zod.number(),
+  "notes": zod.string().optional(),
+  "amountAlreadyMade": zod.number(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+})),
+  "enabled": zod.boolean()
+}).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
+}))
+})
+
+
+/**
+ * Persists a snapshot of an imported premix workbook (its Mix[]) so the current mixes can later be reconciled against it. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
+ * @summary Save a premix-sheet snapshot (keeps only the two most recent)
+ */
+export const SavePremixSheetBody = zod.object({
+  "label": zod.string(),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "scope": zod.string().optional(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "batchSize": zod.number(),
+  "daysEarly": zod.number(),
+  "notes": zod.string().optional(),
+  "amountAlreadyMade": zod.number(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+})),
+  "enabled": zod.boolean()
+}).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
+})
+
+export const SavePremixSheetResponse = zod.object({
+  "premixSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "scope": zod.string().optional(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "batchSize": zod.number(),
+  "daysEarly": zod.number(),
+  "notes": zod.string().optional(),
+  "amountAlreadyMade": zod.number(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+})),
+  "enabled": zod.boolean()
+}).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
+}))
+})
+
+
+/**
+ * @summary Delete a saved premix sheet by id
+ */
+export const DeletePremixSheetParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeletePremixSheetResponse = zod.object({
+  "premixSheets": zod.array(zod.object({
+  "id": zod.number(),
+  "label": zod.string(),
+  "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
+  "data": zod.array(zod.object({
+  "id": zod.string(),
+  "scope": zod.string().optional(),
+  "name": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "batchSize": zod.number(),
+  "daysEarly": zod.number(),
+  "notes": zod.string().optional(),
+  "amountAlreadyMade": zod.number(),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string(),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+})),
+  "enabled": zod.boolean()
+}).describe('A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.')).describe('The Mix[] snapshot captured when a premix workbook was imported.')
 }))
 })
 

@@ -1012,6 +1012,117 @@ export interface SpecReconcileResult {
   generatedAt: number;
 }
 
+export interface MixComponentSpec {
+  ingredient: string;
+  /** Pounds of this ingredient per pizza */
+  perPizza: number;
+}
+
+/**
+ * A single manager-defined mix, as stored factory-wide. Extra fields are allowed so a snapshot round-trips unchanged.
+ */
+export interface SavedMix {
+  id: string;
+  scope?: string;
+  name: string;
+  brand: string;
+  flavor: string;
+  batchSize: number;
+  daysEarly: number;
+  notes?: string;
+  amountAlreadyMade: number;
+  components: MixComponentSpec[];
+  enabled: boolean;
+  [key: string]: unknown;
+ }
+
+/**
+ * The Mix[] snapshot captured when a premix workbook was imported.
+ */
+export type SavedPremixSheetData = SavedMix[];
+
+export interface SavedPremixSheet {
+  id: number;
+  label: string;
+  /** Epoch milliseconds the snapshot was saved */
+  createdAt: number;
+  data: SavedPremixSheetData;
+}
+
+export interface SavedPremixSheetList {
+  premixSheets: SavedPremixSheet[];
+}
+
+export interface SavePremixSheetInput {
+  label: string;
+  data: SavedPremixSheetData;
+}
+
+export type MixDiscrepancyWireSource = typeof MixDiscrepancyWireSource[keyof typeof MixDiscrepancyWireSource];
+
+
+export const MixDiscrepancyWireSource = {
+  premix: 'premix',
+  spec: 'spec',
+} as const;
+
+export type MixDiscrepancyWireType = typeof MixDiscrepancyWireType[keyof typeof MixDiscrepancyWireType];
+
+
+export const MixDiscrepancyWireType = {
+  'missing-mix': 'missing-mix',
+  'missing-component': 'missing-component',
+  'extra-component': 'extra-component',
+  'amount-mismatch': 'amount-mismatch',
+} as const;
+
+export interface MixDiscrepancyWire {
+  source: MixDiscrepancyWireSource;
+  type: MixDiscrepancyWireType;
+  brand: string;
+  flavor: string;
+  mixName: string;
+  ingredient?: string;
+  sheetPerPizza?: number;
+  mixPerPizza?: number;
+  message: string;
+}
+
+export interface MixReconcileInput {
+  /** Optional label for what was compared (e.g. the sheet name) */
+  label?: string;
+  /** The deterministic discrepancies computed client-side */
+  discrepancies: MixDiscrepancyWire[];
+}
+
+export interface MixReconcileResult {
+  /** Advisory plain-language summary; absent/empty when the AI is unavailable */
+  summary?: string;
+  generatedAt: number;
+}
+
+export interface MixAssistMix {
+  name: string;
+  brand: string;
+  flavor: string;
+  batchSize?: number;
+  daysEarly?: number;
+  amountAlreadyMade?: number;
+  enabled?: boolean;
+  components: MixComponentSpec[];
+}
+
+export interface MixAssistInput {
+  question: string;
+  mixes: MixAssistMix[];
+}
+
+export interface MixAssistResult {
+  answer: string;
+  generatedAt: number;
+  note?: string;
+}
+
 export type ProactiveAlertCategory = typeof ProactiveAlertCategory[keyof typeof ProactiveAlertCategory];
 
 

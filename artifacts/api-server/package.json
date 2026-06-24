@@ -24,6 +24,7 @@
     "@workspace/premix-import": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/spec-import": "workspace:*",
+    "@workspace/mix-reconcile": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",
     "@workspace/voice-commands": "workspace:*",
     "cookie-parser": "^1.4.7",

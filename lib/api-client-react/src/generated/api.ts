@@ -74,7 +74,11 @@ import type {
   MergeInventoryInput,
   MergeInventoryResult,
   MergedAwayList,
+  MixAssistInput,
+  MixAssistResult,
   MixList,
+  MixReconcileInput,
+  MixReconcileResult,
   OkResponse,
   OptimizeInput,
   OptimizeResult,
@@ -110,9 +114,11 @@ import type {
   SaveMergedAwayInput,
   SaveMixesInput,
   SavePhotoAliasesInput,
+  SavePremixSheetInput,
   SaveProductionRulesInput,
   SaveSpecImportAliasesInput,
   SaveSpecSheetInput,
+  SavedPremixSheetList,
   SavedSpecSheetList,
   SpecImportAliasList,
   SpecReconcileInput,
@@ -3071,6 +3077,150 @@ export const useAiSpecReconcile = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiSpecReconcileMutationOptions(options));
+    }
+
+export const getAiMixReconcileUrl = () => {
+
+
+
+
+  return `/api/ai/mix-reconcile`
+}
+
+/**
+ * The deterministic diff of the current mixes against the imported premix and spec sheets runs on the client (the shared @workspace/mix-reconcile lib). This endpoint takes that exact discrepancy list and asks the AI for a short plain-language summary of what's off. Read-only and fail-safe: an AI error simply yields an empty summary, never an error. It never invents or applies anything. Available to any signed-in user.
+ * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ */
+export const aiMixReconcile = async (mixReconcileInput: MixReconcileInput, options?: RequestInit): Promise<MixReconcileResult> => {
+
+  return customFetch<MixReconcileResult>(getAiMixReconcileUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mixReconcileInput,)
+  }
+);}
+
+
+
+
+export const getAiMixReconcileMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,{data: BodyType<MixReconcileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,{data: BodyType<MixReconcileInput>}, TContext> => {
+
+const mutationKey = ['aiMixReconcile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMixReconcile>>, {data: BodyType<MixReconcileInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiMixReconcile(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiMixReconcileMutationResult = NonNullable<Awaited<ReturnType<typeof aiMixReconcile>>>
+    export type AiMixReconcileMutationBody = BodyType<MixReconcileInput>
+    export type AiMixReconcileMutationError = ErrorType<void>
+
+    /**
+ * @summary Narrate already-computed mix discrepancies (AI summary); read-only
+ */
+export const useAiMixReconcile = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixReconcile>>, TError,{data: BodyType<MixReconcileInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiMixReconcile>>,
+        TError,
+        {data: BodyType<MixReconcileInput>},
+        TContext
+      > => {
+      return useMutation(getAiMixReconcileMutationOptions(options));
+    }
+
+export const getAiMixAssistantUrl = () => {
+
+
+
+
+  return `/api/ai/mix-assistant`
+}
+
+/**
+ * Answers a plain-language question grounded strictly in the current mix definitions and the facility memory. Advisory only: it explains and computes but never edits a mix or applies anything (no structured suggestion). Available to any signed-in user.
+ * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
+ */
+export const aiMixAssistant = async (mixAssistInput: MixAssistInput, options?: RequestInit): Promise<MixAssistResult> => {
+
+  return customFetch<MixAssistResult>(getAiMixAssistantUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mixAssistInput,)
+  }
+);}
+
+
+
+
+export const getAiMixAssistantMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,{data: BodyType<MixAssistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,{data: BodyType<MixAssistInput>}, TContext> => {
+
+const mutationKey = ['aiMixAssistant'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMixAssistant>>, {data: BodyType<MixAssistInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiMixAssistant(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiMixAssistantMutationResult = NonNullable<Awaited<ReturnType<typeof aiMixAssistant>>>
+    export type AiMixAssistantMutationBody = BodyType<MixAssistInput>
+    export type AiMixAssistantMutationError = ErrorType<void>
+
+    /**
+ * @summary Mixes helper — answer plain-language questions about the mixes (AI); read-only
+ */
+export const useAiMixAssistant = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMixAssistant>>, TError,{data: BodyType<MixAssistInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiMixAssistant>>,
+        TError,
+        {data: BodyType<MixAssistInput>},
+        TContext
+      > => {
+      return useMutation(getAiMixAssistantMutationOptions(options));
     }
 
 export const getAiProactiveAlertUrl = () => {
@@ -6170,6 +6320,226 @@ export const useDeleteSpecSheet = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteSpecSheetMutationOptions(options));
+    }
+
+export const getListPremixSheetsUrl = () => {
+
+
+
+
+  return `/api/premix-sheets`
+}
+
+/**
+ * Returns the saved premix-sheet snapshots (the Mix[] captured when a premix workbook was imported), most recent first. At most two are kept. Available to any signed-in user.
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
+export const listPremixSheets = async ( options?: RequestInit): Promise<SavedPremixSheetList> => {
+
+  return customFetch<SavedPremixSheetList>(getListPremixSheetsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPremixSheetsQueryKey = () => {
+    return [
+    `/api/premix-sheets`
+    ] as const;
+    }
+
+
+export const getListPremixSheetsQueryOptions = <TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPremixSheetsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPremixSheets>>> = ({ signal }) => listPremixSheets({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPremixSheetsQueryResult = NonNullable<Awaited<ReturnType<typeof listPremixSheets>>>
+export type ListPremixSheetsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List saved premix sheets (most recent first, up to two)
+ */
+
+export function useListPremixSheets<TData = Awaited<ReturnType<typeof listPremixSheets>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPremixSheets>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPremixSheetsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSavePremixSheetUrl = () => {
+
+
+
+
+  return `/api/premix-sheets`
+}
+
+/**
+ * Persists a snapshot of an imported premix workbook (its Mix[]) so the current mixes can later be reconciled against it. After insert, older snapshots beyond the two most recent are pruned. Available to any signed-in user.
+ * @summary Save a premix-sheet snapshot (keeps only the two most recent)
+ */
+export const savePremixSheet = async (savePremixSheetInput: SavePremixSheetInput, options?: RequestInit): Promise<SavedPremixSheetList> => {
+
+  return customFetch<SavedPremixSheetList>(getSavePremixSheetUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      savePremixSheetInput,)
+  }
+);}
+
+
+
+
+export const getSavePremixSheetMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePremixSheet>>, TError,{data: BodyType<SavePremixSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof savePremixSheet>>, TError,{data: BodyType<SavePremixSheetInput>}, TContext> => {
+
+const mutationKey = ['savePremixSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof savePremixSheet>>, {data: BodyType<SavePremixSheetInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  savePremixSheet(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SavePremixSheetMutationResult = NonNullable<Awaited<ReturnType<typeof savePremixSheet>>>
+    export type SavePremixSheetMutationBody = BodyType<SavePremixSheetInput>
+    export type SavePremixSheetMutationError = ErrorType<void>
+
+    /**
+ * @summary Save a premix-sheet snapshot (keeps only the two most recent)
+ */
+export const useSavePremixSheet = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof savePremixSheet>>, TError,{data: BodyType<SavePremixSheetInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof savePremixSheet>>,
+        TError,
+        {data: BodyType<SavePremixSheetInput>},
+        TContext
+      > => {
+      return useMutation(getSavePremixSheetMutationOptions(options));
+    }
+
+export const getDeletePremixSheetUrl = (id: number,) => {
+
+
+
+
+  return `/api/premix-sheets/${id}`
+}
+
+/**
+ * @summary Delete a saved premix sheet by id
+ */
+export const deletePremixSheet = async (id: number, options?: RequestInit): Promise<SavedPremixSheetList> => {
+
+  return customFetch<SavedPremixSheetList>(getDeletePremixSheetUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeletePremixSheetMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePremixSheet>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deletePremixSheet>>, TError,{id: number}, TContext> => {
+
+const mutationKey = ['deletePremixSheet'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deletePremixSheet>>, {id: number}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deletePremixSheet(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePremixSheetMutationResult = NonNullable<Awaited<ReturnType<typeof deletePremixSheet>>>
+
+    export type DeletePremixSheetMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a saved premix sheet by id
+ */
+export const useDeletePremixSheet = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePremixSheet>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deletePremixSheet>>,
+        TError,
+        {id: number},
+        TContext
+      > => {
+      return useMutation(getDeletePremixSheetMutationOptions(options));
     }
 
 export const getListImportAliasesUrl = () => {

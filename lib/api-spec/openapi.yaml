@@ -943,6 +943,62 @@ paths:
         "404":
           description: No saved spec sheet with that id
 
+  /ai/mix-reconcile:
+    post:
+      operationId: aiMixReconcile
+      tags: [ai]
+      summary: Narrate already-computed mix discrepancies (AI summary); read-only
+      description: >-
+        The deterministic diff of the current mixes against the imported premix
+        and spec sheets runs on the client (the shared @workspace/mix-reconcile
+        lib). This endpoint takes that exact discrepancy list and asks the AI for
+        a short plain-language summary of what's off. Read-only and fail-safe: an
+        AI error simply yields an empty summary, never an error. It never invents
+        or applies anything. Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MixReconcileInput"
+      responses:
+        "200":
+          description: An advisory plain-language summary of the supplied discrepancies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixReconcileResult"
+        "400":
+          description: Invalid input
+
+  /ai/mix-assistant:
+    post:
+      operationId: aiMixAssistant
+      tags: [ai]
+      summary: Mixes helper — answer plain-language questions about the mixes (AI); read-only
+      description: >-
+        Answers a plain-language question grounded strictly in the current mix
+        definitions and the facility memory. Advisory only: it explains and
+        computes but never edits a mix or applies anything (no structured
+        suggestion). Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MixAssistInput"
+      responses:
+        "200":
+          description: A grounded plain-language answer (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixAssistResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/proactive-alert:
     post:
       operationId: aiProactiveAlert
@@ -1913,6 +1969,66 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SavedSpecSheetList"
+
+  /premix-sheets:
+    get:
+      operationId: listPremixSheets
+      tags: [premixImport]
+      summary: List saved premix sheets (most recent first, up to two)
+      description: >-
+        Returns the saved premix-sheet snapshots (the Mix[] captured when a
+        premix workbook was imported), most recent first. At most two are kept.
+        Available to any signed-in user.
+      responses:
+        "200":
+          description: All saved premix sheets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedPremixSheetList"
+    post:
+      operationId: savePremixSheet
+      tags: [premixImport]
+      summary: Save a premix-sheet snapshot (keeps only the two most recent)
+      description: >-
+        Persists a snapshot of an imported premix workbook (its Mix[]) so the
+        current mixes can later be reconciled against it. After insert, older
+        snapshots beyond the two most recent are pruned. Available to any
+        signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavePremixSheetInput"
+      responses:
+        "200":
+          description: The full updated premix-sheet list after the save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedPremixSheetList"
+        "400":
+          description: Invalid input
+
+  /premix-sheets/{id}:
+    delete:
+      operationId: deletePremixSheet
+      tags: [premixImport]
+      summary: Delete a saved premix sheet by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The full updated premix-sheet list after the delete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedPremixSheetList"
 
   /import-aliases:
     get:
@@ -3981,6 +4097,214 @@ components:
           description: Advisory plain-language summary; absent/empty when the AI is unavailable
         generatedAt:
           type: number
+
+    MixComponentSpec:
+      type: object
+      required:
+        - ingredient
+        - perPizza
+      properties:
+        ingredient:
+          type: string
+        perPizza:
+          type: number
+          description: Pounds of this ingredient per pizza
+
+    SavedMix:
+      type: object
+      description: >-
+        A single manager-defined mix, as stored factory-wide. Extra fields are
+        allowed so a snapshot round-trips unchanged.
+      additionalProperties: true
+      required:
+        - id
+        - name
+        - brand
+        - flavor
+        - batchSize
+        - daysEarly
+        - amountAlreadyMade
+        - components
+        - enabled
+      properties:
+        id:
+          type: string
+        scope:
+          type: string
+        name:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        batchSize:
+          type: number
+        daysEarly:
+          type: number
+        notes:
+          type: string
+        amountAlreadyMade:
+          type: number
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixComponentSpec"
+        enabled:
+          type: boolean
+
+    SavedPremixSheetData:
+      type: array
+      description: The Mix[] snapshot captured when a premix workbook was imported.
+      items:
+        $ref: "#/components/schemas/SavedMix"
+
+    SavedPremixSheet:
+      type: object
+      required:
+        - id
+        - label
+        - createdAt
+        - data
+      properties:
+        id:
+          type: integer
+        label:
+          type: string
+        createdAt:
+          type: number
+          description: Epoch milliseconds the snapshot was saved
+        data:
+          $ref: "#/components/schemas/SavedPremixSheetData"
+
+    SavedPremixSheetList:
+      type: object
+      required:
+        - premixSheets
+      properties:
+        premixSheets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedPremixSheet"
+
+    SavePremixSheetInput:
+      type: object
+      required:
+        - label
+        - data
+      properties:
+        label:
+          type: string
+        data:
+          $ref: "#/components/schemas/SavedPremixSheetData"
+
+    MixDiscrepancyWire:
+      type: object
+      required:
+        - source
+        - type
+        - brand
+        - flavor
+        - mixName
+        - message
+      properties:
+        source:
+          type: string
+          enum: [premix, spec]
+        type:
+          type: string
+          enum: [missing-mix, missing-component, extra-component, amount-mismatch]
+        brand:
+          type: string
+        flavor:
+          type: string
+        mixName:
+          type: string
+        ingredient:
+          type: string
+        sheetPerPizza:
+          type: number
+        mixPerPizza:
+          type: number
+        message:
+          type: string
+
+    MixReconcileInput:
+      type: object
+      required:
+        - discrepancies
+      properties:
+        label:
+          type: string
+          description: Optional label for what was compared (e.g. the sheet name)
+        discrepancies:
+          type: array
+          description: The deterministic discrepancies computed client-side
+          items:
+            $ref: "#/components/schemas/MixDiscrepancyWire"
+
+    MixReconcileResult:
+      type: object
+      required:
+        - generatedAt
+      properties:
+        summary:
+          type: string
+          description: Advisory plain-language summary; absent/empty when the AI is unavailable
+        generatedAt:
+          type: number
+
+    MixAssistMix:
+      type: object
+      required:
+        - name
+        - brand
+        - flavor
+        - components
+      properties:
+        name:
+          type: string
+        brand:
+          type: string
+        flavor:
+          type: string
+        batchSize:
+          type: number
+        daysEarly:
+          type: number
+        amountAlreadyMade:
+          type: number
+        enabled:
+          type: boolean
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixComponentSpec"
+
+    MixAssistInput:
+      type: object
+      required:
+        - question
+        - mixes
+      properties:
+        question:
+          type: string
+        mixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/MixAssistMix"
+
+    MixAssistResult:
+      type: object
+      required:
+        - answer
+        - generatedAt
+      properties:
+        answer:
+          type: string
+        generatedAt:
+          type: number
+        note:
+          type: string
 
     ProactiveAlert:
       type: object

@@ -197,6 +197,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mix-reconcile':
+        specifier: workspace:*
+        version: link:../../lib/mix-reconcile
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
@@ -483,6 +486,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mix-reconcile':
+        specifier: workspace:*
+        version: link:../../lib/mix-reconcile
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
@@ -748,6 +754,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mix-reconcile':
+        specifier: workspace:*
+        version: link:../../lib/mix-reconcile
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
@@ -1028,6 +1037,19 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/merge-suggest: {}
+
+  lib/mix-reconcile:
+    dependencies:
+      '@workspace/mixes':
+        specifier: workspace:*
+        version: link:../mixes
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../spec-import
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/mixes:
     devDependencies:
