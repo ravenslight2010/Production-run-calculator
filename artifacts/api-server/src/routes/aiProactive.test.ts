@@ -263,12 +263,55 @@ describe("buildProactivePrompt", () => {
     expect(user).toContain("- Marinara [Sauce] — 8 gal at risk, expired 2d ago (2026-06-19)");
   });
 
-  it("allows all three nudge kinds while a run is active", () => {
+  it("renders an empty low-stock section by default", () => {
+    const { system, user } = buildProactivePrompt(baseInput());
+    expect(user).toContain("LOW STOCK (at or below reorder point — reorder now):");
+    expect(user).toMatch(/LOW STOCK[^]*\(none\)/);
+    // The watcher must be told a reorder nudge is a valid kind of alert.
+    expect(system).toMatch(/reorder point/i);
+    expect(user).toContain("reorder-now");
+  });
+
+  it("lists low-stock items with on-hand, reorder point and suggested order qty", () => {
+    const { user } = buildProactivePrompt(baseInput(), [], [
+      {
+        key: "pep",
+        name: "Pepperoni",
+        category: "ingredient",
+        unit: "lb",
+        onHand: 5,
+        reorderThreshold: 20,
+        demand: 0,
+        projectedOnHand: 5,
+        suggestedQty: 15,
+      },
+      {
+        key: "box",
+        name: "12in Box",
+        category: "packaging",
+        unit: "ea",
+        onHand: 0,
+        reorderThreshold: 100,
+        demand: 0,
+        projectedOnHand: 0,
+        suggestedQty: 100,
+      },
+    ]);
+    expect(user).toContain(
+      "- Pepperoni [ingredient] — 5 lb on hand (reorder point 20), suggest ordering 15 lb",
+    );
+    expect(user).toContain(
+      "- 12in Box [packaging] — 0 ea on hand (reorder point 100), suggest ordering 100 ea",
+    );
+  });
+
+  it("allows all four nudge kinds while a run is active", () => {
     const { system } = buildProactivePrompt(baseInput());
     expect(system).toMatch(/shift is currently in progress/i);
     expect(system).toMatch(/falling behind/i);
     expect(system).toMatch(/break or changeover/i);
     expect(system).toMatch(/expir/i);
+    expect(system).toMatch(/reorder point/i);
   });
 
   it("restricts to stock-only nudges when the day is idle (no run started)", () => {
@@ -278,10 +321,14 @@ describe("buildProactivePrompt", () => {
     expect(system).toMatch(/the day is idle/i);
     expect(system).toMatch(/never raise a behind-plan or break/i);
     expect(system).toMatch(/at-risk-stock/i);
-    // The stock section + JSON contract are still present so a stock nudge can
+    // The watcher may still raise a reorder nudge on an idle day.
+    expect(system).toMatch(/reorder point/i);
+    // The stock sections + JSON contract are still present so a stock nudge can
     // still be emitted on an idle day.
     expect(user).toContain("AT-RISK STOCK (expired or expiring soon):");
     expect(user).toContain("stock-expiring");
+    expect(user).toContain("LOW STOCK (at or below reorder point — reorder now):");
+    expect(user).toContain("reorder-now");
   });
 });
 

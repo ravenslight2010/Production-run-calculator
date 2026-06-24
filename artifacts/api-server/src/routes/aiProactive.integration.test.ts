@@ -373,6 +373,96 @@ describe("POST /ai/proactive-alert — decision branches", () => {
     expect(mock.lastUserPrompt).toContain("Mozzarella");
   });
 
+  it("surfaces a reorder nudge on an idle day when an item is at/below its reorder point", async () => {
+    const mgr = await freshManager();
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({
+        key: "pep",
+        category: "ingredient",
+        name: "Pepperoni",
+        unit: "lbs",
+        reorderThreshold: 20,
+      })
+      .returning();
+    // On-hand (5) sits below the reorder point (20) — clearly needs reordering.
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 50,
+      qtyRemaining: 5,
+      expirationDate: null,
+    });
+
+    mock.nextContent = alertContent({
+      key: "reorder-now",
+      category: "efficiency",
+      impact: "medium",
+      title: "Reorder pepperoni",
+      detail: "Pepperoni is down to 5 lbs, below its reorder point of 20 — place an order now.",
+    });
+
+    const res = await req(mgr, "POST", "/api/ai/proactive-alert", idleDayBody());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alert: { key: string; category: string } | null };
+    expect(body.alert?.category).toBe("efficiency");
+    expect(body.alert?.key).toBe("reorder-now");
+    // The watcher must be grounded in the low-stock list.
+    expect(mock.lastUserPrompt).toContain("LOW STOCK");
+    expect(mock.lastUserPrompt).toContain("Pepperoni");
+  });
+
+  it("feeds low-stock reorder items into the watcher prompt", async () => {
+    const mgr = await freshManager();
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({
+        key: "pep",
+        category: "ingredient",
+        name: "Pepperoni",
+        unit: "lbs",
+        reorderThreshold: 20,
+      })
+      .returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 50,
+      qtyRemaining: 5,
+      expirationDate: null,
+    });
+
+    const res = await req(mgr, "POST", "/api/ai/proactive-alert", liveDayBody());
+    expect(res.status).toBe(200);
+    expect(mock.lastUserPrompt).toContain("LOW STOCK");
+    expect(mock.lastUserPrompt).toContain("Pepperoni");
+    expect(mock.lastUserPrompt).toContain("reorder point 20");
+  });
+
+  it("does not flag an item comfortably above its reorder point", async () => {
+    const mgr = await freshManager();
+    const [item] = await db
+      .insert(inventoryItemsTable)
+      .values({
+        key: "flour",
+        category: "ingredient",
+        name: "Flour",
+        unit: "lbs",
+        reorderThreshold: 20,
+      })
+      .returning();
+    await db.insert(inventoryLotsTable).values({
+      itemId: item.id,
+      qtyReceived: 100,
+      qtyRemaining: 80,
+      expirationDate: null,
+    });
+
+    const res = await req(mgr, "POST", "/api/ai/proactive-alert", liveDayBody());
+    expect(res.status).toBe(200);
+    // The low-stock section is present but empty — no item is at/below threshold.
+    expect(mock.lastUserPrompt).toMatch(/LOW STOCK[^]*\(none\)/);
+    expect(mock.lastUserPrompt).not.toContain("Flour [");
+  });
+
   it("returns a STABLE key for the same condition across repeated calls", async () => {
     const mgr = await freshManager();
     // The model is free to phrase the key loosely; the server slugifies it to a

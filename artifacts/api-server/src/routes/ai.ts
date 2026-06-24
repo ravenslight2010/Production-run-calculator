@@ -59,6 +59,11 @@ import {
   type WasteFlaggedItem,
 } from "./wasteInsight";
 import {
+  computeReorderList,
+  type ReorderInput,
+  type ReorderItem,
+} from "@workspace/inventory-math";
+import {
   buildAskPrompt,
   sanitizeAnswer,
   validateAskBody,
@@ -672,6 +677,49 @@ async function loadFlaggedAtRiskStock(
   }
 }
 
+// Compute the items that have dropped to/below their reorder point the same way
+// the warehouse "Reorder Now" card does (shared computeReorderList from
+// @workspace/inventory-math), so the proactive watcher can surface an
+// auto-deduped reorder nudge without anyone opening the Warehouse tab.
+// Demand is deliberately NOT subtracted here: the server can't resolve scheduled
+// runs to material demand (brand profiles live client-side), so this triggers on
+// the current cross-location on-hand vs the reorder point — exactly "an item has
+// dropped to its reorder point". This is a conservative SUBSET of the card
+// (which subtracts upcoming scheduled demand, so it flags at least these items),
+// so the nudge can never disagree with the card. Best-effort: any DB failure
+// returns an empty list and the watcher simply omits the low-stock section.
+async function loadLowStockReorderItems(
+  log: { error: (obj: unknown, msg?: string) => void },
+): Promise<ReorderItem[]> {
+  try {
+    const items = await db
+      .select()
+      .from(inventoryItemsTable)
+      .where(eq(inventoryItemsTable.scope, currentScope()))
+      .orderBy(inventoryItemsTable.category, inventoryItemsTable.name);
+    const allLots = await db
+      .select()
+      .from(inventoryLotsTable)
+      .where(eq(inventoryLotsTable.scope, currentScope()));
+    const onHandByItem = new Map<number, number>();
+    for (const lot of allLots) {
+      onHandByItem.set(lot.itemId, (onHandByItem.get(lot.itemId) ?? 0) + lot.qtyRemaining);
+    }
+    const reorderInputs: ReorderInput[] = items.map((item) => ({
+      key: item.key,
+      name: item.name,
+      category: item.category as ReorderInput["category"],
+      unit: item.unit,
+      onHand: onHandByItem.get(item.id) ?? 0,
+      reorderThreshold: item.reorderThreshold,
+    }));
+    return computeReorderList(reorderInputs);
+  } catch (err) {
+    log.error({ err }, "proactive-alert: failed to load low-stock reorder items (non-fatal)");
+    return [];
+  }
+}
+
 // Proactive watcher: same live-day input as /ai/optimize, but returns at most a
 // single timely, dismissible nudge (or null). Polled on a cadence by the client
 // while a day is running; the client owns de-dup/cooldown via the returned key.
@@ -691,18 +739,22 @@ router.post(
       return;
     }
 
-    const flaggedAtRisk = await loadFlaggedAtRiskStock(req.log);
+    const [flaggedAtRisk, lowStock] = await Promise.all([
+      loadFlaggedAtRiskStock(req.log),
+      loadLowStockReorderItems(req.log),
+    ]);
 
-    // On an idle day (no run started) the only nudge worth surfacing is at-risk
-    // stock. If there's none, skip the AI call entirely so an app left open
-    // overnight doesn't burn the cost cap polling for nothing.
-    if (!isDayActive(validation.data) && flaggedAtRisk.length === 0) {
+    // On an idle day (no run started) the only nudges worth surfacing are stock
+    // related (at-risk stock, low stock / reorder). If both are empty, skip the
+    // AI call entirely so an app left open overnight doesn't burn the cost cap
+    // polling for nothing.
+    if (!isDayActive(validation.data) && flaggedAtRisk.length === 0 && lowStock.length === 0) {
       res.json({ alert: null, generatedAt: Date.now() });
       return;
     }
 
     const knowledge = await loadFacilityKnowledge(req.log);
-    const { system, user } = buildProactivePrompt(validation.data, flaggedAtRisk);
+    const { system, user } = buildProactivePrompt(validation.data, flaggedAtRisk, lowStock);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let content = "";

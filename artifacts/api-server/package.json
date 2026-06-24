@@ -17,6 +17,7 @@
     "@workspace/cycle-count": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
+    "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/production-rules": "workspace:*",

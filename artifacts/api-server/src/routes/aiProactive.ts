@@ -1,4 +1,5 @@
 import * as z from "zod";
+import type { ReorderItem } from "@workspace/inventory-math";
 import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
 import { MAX_FLAGGED_IN_PROMPT, type WasteFlaggedItem } from "./wasteInsight";
 
@@ -160,6 +161,7 @@ export function sanitizeProactiveAlert(raw: unknown): {
 export function buildProactivePrompt(
   input: OptimizeInput,
   flaggedAtRisk: ReadonlyArray<WasteFlaggedItem> = [],
+  lowStock: ReadonlyArray<ReorderItem> = [],
 ): {
   system: string;
   user: string;
@@ -170,35 +172,39 @@ export function buildProactivePrompt(
     "You are a proactive production-line watcher for a frozen-pizza factory. " +
     "You run automatically every few minutes. ";
 
-  // When a shift is running, all three kinds of nudge are in play. When the day
-  // is idle (no run started yet) the only thing worth interrupting a manager for
-  // is at-risk stock — behind-plan / break nudges make no sense with no live run
+  // When a shift is running, all four kinds of nudge are in play. When the day
+  // is idle (no run started yet) only the stock-related nudges (at-risk stock,
+  // low stock / reorder) make sense — behind-plan / break nudges need a live run
   // — so the watcher is told to consider stock only.
   const system = dayActive
     ? role +
       "A shift is currently in progress. Your job is to decide whether, RIGHT " +
       "NOW, there is exactly ONE timely, actionable nudge worth interrupting a " +
-      "busy shift manager for. Only three kinds of nudge qualify: (1) the line " +
+      "busy shift manager for. Only four kinds of nudge qualify: (1) the line " +
       "is clearly falling behind the plan / target finish time and the manager " +
       "should act; or (2) a natural break or changeover window is opening now, " +
       "so a break/lunch can be taken without stalling the line; or (3) there is " +
       "ingredient/packaging stock that is already expired or expiring very soon " +
       "and today's production could be ordered to consume it first to avoid " +
-      "waste. The list of at-risk stock is given to you below — only raise a " +
-      "stock nudge when that list is non-empty, and never invent items or " +
+      "waste; or (4) an ingredient/packaging item has dropped to or below its " +
+      "reorder point and should be reordered now to avoid a stockout. The lists " +
+      "of at-risk stock and low stock are given to you below — only raise the " +
+      "matching nudge when its list is non-empty, and never invent items or " +
       "quantities. Be conservative: if nothing is clearly actionable at this " +
       "exact moment, return no alert. Prioritize a behind-plan or break-window " +
       "nudge over a stock nudge when more than one applies. Never nag about " +
       "minor things, and never suggest formula or recipe changes."
     : role +
-      "No shift is running yet — the day is idle. The ONLY kind of nudge you " +
-      "may raise right now is an at-risk-stock / waste-avoidance nudge: there " +
-      "is ingredient/packaging stock that is already expired or expiring very " +
-      "soon, and the manager should plan today's production to consume it first " +
-      "to avoid waste. NEVER raise a behind-plan or break/changeover nudge " +
-      "while the day is idle. The list of at-risk stock is given to you below — " +
-      "only raise a stock nudge when that list is non-empty, and never invent " +
-      "items or quantities. Be conservative: if there is no clearly at-risk " +
+      "No shift is running yet — the day is idle. The ONLY nudges you may raise " +
+      "right now are stock-related: (1) an at-risk-stock / waste-avoidance " +
+      "nudge — stock that is already expired or expiring very soon, so the " +
+      "manager should plan today's production to consume it first; or (2) a " +
+      "low-stock / reorder nudge — an item that has dropped to or below its " +
+      "reorder point and should be reordered now to avoid a stockout. NEVER " +
+      "raise a behind-plan or break/changeover nudge while the day is idle. The " +
+      "lists of at-risk stock and low stock are given to you below — only raise " +
+      "the matching nudge when its list is non-empty, and never invent items or " +
+      "quantities. Be conservative: if there is no clearly at-risk or low " +
       "stock, return no alert. Never nag about minor things, and never suggest " +
       "formula or recipe changes.";
 
@@ -272,6 +278,19 @@ export function buildProactivePrompt(
   }
 
   lines.push("");
+  lines.push("LOW STOCK (at or below reorder point — reorder now):");
+  if (lowStock.length === 0) {
+    lines.push("(none)");
+  } else {
+    for (const it of lowStock.slice(0, MAX_FLAGGED_IN_PROMPT)) {
+      lines.push(
+        `- ${it.name} [${it.category}] — ${it.onHand} ${it.unit} on hand` +
+          ` (reorder point ${it.reorderThreshold}), suggest ordering ${it.suggestedQty} ${it.unit}`,
+      );
+    }
+  }
+
+  lines.push("");
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"alert":{"key":string,"category":"run"|"break"|"efficiency","title":string,"detail":string,' +
@@ -280,11 +299,12 @@ export function buildProactivePrompt(
       "When you do surface one, keep title short (a glanceable headline) and detail to one or two " +
       "plain-language sentences a floor manager can act on immediately. " +
       '"key" must be a short, stable lowercase slug naming the KIND of nudge (e.g. "behind-plan", ' +
-      '"break-window", "downtime-spike", "stock-expiring") — the SAME situation must always reuse ' +
-      "the SAME key so repeats can be suppressed; never make the key specific to a run instance or " +
-      "timestamp. " +
+      '"break-window", "downtime-spike", "stock-expiring", "reorder-now") — the SAME situation must ' +
+      "always reuse the SAME key so repeats can be suppressed; never make the key specific to a run " +
+      "instance or timestamp. " +
       'Use "category":"break" for a break/changeover window, "category":"efficiency" for an ' +
-      'at-risk-stock / waste-avoidance nudge (use the key "stock-expiring"), otherwise "run".',
+      'at-risk-stock / waste-avoidance nudge (use the key "stock-expiring") or a low-stock / reorder ' +
+      'nudge (use the key "reorder-now"), otherwise "run".',
   );
 
   return { system, user: lines.join("\n") };

@@ -39,6 +39,21 @@ AI call (folded into the existing one); the stock load is best-effort (failure �
 empty list, never breaks the poll). No client change needed: both banners already
 render `efficiency` and dedup by key, so web+mobile parity is automatic.
 
+**Low-stock reorder nudge wired in (server-only, auto-parity):** the proactive
+route also loads current on-hand per item (summed cross-location) and runs the
+shared `computeReorderList` from `@workspace/inventory-math` with an EMPTY
+`demandByKey`, then feeds the result into `buildProactivePrompt(input, flaggedAtRisk, lowStock)`
+as a "LOW STOCK (at or below reorder point — reorder now):" section. Surfaces as a
+4th nudge kind — category `efficiency`, stable key `reorder-now`. **Why no demand:**
+the server can't resolve scheduled-run material demand (brand profiles are
+client-side), so this nudge fires purely on `onHand <= reorderThreshold` — a
+conservative SUBSET of the warehouse "Reorder Now" card (which subtracts demand →
+flags ≥ these items), so the nudge can never disagree with the card. Server-only =
+web+mobile parity is automatic (both banners already render `efficiency` + dedup by
+key). Both stock loads run via `Promise.all`, best-effort; idle short-circuit now
+also checks `lowStock.length === 0`. Note `computeReorderList` skips
+`reorderThreshold <= 0`, so items with the default 0 threshold never nudge.
+
 **Manager-tunable cadence/cooldown/on-off (factory-wide):** the 4min poll and
 30min cooldown are no longer constants — they're a server-persisted single-row
 setting (`proactive_alert_settings` id=1; `GET` open to any authed user, `PUT`
