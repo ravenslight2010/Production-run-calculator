@@ -1615,6 +1615,40 @@ export interface DeleteFreezerPullItemsInput {
   ids: string[];
 }
 
+/**
+ * A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.
+ */
+export interface CycleCountSchedule {
+  /** Stable client-generated id */
+  id: string;
+  /** The warehouse section/area to count */
+  section: string;
+  /** How many days may elapse between counts (default 7) */
+  cadenceDays: number;
+  /** Date last counted (YYYY-MM-DD), or null if never counted */
+  lastCountedAt: string | null;
+  enabled: boolean;
+}
+
+export interface CycleCountScheduleList {
+  schedules: CycleCountSchedule[];
+}
+
+export interface SaveCycleCountSchedulesInput {
+  /** The batch of cycle-count schedules to create or update (by id) */
+  schedules: CycleCountSchedule[];
+}
+
+export interface DeleteCycleCountSchedulesInput {
+  /** The ids of the cycle-count schedules to delete */
+  ids: string[];
+}
+
+export interface MarkCycleCountCountedInput {
+  /** The client's local factory day (YYYY-MM-DD) to stamp as the last-counted date. Sent so the stamp matches the same local-day basis the clients use to compute the due list (avoiding timezone off-by-one drift). If omitted or malformed, the server falls back to its own current date. */
+  today?: string;
+}
+
 export interface SuggestMergesInput {
   /** The full pool of mergeable ingredient/die names to cluster */
   names: string[];

@@ -20,6 +20,10 @@ import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import { useFreezerPullItems } from "@/hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import { useCycleCountSchedules } from "@/hooks/useCycleCountSchedules";
+import { markCycleCountCounted } from "@/context/cycleCount";
+import { buildCycleCountDueList } from "@workspace/cycle-count";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import ReorderCard from "@/components/ReorderCard";
 import UseFirstCard from "@/components/UseFirstCard";
 
@@ -108,6 +112,13 @@ export default function WarehouseScreen() {
   const insets = useSafeAreaInsets();
   const { allRuns, scheduled, brandProfiles, stagedItems, toggleStagedItem } = useRun();
   const { items: freezerPullItems } = useFreezerPullItems();
+  const { schedules: cycleCountSchedules } = useCycleCountSchedules();
+  const cycleCountQc = useQueryClient();
+  const markCountedMutation = useMutation({
+    mutationFn: (id: string) => markCycleCountCounted(id),
+    onSuccess: (saved) =>
+      cycleCountQc.setQueryData(["cycleCountSchedules"], saved),
+  });
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -250,6 +261,14 @@ export default function WarehouseScreen() {
     today,
   });
 
+  // Time to Count: warehouse sections now due for a cycle count (never counted,
+  // or last counted longer ago than their cadence). Config is factory-wide
+  // manager master-data; any signed-in user can mark a section counted.
+  const cycleCountDue = buildCycleCountDueList({
+    schedules: cycleCountSchedules,
+    today,
+  });
+
   // Reorder Now demand basis: UPCOMING (today-or-later) scheduled runs resolved
   // to RunSettings via their brand/flavor profile, exactly like the freezer-pull
   // resolution above. Web filters scheduledDays to `d >= today`, so mobile must
@@ -356,6 +375,56 @@ export default function WarehouseScreen() {
             </View>
           </Card>
         ))}
+
+        {/* Time to Count: warehouse sections now due for a cycle count. Any
+            signed-in user can mark a section counted, which stamps it and clears
+            it until the cadence elapses again. */}
+        {cycleCountDue.length > 0 ? (
+          <Card
+            title="Time to Count"
+            icon="check-square"
+            style={{ marginBottom: 16 }}
+          >
+            <Text style={[styles.freezerSubhead, { color: colors.mutedForeground }]}>
+              {cycleCountDue.length} section{cycleCountDue.length !== 1 ? "s" : ""} due
+            </Text>
+            <View style={{ gap: 10 }}>
+              {cycleCountDue.map((d) => (
+                <View
+                  key={d.id}
+                  style={[
+                    styles.cycleRow,
+                    { backgroundColor: colors.secondary, borderColor: colors.border },
+                  ]}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.cycleSection, { color: colors.foreground }]} numberOfLines={1}>
+                      {d.section}
+                    </Text>
+                    <Text style={[styles.cycleMeta, { color: colors.mutedForeground }]} numberOfLines={1}>
+                      {d.daysSince === null
+                        ? `Never counted · every ${d.cadenceDays}d`
+                        : `Last ${d.lastCountedAt} · ${d.daysSince}d ago${d.overdueDays > 0 ? ` (${d.overdueDays}d over)` : ""}`}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => markCountedMutation.mutate(d.id)}
+                    disabled={markCountedMutation.isPending}
+                    style={[
+                      styles.cycleBtn,
+                      { backgroundColor: colors.primary, opacity: markCountedMutation.isPending ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Ionicons name="checkmark-done" size={14} color={colors.primaryForeground} />
+                    <Text style={[styles.cycleBtnText, { color: colors.primaryForeground }]}>
+                      Mark counted
+                    </Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
         {/* Reorder Now: cross-location on-hand at/below reorder threshold once
             upcoming scheduled-run demand is subtracted. Advisory only. */}
@@ -603,6 +672,26 @@ const styles = StyleSheet.create({
   freezerRun: { borderRadius: 8, borderWidth: 1, padding: 12 },
   freezerRunTitle: { fontSize: 15, fontFamily: FONTS.medium, marginBottom: 8 },
   freezerEarly: { fontSize: 11, fontFamily: FONTS.regular },
+
+  cycleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+  },
+  cycleSection: { fontSize: 14, fontFamily: FONTS.medium },
+  cycleMeta: { fontSize: 11, fontFamily: FONTS.regular, marginTop: 2 },
+  cycleBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  cycleBtnText: { fontSize: 12, fontFamily: FONTS.bold },
 
   scheduleList: { gap: 6 },
   dayPill: {

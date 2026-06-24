@@ -43,6 +43,9 @@
       "path": "./lib/freezer-pull"
     },
     {
+      "path": "./lib/cycle-count"
+    },
+    {
       "path": "./lib/ai-memory"
     },
     {

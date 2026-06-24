@@ -357,6 +357,22 @@ const ROUTES: GatedRoute[] = [
     body: { ids: [] },
     okStatus: 200,
   },
+  {
+    name: "POST /cycle-count-schedules",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/cycle-count-schedules",
+    body: { schedules: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /cycle-count-schedules",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/cycle-count-schedules",
+    body: { ids: [] },
+    okStatus: 200,
+  },
   // --- approve-password-resets ---
   {
     name: "GET /password-reset-requests",
@@ -489,6 +505,47 @@ describe("GET /freezer-pull-items read policy", () => {
   it("allows a capability-less operator to read (→ 200)", async () => {
     const res = await req(OPERATOR, "GET", "/api/freezer-pull-items");
     expect(res.status).toBe(200);
+  });
+});
+
+// Cycle-count schedule config writes are manager-gated (covered in GATED_ROUTES),
+// but the LIST is intentionally readable by any signed-in user so the warehouse
+// "Time to Count" card renders for floor staff. These lock that read policy:
+// no token → 401, but a capability-less operator → 200.
+describe("GET /cycle-count-schedules read policy", () => {
+  it("rejects an unauthenticated read with 401", async () => {
+    const res = await req(null, "GET", "/api/cycle-count-schedules");
+    expect(res.status).toBe(401);
+  });
+
+  it("allows a capability-less operator to read (→ 200)", async () => {
+    const res = await req(OPERATOR, "GET", "/api/cycle-count-schedules");
+    expect(res.status).toBe(200);
+  });
+});
+
+// Marking a section counted is intentionally NOT manager-gated — floor staff
+// perform the counts — but it still requires a signed-in user. These lock that
+// policy: no token → 401; a capability-less operator is allowed past the gate
+// (an unknown id → 404, proving auth passed but no manager capability is
+// required).
+describe("POST /cycle-count-schedules/:id/mark-counted policy", () => {
+  it("rejects an unauthenticated mark-counted with 401", async () => {
+    const res = await req(
+      null,
+      "POST",
+      "/api/cycle-count-schedules/nope/mark-counted",
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("allows a capability-less operator past the gate (unknown id → 404)", async () => {
+    const res = await req(
+      OPERATOR,
+      "POST",
+      "/api/cycle-count-schedules/nope/mark-counted",
+    );
+    expect(res.status).toBe(404);
   });
 });
 

@@ -14,6 +14,7 @@
     "@workspace/ai-memory": "workspace:*",
     "@workspace/ai-review": "workspace:*",
     "@workspace/api-zod": "workspace:*",
+    "@workspace/cycle-count": "workspace:*",
     "@workspace/db": "workspace:*",
     "@workspace/integrations-openai-ai-server": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",

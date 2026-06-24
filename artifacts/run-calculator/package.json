@@ -88,6 +88,7 @@
     "@workspace/ai-memory": "workspace:*",
     "@workspace/ai-review": "workspace:*",
     "@workspace/allergen": "workspace:*",
+    "@workspace/cycle-count": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/inventory-math": "workspace:*",

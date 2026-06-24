@@ -62,6 +62,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/space-mono": "^0.4.2",
+    "@workspace/cycle-count": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
     "@workspace/inventory-math": "workspace:*",

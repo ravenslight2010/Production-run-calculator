@@ -22,6 +22,8 @@ import SpecImportModal from "@/components/SpecImportModal";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import ProductionRulesManager from "@/components/ProductionRulesManager";
 import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
+import CycleCountManager from "@/components/CycleCountManager";
+import { DEFAULT_CYCLE_COUNT_SECTIONS } from "@workspace/cycle-count";
 import StaffRolesCard from "@/components/StaffRolesCard";
 import RolesManager from "@/components/RolesManager";
 import {
@@ -1462,6 +1464,16 @@ export default function MasterDataScreen() {
                   ...pepTypes,
                 ]}
               />
+            </CardSection>
+          </>
+        ) : null}
+
+        {/* Cycle-count schedules (manage-inventory capability; mirrors web) */}
+        {canManageInventory ? (
+          <>
+            <SectionHeader title="Cycle Counts" />
+            <CardSection>
+              <CycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
             </CardSection>
           </>
         ) : null}

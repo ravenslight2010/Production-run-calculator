@@ -179,6 +179,9 @@ importers:
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
+      '@workspace/cycle-count':
+        specifier: workspace:*
+        version: link:../../lib/cycle-count
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
@@ -456,6 +459,9 @@ importers:
       '@workspace/allergen':
         specifier: workspace:*
         version: link:../../lib/allergen
+      '@workspace/cycle-count':
+        specifier: workspace:*
+        version: link:../../lib/cycle-count
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -709,6 +715,9 @@ importers:
       '@expo-google-fonts/space-mono':
         specifier: ^0.4.2
         version: 0.4.2
+      '@workspace/cycle-count':
+        specifier: workspace:*
+        version: link:../../lib/cycle-count
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -929,6 +938,12 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 3.25.76
+
+  lib/cycle-count:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/db:
     dependencies:

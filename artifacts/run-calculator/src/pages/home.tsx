@@ -121,10 +121,18 @@ import InventoryTab from "../components/InventoryTab";
 import RolesManager from "../components/RolesManager";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
+import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import {
+  buildCycleCountDueList,
+  DEFAULT_CYCLE_COUNT_SECTIONS,
+} from "@workspace/cycle-count";
+import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
+import { markCycleCountCounted } from "../cycleCount";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import StaffRolesCard from "../components/StaffRolesCard";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
@@ -270,6 +278,7 @@ import {
   LogOut,
   Smartphone,
   Snowflake,
+  ClipboardCheck,
 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
 import * as XLSX from "xlsx";
@@ -2069,6 +2078,16 @@ export default function Home() {
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
   const { items: freezerPullItems } = useFreezerPullItems();
+  // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
+  // Warehouse "Time to Count" card. Marking a section counted is open to any
+  // signed-in user (floor staff perform the counts).
+  const { schedules: cycleCountSchedules } = useCycleCountSchedules();
+  const cycleCountQc = useQueryClient();
+  const markCountedMutation = useMutation({
+    mutationFn: (id: string) => markCycleCountCounted(id),
+    onSuccess: (saved) =>
+      cycleCountQc.setQueryData(["cycleCountSchedules"], saved),
+  });
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
@@ -6569,6 +6588,7 @@ export default function Home() {
           { key: "import", label: "Import" },
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
+          ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
         ];
         const allTabs = [...groupedTabs, ...standaloneTabs];
@@ -7022,6 +7042,11 @@ export default function Home() {
                       ...pepTypes,
                     ]}
                   />
+                )}
+
+                {/* Cycle-count schedules */}
+                {manageCategory === "cycleCount" && canManageInventory && (
+                  <CycleCountManager suggestions={DEFAULT_CYCLE_COUNT_SECTIONS} />
                 )}
 
                 {/* Staff (roster + roles) */}
@@ -9168,6 +9193,60 @@ export default function Home() {
                         </Card>
                       ))}
                     </div>
+                  );
+                })()}
+                {/* Time to Count: warehouse sections now due for a cycle count
+                    (never counted, or last counted longer ago than their
+                    cadence). Config is factory-wide manager master-data; any
+                    signed-in user can mark a section counted, which stamps it
+                    and clears it until the cadence elapses again. */}
+                {(() => {
+                  const due = buildCycleCountDueList({
+                    schedules: cycleCountSchedules,
+                    today: todayStr(),
+                  });
+                  if (due.length === 0) return null;
+                  return (
+                    <Card
+                      className="bg-amber-950/30 border-amber-700/40 shadow-md mb-4"
+                      data-testid="cycle-count-due"
+                    >
+                      <CardHeader className="pb-2 pt-4 px-5">
+                        <CardTitle className="text-sm font-semibold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                          <ClipboardCheck className="w-4 h-4" /> Time to Count
+                          <span className="ml-1 font-normal normal-case text-xs text-amber-400/80">
+                            ({due.length} section{due.length !== 1 ? "s" : ""} due)
+                          </span>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-2">
+                        {due.map((d) => (
+                          <div
+                            key={d.id}
+                            className="flex items-center justify-between gap-2 rounded-md border border-amber-800/40 bg-amber-950/20 p-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="font-semibold text-sm text-amber-100 truncate">
+                                {d.section}
+                              </div>
+                              <div className="text-[11px] text-amber-400/80">
+                                {d.daysSince === null
+                                  ? `Never counted · every ${d.cadenceDays}d`
+                                  : `Last counted ${d.lastCountedAt} · ${d.daysSince}d ago${d.overdueDays > 0 ? ` (${d.overdueDays}d over)` : ""}`}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => markCountedMutation.mutate(d.id)}
+                              disabled={markCountedMutation.isPending}
+                              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-600 text-amber-50 text-xs font-semibold disabled:opacity-50"
+                            >
+                              <ClipboardCheck className="w-3.5 h-3.5" /> Mark counted
+                            </button>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
                   );
                 })()}
                 {/* Reorder Now: cross-location on-hand at/below reorder threshold

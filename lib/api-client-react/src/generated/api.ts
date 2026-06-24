@@ -37,6 +37,8 @@ import type {
   CreateInventoryItemInput,
   CreateInventoryLocationInput,
   CreateRole,
+  CycleCountScheduleList,
+  DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
   DeleteProductionRulesInput,
   DeniedMergeList,
@@ -62,6 +64,7 @@ import type {
   InventorySettings,
   ListInventoryLedgerParams,
   ListQualityChecksParams,
+  MarkCycleCountCountedInput,
   MatchImportInput,
   MatchImportResult,
   MergeAliasList,
@@ -93,6 +96,7 @@ import type {
   RoleCapabilitiesUpdate,
   RoleDefinition,
   SaveAiCorrectionsInput,
+  SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
   SaveFacilityKnowledgeInput,
   SaveFillMissingValuesInput,
@@ -4752,6 +4756,301 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListCycleCountSchedulesUrl = () => {
+
+
+
+
+  return `/api/cycle-count-schedules`
+}
+
+/**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
+ * @summary List manager-defined cycle-count schedules
+ */
+export const listCycleCountSchedules = async ( options?: RequestInit): Promise<CycleCountScheduleList> => {
+
+  return customFetch<CycleCountScheduleList>(getListCycleCountSchedulesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCycleCountSchedulesQueryKey = () => {
+    return [
+    `/api/cycle-count-schedules`
+    ] as const;
+    }
+
+
+export const getListCycleCountSchedulesQueryOptions = <TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCycleCountSchedulesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCycleCountSchedules>>> = ({ signal }) => listCycleCountSchedules({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCycleCountSchedulesQueryResult = NonNullable<Awaited<ReturnType<typeof listCycleCountSchedules>>>
+export type ListCycleCountSchedulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined cycle-count schedules
+ */
+
+export function useListCycleCountSchedules<TData = Awaited<ReturnType<typeof listCycleCountSchedules>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCycleCountSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCycleCountSchedulesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveCycleCountSchedulesUrl = () => {
+
+
+
+
+  return `/api/cycle-count-schedules`
+}
+
+/**
+ * Upserts a batch of cycle-count schedules by id. Each schedule is normalized and validated server-side; malformed schedules are dropped. The `lastCountedAt` field is preserved from the existing row on update (only the mark-counted endpoint changes it). Manager role required.
+ * @summary Create or update cycle-count schedules (manager only)
+ */
+export const saveCycleCountSchedules = async (saveCycleCountSchedulesInput: SaveCycleCountSchedulesInput, options?: RequestInit): Promise<CycleCountScheduleList> => {
+
+  return customFetch<CycleCountScheduleList>(getSaveCycleCountSchedulesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveCycleCountSchedulesInput,)
+  }
+);}
+
+
+
+
+export const getSaveCycleCountSchedulesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCycleCountSchedules>>, TError,{data: BodyType<SaveCycleCountSchedulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveCycleCountSchedules>>, TError,{data: BodyType<SaveCycleCountSchedulesInput>}, TContext> => {
+
+const mutationKey = ['saveCycleCountSchedules'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveCycleCountSchedules>>, {data: BodyType<SaveCycleCountSchedulesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveCycleCountSchedules(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveCycleCountSchedulesMutationResult = NonNullable<Awaited<ReturnType<typeof saveCycleCountSchedules>>>
+    export type SaveCycleCountSchedulesMutationBody = BodyType<SaveCycleCountSchedulesInput>
+    export type SaveCycleCountSchedulesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update cycle-count schedules (manager only)
+ */
+export const useSaveCycleCountSchedules = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCycleCountSchedules>>, TError,{data: BodyType<SaveCycleCountSchedulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveCycleCountSchedules>>,
+        TError,
+        {data: BodyType<SaveCycleCountSchedulesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveCycleCountSchedulesMutationOptions(options));
+    }
+
+export const getDeleteCycleCountSchedulesUrl = () => {
+
+
+
+
+  return `/api/cycle-count-schedules`
+}
+
+/**
+ * Removes a batch of cycle-count schedules by id. Manager role required.
+ * @summary Delete cycle-count schedules by id (manager only)
+ */
+export const deleteCycleCountSchedules = async (deleteCycleCountSchedulesInput: DeleteCycleCountSchedulesInput, options?: RequestInit): Promise<CycleCountScheduleList> => {
+
+  return customFetch<CycleCountScheduleList>(getDeleteCycleCountSchedulesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteCycleCountSchedulesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteCycleCountSchedulesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCycleCountSchedules>>, TError,{data: BodyType<DeleteCycleCountSchedulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCycleCountSchedules>>, TError,{data: BodyType<DeleteCycleCountSchedulesInput>}, TContext> => {
+
+const mutationKey = ['deleteCycleCountSchedules'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCycleCountSchedules>>, {data: BodyType<DeleteCycleCountSchedulesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteCycleCountSchedules(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCycleCountSchedulesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCycleCountSchedules>>>
+    export type DeleteCycleCountSchedulesMutationBody = BodyType<DeleteCycleCountSchedulesInput>
+    export type DeleteCycleCountSchedulesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete cycle-count schedules by id (manager only)
+ */
+export const useDeleteCycleCountSchedules = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCycleCountSchedules>>, TError,{data: BodyType<DeleteCycleCountSchedulesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCycleCountSchedules>>,
+        TError,
+        {data: BodyType<DeleteCycleCountSchedulesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteCycleCountSchedulesMutationOptions(options));
+    }
+
+export const getMarkCycleCountCountedUrl = (id: string,) => {
+
+
+
+
+  return `/api/cycle-count-schedules/${id}/mark-counted`
+}
+
+/**
+ * Stamps the schedule's `lastCountedAt` to the current date, clearing it from the "Time to Count" due list until its cadence elapses again. Available to any signed-in user (floor staff perform the counts), unlike the manager-only schedule edits.
+ * @summary Mark a cycle-count section counted
+ */
+export const markCycleCountCounted = async (id: string,
+    markCycleCountCountedInput?: MarkCycleCountCountedInput, options?: RequestInit): Promise<CycleCountScheduleList> => {
+
+  return customFetch<CycleCountScheduleList>(getMarkCycleCountCountedUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      markCycleCountCountedInput,)
+  }
+);}
+
+
+
+
+export const getMarkCycleCountCountedMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markCycleCountCounted>>, TError,{id: string;data?: BodyType<MarkCycleCountCountedInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof markCycleCountCounted>>, TError,{id: string;data?: BodyType<MarkCycleCountCountedInput>}, TContext> => {
+
+const mutationKey = ['markCycleCountCounted'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof markCycleCountCounted>>, {id: string;data?: BodyType<MarkCycleCountCountedInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  markCycleCountCounted(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MarkCycleCountCountedMutationResult = NonNullable<Awaited<ReturnType<typeof markCycleCountCounted>>>
+    export type MarkCycleCountCountedMutationBody = BodyType<MarkCycleCountCountedInput> | undefined
+    export type MarkCycleCountCountedMutationError = ErrorType<void>
+
+    /**
+ * @summary Mark a cycle-count section counted
+ */
+export const useMarkCycleCountCounted = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markCycleCountCounted>>, TError,{id: string;data?: BodyType<MarkCycleCountCountedInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof markCycleCountCounted>>,
+        TError,
+        {id: string;data?: BodyType<MarkCycleCountCountedInput>},
+        TContext
+      > => {
+      return useMutation(getMarkCycleCountCountedMutationOptions(options));
     }
 
 export const getListAiCorrectionsUrl = () => {

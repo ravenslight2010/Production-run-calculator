@@ -1485,6 +1485,107 @@ paths:
         "403":
           description: Manager role required
 
+  /cycle-count-schedules:
+    get:
+      operationId: listCycleCountSchedules
+      tags: [cycleCount]
+      summary: List manager-defined cycle-count schedules
+      description: >-
+        Returns every factory-wide cycle-count schedule (warehouse sections to
+        count on a cadence, with the date each was last counted). These are
+        global policy (not part of the per-day sync payload). Reading is
+        available to any signed-in user so both apps can build the warehouse
+        "Time to Count" card; editing is manager-only.
+      responses:
+        "200":
+          description: All cycle-count schedules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleCountScheduleList"
+    post:
+      operationId: saveCycleCountSchedules
+      tags: [cycleCount]
+      summary: Create or update cycle-count schedules (manager only)
+      description: >-
+        Upserts a batch of cycle-count schedules by id. Each schedule is
+        normalized and validated server-side; malformed schedules are dropped.
+        The `lastCountedAt` field is preserved from the existing row on update
+        (only the mark-counted endpoint changes it). Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveCycleCountSchedulesInput"
+      responses:
+        "200":
+          description: The full updated schedule list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleCountScheduleList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteCycleCountSchedules
+      tags: [cycleCount]
+      summary: Delete cycle-count schedules by id (manager only)
+      description: >-
+        Removes a batch of cycle-count schedules by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteCycleCountSchedulesInput"
+      responses:
+        "200":
+          description: The full updated schedule list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleCountScheduleList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
+  /cycle-count-schedules/{id}/mark-counted:
+    post:
+      operationId: markCycleCountCounted
+      tags: [cycleCount]
+      summary: Mark a cycle-count section counted
+      description: >-
+        Stamps the schedule's `lastCountedAt` to the current date, clearing it
+        from the "Time to Count" due list until its cadence elapses again.
+        Available to any signed-in user (floor staff perform the counts), unlike
+        the manager-only schedule edits.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The id of the cycle-count schedule to stamp as counted
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkCycleCountCountedInput"
+      responses:
+        "200":
+          description: The full updated schedule list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CycleCountScheduleList"
+        "404":
+          description: Schedule not found
+
   /ai-corrections:
     get:
       operationId: listAiCorrections
@@ -4801,6 +4902,80 @@ components:
           description: The ids of the freezer-pull items to delete
           items:
             type: string
+
+    CycleCountSchedule:
+      type: object
+      description: >-
+        A manager-defined factory-wide cycle-count schedule: a warehouse section
+        that must be counted every `cadenceDays` days. `lastCountedAt` is the
+        date it was last counted (null = never). Disabled schedules are kept but
+        produce no reminder.
+      required:
+        - id
+        - section
+        - cadenceDays
+        - lastCountedAt
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        section:
+          type: string
+          description: The warehouse section/area to count
+        cadenceDays:
+          type: integer
+          description: How many days may elapse between counts (default 7)
+        lastCountedAt:
+          type: string
+          nullable: true
+          description: Date last counted (YYYY-MM-DD), or null if never counted
+        enabled:
+          type: boolean
+
+    CycleCountScheduleList:
+      type: object
+      required:
+        - schedules
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/CycleCountSchedule"
+
+    SaveCycleCountSchedulesInput:
+      type: object
+      required:
+        - schedules
+      properties:
+        schedules:
+          type: array
+          description: The batch of cycle-count schedules to create or update (by id)
+          items:
+            $ref: "#/components/schemas/CycleCountSchedule"
+
+    DeleteCycleCountSchedulesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the cycle-count schedules to delete
+          items:
+            type: string
+
+    MarkCycleCountCountedInput:
+      type: object
+      properties:
+        today:
+          type: string
+          description: >-
+            The client's local factory day (YYYY-MM-DD) to stamp as the
+            last-counted date. Sent so the stamp matches the same local-day
+            basis the clients use to compute the due list (avoiding timezone
+            off-by-one drift). If omitted or malformed, the server falls back to
+            its own current date.
 
     SuggestMergesInput:
       type: object

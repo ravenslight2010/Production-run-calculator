@@ -1658,6 +1658,88 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
+ * @summary List manager-defined cycle-count schedules
+ */
+export const ListCycleCountSchedulesResponse = zod.object({
+  "schedules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().describe('How many days may elapse between counts (default 7)'),
+  "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
+})
+
+
+/**
+ * Upserts a batch of cycle-count schedules by id. Each schedule is normalized and validated server-side; malformed schedules are dropped. The `lastCountedAt` field is preserved from the existing row on update (only the mark-counted endpoint changes it). Manager role required.
+ * @summary Create or update cycle-count schedules (manager only)
+ */
+export const SaveCycleCountSchedulesBody = zod.object({
+  "schedules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().describe('How many days may elapse between counts (default 7)'),
+  "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.')).describe('The batch of cycle-count schedules to create or update (by id)')
+})
+
+export const SaveCycleCountSchedulesResponse = zod.object({
+  "schedules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().describe('How many days may elapse between counts (default 7)'),
+  "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
+})
+
+
+/**
+ * Removes a batch of cycle-count schedules by id. Manager role required.
+ * @summary Delete cycle-count schedules by id (manager only)
+ */
+export const DeleteCycleCountSchedulesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the cycle-count schedules to delete')
+})
+
+export const DeleteCycleCountSchedulesResponse = zod.object({
+  "schedules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().describe('How many days may elapse between counts (default 7)'),
+  "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
+})
+
+
+/**
+ * Stamps the schedule's `lastCountedAt` to the current date, clearing it from the "Time to Count" due list until its cadence elapses again. Available to any signed-in user (floor staff perform the counts), unlike the manager-only schedule edits.
+ * @summary Mark a cycle-count section counted
+ */
+export const MarkCycleCountCountedParams = zod.object({
+  "id": zod.coerce.string().describe('The id of the cycle-count schedule to stamp as counted')
+})
+
+export const MarkCycleCountCountedBody = zod.object({
+  "today": zod.string().optional().describe('The client\'s local factory day (YYYY-MM-DD) to stamp as the last-counted date. Sent so the stamp matches the same local-day basis the clients use to compute the due list (avoiding timezone off-by-one drift). If omitted or malformed, the server falls back to its own current date.')
+})
+
+export const MarkCycleCountCountedResponse = zod.object({
+  "schedules": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "section": zod.string().describe('The warehouse section\/area to count'),
+  "cadenceDays": zod.number().describe('How many days may elapse between counts (default 7)'),
+  "lastCountedAt": zod.string().nullable().describe('Date last counted (YYYY-MM-DD), or null if never counted'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.'))
+})
+
+
+/**
  * Returns every confirmed name correction in the shared pool (domain-tagged fromText -> toText), recorded whenever staff confirm a correction in any AI helper. Clients supply these to the AI helpers to ground name resolution. Available to any signed-in user.
  * @summary List the shared factory-wide AI name corrections
  */
