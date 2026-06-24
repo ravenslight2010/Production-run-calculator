@@ -26,6 +26,10 @@ import { buildCycleCountDueList } from "@workspace/cycle-count";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import ReorderCard from "@/components/ReorderCard";
 import UseFirstCard from "@/components/UseFirstCard";
+import ScheduledRecipeWarningCard from "@/components/ScheduledRecipeWarningCard";
+import { useRouter } from "expo-router";
+import { useMe } from "@/hooks/useRole";
+import type { ScheduledRunRef } from "@workspace/scheduled-recipe-check";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -110,7 +114,10 @@ function buildRunPackagingRows(s: RunSettings): NeedRow[] {
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, scheduled, brandProfiles, stagedItems, toggleStagedItem } = useRun();
+  const { allRuns, scheduled, brandProfiles, stagedItems, toggleStagedItem, updateSettings } =
+    useRun();
+  const router = useRouter();
+  const { isManager } = useMe();
   const { items: freezerPullItems } = useFreezerPullItems();
   const { schedules: cycleCountSchedules } = useCycleCountSchedules();
   const cycleCountQc = useQueryClient();
@@ -290,6 +297,21 @@ export default function WarehouseScreen() {
       }),
   );
 
+  // Recipe Setup Needed (managers): the same UPCOMING scheduled runs as the
+  // reorder basis, but as lightweight refs so the shared detector can flag the
+  // brand+flavor combos with no saved profile (or no recipe rows). Web builds
+  // the identical ref set (replit.md parity).
+  const scheduledRunRefs: ScheduledRunRef[] = scheduledDays.flatMap((date) =>
+    (scheduled[date] ?? [])
+      .filter((r) => r.brand)
+      .map((r) => ({
+        date,
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesNeeded,
+      })),
+  );
+
   // Use First "today's runs" basis: runs active now + runs scheduled for today,
   // resolved to RunSettings exactly like the lists above. Web builds the same
   // set (active runs + today's scheduled), so the two cards prioritize the same
@@ -424,6 +446,21 @@ export default function WarehouseScreen() {
               ))}
             </View>
           </Card>
+        ) : null}
+
+        {/* Recipe Setup Needed (managers): upcoming scheduled runs whose
+            brand+flavor has no saved profile (or a profile with no recipe rows).
+            Their reorder demand silently falls back to defaults, so warn managers
+            and let them jump to set the profile up. Shared detector keeps this at
+            web parity. */}
+        {isManager ? (
+          <ScheduledRecipeWarningCard
+            scheduledRuns={scheduledRunRefs}
+            onSetup={(brand, flavor) => {
+              updateSettings({ brand, flavor });
+              router.push("/configure" as never);
+            }}
+          />
         ) : null}
 
         {/* Reorder Now: cross-location on-hand at/below reorder threshold once

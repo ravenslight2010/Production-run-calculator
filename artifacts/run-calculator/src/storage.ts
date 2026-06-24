@@ -274,6 +274,28 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
 }
 
 /**
+ * The RAW stored profile object for brand+flavor (dough + crust merged), WITHOUT
+ * the DEFAULT_VALUES overlay loadProfile applies. Returns null when nothing is
+ * saved for this brand+flavor. Used by the scheduled-recipe warning to tell a
+ * missing profile apart from one that exists but carries no real recipe data.
+ */
+export function loadRawProfile(brand: string, flavor: string): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
+    if (!raw) return null;
+    const dough = JSON.parse(raw) as Record<string, unknown>;
+    let crust: Record<string, unknown> = {};
+    try {
+      const crustRaw = localStorage.getItem(CRUST_PROFILE_KEY(brand, flavor));
+      if (crustRaw) crust = JSON.parse(crustRaw) as Record<string, unknown>;
+    } catch {}
+    return { ...dough, ...crust };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * True when a profile object carries real recipe/applicator data (vs. a blank
  * default form). Used to (a) avoid letting a blank/default form clobber a
  * populated profile, and (b) decide whether a seeded profile may be repaired.

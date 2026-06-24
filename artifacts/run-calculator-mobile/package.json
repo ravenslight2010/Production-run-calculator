@@ -71,6 +71,7 @@
     "@workspace/onboarding": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
+    "@workspace/scheduled-recipe-check": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",
     "@workspace/voice-commands": "workspace:*",

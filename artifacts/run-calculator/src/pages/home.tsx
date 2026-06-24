@@ -124,6 +124,7 @@ import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
 import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
+import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
@@ -9301,6 +9302,33 @@ export default function Home() {
                     </Card>
                   );
                 })()}
+                {/* Recipe Setup Needed (managers): upcoming scheduled runs whose
+                    brand+flavor has no saved profile (or a profile with no recipe
+                    rows). Their reorder demand silently falls back to defaults, so
+                    warn managers and let them jump to set the profile up.
+                    Detection is shared with mobile (replit.md parity). */}
+                {isManager &&
+                  (() => {
+                    const scheduledRuns = scheduledDays.flatMap((day) =>
+                      (day.runs ?? [])
+                        .filter((r) => r.brand)
+                        .map((r) => ({
+                          date: day.date,
+                          brand: r.brand,
+                          flavor: r.flavor,
+                          casesNeeded: r.casesNeeded,
+                        })),
+                    );
+                    return (
+                      <ScheduledRecipeWarningCard
+                        scheduledRuns={scheduledRuns}
+                        onSetup={(brand, flavor) => {
+                          if (currentRunId) updateRunMeta(currentRunId, { brand, flavor });
+                          setActiveTab("setup");
+                        }}
+                      />
+                    );
+                  })()}
                 {/* Reorder Now: cross-location on-hand at/below reorder threshold
                     once upcoming scheduled-run demand is subtracted. Scheduled
                     runs carry no recipe rows, so resolve each via its profile ->

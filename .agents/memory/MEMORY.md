@@ -93,3 +93,4 @@
 - [Mixes section + make-day calc](mixes.md) — manager-defined pre-blended mixes master-data (NOT synced, additive DB); buildMixPlan in @workspace/mixes; pick make-day→per-run batches + Pull-For-Mix lbs; web+mobile parity.
 - [Freezer-pull notification](freezer-pull.md) — warehouse "Pull Out Freezer for [date]" cards; manager-tagged items w/ per-item daysEarly; factory-wide master-data (NOT synced); GET authed-only, writes manage-inventory; web+mobile parity.
 - [Low-stock reorder list](reorder-list.md) — advisory "Reorder Now" warehouse card; flags on-hand≤reorderThreshold(>0) minus SCHEDULED-run demand; math in @workspace/inventory-math; read-only; web+mobile parity.
+- [Scheduled recipe-setup warning](scheduled-recipe-check.md) — manager warehouse card flags upcoming scheduled runs w/ missing/empty recipe profile (reorder demand falls back to defaults); shared @workspace/scheduled-recipe-check; raw-profile resolver; web+mobile parity.

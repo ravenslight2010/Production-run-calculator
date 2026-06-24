@@ -49,6 +49,9 @@
       "path": "./lib/cycle-count"
     },
     {
+      "path": "./lib/scheduled-recipe-check"
+    },
+    {
       "path": "./lib/ai-memory"
     },
     {
