@@ -33,9 +33,15 @@ them pollutes both dedupe keys and the prompt blocks.
   `recordFacilityKnowledge` / `recordConversationTurns`. Route file
   `aiMemory.ts`. Both reads and writes are FAIL-SAFE — exactly like
   `aiCorrectionsContext`; on any failure the prompt just sees empty memory.
-- The facility block is threaded into the 5 ai.ts endpoints + incidents
-  diagnosis. **Any new AI endpoint must call the shared grounding path**, not
-  re-load memory ad hoc.
+- The facility block is now threaded into nearly ALL generative endpoints:
+  every `/ai/*` in ai.ts EXCEPT `/ai/command` (intent classifier) and the
+  `aiReviewer` 2nd-pass reviewer (both intentionally un-grounded), plus
+  inventory quality + waste insight and incident diagnosis. Per-user
+  CONVERSATION memory (userId passed) is only `/ai/ask` — every other feature is
+  single-shot by design (mix-assistant, recipe-assistant, etc.).
+  **Any new AI endpoint must call the shared grounding path**, not re-load memory
+  ad hoc. (incident diagnosis loads facility knowledge directly rather than via
+  groundPromptWithMemory, but still grounds.)
 
 ## Gotchas
 - `normalizeConversationTurns` input type is loose (`{role?: unknown; text?:
