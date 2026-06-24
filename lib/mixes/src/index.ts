@@ -242,11 +242,24 @@ function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
   return entry;
 }
 
-// Build the mix plan for a chosen make-day (`today`): for every scheduled run,
-// include any enabled mix whose product (brand+flavor, case-insensitive) matches
-// the run AND whose run is within the mix's make-ahead window
+// An aggregate of all scheduled runs that share a date + product (brand+flavor),
+// with their pizza/case counts summed. Mixes are computed once against this
+// aggregate so a day's "amount already made" is honored a single time even when a
+// product is split across several runs.
+interface ProductAggregate {
+  brand: string;
+  flavor: string;
+  pizzas: number;
+  cases: number;
+}
+
+// Build the mix plan for a chosen make-day (`today`): scheduled runs are first
+// aggregated by date + product (brand+flavor, case-insensitive), summing their
+// pizza/case counts. For each aggregated product, include any enabled mix whose
+// product matches AND whose runs are within the mix's make-ahead window
 // (0 <= daysUntil(run) <= mix.daysEarly). Runs in the past (daysUntil < 0) are
-// skipped. Each matched mix's components are scaled by the run's pizza count.
+// skipped. Each matched mix's components are scaled by the aggregated pizza count,
+// and "amount already made" is subtracted once per product (not once per run).
 // Results are grouped by run date and sorted ascending by date.
 export function buildMixPlan(args: {
   runs: MixScheduledRun[];
@@ -266,31 +279,57 @@ export function buildMixPlan(args: {
     else byProduct.set(key, [mix]);
   }
 
-  const groups = new Map<string, MixPlanGroup>();
+  // Aggregate runs by date -> product, summing pizzas/cases. Insertion order of
+  // the inner map preserves first-seen product order within a date.
+  const byDate = new Map<string, Map<string, ProductAggregate>>();
   for (const run of runs) {
     const du = daysUntil(run.date, today);
     if (!Number.isFinite(du) || du < 0) continue;
-    const candidates = byProduct.get(productKey(run.brand, run.flavor));
-    if (!candidates || candidates.length === 0) continue;
-    const matched: MixPlanEntry[] = [];
-    for (const mix of candidates) {
-      if (du > mix.daysEarly) continue; // not time to make it yet
-      matched.push(computeEntry(mix, run.pizzas));
+    const key = productKey(run.brand, run.flavor);
+    if (!byProduct.has(key)) continue; // no mix for this product
+    let products = byDate.get(run.date);
+    if (!products) {
+      products = new Map<string, ProductAggregate>();
+      byDate.set(run.date, products);
     }
-    if (matched.length === 0) continue;
-    let group = groups.get(run.date);
-    if (!group) {
-      group = { date: run.date, daysUntil: du, runs: [] };
-      groups.set(run.date, group);
+    const agg = products.get(key);
+    if (agg) {
+      agg.pizzas += run.pizzas;
+      agg.cases += run.cases;
+    } else {
+      products.set(key, {
+        brand: run.brand,
+        flavor: run.flavor,
+        pizzas: run.pizzas,
+        cases: run.cases,
+      });
     }
-    group.runs.push({
-      brand: run.brand,
-      flavor: run.flavor,
-      pizzas: run.pizzas,
-      cases: run.cases,
-      mixes: matched,
-    });
   }
 
-  return Array.from(groups.values()).sort((a, b) => a.date.localeCompare(b.date));
+  const groups: MixPlanGroup[] = [];
+  for (const [date, products] of byDate) {
+    const du = daysUntil(date, today);
+    const planRuns: MixPlanRun[] = [];
+    for (const [key, agg] of products) {
+      const candidates = byProduct.get(key);
+      if (!candidates || candidates.length === 0) continue;
+      const matched: MixPlanEntry[] = [];
+      for (const mix of candidates) {
+        if (du > mix.daysEarly) continue; // not time to make it yet
+        matched.push(computeEntry(mix, agg.pizzas));
+      }
+      if (matched.length === 0) continue;
+      planRuns.push({
+        brand: agg.brand,
+        flavor: agg.flavor,
+        pizzas: agg.pizzas,
+        cases: agg.cases,
+        mixes: matched,
+      });
+    }
+    if (planRuns.length === 0) continue;
+    groups.push({ date, daysUntil: du, runs: planRuns });
+  }
+
+  return groups.sort((a, b) => a.date.localeCompare(b.date));
 }

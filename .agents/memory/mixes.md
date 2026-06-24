@@ -10,14 +10,16 @@ factory-wide, manager-gated writes, **NOT in /sync**, additive DB — mirrors th
 items pattern exactly.
 
 ## Model & pure logic
-- Lives in `@workspace/mixes` (`lib/mixes/src/index.ts`). Apps keep only platform glue +
-  re-export from the lib; tests import the lib directly.
-- A Mix: name, brand+flavor (used to match scheduled runs), batchSize (lbs/batch), daysEarly
-  (default 0), notes?, amountAlreadyMade, components[{ingredient, perPizza lbs}], plus id/scope.
-- `buildMixPlan({runs, mixes, today})`: enabled-only; brand+flavor matched case-insensitively;
-  keep run if `0 <= daysUntil(run.date) <= mix.daysEarly`; per-component lbs = perPizza×pizzas;
-  totalLbs = sum; remainingLbs = max(0, total − amountAlreadyMade); batches = remaining/batchSize
-  (0 if ≤0); grouped by date ascending. **Advisory-only** — never auto-writes.
+- Lives in shared lib `@workspace/mixes`. Apps keep only platform glue + re-export; tests
+  import the lib directly.
+- A Mix matches scheduled runs by brand+flavor (case-insensitive) and has a make-ahead window
+  (daysEarly). The plan scales each component by the day's pizza count and reports batches.
+- **Aggregate by day+product, not by run.** Multiple scheduled runs for the same brand+flavor
+  on one day MUST be summed (pizzas/cases) into a single card, and `amountAlreadyMade` applied
+  ONCE per product. **Why:** a first attempt computed one entry per run, so split runs produced
+  duplicate cards and subtracted "already made" multiple times (understating batches). A
+  regression test covers "two runs, same day, same product".
+- **Advisory-only** — never auto-writes / never moves stock.
 
 ## Run resolution (the parity-sensitive bit)
 The planner needs, per scheduled run: `pizzas` and `cases`.

@@ -230,4 +230,35 @@ describe("buildMixPlan", () => {
     expect(plan.map((g) => g.date)).toEqual(["2026-06-25", "2026-06-27"]);
     expect(plan[0].runs[0].mixes.map((m) => m.name)).toEqual(["M1", "M2"]);
   });
+
+  it("aggregates same-day same-product runs into one card and subtracts amountAlreadyMade once", () => {
+    const m = mix({
+      name: "M",
+      brand: "Acme",
+      flavor: "Combo",
+      batchSize: 40,
+      amountAlreadyMade: 40,
+      components: [{ ingredient: "Onions", perPizza: 0.08 }],
+    });
+    const plan = buildMixPlan({
+      runs: [
+        run("2026-06-23", "Acme", "Combo", 600, 60),
+        run("2026-06-23", "Acme", "Combo", 400, 40),
+      ],
+      mixes: [m],
+      today,
+    });
+    expect(plan).toHaveLength(1);
+    // One grouped card for the product, not one per run.
+    expect(plan[0].runs).toHaveLength(1);
+    const planRun = plan[0].runs[0];
+    expect(planRun.pizzas).toBe(1000);
+    expect(planRun.cases).toBe(100);
+    const entry = planRun.mixes[0];
+    // total = 1000 * 0.08 = 80; amountAlreadyMade subtracted ONCE => 40 remaining, 1 batch.
+    expect(entry.totalLbs).toBeCloseTo(80);
+    expect(entry.remainingLbs).toBeCloseTo(40);
+    expect(entry.batches).toBeCloseTo(1);
+    expect(entry.components[0].lbs).toBeCloseTo(80);
+  });
 });
