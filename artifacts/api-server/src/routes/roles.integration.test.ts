@@ -358,6 +358,22 @@ const ROUTES: GatedRoute[] = [
     okStatus: 200,
   },
   {
+    name: "POST /mixes",
+    capability: "manage-inventory",
+    method: "POST",
+    path: () => "/api/mixes",
+    body: { items: [] },
+    okStatus: 200,
+  },
+  {
+    name: "DELETE /mixes",
+    capability: "manage-inventory",
+    method: "DELETE",
+    path: () => "/api/mixes",
+    body: { ids: [] },
+    okStatus: 200,
+  },
+  {
     name: "POST /cycle-count-schedules",
     capability: "manage-inventory",
     method: "POST",
@@ -504,6 +520,22 @@ describe("GET /freezer-pull-items read policy", () => {
 
   it("allows a capability-less operator to read (→ 200)", async () => {
     const res = await req(OPERATOR, "GET", "/api/freezer-pull-items");
+    expect(res.status).toBe(200);
+  });
+});
+
+// Mix config writes are manager-gated (covered in GATED_ROUTES), but the LIST is
+// intentionally readable by any signed-in user so both apps can build the mix
+// make-day plan for floor staff. These lock that read policy: no token → 401,
+// but a capability-less operator → 200.
+describe("GET /mixes read policy", () => {
+  it("rejects an unauthenticated read with 401", async () => {
+    const res = await req(null, "GET", "/api/mixes");
+    expect(res.status).toBe(401);
+  });
+
+  it("allows a capability-less operator to read (→ 200)", async () => {
+    const res = await req(OPERATOR, "GET", "/api/mixes");
     expect(res.status).toBe(200);
   });
 });

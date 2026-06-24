@@ -1,0 +1,436 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle, Plus, Trash2, Blend } from "lucide-react";
+import {
+  DEFAULT_DAYS_EARLY,
+  normalizeMix,
+  type Mix,
+  type MixComponent,
+} from "@workspace/mixes";
+import { useMixes } from "../hooks/useMixes";
+import { saveMixes, deleteMixes } from "../mixes";
+
+function genId(): string {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function blankMix(): Mix {
+  return {
+    id: genId(),
+    name: "",
+    brand: "",
+    flavor: "",
+    batchSize: 0,
+    daysEarly: DEFAULT_DAYS_EARLY,
+    notes: "",
+    amountAlreadyMade: 0,
+    components: [],
+    enabled: true,
+  };
+}
+
+// Manager-only editor for factory-wide mixes. A mix is a pre-blended recipe
+// (veggie/topping, cheese, sauce, …) made ahead for a product. Each mix names
+// the product (brand + flavor) it matches against scheduled runs, a batch size
+// (lbs/batch), an optional "make N days early" window, optional notes, an
+// optional "amount already made", and a list of components (each ingredient and
+// its per-pizza pounds). Mixes are persisted server-side (shared across all
+// signed-in users) and drive the Mixes make-day plan. The server enforces the
+// manager role on writes; this card is only rendered for managers.
+export default function MixesManager({
+  brands = [],
+  brandFlavors = {},
+  ingredientSuggestions = [],
+}: {
+  brands?: string[];
+  brandFlavors?: Record<string, string[]>;
+  ingredientSuggestions?: string[];
+}) {
+  const qc = useQueryClient();
+  const { items, isLoading } = useMixes();
+  const [error, setError] = useState<string | null>(null);
+
+  const saveMutation = useMutation({
+    mutationFn: (next: Mix[]) => saveMixes(next),
+    onSuccess: (saved) => {
+      qc.setQueryData(["mixes"], saved);
+      setError(null);
+    },
+    onError: () =>
+      setError("Could not save the mix. Check your connection and try again."),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (ids: string[]) => deleteMixes(ids),
+    onSuccess: (saved) => {
+      qc.setQueryData(["mixes"], saved);
+      setError(null);
+    },
+    onError: () =>
+      setError("Could not delete the mix. Check your connection and try again."),
+  });
+
+  const busy = saveMutation.isPending || deleteMutation.isPending;
+
+  function addMix() {
+    const draft = blankMix();
+    draft.name = "New Mix";
+    saveMutation.mutate([draft]);
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Blend className="w-4 h-4" />
+          Mixes
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Define pre-blended mixes made ahead for a product. Match a mix to a
+          product by <span className="font-semibold">brand + flavor</span>, set
+          its batch size and components (lbs per pizza). The Mixes tab shows what
+          to make for a chosen day — within the{" "}
+          <span className="font-semibold text-sky-300">days-early</span> window
+          (default {DEFAULT_DAYS_EARLY}).
+        </p>
+
+        {error && (
+          <div className="flex items-start gap-2 px-2.5 py-1.5 rounded-md text-xs border bg-red-950/40 border-red-700/40 text-red-300">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading mixes…</p>
+        ) : items.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No mixes yet. Add one below.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {items.map((mix) => (
+              <MixEditor
+                key={mix.id}
+                mix={mix}
+                disabled={busy}
+                brands={brands}
+                brandFlavors={brandFlavors}
+                ingredientSuggestions={ingredientSuggestions}
+                onChange={(next) => saveMutation.mutate([next])}
+                onDelete={() => deleteMutation.mutate([mix.id])}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="pt-1 border-t border-border/40">
+          <button
+            type="button"
+            onClick={addMix}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-50"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Mix
+          </button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function MixEditor({
+  mix,
+  disabled,
+  brands,
+  brandFlavors,
+  ingredientSuggestions,
+  onChange,
+  onDelete,
+}: {
+  mix: Mix;
+  disabled: boolean;
+  brands: string[];
+  brandFlavors: Record<string, string[]>;
+  ingredientSuggestions: string[];
+  onChange: (mix: Mix) => void;
+  onDelete: () => void;
+}) {
+  // Local draft so component rows / numbers edit smoothly; commit on blur.
+  const [draft, setDraft] = useState<Mix>(mix);
+
+  // Keep the local draft in step when the upstream record changes (e.g. a
+  // background poll or a save round-trip returns the canonical row).
+  const signature = JSON.stringify(mix);
+  const [lastSignature, setLastSignature] = useState(signature);
+  if (signature !== lastSignature) {
+    setLastSignature(signature);
+    setDraft(mix);
+  }
+
+  function patch(p: Partial<Mix>) {
+    setDraft((d) => ({ ...d, ...p }));
+  }
+
+  function commit(next: Mix = draft) {
+    const clean = normalizeMix(next);
+    if (clean) onChange({ ...clean, id: next.id, scope: next.scope });
+  }
+
+  function patchComponent(idx: number, p: Partial<MixComponent>) {
+    setDraft((d) => {
+      const components = d.components.map((c, i) =>
+        i === idx ? { ...c, ...p } : c,
+      );
+      return { ...d, components };
+    });
+  }
+
+  function addComponent() {
+    const next = {
+      ...draft,
+      components: [...draft.components, { ingredient: "", perPizza: 0 }],
+    };
+    setDraft(next);
+  }
+
+  function removeComponent(idx: number) {
+    const next = {
+      ...draft,
+      components: draft.components.filter((_, i) => i !== idx),
+    };
+    setDraft(next);
+    commit(next);
+  }
+
+  const flavorOptions = brandFlavors[draft.brand] ?? [];
+
+  return (
+    <div className="rounded-md border border-border/60 bg-muted/20 p-2.5 space-y-2">
+      {/* Name + enabled + delete */}
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={draft.name}
+          onChange={(e) => patch({ name: e.target.value })}
+          onBlur={() => commit()}
+          disabled={disabled}
+          placeholder="Mix name…"
+          className="flex-1 min-w-[8rem] rounded-md border border-input bg-background px-2 py-1 text-xs font-semibold"
+        />
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(e) => {
+              const next = { ...draft, enabled: e.target.checked };
+              setDraft(next);
+              commit(next);
+            }}
+            disabled={disabled}
+          />
+          On
+        </label>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={disabled}
+          title="Delete mix"
+          className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Product match: brand + flavor */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Brand</span>
+          <input
+            type="text"
+            list={`mix-brands-${draft.id}`}
+            value={draft.brand}
+            onChange={(e) => patch({ brand: e.target.value })}
+            onBlur={() => commit()}
+            disabled={disabled}
+            placeholder="Any brand"
+            className="w-36 rounded-md border border-input bg-background px-2 py-1 text-xs"
+          />
+          <datalist id={`mix-brands-${draft.id}`}>
+            {brands.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Flavor</span>
+          <input
+            type="text"
+            list={`mix-flavors-${draft.id}`}
+            value={draft.flavor}
+            onChange={(e) => patch({ flavor: e.target.value })}
+            onBlur={() => commit()}
+            disabled={disabled}
+            placeholder="Any flavor"
+            className="w-36 rounded-md border border-input bg-background px-2 py-1 text-xs"
+          />
+          <datalist id={`mix-flavors-${draft.id}`}>
+            {flavorOptions.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+        </div>
+      </div>
+
+      {/* Batch size, days early, amount already made */}
+      <div className="flex flex-wrap items-end gap-2">
+        <NumberField
+          label="Batch size (lbs)"
+          value={draft.batchSize}
+          min={0}
+          step={0.1}
+          disabled={disabled}
+          onChange={(v) => patch({ batchSize: v })}
+          onCommit={() => commit()}
+        />
+        <NumberField
+          label="Days early"
+          value={draft.daysEarly}
+          min={0}
+          step={1}
+          integer
+          disabled={disabled}
+          onChange={(v) => patch({ daysEarly: v })}
+          onCommit={() => commit()}
+        />
+        <NumberField
+          label="Already made (lbs)"
+          value={draft.amountAlreadyMade}
+          min={0}
+          step={0.1}
+          disabled={disabled}
+          onChange={(v) => patch({ amountAlreadyMade: v })}
+          onCommit={() => commit()}
+        />
+      </div>
+
+      {/* Notes */}
+      <input
+        type="text"
+        value={draft.notes ?? ""}
+        onChange={(e) => patch({ notes: e.target.value })}
+        onBlur={() => commit()}
+        disabled={disabled}
+        placeholder="Notes (optional)…"
+        className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+      />
+
+      {/* Components */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold text-muted-foreground">
+          Components (lbs per pizza)
+        </p>
+        {draft.components.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">No components yet.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {draft.components.map((c, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  list={`mix-ingredients-${draft.id}`}
+                  value={c.ingredient}
+                  onChange={(e) => patchComponent(idx, { ingredient: e.target.value })}
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  placeholder="Ingredient…"
+                  className="flex-1 min-w-[7rem] rounded-md border border-input bg-background px-2 py-1 text-xs"
+                />
+                <input
+                  type="number"
+                  min={0}
+                  step={0.001}
+                  value={c.perPizza}
+                  onChange={(e) =>
+                    patchComponent(idx, {
+                      perPizza: Math.max(0, Number(e.target.value) || 0),
+                    })
+                  }
+                  onBlur={() => commit()}
+                  disabled={disabled}
+                  className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">lbs/pizza</span>
+                <button
+                  type="button"
+                  onClick={() => removeComponent(idx)}
+                  disabled={disabled}
+                  title="Remove component"
+                  className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <datalist id={`mix-ingredients-${draft.id}`}>
+          {ingredientSuggestions.map((s) => (
+            <option key={s} value={s} />
+          ))}
+        </datalist>
+        <button
+          type="button"
+          onClick={addComponent}
+          disabled={disabled}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full border border-border/60 bg-muted/30 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50"
+        >
+          <Plus className="w-3 h-3" /> Add component
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  step,
+  integer = false,
+  disabled,
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  step: number;
+  integer?: boolean;
+  disabled: boolean;
+  onChange: (v: number) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {label}
+      </span>
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const raw = Number(e.target.value) || 0;
+          const v = integer ? Math.trunc(raw) : raw;
+          onChange(Math.max(min, v));
+        }}
+        onBlur={onCommit}
+        disabled={disabled}
+        className="w-28 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
+      />
+    </div>
+  );
+}

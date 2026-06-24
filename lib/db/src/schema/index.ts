@@ -23,6 +23,7 @@ export * from "./facilityKnowledge";
 export * from "./aiConversationTurns";
 export * from "./productionRules";
 export * from "./freezerPullItems";
+export * from "./mixes";
 export * from "./cycleCountSchedules";
 export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";

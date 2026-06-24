@@ -43,6 +43,9 @@
       "path": "./lib/freezer-pull"
     },
     {
+      "path": "./lib/mixes"
+    },
+    {
       "path": "./lib/cycle-count"
     },
     {

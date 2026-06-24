@@ -126,6 +126,9 @@ import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
+import MixesManager from "../components/MixesManager";
+import { useMixes } from "../hooks/useMixes";
+import { buildMixPlan } from "@workspace/mixes";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
@@ -279,6 +282,7 @@ import {
   LogOut,
   Smartphone,
   Snowflake,
+  Blend,
   ClipboardCheck,
 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
@@ -2079,6 +2083,11 @@ export default function Home() {
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
   const { items: freezerPullItems } = useFreezerPullItems();
+  // Factory-wide mixes (open to all signed-in users) — drives the Mixes
+  // make-day plan and the manager Mixes editor.
+  const { items: mixes } = useMixes();
+  // The make-day chosen on the Mixes tab (defaults to today).
+  const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
   // Warehouse "Time to Count" card. Marking a section counted is open to any
   // signed-in user (floor staff perform the counts).
@@ -6611,6 +6620,7 @@ export default function Home() {
           { key: "import", label: "Import" },
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
+          ...(canManageInventory ? [{ key: "mixes", label: "Mixes" }] : []),
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
         ];
@@ -7057,6 +7067,22 @@ export default function Home() {
                 {manageCategory === "freezer" && canManageInventory && (
                   <FreezerPullItemsManager
                     suggestions={[
+                      ...doughIngredients,
+                      ...frontlineIngredients,
+                      ...cheeseIngredients,
+                      ...mixIngredients,
+                      ...ingredientTypes,
+                      ...pepTypes,
+                    ]}
+                  />
+                )}
+
+                {/* Mixes (pre-blended mix definitions) */}
+                {manageCategory === "mixes" && canManageInventory && (
+                  <MixesManager
+                    brands={brands}
+                    brandFlavors={brandFlavors}
+                    ingredientSuggestions={[
                       ...doughIngredients,
                       ...frontlineIngredients,
                       ...cheeseIngredients,
@@ -7854,6 +7880,9 @@ export default function Home() {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setActiveTab("ai")}>
                   <Sparkles className="w-4 h-4 mr-2" /> AI Assistant
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setActiveTab("mixes")}>
+                  <Blend className="w-4 h-4 mr-2" /> Mixes
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setShowReportIssue(true)}>
                   <LifeBuoy className="w-4 h-4 mr-2" /> Report an issue
@@ -9482,6 +9511,155 @@ export default function Home() {
                     onClearSubstitutions={clearSubstitutions}
                   />;
                 })()}
+              </TabsContent>
+
+              {/* ─── MIXES ─── */}
+              <TabsContent value="mixes">
+                {/* Pre-blended mixes made ahead for a product. Pick a make-day;
+                    for every scheduled run within a matching mix's days-early
+                    window, show per-product cards with cases/pizzas, batches to
+                    make, total lbs, and a "Pull For Mix" per-component lbs
+                    breakdown. Scheduled runs carry no recipe rows, so resolve
+                    each via its profile -> FormValues -> computeSummaryStats for
+                    pizza/case counts, exactly like the warehouse card. Advisory
+                    only — this never moves stock. */}
+                <div className="space-y-4 max-w-2xl mx-auto pb-8">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Blend className="w-5 h-5 text-emerald-400" />
+                    <h2 className="text-lg font-semibold">Mixes</h2>
+                  </div>
+                  <Card>
+                    <CardContent className="px-4 py-3 flex items-center gap-3 flex-wrap">
+                      <label htmlFor="mix-make-day" className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                        Make day
+                      </label>
+                      <Input
+                        id="mix-make-day"
+                        type="date"
+                        value={mixMakeDay}
+                        onChange={(e) => setMixMakeDay(e.target.value || todayStr())}
+                        className="w-auto"
+                        data-testid="mix-make-day"
+                      />
+                    </CardContent>
+                  </Card>
+                  {(() => {
+                    if (mixes.length === 0) {
+                      return (
+                        <p className="text-sm text-muted-foreground px-1">
+                          No mixes defined yet.{canManageInventory ? " Add mixes under Settings → Mixes." : " Ask a manager to add mixes under Settings."}
+                        </p>
+                      );
+                    }
+                    const runs = scheduledDays.flatMap((day) =>
+                      (day.runs ?? [])
+                        .filter((r) => r.brand)
+                        .map((r) => {
+                          const profile = loadProfile(r.brand, r.flavor);
+                          const vals: FormValues = {
+                            ...(profile ?? DEFAULT_VALUES),
+                            casesNeeded: r.casesNeeded,
+                            ...(r.dieType ? { dieType: r.dieType } : {}),
+                          };
+                          const s = computeSummaryStats(vals);
+                          return {
+                            date: day.date,
+                            brand: r.brand,
+                            flavor: r.flavor,
+                            pizzas: s.totalPizzas,
+                            cases: s.totalCases,
+                          };
+                        }),
+                    );
+                    const plan = buildMixPlan({ runs, mixes, today: mixMakeDay });
+                    if (plan.length === 0) {
+                      return (
+                        <p className="text-sm text-muted-foreground px-1" data-testid="mix-plan-empty">
+                          No mixes to make for this day. Pick a make-day with scheduled runs whose product matches a mix (within its days-early window).
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="space-y-3">
+                        {plan.map((group) => (
+                          <Card
+                            key={group.date}
+                            className="bg-emerald-950/30 border-emerald-700/40 shadow-md"
+                            data-testid={`mix-plan-${group.date}`}
+                          >
+                            <CardHeader className="pb-2 pt-4 px-5">
+                              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                                <Blend className="w-4 h-4" /> Mixes for {group.date}
+                                <span className="ml-1 font-normal normal-case text-xs text-emerald-400/80">
+                                  ({group.daysUntil === 0 ? "today" : `in ${group.daysUntil} day${group.daysUntil !== 1 ? "s" : ""}`})
+                                </span>
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="px-4 pb-4 space-y-3">
+                              {group.runs.map((run, ri) => (
+                                <div key={ri} className="rounded-md border border-emerald-800/40 bg-emerald-950/20 p-3">
+                                  <div className="flex items-baseline justify-between gap-2 mb-2">
+                                    <div className="font-semibold text-sm text-emerald-100 truncate">
+                                      {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
+                                    </div>
+                                    <div className="text-xs text-emerald-300/80 whitespace-nowrap tabular-nums">
+                                      {run.cases} case{run.cases !== 1 ? "s" : ""} · {run.pizzas} pizza{run.pizzas !== 1 ? "s" : ""}
+                                    </div>
+                                  </div>
+                                  <div className="space-y-2.5">
+                                    {run.mixes.map((m) => (
+                                      <div key={m.mixId} className="rounded border border-emerald-800/30 bg-emerald-900/10 p-2.5">
+                                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                                          <span className="font-medium text-sm text-emerald-50 truncate">
+                                            {m.name}
+                                            {m.daysEarly > 0 && (
+                                              <span className="ml-1.5 text-[11px] text-emerald-400/70">make {m.daysEarly}d early</span>
+                                            )}
+                                          </span>
+                                          <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50 text-sm">
+                                            {m.batchSize > 0 ? (
+                                              <>{fmtNum(m.batches, 2)} <span className="font-normal text-emerald-300/80">batch{m.batches === 1 ? "" : "es"}</span></>
+                                            ) : (
+                                              <span className="font-normal text-emerald-300/80 text-xs">no batch size</span>
+                                            )}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-baseline justify-between gap-2 text-xs text-emerald-300/80 mb-1.5 tabular-nums">
+                                          <span>Total {fmtNum(m.totalLbs, 2)} lbs</span>
+                                          {m.amountAlreadyMade > 0 && (
+                                            <span>have {fmtNum(m.amountAlreadyMade, 2)} → need {fmtNum(m.remainingLbs, 2)} lbs</span>
+                                          )}
+                                        </div>
+                                        {m.notes && (
+                                          <div className="text-[11px] text-emerald-400/70 italic mb-1.5">{m.notes}</div>
+                                        )}
+                                        <div className="space-y-1 pt-1 border-t border-emerald-800/30">
+                                          <div className="text-[11px] uppercase tracking-wider text-emerald-400/70 font-semibold pt-1">Pull For Mix</div>
+                                          {m.components.length === 0 ? (
+                                            <div className="text-xs text-emerald-400/60">No components defined.</div>
+                                          ) : (
+                                            m.components.map((c, ci) => (
+                                              <div key={ci} className="flex items-baseline justify-between gap-2 text-sm">
+                                                <span className="text-emerald-200/90 truncate">{c.ingredient}</span>
+                                                <span className="font-bold tabular-nums whitespace-nowrap text-emerald-50">
+                                                  {fmtNum(c.lbs, 2)} <span className="font-normal text-emerald-300/80">lbs</span>
+                                                </span>
+                                              </div>
+                                            ))
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </TabsContent>
 
               <TabsContent value="ai">

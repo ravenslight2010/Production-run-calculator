@@ -19,6 +19,7 @@ import aiCorrectionsRouter from "./aiCorrections";
 import aiMemoryRouter from "./aiMemory";
 import productionRulesRouter from "./productionRules";
 import freezerPullItemsRouter from "./freezerPullItems";
+import mixesRouter from "./mixes";
 import cycleCountSchedulesRouter from "./cycleCountSchedules";
 import sandboxRouter from "./sandbox";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -62,6 +63,7 @@ router.use(aiCorrectionsRouter);
 router.use(aiMemoryRouter);
 router.use(productionRulesRouter);
 router.use(freezerPullItemsRouter);
+router.use(mixesRouter);
 router.use(cycleCountSchedulesRouter);
 router.use(sandboxRouter);
 

@@ -1662,6 +1662,97 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
+ * @summary List manager-defined mixes
+ */
+export const ListMixesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the mix'),
+  "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
+  "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
+  "batchSize": zod.number().describe('Pounds of finished mix per batch'),
+  "daysEarly": zod.number().describe('Days before the run this mix may be made ahead (default 0)'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+})
+
+
+/**
+ * Upserts a batch of mixes by id. Each mix is normalized and validated server-side; malformed mixes are dropped. Manager role required.
+ * @summary Create or update mixes (manager only)
+ */
+export const SaveMixesBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the mix'),
+  "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
+  "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
+  "batchSize": zod.number().describe('Pounds of finished mix per batch'),
+  "daysEarly": zod.number().describe('Days before the run this mix may be made ahead (default 0)'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.')).describe('The batch of mixes to create or update (by id)')
+})
+
+export const SaveMixesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the mix'),
+  "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
+  "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
+  "batchSize": zod.number().describe('Pounds of finished mix per batch'),
+  "daysEarly": zod.number().describe('Days before the run this mix may be made ahead (default 0)'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+})
+
+
+/**
+ * Removes a batch of mixes by id. Manager role required.
+ * @summary Delete mixes by id (manager only)
+ */
+export const DeleteMixesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the mixes to delete')
+})
+
+export const DeleteMixesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the mix'),
+  "brand": zod.string().describe('Product brand, matched case-insensitively against scheduled runs'),
+  "flavor": zod.string().describe('Product flavor, matched case-insensitively against scheduled runs'),
+  "batchSize": zod.number().describe('Pounds of finished mix per batch'),
+  "daysEarly": zod.number().describe('Days before the run this mix may be made ahead (default 0)'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "amountAlreadyMade": zod.number().describe('Pounds already made\/on hand, subtracted from the total'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "perPizza": zod.number().describe('Pounds of this ingredient per pizza')
+}).describe('One ingredient of a mix and how many pounds of it go into a single pizza\'s worth of the finished mix.')).describe('The ingredients that make up the mix'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide pre-blended mix (veggie\/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run\'s pizza count. Disabled mixes are kept but produce no make-day plan entry.'))
+})
+
+
+/**
  * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
  * @summary List manager-defined cycle-count schedules
  */

@@ -22,6 +22,7 @@ import SpecImportModal from "@/components/SpecImportModal";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import ProductionRulesManager from "@/components/ProductionRulesManager";
 import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
+import MixesManager from "@/components/MixesManager";
 import CycleCountManager from "@/components/CycleCountManager";
 import { DEFAULT_CYCLE_COUNT_SECTIONS } from "@workspace/cycle-count";
 import StaffRolesCard from "@/components/StaffRolesCard";
@@ -1458,6 +1459,25 @@ export default function MasterDataScreen() {
             <CardSection>
               <FreezerPullItemsManager
                 suggestions={[
+                  ...doughIngredients,
+                  ...frontlineIngredients,
+                  ...cheeseIngredients,
+                  ...pepTypes,
+                ]}
+              />
+            </CardSection>
+          </>
+        ) : null}
+
+        {/* Mixes (manage-inventory capability; mirrors web) */}
+        {canManageInventory ? (
+          <>
+            <SectionHeader title="Mixes" />
+            <CardSection>
+              <MixesManager
+                brands={brands}
+                brandFlavors={brandFlavors}
+                ingredientSuggestions={[
                   ...doughIngredients,
                   ...frontlineIngredients,
                   ...cheeseIngredients,

@@ -1485,6 +1485,72 @@ paths:
         "403":
           description: Manager role required
 
+  /mixes:
+    get:
+      operationId: listMixes
+      tags: [mixes]
+      summary: List manager-defined mixes
+      description: >-
+        Returns every factory-wide mix (a pre-blended recipe — veggie/topping,
+        cheese, sauce, … — made ahead for a given product). These are global
+        policy (not part of the per-day sync payload). Reading is available to
+        any signed-in user so both apps can build the mix make-day plan; editing
+        is manager-only.
+      responses:
+        "200":
+          description: All mixes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixList"
+    post:
+      operationId: saveMixes
+      tags: [mixes]
+      summary: Create or update mixes (manager only)
+      description: >-
+        Upserts a batch of mixes by id. Each mix is normalized and validated
+        server-side; malformed mixes are dropped. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMixesInput"
+      responses:
+        "200":
+          description: The full updated mix list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteMixes
+      tags: [mixes]
+      summary: Delete mixes by id (manager only)
+      description: >-
+        Removes a batch of mixes by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteMixesInput"
+      responses:
+        "200":
+          description: The full updated mix list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
   /cycle-count-schedules:
     get:
       operationId: listCycleCountSchedules
@@ -4911,6 +4977,104 @@ components:
         ids:
           type: array
           description: The ids of the freezer-pull items to delete
+          items:
+            type: string
+
+    MixComponent:
+      type: object
+      description: >-
+        One ingredient of a mix and how many pounds of it go into a single
+        pizza's worth of the finished mix.
+      required:
+        - ingredient
+        - perPizza
+      properties:
+        ingredient:
+          type: string
+          description: Ingredient name
+        perPizza:
+          type: number
+          description: Pounds of this ingredient per pizza
+
+    Mix:
+      type: object
+      description: >-
+        A manager-defined factory-wide pre-blended mix (veggie/topping, cheese,
+        sauce, …) made ahead for a given product. Matched against scheduled runs
+        by brand + flavor (case-insensitive); component pounds scale by the run's
+        pizza count. Disabled mixes are kept but produce no make-day plan entry.
+      required:
+        - id
+        - name
+        - brand
+        - flavor
+        - batchSize
+        - daysEarly
+        - amountAlreadyMade
+        - components
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Display name of the mix
+        brand:
+          type: string
+          description: Product brand, matched case-insensitively against scheduled runs
+        flavor:
+          type: string
+          description: Product flavor, matched case-insensitively against scheduled runs
+        batchSize:
+          type: number
+          description: Pounds of finished mix per batch
+        daysEarly:
+          type: integer
+          description: Days before the run this mix may be made ahead (default 0)
+        notes:
+          type: string
+          description: Optional free-form notes
+        amountAlreadyMade:
+          type: number
+          description: Pounds already made/on hand, subtracted from the total
+        components:
+          type: array
+          description: The ingredients that make up the mix
+          items:
+            $ref: "#/components/schemas/MixComponent"
+        enabled:
+          type: boolean
+
+    MixList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Mix"
+
+    SaveMixesInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of mixes to create or update (by id)
+          items:
+            $ref: "#/components/schemas/Mix"
+
+    DeleteMixesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the mixes to delete
           items:
             type: string
 

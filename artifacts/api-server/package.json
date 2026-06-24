@@ -20,6 +20,7 @@
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
+    "@workspace/mixes": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/spec-import": "workspace:*",
     "@workspace/spec-reconcile": "workspace:*",

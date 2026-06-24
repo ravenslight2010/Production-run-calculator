@@ -197,6 +197,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mixes':
+        specifier: workspace:*
+        version: link:../../lib/mixes
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
@@ -477,6 +480,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mixes':
+        specifier: workspace:*
+        version: link:../../lib/mixes
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -733,6 +739,9 @@ importers:
       '@workspace/merge-suggest':
         specifier: workspace:*
         version: link:../../lib/merge-suggest
+      '@workspace/mixes':
+        specifier: workspace:*
+        version: link:../../lib/mixes
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -1004,6 +1013,12 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/merge-suggest: {}
+
+  lib/mixes:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/onboarding:
     devDependencies:

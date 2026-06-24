@@ -134,6 +134,26 @@ export default function SettingsScreen() {
           <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
         </Pressable>
 
+        {/* Mixes make-day plan (open to all signed-in users; mirrors web) */}
+        <Pressable
+          onPress={() => router.push("/mixes")}
+          style={({ pressed }) => [
+            styles.linkBtn,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+              marginTop: 10,
+            },
+          ]}
+        >
+          <Feather name="layers" size={16} color={colors.foreground} />
+          <Text style={[styles.linkText, { color: colors.foreground }]}>
+            Mixes
+          </Text>
+          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+        </Pressable>
+
         {/* Reset */}
         <Pressable
           onPress={() => {

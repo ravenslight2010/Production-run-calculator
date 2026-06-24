@@ -1623,6 +1623,55 @@ export interface DeleteFreezerPullItemsInput {
 }
 
 /**
+ * One ingredient of a mix and how many pounds of it go into a single pizza's worth of the finished mix.
+ */
+export interface MixComponent {
+  /** Ingredient name */
+  ingredient: string;
+  /** Pounds of this ingredient per pizza */
+  perPizza: number;
+}
+
+/**
+ * A manager-defined factory-wide pre-blended mix (veggie/topping, cheese, sauce, …) made ahead for a given product. Matched against scheduled runs by brand + flavor (case-insensitive); component pounds scale by the run's pizza count. Disabled mixes are kept but produce no make-day plan entry.
+ */
+export interface Mix {
+  /** Stable client-generated id */
+  id: string;
+  /** Display name of the mix */
+  name: string;
+  /** Product brand, matched case-insensitively against scheduled runs */
+  brand: string;
+  /** Product flavor, matched case-insensitively against scheduled runs */
+  flavor: string;
+  /** Pounds of finished mix per batch */
+  batchSize: number;
+  /** Days before the run this mix may be made ahead (default 0) */
+  daysEarly: number;
+  /** Optional free-form notes */
+  notes?: string;
+  /** Pounds already made/on hand, subtracted from the total */
+  amountAlreadyMade: number;
+  /** The ingredients that make up the mix */
+  components: MixComponent[];
+  enabled: boolean;
+}
+
+export interface MixList {
+  items: Mix[];
+}
+
+export interface SaveMixesInput {
+  /** The batch of mixes to create or update (by id) */
+  items: Mix[];
+}
+
+export interface DeleteMixesInput {
+  /** The ids of the mixes to delete */
+  ids: string[];
+}
+
+/**
  * A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.
  */
 export interface CycleCountSchedule {

@@ -40,6 +40,7 @@ import type {
   CycleCountScheduleList,
   DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
+  DeleteMixesInput,
   DeleteProductionRulesInput,
   DeniedMergeList,
   FacilityKnowledgeList,
@@ -71,6 +72,7 @@ import type {
   MergeInventoryInput,
   MergeInventoryResult,
   MergedAwayList,
+  MixList,
   OkResponse,
   OptimizeInput,
   OptimizeResult,
@@ -104,6 +106,7 @@ import type {
   SaveImportAliasesInput,
   SaveMergeAliasesInput,
   SaveMergedAwayInput,
+  SaveMixesInput,
   SavePhotoAliasesInput,
   SaveProductionRulesInput,
   SaveSpecImportAliasesInput,
@@ -4756,6 +4759,228 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListMixesUrl = () => {
+
+
+
+
+  return `/api/mixes`
+}
+
+/**
+ * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
+ * @summary List manager-defined mixes
+ */
+export const listMixes = async ( options?: RequestInit): Promise<MixList> => {
+
+  return customFetch<MixList>(getListMixesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListMixesQueryKey = () => {
+    return [
+    `/api/mixes`
+    ] as const;
+    }
+
+
+export const getListMixesQueryOptions = <TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListMixesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMixes>>> = ({ signal }) => listMixes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListMixesQueryResult = NonNullable<Awaited<ReturnType<typeof listMixes>>>
+export type ListMixesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined mixes
+ */
+
+export function useListMixes<TData = Awaited<ReturnType<typeof listMixes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMixes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListMixesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveMixesUrl = () => {
+
+
+
+
+  return `/api/mixes`
+}
+
+/**
+ * Upserts a batch of mixes by id. Each mix is normalized and validated server-side; malformed mixes are dropped. Manager role required.
+ * @summary Create or update mixes (manager only)
+ */
+export const saveMixes = async (saveMixesInput: SaveMixesInput, options?: RequestInit): Promise<MixList> => {
+
+  return customFetch<MixList>(getSaveMixesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveMixesInput,)
+  }
+);}
+
+
+
+
+export const getSaveMixesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMixes>>, TError,{data: BodyType<SaveMixesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveMixes>>, TError,{data: BodyType<SaveMixesInput>}, TContext> => {
+
+const mutationKey = ['saveMixes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveMixes>>, {data: BodyType<SaveMixesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveMixes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveMixesMutationResult = NonNullable<Awaited<ReturnType<typeof saveMixes>>>
+    export type SaveMixesMutationBody = BodyType<SaveMixesInput>
+    export type SaveMixesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update mixes (manager only)
+ */
+export const useSaveMixes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMixes>>, TError,{data: BodyType<SaveMixesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveMixes>>,
+        TError,
+        {data: BodyType<SaveMixesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveMixesMutationOptions(options));
+    }
+
+export const getDeleteMixesUrl = () => {
+
+
+
+
+  return `/api/mixes`
+}
+
+/**
+ * Removes a batch of mixes by id. Manager role required.
+ * @summary Delete mixes by id (manager only)
+ */
+export const deleteMixes = async (deleteMixesInput: DeleteMixesInput, options?: RequestInit): Promise<MixList> => {
+
+  return customFetch<MixList>(getDeleteMixesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteMixesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteMixesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMixes>>, TError,{data: BodyType<DeleteMixesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteMixes>>, TError,{data: BodyType<DeleteMixesInput>}, TContext> => {
+
+const mutationKey = ['deleteMixes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMixes>>, {data: BodyType<DeleteMixesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteMixes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteMixesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMixes>>>
+    export type DeleteMixesMutationBody = BodyType<DeleteMixesInput>
+    export type DeleteMixesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete mixes by id (manager only)
+ */
+export const useDeleteMixes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMixes>>, TError,{data: BodyType<DeleteMixesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteMixes>>,
+        TError,
+        {data: BodyType<DeleteMixesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteMixesMutationOptions(options));
     }
 
 export const getListCycleCountSchedulesUrl = () => {

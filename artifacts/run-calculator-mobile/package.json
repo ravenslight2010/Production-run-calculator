@@ -65,6 +65,7 @@
     "@workspace/cycle-count": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
+    "@workspace/mixes": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",

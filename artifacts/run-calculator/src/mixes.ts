@@ -1,0 +1,51 @@
+// Mixes — web platform glue.
+//
+// Managers define pre-blended "mixes" (a veggie/topping mix, a cheese mix, a
+// sauce mix, …) that the floor makes ahead for a given product. Mixes are
+// persisted server-side (shared across all signed-in users) and are NOT part of
+// the per-day sync payload. Reading is open to any signed-in user (both apps
+// build the mix make-day plan); creating, updating and deleting are
+// manager-only (the server enforces "manage-inventory").
+//
+// Mirrors the mobile glue in
+// artifacts/run-calculator-mobile/context/mixes.ts (replit.md parity).
+
+import { normalizeMixes, type Mix } from "@workspace/mixes";
+import { inventoryClientId } from "./inventoryShared";
+
+export async function fetchMixes(): Promise<Mix[]> {
+  const res = await fetch("/api/mixes", {
+    headers: { "x-client-id": inventoryClientId() },
+  });
+  if (!res.ok) throw new Error(`List mixes failed (${res.status})`);
+  const data = (await res.json()) as { items: unknown };
+  return normalizeMixes(data.items);
+}
+
+export async function saveMixes(items: Mix[]): Promise<Mix[]> {
+  const res = await fetch("/api/mixes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ items }),
+  });
+  if (!res.ok) throw new Error(`Save mixes failed (${res.status})`);
+  const data = (await res.json()) as { items: unknown };
+  return normalizeMixes(data.items);
+}
+
+export async function deleteMixes(ids: string[]): Promise<Mix[]> {
+  const res = await fetch("/api/mixes", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+      "x-client-id": inventoryClientId(),
+    },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(`Delete mixes failed (${res.status})`);
+  const data = (await res.json()) as { items: unknown };
+  return normalizeMixes(data.items);
+}
