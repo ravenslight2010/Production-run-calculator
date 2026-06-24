@@ -77,6 +77,7 @@ import {
 } from "@/context/savedSpecSheets";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
+import { useQueryClient } from "@tanstack/react-query";
 import { FONTS } from "@/constants/fonts";
 import type { ParsedRecipe } from "@workspace/spec-import";
 
@@ -825,6 +826,7 @@ export default function MasterDataScreen() {
     importScheduledRuns,
   } = useRun();
   const { isManager, hasCapability } = useMe();
+  const mixesQc = useQueryClient();
   const canEditRules = hasCapability("edit-production-rules");
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
@@ -1221,6 +1223,9 @@ export default function MasterDataScreen() {
     setPremixApplying(true);
     try {
       await commitPremixImport(premixPrepared, selectedIds);
+      // Refresh the shared mixes query so imported mixes appear immediately in
+      // the Mixes view and feed the make-day plan without waiting for polling.
+      void mixesQc.invalidateQueries({ queryKey: ["mixes"] });
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

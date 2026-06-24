@@ -4758,6 +4758,9 @@ export default function Home() {
     setPremixImportApplying(true);
     try {
       await commitPremixImport(premixImportPrepared, selectedIds);
+      // Refresh the shared mixes query so imported mixes appear immediately in
+      // the Mixes view and feed the make-day plan without waiting for polling.
+      void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       setShowPremixImport(false);
       setPremixImportPrepared(null);
     } catch (err) {
