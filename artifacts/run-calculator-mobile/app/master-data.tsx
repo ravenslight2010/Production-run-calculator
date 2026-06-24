@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
 import * as XLSX from "xlsx";
 import SpecImportModal from "@/components/SpecImportModal";
+import PremixImportModal from "@/components/PremixImportModal";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import ProductionRulesManager from "@/components/ProductionRulesManager";
 import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
@@ -59,6 +60,13 @@ import {
   type SpecImportPrepared,
   type SpecImportStore,
 } from "@/context/specImport";
+import {
+  preparePremixImport,
+  commitPremixImport,
+  MAX_PREMIX_IMPORT_FILES,
+  type PremixImportPrepared,
+  type PremixImportStore,
+} from "@/context/premixImport";
 import {
   fetchSavedSpecSheets,
   reconcileSpecSheet,
@@ -927,6 +935,14 @@ export default function MasterDataScreen() {
   const [specError, setSpecError] = useState<string | null>(null);
   const [specPrepared, setSpecPrepared] = useState<SpecImportPrepared | null>(null);
   const [specProgress, setSpecProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // ── Excel premix-sheet import (manager only; mirrors web Mixes section) ──
+  const [premixOpen, setPremixOpen] = useState(false);
+  const [premixLoading, setPremixLoading] = useState(false);
+  const [premixApplying, setPremixApplying] = useState(false);
+  const [premixError, setPremixError] = useState<string | null>(null);
+  const [premixPrepared, setPremixPrepared] = useState<PremixImportPrepared | null>(null);
+  const [premixProgress, setPremixProgress] = useState<{ done: number; total: number } | null>(null);
   // Bumped after a recipe import to make MergeManager auto-run a merge check
   // (imported recipe ingredients can duplicate standalone individual ones).
   const [mergeCheckSignal, setMergeCheckSignal] = useState(0);
@@ -1136,6 +1152,84 @@ export default function MasterDataScreen() {
       );
     } finally {
       setSpecApplying(false);
+    }
+  }
+
+  // Premix import store: the known grounding pool built from live context (web
+  // reads localStorage; mobile injects the same shape). Ingredients are the
+  // combined cheese+dough+sauce pool, mirroring web's toPremixKnown.
+  const buildPremixStore = (): PremixImportStore => ({
+    known: {
+      brands,
+      flavorsByBrand: brandFlavors,
+      ingredients: [
+        ...new Set([
+          ...cheeseIngredients,
+          ...doughIngredients,
+          ...frontlineIngredients,
+        ]),
+      ],
+    },
+  });
+
+  async function handlePremixImportPick() {
+    setPremixError(null);
+    setPremixPrepared(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: true,
+      });
+      if (picked.canceled || !picked.assets?.length) return;
+      const assets = picked.assets.slice(0, MAX_PREMIX_IMPORT_FILES);
+      setPremixOpen(true);
+      setPremixProgress(assets.length > 1 ? { done: 0, total: assets.length } : null);
+      setPremixLoading(true);
+      const readGrids = async (uri: string) =>
+        Platform.OS === "web"
+          ? readWorkbookGridsFromArrayBuffer(await (await fetch(uri)).arrayBuffer())
+          : readWorkbookGridsFromBase64(await Promise.resolve(new File(uri).base64()));
+      // Read each workbook independently so one unreadable file doesn't sink the
+      // batch — preparePremixImport skips empties and throws only if every file
+      // failed.
+      const settled = await Promise.all(
+        assets.map((a) => readGrids(a.uri).catch(() => [])),
+      );
+      const prepared = await preparePremixImport(
+        settled,
+        buildPremixStore(),
+        (done, total) => setPremixProgress({ done, total }),
+      );
+      setPremixPrepared(prepared);
+    } catch (e) {
+      setPremixError(
+        e instanceof Error ? e.message : "Could not read or interpret that file.",
+      );
+    } finally {
+      setPremixLoading(false);
+      setPremixProgress(null);
+    }
+  }
+
+  async function handlePremixImportConfirm() {
+    if (!premixPrepared) return;
+    setPremixApplying(true);
+    try {
+      await commitPremixImport(premixPrepared);
+      setPremixOpen(false);
+      setPremixPrepared(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      setPremixError(
+        e instanceof Error ? e.message : "Could not apply the import. Please retry.",
+      );
+    } finally {
+      setPremixApplying(false);
     }
   }
 
@@ -1474,6 +1568,34 @@ export default function MasterDataScreen() {
           <>
             <SectionHeader title="Mixes" />
             <CardSection>
+              {isManager ? (
+                <>
+                  <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                    Import premix sheets from an Excel (.xlsx) workbook. Each
+                    product tab becomes a mix; you&apos;ll see a summary before
+                    anything is saved. Re-importing updates existing mixes instead
+                    of duplicating.
+                  </Text>
+                  <Pressable
+                    onPress={handlePremixImportPick}
+                    style={({ pressed }) => [
+                      styles.importBtn,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.7 : 1,
+                        marginBottom: 12,
+                      },
+                    ]}
+                  >
+                    <Feather name="upload" size={16} color={colors.foreground} />
+                    <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                      Import Premix Sheet…
+                    </Text>
+                  </Pressable>
+                </>
+              ) : null}
               <MixesManager
                 brands={brands}
                 brandFlavors={brandFlavors}
@@ -1639,6 +1761,21 @@ export default function MasterDataScreen() {
         prepared={specPrepared}
         applying={specApplying}
         onConfirm={handleSpecImportConfirm}
+      />
+
+      <PremixImportModal
+        visible={premixOpen}
+        onClose={() => {
+          setPremixOpen(false);
+          setPremixPrepared(null);
+          setPremixError(null);
+        }}
+        loading={premixLoading}
+        progress={premixProgress}
+        error={premixError}
+        prepared={premixPrepared}
+        applying={premixApplying}
+        onConfirm={handlePremixImportConfirm}
       />
 
       <ExcelImportModal

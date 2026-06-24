@@ -68,6 +68,8 @@ import type {
   MarkCycleCountCountedInput,
   MatchImportInput,
   MatchImportResult,
+  MatchPremixInput,
+  MatchPremixResult,
   MergeAliasList,
   MergeInventoryInput,
   MergeInventoryResult,
@@ -3577,6 +3579,78 @@ export const useAiMatchImport = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiMatchImportMutationOptions(options));
+    }
+
+export const getAiMatchPremixUrl = () => {
+
+
+
+
+  return `/api/ai/match-premix`
+}
+
+/**
+ * Given the saved brands and their flavors plus a list of imported premix PRODUCT names that did NOT ground to a saved product locally, returns the best saved brand (and flavor when clear) for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the premix import dialog and the user can still override. Falls back silently to the client's local grounding when unavailable.
+ * @summary Match imported premix product names to saved brand+flavor (AI); read-only
+ */
+export const aiMatchPremix = async (matchPremixInput: MatchPremixInput, options?: RequestInit): Promise<MatchPremixResult> => {
+
+  return customFetch<MatchPremixResult>(getAiMatchPremixUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      matchPremixInput,)
+  }
+);}
+
+
+
+
+export const getAiMatchPremixMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMatchPremix>>, TError,{data: BodyType<MatchPremixInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiMatchPremix>>, TError,{data: BodyType<MatchPremixInput>}, TContext> => {
+
+const mutationKey = ['aiMatchPremix'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiMatchPremix>>, {data: BodyType<MatchPremixInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiMatchPremix(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiMatchPremixMutationResult = NonNullable<Awaited<ReturnType<typeof aiMatchPremix>>>
+    export type AiMatchPremixMutationBody = BodyType<MatchPremixInput>
+    export type AiMatchPremixMutationError = ErrorType<void>
+
+    /**
+ * @summary Match imported premix product names to saved brand+flavor (AI); read-only
+ */
+export const useAiMatchPremix = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiMatchPremix>>, TError,{data: BodyType<MatchPremixInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiMatchPremix>>,
+        TError,
+        {data: BodyType<MatchPremixInput>},
+        TContext
+      > => {
+      return useMutation(getAiMatchPremixMutationOptions(options));
     }
 
 export const getAiParseSpecSheetUrl = () => {

@@ -1862,6 +1862,37 @@ export interface MatchImportResult {
 }
 
 /**
+ * Saved flavors keyed by brand name (allowed flavor targets)
+ */
+export type MatchPremixInputBrandFlavors = {[key: string]: string[]};
+
+export interface MatchPremixInput {
+  /** All saved brand names (the allowed match targets for brands) */
+  brands: string[];
+  /** Saved flavors keyed by brand name (allowed flavor targets) */
+  brandFlavors: MatchPremixInputBrandFlavors;
+  /** Imported premix product names that did not ground locally */
+  unmatchedNames: string[];
+}
+
+export interface MatchPremixMatch {
+  /** The imported premix name (echoes an unmatchedNames entry) */
+  name: string;
+  /** The saved brand it best matches (always one of brands) */
+  brand: string;
+  /** The saved flavor under that brand, or empty when none fits */
+  flavor: string;
+  review?: ReviewVerdict;
+}
+
+export interface MatchPremixResult {
+  matches: MatchPremixMatch[];
+  generatedAt: number;
+  /** Optional message when no matches could be made */
+  note?: string;
+}
+
+/**
  * Captured details about a reported issue or a crash
  */
 export interface IncidentContext {

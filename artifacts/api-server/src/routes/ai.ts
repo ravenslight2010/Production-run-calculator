@@ -40,6 +40,11 @@ import {
   sanitizeParseSpecSheet,
   validateParseSpecSheetBody,
 } from "./aiParseSpecSheet";
+import {
+  buildMatchPremixPrompt,
+  sanitizeMatchPremix,
+  validateMatchPremixBody,
+} from "./aiMatchPremix";
 import { recipeTargets } from "@workspace/spec-import";
 import {
   buildSuggestMergesPrompt,
@@ -151,6 +156,15 @@ const PARSE_SPEC_RATE_MAX = 10;
 const parseSpecRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PARSE_SPEC_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the premix-sheet product-name matcher: per-user fixed window,
+// Postgres-backed in production so the cap holds across instances.
+const MATCH_PREMIX_RATE_WINDOW_MS = 60_000;
+const MATCH_PREMIX_RATE_MAX = 10;
+const matchPremixRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(MATCH_PREMIX_RATE_WINDOW_MS)
     : undefined;
 
 // Same posture for the ingredient merge suggester: per-user fixed window,
@@ -1291,6 +1305,80 @@ router.post(
       generatedAt: Date.now(),
       ...(parsed.note ? { note: parsed.note } : {}),
     });
+  },
+);
+
+router.post(
+  "/ai/match-premix",
+  requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: MATCH_PREMIX_RATE_WINDOW_MS,
+    max: MATCH_PREMIX_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: matchPremixRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateMatchPremixBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    const [corrections, knowledge] = await Promise.all([
+      loadCorrections(req.log),
+      loadFacilityKnowledge(req.log),
+    ]);
+    const { system, user } = buildMatchPremixPrompt(validation.data);
+    const userPrompt = appendFacilityMemoryBlock(
+      appendCorrectionsBlock(user, corrections, ["brand", "flavor"]),
+      knowledge,
+    );
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-5.4",
+        max_completion_tokens: 4096,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "ai-match-premix call failed");
+      res.status(502).json({ error: "AI provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-match-premix non-JSON response");
+      res.json({ matches: [], generatedAt: Date.now() });
+      return;
+    }
+
+    const matches = sanitizeMatchPremix(raw, validation.data);
+
+    const verdicts = await reviewSuggestions({
+      featureLabel: "premix product names matched to existing saved brand/flavor products",
+      instructions:
+        "Flag any match where the imported premix name is likely NOT the same real-world product as the matched saved brand/flavor (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
+      items: matches.map((m, i) => ({
+        id: `match-${i}`,
+        text: `Imported premix "${m.name}" matched to saved brand "${m.brand}"${m.flavor ? ` flavor "${m.flavor}"` : ""}`,
+      })),
+      log: req.log,
+    });
+    const reviewedMatches = matches.map((m, i) => {
+      const v = verdicts.get(`match-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
+
+    res.json({ matches: reviewedMatches, generatedAt: Date.now() });
   },
 );
 

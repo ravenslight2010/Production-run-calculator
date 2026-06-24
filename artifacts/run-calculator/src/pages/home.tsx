@@ -299,6 +299,8 @@ import {
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
+import PremixImportDialog from "@/components/PremixImportDialog";
+import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 
 import {
   Form,
@@ -2664,6 +2666,13 @@ export default function Home() {
   const [specImportPrepared, setSpecImportPrepared] = useState<SpecImportPrepared | null>(null);
   const [specImportProgress, setSpecImportProgress] = useState<{ done: number; total: number } | null>(null);
   const specImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [showPremixImport, setShowPremixImport] = useState(false);
+  const [premixImportLoading, setPremixImportLoading] = useState(false);
+  const [premixImportApplying, setPremixImportApplying] = useState(false);
+  const [premixImportError, setPremixImportError] = useState<string | null>(null);
+  const [premixImportPrepared, setPremixImportPrepared] = useState<PremixImportPrepared | null>(null);
+  const [premixImportProgress, setPremixImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const premixImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
@@ -4710,6 +4719,53 @@ export default function Home() {
       );
     } finally {
       setSpecImportApplying(false);
+    }
+  }
+
+  // Premix-sheet importer: read the .xlsx, parse each product tab/block into a
+  // Mix deterministically (the AI only disambiguates product names), ground the
+  // names, and show a single review/summary screen. Nothing is written until the
+  // user confirms; re-importing updates existing mixes by id.
+  async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setPremixImportPrepared(null);
+    setPremixImportError(null);
+    setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
+    setPremixImportLoading(true);
+    setShowPremixImport(true);
+    try {
+      const buffers = await Promise.all(
+        files.map((f) => f.arrayBuffer().catch(() => new ArrayBuffer(0))),
+      );
+      const prepared = await preparePremixImport(buffers, (done, total) =>
+        setPremixImportProgress(total > 1 ? { done, total } : null),
+      );
+      setPremixImportPrepared(prepared);
+    } catch (err) {
+      setPremixImportError(
+        err instanceof Error ? err.message : "Could not read or interpret that workbook.",
+      );
+    } finally {
+      setPremixImportLoading(false);
+      setPremixImportProgress(null);
+    }
+  }
+
+  async function handlePremixImportConfirm() {
+    if (!premixImportPrepared) return;
+    setPremixImportApplying(true);
+    try {
+      await commitPremixImport(premixImportPrepared);
+      setShowPremixImport(false);
+      setPremixImportPrepared(null);
+    } catch (err) {
+      setPremixImportError(
+        err instanceof Error ? err.message : "Import failed while saving. Please try again.",
+      );
+    } finally {
+      setPremixImportApplying(false);
     }
   }
 
@@ -7080,18 +7136,26 @@ export default function Home() {
 
                 {/* Mixes (pre-blended mix definitions) */}
                 {manageCategory === "mixes" && canManageInventory && (
-                  <MixesManager
-                    brands={brands}
-                    brandFlavors={brandFlavors}
-                    ingredientSuggestions={[
-                      ...doughIngredients,
-                      ...frontlineIngredients,
-                      ...cheeseIngredients,
-                      ...mixIngredients,
-                      ...ingredientTypes,
-                      ...pepTypes,
-                    ]}
-                  />
+                  <div className="space-y-3">
+                    {isManager && (
+                      <button type="button" onClick={() => premixImportInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                        <Upload className="w-4 h-4" /> Import Premix Sheet
+                      </button>
+                    )}
+                    <MixesManager
+                      brands={brands}
+                      brandFlavors={brandFlavors}
+                      ingredientSuggestions={[
+                        ...doughIngredients,
+                        ...frontlineIngredients,
+                        ...cheeseIngredients,
+                        ...mixIngredients,
+                        ...ingredientTypes,
+                        ...pepTypes,
+                      ]}
+                    />
+                  </div>
                 )}
 
                 {/* Cycle-count schedules */}
@@ -11807,6 +11871,16 @@ export default function Home() {
             onChange={handleSpecImportFile}
           />
         )}
+        {isManager && (
+          <input
+            ref={premixImportInputRef}
+            type="file"
+            accept=".xlsx"
+            multiple
+            className="hidden"
+            onChange={handlePremixImportFile}
+          />
+        )}
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
@@ -11855,6 +11929,18 @@ export default function Home() {
           prepared={specImportPrepared}
           applying={specImportApplying}
           onConfirm={handleSpecImportConfirm}
+        />
+
+        {/* ── Premix Sheet Import Dialog ───────────────────────────────────── */}
+        <PremixImportDialog
+          open={showPremixImport}
+          onClose={() => { setShowPremixImport(false); setPremixImportPrepared(null); setPremixImportError(null); }}
+          loading={premixImportLoading}
+          progress={premixImportProgress}
+          error={premixImportError}
+          prepared={premixImportPrepared}
+          applying={premixImportApplying}
+          onConfirm={handlePremixImportConfirm}
         />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}

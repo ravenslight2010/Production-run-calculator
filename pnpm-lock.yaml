@@ -200,6 +200,9 @@ importers:
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
+      '@workspace/premix-import':
+        specifier: workspace:*
+        version: link:../../lib/premix-import
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
@@ -486,6 +489,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/premix-import':
+        specifier: workspace:*
+        version: link:../../lib/premix-import
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
@@ -748,6 +754,9 @@ importers:
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
+      '@workspace/premix-import':
+        specifier: workspace:*
+        version: link:../../lib/premix-import
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
@@ -1034,6 +1043,19 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.1.0
+
+  lib/premix-import:
+    dependencies:
+      '@workspace/mixes':
+        specifier: workspace:*
+        version: link:../mixes
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../spec-import
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/production-rules:
     dependencies:

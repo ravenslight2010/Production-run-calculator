@@ -95,6 +95,7 @@
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",
+    "@workspace/premix-import": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
     "@workspace/scheduled-recipe-check": "workspace:*",

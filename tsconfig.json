@@ -46,6 +46,9 @@
       "path": "./lib/mixes"
     },
     {
+      "path": "./lib/premix-import"
+    },
+    {
       "path": "./lib/cycle-count"
     },
     {

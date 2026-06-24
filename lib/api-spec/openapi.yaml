@@ -1125,6 +1125,37 @@ paths:
         "502":
           description: AI provider error
 
+  /ai/match-premix:
+    post:
+      operationId: aiMatchPremix
+      tags: [ai]
+      summary: Match imported premix product names to saved brand+flavor (AI); read-only
+      description: >-
+        Given the saved brands and their flavors plus a list of imported premix
+        PRODUCT names that did NOT ground to a saved product locally, returns the
+        best saved brand (and flavor when clear) for each (only when confident).
+        Read-only — never writes anything; the client uses the matches as
+        pre-selected suggestions in the premix import dialog and the user can
+        still override. Falls back silently to the client's local grounding when
+        unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MatchPremixInput"
+      responses:
+        "200":
+          description: Suggested premix matches (advisory only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchPremixResult"
+        "400":
+          description: Invalid input
+        "502":
+          description: AI provider error
+
   /ai/parse-spec-sheet:
     post:
       operationId: aiParseSpecSheet
@@ -5450,6 +5481,66 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MatchImportFlavorMatch"
+        generatedAt:
+          type: number
+        note:
+          type: string
+          description: Optional message when no matches could be made
+
+    MatchPremixInput:
+      type: object
+      required:
+        - brands
+        - brandFlavors
+        - unmatchedNames
+      properties:
+        brands:
+          type: array
+          description: All saved brand names (the allowed match targets for brands)
+          items:
+            type: string
+        brandFlavors:
+          type: object
+          description: Saved flavors keyed by brand name (allowed flavor targets)
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        unmatchedNames:
+          type: array
+          description: Imported premix product names that did not ground locally
+          items:
+            type: string
+
+    MatchPremixMatch:
+      type: object
+      required:
+        - name
+        - brand
+        - flavor
+      properties:
+        name:
+          type: string
+          description: The imported premix name (echoes an unmatchedNames entry)
+        brand:
+          type: string
+          description: The saved brand it best matches (always one of brands)
+        flavor:
+          type: string
+          description: The saved flavor under that brand, or empty when none fits
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
+
+    MatchPremixResult:
+      type: object
+      required:
+        - matches
+        - generatedAt
+      properties:
+        matches:
+          type: array
+          items:
+            $ref: "#/components/schemas/MatchPremixMatch"
         generatedAt:
           type: number
         note:

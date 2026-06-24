@@ -1292,6 +1292,31 @@ export const AiMatchImportResponse = zod.object({
 
 
 /**
+ * Given the saved brands and their flavors plus a list of imported premix PRODUCT names that did NOT ground to a saved product locally, returns the best saved brand (and flavor when clear) for each (only when confident). Read-only — never writes anything; the client uses the matches as pre-selected suggestions in the premix import dialog and the user can still override. Falls back silently to the client's local grounding when unavailable.
+ * @summary Match imported premix product names to saved brand+flavor (AI); read-only
+ */
+export const AiMatchPremixBody = zod.object({
+  "brands": zod.array(zod.string()).describe('All saved brand names (the allowed match targets for brands)'),
+  "brandFlavors": zod.record(zod.string(), zod.array(zod.string())).describe('Saved flavors keyed by brand name (allowed flavor targets)'),
+  "unmatchedNames": zod.array(zod.string()).describe('Imported premix product names that did not ground locally')
+})
+
+export const AiMatchPremixResponse = zod.object({
+  "matches": zod.array(zod.object({
+  "name": zod.string().describe('The imported premix name (echoes an unmatchedNames entry)'),
+  "brand": zod.string().describe('The saved brand it best matches (always one of brands)'),
+  "flavor": zod.string().describe('The saved flavor under that brand, or empty when none fits'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when no matches could be made')
+})
+
+
+/**
  * Given the flattened text of an uploaded .xlsx workbook plus the app's known canonical lists (brands, flavors, applicator/pepperoni types, recipe ingredients) and learned aliases, returns structured spec profiles and dough/sauce/cheese recipes. Read-only — never writes anything; the client canonicalizes names and applies the import.
  * @summary Interpret an uploaded Excel spec sheet / recipe workbook (AI)
  */
