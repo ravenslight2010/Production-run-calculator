@@ -1216,11 +1216,11 @@ export default function MasterDataScreen() {
     }
   }
 
-  async function handlePremixImportConfirm() {
+  async function handlePremixImportConfirm(selectedIds: string[]) {
     if (!premixPrepared) return;
     setPremixApplying(true);
     try {
-      await commitPremixImport(premixPrepared);
+      await commitPremixImport(premixPrepared, selectedIds);
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

@@ -8,6 +8,7 @@ import {
   sanitizePremixMatches,
   applyPremixMatches,
   summarizePremixImport,
+  buildPremixCandidates,
   mergePremixIntoMixes,
   type PremixKnown,
   type SheetGrid,
@@ -217,5 +218,16 @@ describe("conversion + summary", () => {
 
     const merged = mergePremixIntoMixes([mixes[0]], mixes);
     expect(merged).toHaveLength(2);
+  });
+
+  it("builds per-mix review candidates tagged new vs update", () => {
+    const mixes = parsePremixWorkbook([HANNAFORD]).map(
+      (p) => premixToMix(groundPremix(p, KNOWN, []).mix)!,
+    );
+    const existingIds = new Set([mixes[0].id]);
+    const candidates = buildPremixCandidates(mixes, (id) => existingIds.has(id));
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]).toEqual({ mix: mixes[0], status: "update" });
+    expect(candidates[1]).toEqual({ mix: mixes[1], status: "new" });
   });
 });

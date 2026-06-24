@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -21,14 +21,15 @@ type Props = {
   error: string | null;
   prepared: PremixImportPrepared | null;
   applying: boolean;
-  onConfirm: () => void;
+  /** Confirm with the ids the manager chose to apply. */
+  onConfirm: (selectedIds: string[]) => void;
 };
 
-// Single review/summary screen for the Excel premix-sheet importer. Per product
-// decision there are NO per-item prompts: each tab/block is parsed
-// deterministically into a Mix, product names are matched against the app's
-// known lists (AI only disambiguates names), and the user just sees what will be
-// created vs updated before confirming. Mirrors the web dialog in
+// Review screen for the Excel premix-sheet importer. Each tab/block is parsed
+// deterministically into a Mix and product names are matched against the app's
+// known lists (AI only disambiguates names). The manager reviews every parsed
+// mix — its matched product, batch size, components and days-early note — and
+// can include/exclude each one before confirming. Mirrors the web dialog in
 // artifacts/run-calculator/src/components/PremixImportDialog.tsx (replit.md parity).
 export default function PremixImportModal({
   visible,
@@ -41,10 +42,31 @@ export default function PremixImportModal({
   onConfirm,
 }: Props) {
   const colors = useColors();
+  // Selected mix ids (default: all parsed mixes are selected for apply).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Reset the selection whenever a fresh prepared result arrives.
+  useEffect(() => {
+    if (prepared) setSelected(new Set(prepared.candidates.map((c) => c.mix.id)));
+    else setSelected(new Set());
+  }, [prepared]);
+
   if (!visible) return null;
 
   const s = prepared?.summary;
   const nothing = s != null && s.total === 0;
+  const candidates = prepared?.candidates ?? [];
+  const selectedCount = candidates.filter((c) => selected.has(c.mix.id)).length;
+  const confirmDisabled =
+    loading || applying || !!error || !prepared || nothing || selectedCount === 0;
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -97,24 +119,24 @@ export default function PremixImportModal({
             {!loading && !error && prepared ? (
               <>
                 <Text style={[styles.help, { color: colors.mutedForeground }]}>
-                  Review what will be applied. Existing mixes with the same product
-                  will be{" "}
+                  Review each mix below and uncheck any you don't want. Checked mixes
+                  marked{" "}
                   <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-                    updated
-                  </Text>
-                  ; new ones will be{" "}
+                    update
+                  </Text>{" "}
+                  replace the existing mix;{" "}
                   <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-                    added
-                  </Text>
-                  .
+                    new
+                  </Text>{" "}
+                  ones are added.
                 </Text>
 
                 <View style={[styles.summaryCard, { borderColor: colors.border }]}>
                   <Text style={[styles.summaryTotal, { color: colors.foreground }]}>
-                    {s!.total}
+                    {selectedCount}
                   </Text>
                   <Text style={[styles.summaryLabel, { color: colors.mutedForeground }]}>
-                    Mixes
+                    of {s!.total} mixes selected
                   </Text>
                   <View style={{ flexDirection: "row", gap: 12, marginTop: 6 }}>
                     <Text style={[styles.summaryStat, { color: colors.success }]}>
@@ -125,6 +147,88 @@ export default function PremixImportModal({
                     </Text>
                   </View>
                 </View>
+
+                {candidates.map((c) => {
+                  const m = c.mix;
+                  const isSel = selected.has(m.id);
+                  const product = [m.brand, m.flavor].filter(Boolean).join(" — ");
+                  const isNew = c.status === "new";
+                  return (
+                    <Pressable
+                      key={m.id}
+                      onPress={() => toggle(m.id)}
+                      testID={`premix-candidate-${m.id}`}
+                      style={[styles.candidate, { borderColor: colors.border }]}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          {
+                            borderColor: isSel ? colors.primary : colors.border,
+                            backgroundColor: isSel ? colors.primary : "transparent",
+                          },
+                        ]}
+                      >
+                        {isSel ? (
+                          <Feather name="check" size={13} color={colors.primaryForeground} />
+                        ) : null}
+                      </View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={styles.candidateHead}>
+                          <Text
+                            style={[styles.candidateName, { color: colors.foreground }]}
+                            numberOfLines={1}
+                          >
+                            {m.name}
+                          </Text>
+                          <View
+                            style={[
+                              styles.badge,
+                              {
+                                backgroundColor: isNew
+                                  ? "rgba(34,197,94,0.15)"
+                                  : "rgba(59,130,246,0.15)",
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.badgeText,
+                                { color: isNew ? colors.success : colors.primary },
+                              ]}
+                            >
+                              {c.status.toUpperCase()}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
+                          {product ? `Matched to ${product}` : "No product match"}
+                        </Text>
+                        <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
+                          Batch{" "}
+                          {m.batchSize.toLocaleString(undefined, {
+                            maximumFractionDigits: 4,
+                          })}{" "}
+                          lbs · {m.components.length} ingredient
+                          {m.components.length === 1 ? "" : "s"}
+                          {m.daysEarly > 0
+                            ? ` · pull ${m.daysEarly} day${m.daysEarly === 1 ? "" : "s"} early`
+                            : ""}
+                        </Text>
+                        {m.notes ? (
+                          <Text
+                            style={[
+                              styles.candidateMeta,
+                              { color: colors.mutedForeground, fontStyle: "italic" },
+                            ]}
+                          >
+                            {m.notes}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
 
                 {prepared.newAliases.length > 0 ? (
                   <Text style={[styles.note, { color: colors.mutedForeground }]}>
@@ -172,19 +276,14 @@ export default function PremixImportModal({
               <Text style={{ color: colors.foreground, fontWeight: "600" }}>Cancel</Text>
             </Pressable>
             <Pressable
-              onPress={onConfirm}
-              disabled={loading || applying || !!error || !prepared || nothing}
+              onPress={() => onConfirm([...selected])}
+              disabled={confirmDisabled}
               style={({ pressed }) => [
                 styles.btn,
                 styles.btnPrimary,
                 {
                   backgroundColor: colors.primary,
-                  opacity:
-                    loading || applying || !!error || !prepared || nothing
-                      ? 0.5
-                      : pressed
-                        ? 0.85
-                        : 1,
+                  opacity: confirmDisabled ? 0.5 : pressed ? 0.85 : 1,
                 },
               ]}
             >
@@ -194,7 +293,8 @@ export default function PremixImportModal({
                 <Feather name="check-circle" size={15} color={colors.primaryForeground} />
               )}
               <Text style={{ color: colors.primaryForeground, fontWeight: "600" }}>
-                Apply import
+                Apply {selectedCount > 0 ? `${selectedCount} ` : ""}mix
+                {selectedCount === 1 ? "" : "es"}
               </Text>
             </Pressable>
           </View>
@@ -229,6 +329,33 @@ const styles = StyleSheet.create({
   summaryTotal: { fontSize: 24, fontWeight: "800" },
   summaryLabel: { fontSize: 12, fontWeight: "600" },
   summaryStat: { fontSize: 12, fontWeight: "600" },
+  candidate: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  candidateHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  candidateName: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
+  candidateMeta: { fontSize: 12, marginTop: 2 },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  badgeText: { fontSize: 10, fontWeight: "700" },
   note: { fontSize: 12 },
   noteBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
   errorBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },

@@ -4753,11 +4753,11 @@ export default function Home() {
     }
   }
 
-  async function handlePremixImportConfirm() {
+  async function handlePremixImportConfirm(selectedIds: string[]) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
     try {
-      await commitPremixImport(premixImportPrepared);
+      await commitPremixImport(premixImportPrepared, selectedIds);
       setShowPremixImport(false);
       setPremixImportPrepared(null);
     } catch (err) {

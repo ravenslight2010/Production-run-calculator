@@ -442,6 +442,24 @@ export type PremixImportSummary = {
   updated: number;
 };
 
+/** One reviewable import candidate: the parsed mix + whether it's new or an update. */
+export type PremixCandidate = {
+  mix: Mix;
+  status: "new" | "update";
+};
+
+/**
+ * Pair each imported mix with its new-vs-update status so the UI can show a
+ * per-mix review list (and let the manager include/exclude each one before
+ * saving). `exists(id)` is supplied by the caller. Pure.
+ */
+export function buildPremixCandidates(
+  mixes: ReadonlyArray<Mix>,
+  exists: (id: string) => boolean,
+): PremixCandidate[] {
+  return mixes.map((mix) => ({ mix, status: exists(mix.id) ? "update" : "new" }));
+}
+
 /**
  * Count how many imported mixes are new vs would overwrite an existing one.
  * `exists(id)` is supplied by the caller (reads platform storage). Pure.

@@ -25,11 +25,13 @@ import {
   premixToMix,
   premixId,
   summarizePremixImport,
+  buildPremixCandidates,
   mergePremixIntoMixes,
   type ParsedPremix,
   type GroundedPremix,
   type PremixKnown,
   type PremixImportSummary,
+  type PremixCandidate,
   type SheetGrid,
   type SpecImportAlias,
 } from "@workspace/premix-import";
@@ -50,6 +52,8 @@ export type PremixImportStore = {
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
   mixes: Mix[];
+  /** Per-mix review list (each parsed mix + new/update status) for confirmation. */
+  candidates: PremixCandidate[];
   summary: PremixImportSummary;
   /** New label→canonical mappings learned this import (persisted on confirm). */
   newAliases: SpecImportAlias[];
@@ -147,6 +151,7 @@ export async function preparePremixImport(
 
   const existingIds = new Set(existing.map((m) => m.id));
   const summary = summarizePremixImport(mixes, (id) => existingIds.has(id));
+  const candidates = buildPremixCandidates(mixes, (id) => existingIds.has(id));
   const newAliases = collectPremixAliases(grounded);
 
   const noteParts: string[] = [];
@@ -157,15 +162,25 @@ export async function preparePremixImport(
   }
   const note = noteParts.length ? noteParts.join("\n") : undefined;
 
-  return { mixes, summary, newAliases, ...(note ? { note } : {}) };
+  return { mixes, candidates, summary, newAliases, ...(note ? { note } : {}) };
 }
 
-/** Apply a prepared premix import: upsert mixes by id, then persist new aliases. */
-export async function commitPremixImport(prepared: PremixImportPrepared): Promise<void> {
+/**
+ * Apply a prepared premix import: upsert mixes by id, then persist new aliases.
+ * Only the mixes whose ids are in `selectedIds` are written; pass `undefined`
+ * (or omit) to apply all parsed mixes.
+ */
+export async function commitPremixImport(
+  prepared: PremixImportPrepared,
+  selectedIds?: Iterable<string>,
+): Promise<void> {
+  const allow = selectedIds ? new Set(selectedIds) : null;
+  const toApply = allow ? prepared.mixes.filter((m) => allow.has(m.id)) : prepared.mixes;
+  if (toApply.length === 0) return;
   // Re-read current mixes right before writing so we merge onto the freshest
   // list (another manager may have edited mixes since prepare).
   const existing = await fetchMixes();
-  const merged = mergePremixIntoMixes(existing, prepared.mixes);
+  const merged = mergePremixIntoMixes(existing, toApply);
   await saveMixes(merged);
 
   if (prepared.newAliases.length) {
