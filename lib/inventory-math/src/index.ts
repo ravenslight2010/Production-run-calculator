@@ -628,3 +628,120 @@ export function computeReorderList(
   });
   return out;
 }
+
+// ── Use-first staging / FEFO (shared, pure) ──────────────────────────────────
+// Powers the warehouse "Use First" card on BOTH web and mobile. PURE and SHARED
+// so the two apps list the exact same lots in the exact same order (replit.md
+// parity). Advisory only: it never writes stock — it just tells warehouse staff
+// which lots to pull first so the oldest stock is consumed before it expires.
+
+// Whole-day calendar difference in days between an ISO date string and `today`.
+// Matches the clients' `daysUntil` and the server's `daysUntilExpiry` exactly
+// (date-only, local-midnight anchored). Returns null for a missing/invalid date.
+function daysUntilDate(dateStr: string | null, today: Date): number | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (isNaN(d.getTime())) return null;
+  const t = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((d.getTime() - t.getTime()) / 86_400_000);
+}
+
+// One stock lot fed into the use-first check. `locationId` null means onsite
+// (the implicit default location).
+export type UseFirstLotInput = {
+  qtyRemaining: number;
+  expirationDate: string | null;
+  locationId: number | null;
+};
+
+// One inventory item with its lots, fed into the use-first check.
+export type UseFirstItemInput = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  lots: UseFirstLotInput[];
+};
+
+// A named storage location used to resolve a lot's `locationId` to a name.
+export type UseFirstLocation = {
+  id: number;
+  name: string;
+  isOnsite: boolean;
+};
+
+// A single at-risk lot to stage and use first. `daysUntilExpiry` is whole days
+// (negative = already expired); `usedToday` marks lots whose item is consumed by
+// a run active/scheduled today, so they sort to the top.
+export type UseFirstEntry = {
+  key: string;
+  name: string;
+  unit: string;
+  category: InventoryCategory;
+  qtyRemaining: number;
+  locationId: number | null;
+  locationName: string;
+  expirationDate: string | null;
+  daysUntilExpiry: number;
+  expired: boolean;
+  usedToday: boolean;
+};
+
+// Flag stock lots that should be used first: any lot with stock remaining whose
+// expiration is within the configured "expiring soon" window (`soonDays`) OR is
+// already past (negative days are <= soonDays, so they're always included).
+// Lots with no expiration date are never at risk and are skipped.
+//
+// Ordering is first-expired-first-out (FEFO): soonest/most-overdue expiration
+// first. Lots whose item is consumed by a run active or scheduled today
+// (`todayItemKeys`) sort ahead of everything else so staff stage what the floor
+// needs now before the rest. Ties break by item name then expiration date for a
+// stable order. Pure.
+export function computeUseFirstList(input: {
+  items: UseFirstItemInput[];
+  locations?: UseFirstLocation[];
+  soonDays: number;
+  today?: Date;
+  todayItemKeys?: Iterable<string>;
+}): UseFirstEntry[] {
+  const today = input.today ?? new Date();
+  const soonDays = Math.max(0, Number(input.soonDays) || 0);
+  const todayKeys = new Set(input.todayItemKeys ?? []);
+  const locById = new Map<number, UseFirstLocation>();
+  for (const l of input.locations ?? []) locById.set(l.id, l);
+  const onsite = (input.locations ?? []).find((l) => l.isOnsite);
+  const out: UseFirstEntry[] = [];
+  for (const item of input.items) {
+    for (const lot of item.lots ?? []) {
+      const qty = Number(lot.qtyRemaining) || 0;
+      if (!(qty > 0)) continue;
+      const days = daysUntilDate(lot.expirationDate, today);
+      if (days == null) continue;
+      if (days > soonDays) continue;
+      const loc = lot.locationId != null ? locById.get(lot.locationId) : onsite;
+      const locationName = loc?.name ?? onsite?.name ?? "Onsite";
+      out.push({
+        key: item.key,
+        name: item.name,
+        unit: item.unit,
+        category: item.category,
+        qtyRemaining: qty,
+        locationId: lot.locationId,
+        locationName,
+        expirationDate: lot.expirationDate,
+        daysUntilExpiry: days,
+        expired: days < 0,
+        usedToday: todayKeys.has(item.key),
+      });
+    }
+  }
+  out.sort((a, b) => {
+    if (a.usedToday !== b.usedToday) return a.usedToday ? -1 : 1;
+    if (a.daysUntilExpiry !== b.daysUntilExpiry)
+      return a.daysUntilExpiry - b.daysUntilExpiry;
+    const n = a.name.localeCompare(b.name);
+    if (n !== 0) return n;
+    return (a.expirationDate ?? "").localeCompare(b.expirationDate ?? "");
+  });
+  return out;
+}

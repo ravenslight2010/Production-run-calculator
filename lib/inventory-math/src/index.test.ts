@@ -8,6 +8,7 @@ import {
   aggregateRunDemand,
   computeTransferNeeds,
   computeReorderList,
+  computeUseFirstList,
   type IngredientSubstitution,
   type LocationStock,
   type RecipeRow,
@@ -401,5 +402,152 @@ describe("computeReorderList", () => {
       item({ key: "c", name: "Cherries", onHand: 5, reorderThreshold: 10 }), // short 5
     ]);
     expect(list.map((r) => r.name)).toEqual(["Bananas", "Cherries", "Apples"]);
+  });
+});
+
+describe("computeUseFirstList", () => {
+  // Fixed "today" so the date arithmetic is deterministic regardless of when the
+  // suite runs.
+  const TODAY = new Date(2026, 5, 24); // 2026-06-24 (local)
+
+  // Build an ISO date string `offset` whole days from TODAY.
+  function dayOffset(offset: number): string {
+    const d = new Date(2026, 5, 24 + offset);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function uItem(over: {
+    key: string;
+    name?: string;
+    unit?: string;
+    lots: { qtyRemaining: number; expirationDate: string | null; locationId?: number | null }[];
+  }) {
+    return {
+      key: over.key,
+      name: over.name ?? over.key,
+      unit: over.unit ?? "lbs",
+      category: "ingredient" as const,
+      lots: over.lots.map((l) => ({
+        qtyRemaining: l.qtyRemaining,
+        expirationDate: l.expirationDate,
+        locationId: l.locationId ?? null,
+      })),
+    };
+  }
+
+  const LOCATIONS = [
+    { id: 1, name: "Onsite (Line)", isOnsite: true },
+    { id: 2, name: "Cold Storage", isOnsite: false },
+  ];
+
+  it("includes lots within the window plus already-expired, skips fresh and no-date", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({ key: "soon", lots: [{ qtyRemaining: 5, expirationDate: dayOffset(3) }] }),
+        uItem({ key: "edge", lots: [{ qtyRemaining: 5, expirationDate: dayOffset(7) }] }),
+        uItem({ key: "fresh", lots: [{ qtyRemaining: 5, expirationDate: dayOffset(30) }] }),
+        uItem({ key: "expired", lots: [{ qtyRemaining: 5, expirationDate: dayOffset(-2) }] }),
+        uItem({ key: "nodate", lots: [{ qtyRemaining: 5, expirationDate: null }] }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    expect(list.map((e) => e.key).sort()).toEqual(["edge", "expired", "soon"]);
+  });
+
+  it("skips lots with no stock remaining", () => {
+    const list = computeUseFirstList({
+      items: [uItem({ key: "empty", lots: [{ qtyRemaining: 0, expirationDate: dayOffset(1) }] })],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    expect(list).toEqual([]);
+  });
+
+  it("orders first-expired-first-out (most overdue first, then soonest)", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({ key: "a", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(5) }] }),
+        uItem({ key: "b", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(-3) }] }),
+        uItem({ key: "c", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(0) }] }),
+        uItem({ key: "d", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(2) }] }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    expect(list.map((e) => e.key)).toEqual(["b", "c", "d", "a"]);
+  });
+
+  it("prioritizes lots used by today's runs above the rest, FEFO within each group", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({ key: "today-late", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(6) }] }),
+        uItem({ key: "other-soon", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(1) }] }),
+        uItem({ key: "today-soon", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(2) }] }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+      todayItemKeys: ["today-late", "today-soon"],
+    });
+    // Today's items first (FEFO between them), then the rest.
+    expect(list.map((e) => e.key)).toEqual(["today-soon", "today-late", "other-soon"]);
+    expect(list.map((e) => e.usedToday)).toEqual([true, true, false]);
+  });
+
+  it("resolves location names; null locationId falls back to onsite", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({ key: "onsite", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(1), locationId: null }] }),
+        uItem({ key: "cold", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(1), locationId: 2 }] }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    const byKey = Object.fromEntries(list.map((e) => [e.key, e.locationName]));
+    expect(byKey).toEqual({ onsite: "Onsite (Line)", cold: "Cold Storage" });
+  });
+
+  it("flags days-until and expired correctly per lot", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({ key: "past", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(-4) }] }),
+        uItem({ key: "future", lots: [{ qtyRemaining: 1, expirationDate: dayOffset(3) }] }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    const byKey = Object.fromEntries(list.map((e) => [e.key, e]));
+    expect(byKey.past.daysUntilExpiry).toBe(-4);
+    expect(byKey.past.expired).toBe(true);
+    expect(byKey.future.daysUntilExpiry).toBe(3);
+    expect(byKey.future.expired).toBe(false);
+  });
+
+  it("expands each item's lots into separate entries", () => {
+    const list = computeUseFirstList({
+      items: [
+        uItem({
+          key: "multi",
+          lots: [
+            { qtyRemaining: 2, expirationDate: dayOffset(1), locationId: null },
+            { qtyRemaining: 3, expirationDate: dayOffset(4), locationId: 2 },
+          ],
+        }),
+      ],
+      locations: LOCATIONS,
+      soonDays: 7,
+      today: TODAY,
+    });
+    expect(list).toHaveLength(2);
+    expect(list.map((e) => e.qtyRemaining)).toEqual([2, 3]);
   });
 });

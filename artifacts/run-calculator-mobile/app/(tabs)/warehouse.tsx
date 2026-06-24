@@ -21,6 +21,7 @@ import { FONTS } from "@/constants/fonts";
 import { useFreezerPullItems } from "@/hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import ReorderCard from "@/components/ReorderCard";
+import UseFirstCard from "@/components/UseFirstCard";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -270,6 +271,31 @@ export default function WarehouseScreen() {
       }),
   );
 
+  // Use First "today's runs" basis: runs active now + runs scheduled for today,
+  // resolved to RunSettings exactly like the lists above. Web builds the same
+  // set (active runs + today's scheduled), so the two cards prioritize the same
+  // lots (replit.md parity).
+  const activeSettingsList: RunSettings[] = allRuns
+    .filter((r) => r.endedAt == null)
+    .map((r) => r.settings);
+  const todayScheduledSettingsList: RunSettings[] = (scheduled[today] ?? [])
+    .filter((r) => r.brand)
+    .map((r) => {
+      const profile = brandProfiles[profileKey(r.brand, r.flavor)] ?? {};
+      return {
+        ...DEFAULT_SETTINGS,
+        ...profile,
+        brand: r.brand,
+        flavor: r.flavor,
+        casesNeeded: r.casesNeeded,
+        ...(r.dieType ? { dieType: r.dieType } : {}),
+      };
+    });
+  const todaySettingsList: RunSettings[] = [
+    ...activeSettingsList,
+    ...todayScheduledSettingsList,
+  ];
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
@@ -334,6 +360,11 @@ export default function WarehouseScreen() {
         {/* Reorder Now: cross-location on-hand at/below reorder threshold once
             upcoming scheduled-run demand is subtracted. Advisory only. */}
         <ReorderCard scheduledSettingsList={scheduledSettingsList} />
+
+        {/* Use First: stock lots expiring within the configured window (plus any
+            already past), ordered first-expired-first-out, with the lots used by
+            today's runs surfaced to the top. Advisory only — never writes stock. */}
+        <UseFirstCard todaySettingsList={todaySettingsList} />
 
         {/* Total ingredient needs across all active runs (mixed units) */}
         <Card title="Total Ingredient Needs — All Runs" icon="archive">

@@ -122,6 +122,7 @@ import RolesManager from "../components/RolesManager";
 import ProductionRulesManager from "../components/ProductionRulesManager";
 import FreezerPullItemsManager from "../components/FreezerPullItemsManager";
 import ReorderCard from "../components/ReorderCard";
+import UseFirstCard from "../components/UseFirstCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import StaffRolesCard from "../components/StaffRolesCard";
@@ -9188,6 +9189,33 @@ export default function Home() {
                       }),
                   );
                   return <ReorderCard scheduledValsList={scheduledValsList} />;
+                })()}
+                {/* Use First: stock lots expiring within the configured window
+                    (plus any already past), ordered first-expired-first-out, with
+                    the lots used by today's runs surfaced to the top. Today's runs
+                    = active runs + runs scheduled for today, resolved to their
+                    FormValues. Deterministic counterpart to the AI waste insight;
+                    advisory only. */}
+                {(() => {
+                  const activeVals: FormValues[] = dayState.runs
+                    .filter((r) => !r.endedAt)
+                    .map((r) => loadRunValues(r.id));
+                  const todayKey = todayStr();
+                  const todayScheduledVals: FormValues[] = scheduledDays
+                    .filter((d) => d.date === todayKey)
+                    .flatMap((d) =>
+                      (d.runs ?? [])
+                        .filter((r) => r.brand)
+                        .map((r) => {
+                          const profile = loadProfile(r.brand, r.flavor);
+                          return {
+                            ...(profile ?? DEFAULT_VALUES),
+                            casesNeeded: r.casesNeeded,
+                            ...(r.dieType ? { dieType: r.dieType } : {}),
+                          } as FormValues;
+                        }),
+                    );
+                  return <UseFirstCard todayValsList={[...activeVals, ...todayScheduledVals]} />;
                 })()}
                 {(() => {
                   const activeRuns = dayState.runs.filter(r => !r.endedAt);

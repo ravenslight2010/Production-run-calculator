@@ -8,6 +8,7 @@ import {
   aggregateRunDemand as aggregateRunDemandShared,
   computeTransferNeeds,
   computeReorderList as computeReorderListShared,
+  computeUseFirstList as computeUseFirstListShared,
   type RunLinesInput,
   type InventoryCategory,
   type ConsumeLine,
@@ -17,6 +18,8 @@ import {
   type TransferDemand,
   type ReorderInput,
   type ReorderItem,
+  type UseFirstItemInput,
+  type UseFirstEntry,
 } from "@workspace/inventory-math";
 
 // Consumption/summary math now lives in @workspace/inventory-math (shared with
@@ -156,6 +159,44 @@ export function computeRunReorderList(
   const demandByKey: Record<string, number> = {};
   for (const d of aggregateRunDemand(scheduledValsList)) demandByKey[d.key] = d.qty;
   return computeReorderListShared(items.map(toReorderInput), demandByKey);
+}
+
+// Re-export the use-first entry type for the card.
+export type { UseFirstEntry };
+
+// Map an inventory item (with lots) to the shared use-first input shape.
+function toUseFirstItem(it: InventoryItem): UseFirstItemInput {
+  return {
+    key: it.key,
+    name: it.name,
+    unit: it.unit,
+    category: it.category as InventoryCategory,
+    lots: it.lots.map((l) => ({
+      qtyRemaining: l.qtyRemaining,
+      expirationDate: l.expirationDate,
+      locationId: l.locationId,
+    })),
+  };
+}
+
+// Top-level convenience: given current inventory, the storage locations, the
+// configured "expiring soon" window, and the runs active/scheduled for today,
+// return the at-risk lots to use first (FEFO, today's items prioritized). The
+// today-item basis is aggregated on the SAME keys as auto-deduction, so web and
+// mobile list and order lots identically. Advisory only — never writes stock.
+export function computeRunUseFirstList(
+  items: InventoryItem[],
+  locations: InventoryLocation[],
+  soonDays: number,
+  todayValsList: FormValues[],
+): UseFirstEntry[] {
+  const todayItemKeys = aggregateRunDemand(todayValsList).map((d) => d.key);
+  return computeUseFirstListShared({
+    items: items.map(toUseFirstItem),
+    locations: locations.map((l) => ({ id: l.id, name: l.name, isOnsite: l.isOnsite })),
+    soonDays,
+    todayItemKeys,
+  });
 }
 
 // ── Expiration helpers ───────────────────────────────────────────────────────
