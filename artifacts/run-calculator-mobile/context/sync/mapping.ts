@@ -529,12 +529,25 @@ export function applyPayloadToState(
   const acceptedDay = !!ds && remoteDateOk && remoteResetAt >= prev.resetAt;
 
   if (acceptedDay && ds) {
+    const isReset = remoteResetAt > prev.resetAt;
+    // Runs are per-day: on a true daily reset drop the run tombstones — their ids
+    // can never match today's fresh runs and would otherwise accumulate forever.
+    if (isReset && deletedItems["runs"]) {
+      const dm = { ...deletedItems };
+      delete dm["runs"];
+      patch.deletedItems = dm;
+    }
+    const delRunSet = new Set(
+      ((patch.deletedItems ?? deletedItems)["runs"] ?? []).map((id) =>
+        String(id).trim().toLowerCase(),
+      ),
+    );
     const prevById = new Map(prev.runs.map((r) => [r.id, r]));
     const remoteRuns = (Array.isArray(ds.runs) ? ds.runs : []).filter(
       (meta): meta is WebRunMeta =>
         !!meta && typeof meta === "object" && typeof meta.id === "string",
     );
-    const runs = remoteRuns.map((meta) => {
+    const mappedRemote = remoteRuns.map((meta) => {
       const prevRun = prevById.get(meta.id);
       const lTs = localUpdatedAt[meta.id] ?? 0;
       const rTs = remoteUpdatedAt[meta.id] ?? 0;
@@ -547,7 +560,24 @@ export function applyPayloadToState(
       }
       return metaToRun(meta, payload.runValues?.[meta.id], prevRun);
     });
-    patch.runs = runs.length > 0 ? runs : prev.runs;
+    // Runs are day-state and converge like the substitution/staging overlays below:
+    // on a true daily reset adopt the remote runs wholesale; during same-day
+    // concurrent editing union by id so a run just added on THIS device that hasn't
+    // synced yet survives an incoming payload that predates it (web parity). The
+    // run-deletion tombstone strips ids deleted on a peer so the union can't
+    // resurrect them.
+    const mergedRuns = isReset
+      ? mappedRemote
+      : (() => {
+          const remoteIds = new Set(remoteRuns.map((m) => m.id));
+          const localOnly = prev.runs.filter((r) => !remoteIds.has(r.id));
+          return [...mappedRemote, ...localOnly].filter(
+            (r) => !delRunSet.has(String(r.id).trim().toLowerCase()),
+          );
+        })();
+    // On a true reset adopt the remote runs wholesale (web parity); same-day, keep
+    // the ≥1-run guard so a transient empty union never wipes our runs.
+    patch.runs = isReset ? mergedRuns : mergedRuns.length > 0 ? mergedRuns : prev.runs;
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;
     if (ds.runToTime !== undefined) patch.runToTime = ds.runToTime;
@@ -558,7 +588,6 @@ export function applyPayloadToState(
     // devices each ticking a different item / adding a different substitution both
     // survive — same convergence model as the master-data list unions. An
     // un-check / removal won't cross devices (accepted union tradeoff; resets daily).
-    const isReset = remoteResetAt > prev.resetAt;
     const remoteSubs = Array.isArray(ds.substitutions) ? ds.substitutions : [];
     const remoteSubLog = Array.isArray(ds.substitutionLog) ? ds.substitutionLog : [];
     const unionById = <T extends { id: string }>(a: readonly T[], b: readonly T[]): T[] => {

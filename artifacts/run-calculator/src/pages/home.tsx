@@ -3031,10 +3031,47 @@ export default function Home() {
         saveRunValuesUpdated(mergedUpd);
       }
 
+      // ── Merge tombstones (union remote+local) ──
+      // A merge removes source names locally, but the additive list-union below
+      // would resurrect them from a stale peer/server. Union the synced tombstone
+      // set and strip those names from every list merge so a merge sticks.
+      const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
+      saveMergedAway(mergedTomb);
+      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
+
+      // ── Deletion tombstones (union remote+local, per list namespace) ──
+      // A plain delete removes an item locally, but the additive list-union below
+      // would resurrect it from a stale peer. Union the synced per-list deletion
+      // tombstones and strip each list's namespace from its merge so a delete sticks.
+      const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems);
+      // Runs are per-day: on a true daily reset (resetAt strictly forward) drop the
+      // run tombstones — those ids can never match today's fresh runs and would
+      // otherwise accumulate forever.
+      if (remoteResetAt > localResetAt) delete deletedMap["runs"];
+      saveDeletedItems(deletedMap);
+      const deletedBrandSet = new Set((deletedMap["brands"] ?? []).map(b => b.trim().toLowerCase()));
+      const deletedRunSet = new Set((deletedMap["runs"] ?? []).map(id => id.trim().toLowerCase()));
+
       // ── Day state (runs + shiftNotes + runToTime) ──
       if (acceptRemoteDay) {
         setDayState(prev => {
-          const newRuns = payload.dayState.runs;
+          const isReset = remoteResetAt > localResetAt;
+          // Runs are day-state and converge like the substitution/staging overlays
+          // below: on a true daily reset adopt the remote runs wholesale (the reset's
+          // empty set replaces ours); during same-day concurrent editing union by id
+          // so a run just added on THIS device — not yet pushed — isn't clobbered by
+          // an incoming payload that predates it. The run-deletion tombstone strips
+          // ids deleted on a peer so the union can't resurrect them.
+          const remoteRuns = payload.dayState.runs;
+          const newRuns = isReset
+            ? remoteRuns
+            : (() => {
+                const remoteIds = new Set(remoteRuns.map(r => r.id));
+                const localOnly = prev.runs.filter(r => !remoteIds.has(r.id));
+                return [...remoteRuns, ...localOnly].filter(
+                  r => !deletedRunSet.has(r.id.trim().toLowerCase()),
+                );
+              })();
           const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
           // A true daily reset bumps resetAt strictly forward: adopt the remote
           // day's overlays wholesale so the reset's empty maps clear ours. When
@@ -3045,7 +3082,6 @@ export default function Home() {
           // the same convergence model as the master-data list unions. An
           // un-check / removal won't cross devices (the accepted union tradeoff,
           // and these reset daily anyway).
-          const isReset = remoteResetAt > localResetAt;
           const remoteStaged = payload.dayState.stagedItems ?? {};
           const mergedStaged: Record<string, boolean> = isReset
             ? remoteStaged
@@ -3104,22 +3140,6 @@ export default function Home() {
           resetFieldArrays(merged);
         }
       }
-
-      // ── Merge tombstones (union remote+local) ──
-      // A merge removes source names locally, but the additive list-union below
-      // would resurrect them from a stale peer/server. Union the synced tombstone
-      // set and strip those names from every list merge so a merge sticks.
-      const mergedTomb = [...new Set([...loadMergedAway(), ...(payload.mergedAway ?? [])])];
-      saveMergedAway(mergedTomb);
-      const tombSet = new Set(mergedTomb.map(n => n.trim().toLowerCase()));
-
-      // ── Deletion tombstones (union remote+local, per list namespace) ──
-      // A plain delete removes an item locally, but the additive list-union below
-      // would resurrect it from a stale peer. Union the synced per-list deletion
-      // tombstones and strip each list's namespace from its merge so a delete sticks.
-      const deletedMap = unionDeletedItems(loadDeletedItems(), payload.deletedItems);
-      saveDeletedItems(deletedMap);
-      const deletedBrandSet = new Set((deletedMap["brands"] ?? []).map(b => b.trim().toLowerCase()));
 
       // ── Brands ──
       if (payload.brands && payload.brands.length > 0) {
@@ -3463,6 +3483,7 @@ export default function Home() {
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
@@ -3483,6 +3504,7 @@ export default function Home() {
         } catch {}
         // Fallback: fresh empty state
         const fresh = { ...freshDayState(), resetAt: Date.now() };
+        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         saveDayState(fresh);
         setDayState(fresh);
         setRunToTime("19:15");
@@ -3763,6 +3785,9 @@ export default function Home() {
     if (!run || run.startedAt || run.endedAt) return; // active or completed — cannot remove
     const newRuns = dayState.runs.filter((_, i) => i !== idx);
     if (newRuns.length === 0) return; // always keep at least one run
+    // Tombstone the removed run id so live-sync's additive run-union can't
+    // resurrect it from a peer that still has it.
+    tombstoneDeleted("runs", run.id);
     const newIndex = Math.max(0, idx - 1);
     const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
     setDayState(newDs);
@@ -4566,6 +4591,7 @@ export default function Home() {
         };
         archiveDayToHistory(finalDs, cur.date ?? todayStr());
         const fresh = { ...freshDayState(), resetAt: now };
+        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         setDayState(fresh);
         saveDayState(fresh);
         setRunToTime("19:15");
@@ -5315,6 +5341,7 @@ export default function Home() {
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
               for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
@@ -5331,6 +5358,7 @@ export default function Home() {
         } catch {}
         // Fallback: fresh empty state
         const fresh = { ...freshDayState(), resetAt: Date.now() };
+        { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
         setDayState(fresh);
         saveDayState(fresh);
         setRunToTime("19:15");

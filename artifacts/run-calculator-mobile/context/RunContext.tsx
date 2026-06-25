@@ -2551,9 +2551,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (index: number) => {
       setAppState((prev) => {
         if (prev.runs.length <= 1) return prev;
+        const removed = prev.runs[index];
         const runs = prev.runs.filter((_, i) => i !== index);
         const currentIndex = Math.min(prev.currentIndex, runs.length - 1);
-        const next = { ...prev, runs, currentIndex };
+        // Tombstone the removed run id so live-sync's additive run-union can't
+        // resurrect it from a peer that still has it (web parity).
+        const deletedItems = removed
+          ? tombstoneDeletedItemNs(prev.deletedItems, "runs", removed.id)
+          : prev.deletedItems;
+        const next = { ...prev, runs, currentIndex, deletedItems };
         persist(next);
         return next;
       });

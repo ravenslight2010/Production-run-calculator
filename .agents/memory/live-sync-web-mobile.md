@@ -76,6 +76,21 @@ contract is owned by web + db and is untyped on the server. Mobile mirrors it in
 - **Reset guard:** accept a remote day only if `remoteDate === today` &&
   `remoteResetAt >= localResetAt` (mirrors web). Master-data lists union-merge
   unconditionally.
+- **Runs converge additively, exactly like substitutions/stagedItems — they are
+  NOT adopted remote-wholesale during same-day editing.** Rebuilding the runs list
+  from the remote payload alone drops a run just added on THIS device that hasn't
+  pushed yet ("I was adding a new run and it disappeared"). Invariant: same-day
+  (`!isReset`) union runs by id keeping local-only ones; on a true reset
+  (`remoteResetAt > localResetAt`) adopt remote wholesale (even an empty list — no
+  ≥1-run fallback on reset, or web/mobile diverge). Deletes are NOT a
+  removal-doesn't-cross-devices exception here; they get a real tombstone instead.
+- **Run deletions use the `"runs"` namespace of the standard `deletedItems`
+  tombstone map** (same infra as brands/ingredients — see deletion-tombstones.md):
+  delete writes a tombstone, the union strips tombstoned ids so a peer can't
+  resurrect a deleted run. **These tombstones are per-day** — clear the `"runs"`
+  namespace on EVERY reset (the sync-apply reset path AND every local
+  midnight/rollover reset) or yesterday's deleted ids accumulate forever (they can
+  never match fresh run ids anyway).
 
 ## Gotchas
 - **Taxonomy migrations must be enforced on the inbound sync path, not just on-load.**
