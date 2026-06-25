@@ -16,27 +16,39 @@
 
 import * as XLSX from "xlsx";
 import {
+  applyNameMatches,
   canonicalize,
   collectSpecAliases,
+  crossFillSpecImport,
   gridsToPromptText,
   mergeParsedSpecImports,
   recipeTargets,
+  splitGridsForPrompt,
   summarizeSpecImport,
   type CanonicalResult,
+  type NameMatch,
   type ParsedRecipe,
   type ParsedRecipeTarget,
   type ParsedSpecImport,
+  type ScopedNameMatch,
   type SheetGrid,
   type SpecAliasKind,
   type SpecImportAlias,
   type SpecImportSummary,
 } from "@workspace/spec-import";
+import {
+  reconcileSpecWithRecipes,
+  toReconcileRecipes,
+  type Discrepancy,
+  type ReconcileRecipe,
+} from "@workspace/spec-reconcile";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import { saveSpecSheet, buildSpecSheetLabel } from "./savedSpecSheets";
 import {
   requestParseSpecSheet,
   type SpecSheetKnown,
 } from "./parseSpecSheet";
+import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import type { ReviewVerdict } from "@workspace/ai-review";
 
@@ -58,6 +70,8 @@ function aliasKindToDomain(kind: SpecAliasKind): string {
  */
 export type SpecImportStore = {
   known: Required<SpecSheetKnown>;
+  /** Current recipe library snapshot, for the deterministic reconcile diff. */
+  currentRecipes: ReconcileRecipe[];
   profileExists: (brand: string, flavor: string) => boolean;
   recipeExists: (kind: ParsedRecipe["kind"], name: string) => boolean;
   apply: (parsed: ParsedSpecImport) => void;
@@ -71,6 +85,12 @@ export type SpecImportPrepared = {
   newAliases: SpecImportAlias[];
   /** Reviewer-AI flags on parsed profiles/recipes (warn/reject only; advisory). */
   flagged: SpecFlaggedItem[];
+  /**
+   * Deterministic diff of the incoming spec recipes against the CURRENT recipe
+   * library — i.e. exactly what applying this import would change. Advisory; no
+   * AI involved.
+   */
+  discrepancies: Discrepancy[];
   note?: string;
 };
 
@@ -211,55 +231,159 @@ type ParseCore = {
   parsed: ParsedSpecImport;
   resolved: ReturnType<typeof canonicalizeParsed>["resolved"];
   flagged: SpecFlaggedItem[];
+  /** Rows dropped because the workbook was too large to chunk fully. */
+  droppedRows: number;
 };
 
 /**
  * Read one workbook's grids → AI parse → canonicalize, returning the
  * canonicalized parse, resolved alias pairs, and reviewer-AI flags for that
- * single file. Throws on a hard failure (empty workbook, AI unavailable). Shared
- * by the single- and multi-file prepare paths so they stay identical. Mirrors
- * web parseWorkbookCore.
+ * single file. A workbook too large for one prompt is split into chunks and
+ * parsed in several calls (full ingestion instead of silent truncation); the
+ * per-chunk raw parses are merged before canonicalizing. Throws on a hard
+ * failure (empty workbook, AI unavailable). Shared by the single- and
+ * multi-file prepare paths so they stay identical. Mirrors web parseWorkbookCore.
  */
 async function parseGridsCore(
   grids: SheetGrid[],
   store: SpecImportStore,
   aliases: SpecImportAlias[],
 ): Promise<ParseCore> {
-  const workbookText = gridsToPromptText(grids);
-  if (!workbookText.trim()) {
+  const { chunks, droppedRows } = splitGridsForPrompt(grids);
+  if (!chunks.length) {
     throw new Error("That workbook looks empty — nothing to import.");
   }
 
-  const ai = await requestParseSpecSheet({
-    workbookText,
-    known: store.known,
-    aliases,
-  });
-
-  const { parsed, resolved } = canonicalizeParsed(
-    { profiles: ai.profiles, recipes: ai.recipes, ...(ai.note ? { note: ai.note } : {}) },
-    store.known,
-    aliases,
-  );
-
-  // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
+  const rawList: ParsedSpecImport[] = [];
   const flagged: SpecFlaggedItem[] = [];
-  for (const p of ai.profiles) {
-    if (p.review && p.review.status !== "ok") {
-      flagged.push({ label: `${p.brand} / ${p.flavor}`.trim(), review: p.review });
+  for (const chunk of chunks) {
+    const workbookText = gridsToPromptText(chunk);
+    if (!workbookText.trim()) continue;
+    const ai = await requestParseSpecSheet({ workbookText, known: store.known, aliases });
+    rawList.push({
+      profiles: ai.profiles,
+      recipes: ai.recipes,
+      ...(ai.note ? { note: ai.note } : {}),
+    });
+    // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
+    for (const p of ai.profiles) {
+      if (p.review && p.review.status !== "ok") {
+        flagged.push({ label: `${p.brand} / ${p.flavor}`.trim(), review: p.review });
+      }
     }
-  }
-  for (const r of ai.recipes) {
-    if (r.review && r.review.status !== "ok") {
-      const tgts = recipeTargets(r);
-      const ctx = tgts.length
-        ? ` — ${tgts[0].brand}/${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more` : ""}`
-        : "";
-      flagged.push({ label: `${r.kind} recipe${ctx}`, review: r.review });
+    for (const r of ai.recipes) {
+      if (r.review && r.review.status !== "ok") {
+        const tgts = recipeTargets(r);
+        const ctx = tgts.length
+          ? ` — ${tgts[0].brand}/${tgts[0].flavor}${tgts.length > 1 ? ` +${tgts.length - 1} more` : ""}`
+          : "";
+        flagged.push({ label: `${r.kind} recipe${ctx}`, review: r.review });
+      }
     }
   }
 
-  return { parsed, resolved, flagged };
+  if (!rawList.length) {
+    throw new Error("That workbook looks empty — nothing to import.");
+  }
+
+  const rawMerged = rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList);
+  const { parsed, resolved } = canonicalizeParsed(rawMerged, store.known, aliases);
+
+  return { parsed, resolved, flagged, droppedRows };
+}
+
+/**
+ * Second linking pass over a canonicalized parse: ask the AI matcher to fold any
+ * brand/flavor that canonicalized as "new" onto an existing saved one (so we
+ * update instead of duplicating), then conservatively cross-fill blank
+ * dieType/sauceOzPerPizza from agreeing same-brand siblings. Fail-safe: any AI
+ * error leaves the parse exactly as canonicalized. Mirrors web linkParsed.
+ */
+async function linkParsed(
+  parsed: ParsedSpecImport,
+  store: SpecImportStore,
+): Promise<{ parsed: ParsedSpecImport; matchAliases: SpecImportAlias[] }> {
+  let working = parsed;
+  let matchAliases: SpecImportAlias[] = [];
+
+  try {
+    const known = store.known;
+    const knownBrandSet = new Set(known.brands.map((b) => b.trim().toLowerCase()));
+    // Brand candidates that canonicalized as new (not an existing saved brand).
+    const brandCandidates = new Map<string, string>();
+    const noteBrand = (b?: string) => {
+      const t = (b ?? "").trim();
+      if (t && !knownBrandSet.has(t.toLowerCase())) brandCandidates.set(t.toLowerCase(), t);
+    };
+    // Flavor candidates under an EXISTING brand whose flavor is not yet saved.
+    const flavorCandidates = new Map<string, { brand: string; flavor: string }>();
+    const noteFlavor = (brand?: string, flavor?: string) => {
+      const b = (brand ?? "").trim();
+      const f = (flavor ?? "").trim();
+      if (!b || !f || !knownBrandSet.has(b.toLowerCase())) return;
+      const knownFlavors = new Set((known.flavorsByBrand[b] ?? []).map((x) => x.trim().toLowerCase()));
+      if (knownFlavors.has(f.toLowerCase())) return;
+      flavorCandidates.set(`${b.toLowerCase()}\u0000${f.toLowerCase()}`, { brand: b, flavor: f });
+    };
+
+    for (const p of working.profiles) {
+      noteBrand(p.brand);
+      noteFlavor(p.brand, p.flavor);
+    }
+    for (const r of working.recipes) {
+      noteBrand(r.brand);
+      noteFlavor(r.brand, r.flavor);
+      for (const t of r.targets ?? []) {
+        noteBrand(t.brand);
+        noteFlavor(t.brand, t.flavor);
+      }
+    }
+
+    if (brandCandidates.size || flavorCandidates.size) {
+      const result = await requestMatchImport({
+        brands: known.brands,
+        brandFlavors: known.flavorsByBrand,
+        unmatchedBrands: [...brandCandidates.values()],
+        unmatchedFlavors: [...flavorCandidates.values()],
+      });
+      const brandMatches: NameMatch[] = result.brandMatches.map((m) => ({
+        candidate: m.candidate,
+        match: m.match,
+      }));
+      const flavorMatches: ScopedNameMatch[] = result.flavorMatches.map((m) => ({
+        brand: m.brand,
+        candidate: m.candidate,
+        match: m.match,
+      }));
+      const applied = applyNameMatches(working, brandMatches, flavorMatches);
+      working = applied.parsed;
+      matchAliases = applied.aliases;
+    }
+  } catch {
+    // Fail-safe: keep the canonicalized parse exactly as-is.
+  }
+
+  working = crossFillSpecImport(working).parsed;
+  return { parsed: working, matchAliases };
+}
+
+/** Build the "what will change" diff of the incoming spec vs current recipes. */
+function buildDiscrepancies(parsed: ParsedSpecImport, store: SpecImportStore): Discrepancy[] {
+  try {
+    return reconcileSpecWithRecipes({
+      specRecipes: toReconcileRecipes(parsed.recipes),
+      currentRecipes: store.currentRecipes,
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Append a "rows dropped" advisory to a parse note when a workbook was too big. */
+function appendDroppedNote(note: string | undefined, droppedRows: number): string | undefined {
+  if (droppedRows <= 0) return note;
+  const msg = `Part of the workbook was too large to read fully — ${droppedRows} row${droppedRows === 1 ? "" : "s"} were skipped.`;
+  return note ? `${note}\n${msg}` : msg;
 }
 
 /** Learned aliases are best-effort; proceed without them if the fetch fails. */
@@ -280,12 +404,21 @@ export async function prepareSpecImport(
   store: SpecImportStore,
 ): Promise<SpecImportPrepared> {
   const aliases = await loadSpecImportAliases();
-  const { parsed, resolved, flagged } = await parseGridsCore(grids, store, aliases);
+  const { parsed: rawParsed, resolved, flagged, droppedRows } = await parseGridsCore(
+    grids,
+    store,
+    aliases,
+  );
+
+  // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
+  const { parsed, matchAliases } = await linkParsed(rawParsed, store);
 
   const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
-  const newAliases = collectSpecAliases(resolved);
+  const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
+  const discrepancies = buildDiscrepancies(parsed, store);
+  const note = appendDroppedNote(parsed.note, droppedRows);
 
-  return { parsed, summary, newAliases, flagged, ...(parsed.note ? { note: parsed.note } : {}) };
+  return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
@@ -310,6 +443,7 @@ export async function prepareSpecImportMulti(
   const allResolved: ParseCore["resolved"] = [];
   const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
+  let totalDropped = 0;
 
   let done = 0;
   for (const grids of gridsList) {
@@ -318,6 +452,7 @@ export async function prepareSpecImportMulti(
       parsedList.push(core.parsed);
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
+      totalDropped += core.droppedRows;
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "Could not read a file.");
     } finally {
@@ -331,19 +466,23 @@ export async function prepareSpecImportMulti(
   }
 
   const merged = mergeParsedSpecImports(parsedList);
-  const summary = summarizeSpecImport(merged, store.profileExists, store.recipeExists);
-  const newAliases = collectSpecAliases(allResolved);
+  // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
+  const { parsed, matchAliases } = await linkParsed(merged, store);
+
+  const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
+  const newAliases = [...collectSpecAliases(allResolved), ...matchAliases];
+  const discrepancies = buildDiscrepancies(parsed, store);
 
   const noteParts: string[] = [];
-  if (merged.note) noteParts.push(merged.note);
+  if (parsed.note) noteParts.push(parsed.note);
   if (errors.length) {
     noteParts.push(
       `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
     );
   }
-  const note = noteParts.length ? noteParts.join("\n") : undefined;
+  const note = appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped);
 
-  return { parsed: merged, summary, newAliases, flagged, ...(note ? { note } : {}) };
+  return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
 }
 
 /** Apply a prepared import: write profiles + recipes, then persist new aliases. */

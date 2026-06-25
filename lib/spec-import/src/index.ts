@@ -283,6 +283,18 @@ const DEFAULT_LIMITS: Required<GridTextLimits> = {
   maxTotalChars: 56000,
 };
 
+/** Clamp a row's cells the same way for prompt text + chunking (shared so they
+ * never drift): cap columns, collapse whitespace, clamp cell length, drop
+ * trailing empties. Returns the cleaned cells (may be empty → caller skips). */
+function cleanRowCells(row: ReadonlyArray<string>, lim: Required<GridTextLimits>): string[] {
+  const cells = row.slice(0, lim.maxCols).map((c) => {
+    const s = (c ?? "").toString().replace(/\s+/g, " ").trim();
+    return s.length > lim.maxCellChars ? s.slice(0, lim.maxCellChars) : s;
+  });
+  while (cells.length && cells[cells.length - 1] === "") cells.pop();
+  return cells;
+}
+
 /**
  * Flatten parsed sheets into a compact, model-friendly text block. Trailing
  * empty cells are dropped, fully-empty rows are skipped, and everything is
@@ -300,12 +312,7 @@ export function gridsToPromptText(grids: ReadonlyArray<SheetGrid>, limits: GridT
     total += header.length + 1;
     const rows = sheet.rows.slice(0, lim.maxRows);
     for (const row of rows) {
-      const cells = row.slice(0, lim.maxCols).map((c) => {
-        const s = (c ?? "").toString().replace(/\s+/g, " ").trim();
-        return s.length > lim.maxCellChars ? s.slice(0, lim.maxCellChars) : s;
-      });
-      // drop trailing empties
-      while (cells.length && cells[cells.length - 1] === "") cells.pop();
+      const cells = cleanRowCells(row, lim);
       if (cells.length === 0) continue;
       const line = cells.join("\t");
       if (total + line.length + 1 > lim.maxTotalChars) {
@@ -317,6 +324,94 @@ export function gridsToPromptText(grids: ReadonlyArray<SheetGrid>, limits: GridT
     }
   }
   return out.join("\n");
+}
+
+export type GridSplit = {
+  /** One SheetGrid[] per AI parse call; each renders under the char budget. */
+  chunks: SheetGrid[][];
+  /** Rows that did not fit within maxChunks and were dropped (precise count). */
+  droppedRows: number;
+};
+
+/** Default cap on parse calls for ONE oversized workbook (mirrors the
+ * multi-file MAX_SPEC_IMPORT_FILES spirit so a single file can't fan out into a
+ * flood of AI calls). */
+export const DEFAULT_MAX_PROMPT_CHUNKS = 8;
+
+/**
+ * Split one workbook's grids into chunks that each render under the prompt char
+ * budget (and per-call sheet/row caps), so a large workbook is parsed across
+ * several AI calls instead of being silently truncated by gridsToPromptText.
+ * Sheets are kept in order; a sheet too large for one chunk is split across
+ * chunks by rows (each chunk re-emits the sheet header). Rows beyond `maxChunks`
+ * chunks are reported as `droppedRows` so the caller can note them precisely.
+ * Pure + deterministic.
+ */
+export function splitGridsForPrompt(
+  grids: ReadonlyArray<SheetGrid>,
+  limits: GridTextLimits = {},
+  maxChunks: number = DEFAULT_MAX_PROMPT_CHUNKS,
+): GridSplit {
+  const lim = { ...DEFAULT_LIMITS, ...limits };
+  const budget = lim.maxTotalChars;
+  const chunks: SheetGrid[][] = [];
+
+  let cur: SheetGrid[] = [];
+  let curChars = 0;
+  const flush = () => {
+    if (cur.length) {
+      chunks.push(cur);
+      cur = [];
+      curChars = 0;
+    }
+  };
+
+  for (const sheet of grids) {
+    const headerLen = `=== SHEET: ${sheet.name} ===`.length + 1;
+    const rows = sheet.rows.map((r) => cleanRowCells(r, lim)).filter((c) => c.length > 0);
+    let i = 0;
+    while (i < rows.length) {
+      // Open a sheet block in the current chunk; start a fresh chunk first if
+      // this one is full (too many sheets) or the header alone won't fit.
+      if (cur.length >= lim.maxSheets || (cur.length > 0 && curChars + headerLen > budget)) {
+        flush();
+      }
+      const blockRows: string[][] = [];
+      let blockChars = headerLen;
+      while (i < rows.length && blockRows.length < lim.maxRows) {
+        const add = rows[i].join("\t").length + 1;
+        if (curChars + blockChars + add > budget) {
+          // A single row larger than the whole budget on an empty chunk: take it
+          // anyway so we always make forward progress (it becomes its own row).
+          if (blockRows.length === 0 && cur.length === 0) {
+            blockRows.push(rows[i]);
+            blockChars += add;
+            i += 1;
+          }
+          break;
+        }
+        blockRows.push(rows[i]);
+        blockChars += add;
+        i += 1;
+      }
+      if (blockRows.length > 0) {
+        cur.push({ name: sheet.name, rows: blockRows });
+        curChars += blockChars;
+      } else {
+        // Nothing fit in the current (non-empty) chunk; flush and retry this row.
+        flush();
+      }
+    }
+  }
+  flush();
+
+  if (chunks.length <= maxChunks) return { chunks, droppedRows: 0 };
+  const kept = chunks.slice(0, maxChunks);
+  let droppedRows = 0;
+  for (const c of chunks.slice(maxChunks)) {
+    for (const s of c) droppedRows += s.rows.length;
+  }
+  return { chunks: kept, droppedRows };
 }
 
 // ── Sanitization of the AI parse result (shared by server) ───────────────────
@@ -495,4 +590,165 @@ export function summarizeSpecImport(
     totalProfiles: parsed.profiles.length,
     totalRecipes: parsed.recipes.length,
   };
+}
+
+/** A confident AI match from /ai/match-import: an external `candidate` name the
+ * server resolved to an existing canonical `match`. */
+export type NameMatch = { candidate: string; match: string };
+/** A brand-scoped flavor match: `match` is the existing flavor within `brand`. */
+export type ScopedNameMatch = { brand: string; candidate: string; match: string };
+
+export type AppliedNameMatches = {
+  parsed: ParsedSpecImport;
+  /** Brand + brand-scoped flavor alias pairs worth remembering (self-refs dropped). */
+  aliases: SpecImportAlias[];
+};
+
+/**
+ * Apply confident AI brand/flavor matches to a canonicalized parse so names that
+ * fuzzy-canonicalize as "new" but actually mean an existing brand/flavor get
+ * folded onto the real one (no duplicate created). Renames brands first, then
+ * flavors within the resolved brand, across profiles, recipe brand/flavor and
+ * recipe `targets`. The matches come from the server, which already canonicalizes
+ * its output to real saved names; this only rewires the parse and records the
+ * pairs for the learned-alias pool. Pure + non-mutating.
+ */
+export function applyNameMatches(
+  parsed: ParsedSpecImport,
+  brandMatches: ReadonlyArray<NameMatch>,
+  flavorMatches: ReadonlyArray<ScopedNameMatch>,
+): AppliedNameMatches {
+  const brandMap = new Map<string, string>();
+  for (const m of brandMatches) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match) continue;
+    brandMap.set(cand.toLowerCase(), match);
+  }
+  const renameBrand = (b: string | undefined): string | undefined => {
+    if (b == null) return b;
+    return brandMap.get(b.trim().toLowerCase()) ?? b;
+  };
+
+  // Keyed by the RESOLVED (canonical) brand so flavor scoping matches the glue,
+  // which builds unmatched flavors against the already brand-matched brand.
+  const flavorMap = new Map<string, string>();
+  const flavorKey = (brand: string, flavor: string) =>
+    `${brand.trim().toLowerCase()}\u0000${flavor.trim().toLowerCase()}`;
+  for (const m of flavorMatches) {
+    const brand = (m.brand ?? "").trim();
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!brand || !cand || !match) continue;
+    flavorMap.set(flavorKey(brand, cand), match);
+  }
+  const renameFlavor = (brand: string | undefined, flavor: string | undefined): string | undefined => {
+    if (flavor == null) return flavor;
+    return flavorMap.get(flavorKey(brand ?? "", flavor)) ?? flavor;
+  };
+
+  const profiles = parsed.profiles.map((p) => {
+    const brand = renameBrand(p.brand) ?? p.brand;
+    const flavor = renameFlavor(brand, p.flavor) ?? p.flavor;
+    return { ...p, brand, flavor };
+  });
+
+  const recipes = parsed.recipes.map((r) => {
+    const out: ParsedRecipe = { ...r };
+    if (r.brand != null) {
+      out.brand = renameBrand(r.brand);
+      out.flavor = renameFlavor(out.brand, r.flavor);
+    }
+    if (r.targets && r.targets.length) {
+      out.targets = r.targets.map((t): ParsedRecipeTarget => {
+        const brand = renameBrand(t.brand) ?? t.brand;
+        return { brand, flavor: renameFlavor(brand, t.flavor) ?? t.flavor };
+      });
+    }
+    return out;
+  });
+
+  const aliasByKey = new Map<string, SpecImportAlias>();
+  for (const m of brandMatches) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    aliasByKey.set(specAliasKey("brand", cand, null), {
+      kind: "brand",
+      externalName: cand,
+      canonicalName: match,
+      context: null,
+    });
+  }
+  for (const m of flavorMatches) {
+    const brand = (m.brand ?? "").trim();
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!brand || !cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    aliasByKey.set(specAliasKey("flavor", cand, brand), {
+      kind: "flavor",
+      externalName: cand,
+      canonicalName: match,
+      context: brand,
+    });
+  }
+
+  return {
+    parsed: { profiles, recipes, ...(parsed.note ? { note: parsed.note } : {}) },
+    aliases: [...aliasByKey.values()],
+  };
+}
+
+export type CrossFillResult = { parsed: ParsedSpecImport; filledCount: number };
+
+/**
+ * Fill a profile's missing `dieType` / `sauceOzPerPizza` from its same-brand
+ * siblings, but ONLY when every sibling that specifies the field agrees on
+ * exactly one value (unambiguous). Existing values are never overridden and a
+ * conflict leaves the blank as-is. Same-brand means an identical brand string
+ * (case-insensitive) — size is folded into the brand at parse time, so this
+ * stays within one product/size. Pure + non-mutating.
+ */
+export function crossFillSpecImport(parsed: ParsedSpecImport): CrossFillResult {
+  // value === null marks a conflict (≥2 distinct specified values).
+  const dieByBrand = new Map<string, string | null>();
+  const sauceByBrand = new Map<string, number | null>();
+  const note = <T>(map: Map<string, T | null>, key: string, val: T) => {
+    if (!map.has(key)) map.set(key, val);
+    else {
+      const cur = map.get(key);
+      if (cur !== null && cur !== val) map.set(key, null);
+    }
+  };
+  for (const p of parsed.profiles) {
+    const key = p.brand.trim().toLowerCase();
+    if (!key) continue;
+    if (p.dieType != null && p.dieType.trim()) note(dieByBrand, key, p.dieType.trim());
+    if (p.sauceOzPerPizza != null && Number.isFinite(p.sauceOzPerPizza)) {
+      note(sauceByBrand, key, p.sauceOzPerPizza);
+    }
+  }
+
+  let filledCount = 0;
+  const profiles = parsed.profiles.map((p) => {
+    const key = p.brand.trim().toLowerCase();
+    const out = { ...p };
+    if (out.dieType == null || !out.dieType.trim()) {
+      const v = dieByBrand.get(key);
+      if (v != null) {
+        out.dieType = v;
+        filledCount += 1;
+      }
+    }
+    if (out.sauceOzPerPizza == null) {
+      const v = sauceByBrand.get(key);
+      if (v != null) {
+        out.sauceOzPerPizza = v;
+        filledCount += 1;
+      }
+    }
+    return out;
+  });
+
+  return { parsed: { ...parsed, profiles }, filledCount };
 }

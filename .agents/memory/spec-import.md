@@ -63,3 +63,31 @@ server prompt (`buildParseSpecSheetPrompt`); clients are thin, no parity edit.
   any non-empty recipe array (dough/frontline/app{1-4}CheeseRecipe) OR any
   non-blank app/pep type, dieType, or recipe-name string counts as "exists"
   (=update). A narrow string-only check under-reports updates in the summary.
+
+## Auto-link pipeline (prepare step) — keep web+mobile IDENTICAL
+The prepare flow runs ONE fixed sequence on both apps (`src/specImport.ts`,
+`context/specImport.ts`): chunked parse → canonicalize → AI match pass →
+`applyNameMatches` → `crossFillSpecImport` → reconcile diff → dropped-row note.
+Any change to one app's order/logic must land in the other verbatim.
+- **AI match pass is fail-safe.** Names that canonicalize as "new" are sent to
+  the EXISTING `/ai/match-import` in ONE call; server-sanitized matches are
+  applied and merged into `newAliases` (learned). Wrap in try/catch — on ANY
+  failure keep the canonical parse and continue; never block the import.
+- **Cross-fill is conservative (D5).** `crossFillSpecImport` fills a profile's
+  missing `dieType`/`sauceOzPerPizza` from same-brand siblings ONLY when all
+  specifying siblings AGREE; never overrides a value that's already set; leaves
+  blank on conflict. Pure, in `@workspace/spec-import`.
+- **Full ingestion (D4), no silent truncation.** `splitGridsForPrompt` chunks an
+  oversized single workbook across multiple parse calls; cores merge all chunks;
+  `droppedRows` is propagated and surfaced via `appendDroppedNote` so the user is
+  told exactly what was dropped. Row cleaning is shared with prompt rendering to
+  avoid drift.
+- **Auto-reconcile in review (D1), no AI/cost.** During prepare, the deterministic
+  `@workspace/spec-reconcile` diff runs spec-vs-current-recipes; result lands in
+  `SpecImportPrepared.discrepancies` (both apps) and renders on the review screen
+  (web `SpecImportDialog`, mobile `SpecImportModal`, capped at 12 +N more).
+  Mobile builds `currentRecipes` via `presetMapsToReconcileRecipes` from
+  RunContext presets (master-data.tsx); web from storage. `Discrepancy.message`
+  is plain-language — render directly.
+- **targets[] nudge stays prompt-only (D3).** Strengthened in
+  `buildParseSpecSheetPrompt` only; no contract change, no client parity edit.

@@ -85,6 +85,12 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "brand list; if that brand has no known flavors, add one target with your best " +
     "reading of its brand and flavor and mention the uncertainty in `note`. Use the " +
     "singular `brand`/`flavor` fields only when a recipe ties to exactly one profile. " +
+    "Be AGGRESSIVE about populating `targets`: whenever a recipe could reasonably " +
+    "serve more than one brand+flavor (any header listing several names, a shared " +
+    "mixing table, a 'standard dough' used line-wide), list EVERY {brand, flavor} it " +
+    "covers rather than leaving `targets` empty or splitting it into duplicate " +
+    "recipes. A shared recipe with an empty `targets` array is almost always a " +
+    "mistake — link it to the profiles it belongs to. " +
     "Never invent data that is not in the workbook. Omit fields you cannot find. " +
     "This is read-only; the user reviews a summary before anything is saved.";
 

@@ -5,11 +5,16 @@ import {
   canonicalize,
   collectSpecAliases,
   gridsToPromptText,
+  splitGridsForPrompt,
+  applyNameMatches,
+  crossFillSpecImport,
   recipeTargets,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
   SPEC_ALIAS_KINDS,
+  type ParsedSpecImport,
+  type SheetGrid,
   type SpecImportAlias,
   type CanonicalResult,
 } from "@workspace/spec-import";
@@ -327,5 +332,169 @@ describe("SPEC_ALIAS_KINDS", () => {
     expect(SPEC_ALIAS_KINDS).toContain("brand");
     expect(SPEC_ALIAS_KINDS).toContain("cheeseIngredient");
     expect(new Set(SPEC_ALIAS_KINDS).size).toBe(SPEC_ALIAS_KINDS.length);
+  });
+});
+
+describe("splitGridsForPrompt", () => {
+  it("returns a single chunk for a small workbook and never truncates it", () => {
+    const grids: SheetGrid[] = [{ name: "S1", rows: [["a", "b"], ["c"]] }];
+    const { chunks, droppedRows } = splitGridsForPrompt(grids);
+    expect(chunks).toHaveLength(1);
+    expect(droppedRows).toBe(0);
+    expect(gridsToPromptText(chunks[0])).not.toContain("… (truncated)");
+  });
+
+  it("splits one oversized sheet across chunks, each under the budget, losing no rows", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => [`row-${i}-${"x".repeat(30)}`]);
+    const { chunks, droppedRows } = splitGridsForPrompt([{ name: "Big", rows }], { maxTotalChars: 200 }, 50);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(droppedRows).toBe(0);
+    // No chunk renders over the budget (so gridsToPromptText won't truncate it).
+    for (const c of chunks) {
+      expect(gridsToPromptText(c, { maxTotalChars: 200 })).not.toContain("… (truncated)");
+    }
+    // Every original row survives across the chunks (full ingestion).
+    const seen = chunks.flatMap((c) => c.flatMap((s) => s.rows.map((r) => r[0])));
+    expect(new Set(seen).size).toBe(40);
+  });
+
+  it("caps the number of chunks and reports the dropped rows precisely", () => {
+    const rows = Array.from({ length: 40 }, (_, i) => [`row-${i}-${"x".repeat(30)}`]);
+    const { chunks, droppedRows } = splitGridsForPrompt([{ name: "Big", rows }], { maxTotalChars: 200 }, 2);
+    expect(chunks).toHaveLength(2);
+    const kept = chunks.flatMap((c) => c.flatMap((s) => s.rows.length));
+    const keptRows = kept.reduce((a, b) => a + b, 0);
+    expect(keptRows + droppedRows).toBe(40);
+    expect(droppedRows).toBeGreaterThan(0);
+  });
+
+  it("keeps each chunk within the per-call sheet cap", () => {
+    const grids: SheetGrid[] = Array.from({ length: 5 }, (_, i) => ({
+      name: `S${i}`,
+      rows: [["x"]],
+    }));
+    const { chunks } = splitGridsForPrompt(grids, { maxSheets: 2 });
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("applyNameMatches", () => {
+  const base = (): ParsedSpecImport => ({
+    profiles: [
+      { brand: "Tombstn", flavor: "Pep", dieType: "", sauceOzPerPizza: 3, applicators: [], pepperonis: [] },
+    ],
+    recipes: [
+      {
+        kind: "dough",
+        name: "Std",
+        rows: [{ ingredient: "Flour", lbs: 1 }],
+        brand: "Tombstn",
+        flavor: "Pep",
+        targets: [{ brand: "Tombstn", flavor: "Pep" }, { brand: "Keep", flavor: "As-Is" }],
+      },
+    ],
+  });
+
+  it("renames brands then brand-scoped flavors across profiles, recipe, and targets", () => {
+    const out = applyNameMatches(
+      base(),
+      [{ candidate: "Tombstn", match: "Tombstone" }],
+      [{ brand: "Tombstone", candidate: "Pep", match: "Pepperoni" }],
+    );
+    expect(out.parsed.profiles[0]).toMatchObject({ brand: "Tombstone", flavor: "Pepperoni" });
+    const r = out.parsed.recipes[0];
+    expect(r.brand).toBe("Tombstone");
+    expect(r.flavor).toBe("Pepperoni");
+    expect(r.targets).toEqual([
+      { brand: "Tombstone", flavor: "Pepperoni" },
+      { brand: "Keep", flavor: "As-Is" },
+    ]);
+  });
+
+  it("emits learnable alias pairs and skips self-references", () => {
+    const out = applyNameMatches(
+      base(),
+      [
+        { candidate: "Tombstn", match: "Tombstone" },
+        { candidate: "Same", match: "Same" }, // self-ref → dropped
+      ],
+      [{ brand: "Tombstone", candidate: "Pep", match: "Pepperoni" }],
+    );
+    expect(out.aliases).toHaveLength(2);
+    expect(out.aliases.find((a) => a.kind === "brand")?.canonicalName).toBe("Tombstone");
+    const flavor = out.aliases.find((a) => a.kind === "flavor");
+    expect(flavor).toMatchObject({ canonicalName: "Pepperoni", context: "Tombstone" });
+  });
+
+  it("leaves the parse untouched when there are no matches", () => {
+    const out = applyNameMatches(base(), [], []);
+    expect(out.parsed.profiles[0].brand).toBe("Tombstn");
+    expect(out.aliases).toEqual([]);
+  });
+});
+
+describe("crossFillSpecImport", () => {
+  const mk = (over: Partial<ParsedSpecImport["profiles"][number]>) => ({
+    brand: "Lowes 7in",
+    flavor: "X",
+    dieType: "",
+    applicators: [],
+    pepperonis: [],
+    ...over,
+  });
+
+  it("fills a blank dieType from same-brand siblings when they agree", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        mk({ flavor: "Pepperoni", dieType: "7in Die" }),
+        mk({ flavor: "Cheese", dieType: "" }),
+      ],
+      recipes: [],
+    };
+    const { parsed: out, filledCount } = crossFillSpecImport(parsed);
+    expect(out.profiles[1].dieType).toBe("7in Die");
+    expect(filledCount).toBe(1);
+  });
+
+  it("does NOT fill when same-brand siblings disagree (ambiguous)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        mk({ flavor: "A", dieType: "7in Die" }),
+        mk({ flavor: "B", dieType: "Other Die" }),
+        mk({ flavor: "C", dieType: "" }),
+      ],
+      recipes: [],
+    };
+    const { parsed: out, filledCount } = crossFillSpecImport(parsed);
+    expect(out.profiles[2].dieType).toBe("");
+    expect(filledCount).toBe(0);
+  });
+
+  it("never overrides an existing value and does not cross different brands", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        mk({ brand: "Lowes 7in", flavor: "A", dieType: "7in Die" }),
+        mk({ brand: "Lowes 11in", flavor: "B", dieType: "" }), // different brand → untouched
+        mk({ brand: "Lowes 7in", flavor: "C", dieType: "Keep Me" }), // existing → untouched
+      ],
+      recipes: [],
+    };
+    const { parsed: out, filledCount } = crossFillSpecImport(parsed);
+    expect(out.profiles[1].dieType).toBe("");
+    expect(out.profiles[2].dieType).toBe("Keep Me");
+    expect(filledCount).toBe(0);
+  });
+
+  it("fills a blank sauceOzPerPizza (including 0) from agreeing siblings", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        mk({ flavor: "A", sauceOzPerPizza: 0 }),
+        mk({ flavor: "B" }),
+      ],
+      recipes: [],
+    };
+    const { parsed: out, filledCount } = crossFillSpecImport(parsed);
+    expect(out.profiles[1].sauceOzPerPizza).toBe(0);
+    expect(filledCount).toBe(1);
   });
 });

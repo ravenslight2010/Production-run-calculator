@@ -1057,6 +1057,11 @@ export default function MasterDataScreen() {
         sauceIngredients: frontlineIngredients,
         dieTypes,
       },
+      currentRecipes: presetMapsToReconcileRecipes({
+        dough: doughRecipePresets,
+        sauce: frontlineRecipePresets,
+        cheese: cheeseRecipePresets,
+      }),
       profileExists: (brand, flavor) => {
         const prof = brandProfiles[profileKey(brand, flavor)];
         if (!prof) return false;

@@ -125,6 +125,27 @@ export default function SpecImportDialog({
                 </div>
               )}
 
+              {prepared.discrepancies.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    Applying this import will change {prepared.discrepancies.length} thing
+                    {prepared.discrepancies.length === 1 ? "" : "s"} in your current recipes:
+                  </p>
+                  <ul className="space-y-0.5">
+                    {prepared.discrepancies.slice(0, 12).map((d, i) => (
+                      <li key={i} className="text-xs text-foreground">
+                        {d.message}
+                      </li>
+                    ))}
+                  </ul>
+                  {prepared.discrepancies.length > 12 && (
+                    <p className="text-xs text-muted-foreground">
+                      +{prepared.discrepancies.length - 12} more
+                    </p>
+                  )}
+                </div>
+              )}
+
               {prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">

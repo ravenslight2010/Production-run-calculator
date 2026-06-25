@@ -148,6 +148,25 @@ export default function SpecImportModal({
                   </View>
                 ) : null}
 
+                {prepared.discrepancies.length > 0 ? (
+                  <View style={{ gap: 4 }}>
+                    <Text style={[styles.note, { color: colors.mutedForeground }]}>
+                      Applying this import will change {prepared.discrepancies.length} thing
+                      {prepared.discrepancies.length === 1 ? "" : "s"} in your current recipes:
+                    </Text>
+                    {prepared.discrepancies.slice(0, 12).map((d, i) => (
+                      <Text key={i} style={[styles.help, { color: colors.foreground }]}>
+                        {d.message}
+                      </Text>
+                    ))}
+                    {prepared.discrepancies.length > 12 ? (
+                      <Text style={[styles.help, { color: colors.mutedForeground }]}>
+                        +{prepared.discrepancies.length - 12} more
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+
                 {prepared.note ? (
                   <View style={[styles.noteBox, { borderColor: colors.border }]}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
