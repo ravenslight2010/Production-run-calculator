@@ -2131,6 +2131,46 @@ export interface DeleteFreezerPullItemsInput {
 }
 
 /**
+ * Run configuration (cross-platform wire shape; opaque to the server)
+ */
+export type RunTemplateValues = { [key: string]: unknown };
+
+/**
+ * A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to/from its own local form shape).
+ */
+export interface RunTemplate {
+  /** Stable client-generated id */
+  id: string;
+  /** Human-readable template name */
+  name: string;
+  /** Run configuration (cross-platform wire shape; opaque to the server) */
+  values: RunTemplateValues;
+  brand?: string;
+  flavor?: string;
+  /** ISO-8601 timestamp the template was created */
+  createdAt: string;
+}
+
+export interface RunTemplateList {
+  templates: RunTemplate[];
+}
+
+export interface SaveRunTemplatesInput {
+  /** The batch of run templates to create or update (by id) */
+  templates: RunTemplate[];
+}
+
+export interface DeleteRunTemplatesInput {
+  /** The ids of the run templates to delete */
+  ids: string[];
+}
+
+export interface SupervisorPin {
+  /** The facility supervisor PIN */
+  pin: string;
+}
+
+/**
  * One ingredient of a mix and how many pounds of it go into a single pizza's worth of the finished mix.
  */
 export interface MixComponent {

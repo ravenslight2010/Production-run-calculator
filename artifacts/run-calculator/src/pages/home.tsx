@@ -126,6 +126,10 @@ import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
+import { useRunTemplates } from "../hooks/useRunTemplates";
+import { useSupervisorPin } from "../hooks/useSupervisorPin";
+import { saveRunTemplates, deleteRunTemplates } from "../runTemplatesApi";
+import { updateSupervisorPin } from "../supervisorPinApi";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
@@ -2092,6 +2096,13 @@ export default function Home() {
   // Factory-wide freezer-pull items (open to all signed-in users) — drives the
   // Warehouse "Pull Out Freezer" notices.
   const { items: freezerPullItems } = useFreezerPullItems();
+  // Facility-wide run templates + supervisor PIN (server-side master-data, open
+  // to all signed-in users for reads). These used to live in this device's local
+  // storage, so they never followed the facility; the server is now the source
+  // of truth, with localStorage kept only as an offline fallback / migration
+  // seed.
+  const { templates: serverTemplates, isSuccess: templatesLoaded } = useRunTemplates();
+  const { pin: serverPin } = useSupervisorPin();
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
   // make-day plan and the manager Mixes editor.
   const { items: mixes } = useMixes();
@@ -2149,8 +2160,19 @@ export default function Home() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   // Managers (server role) always have supervisor access without entering the
-  // PIN; the PIN remains for operators on shared, logged-in devices.
-  const isSupervisor = isManager || role === "supervisor";
+  // PIN; the PIN remains for operators on shared, logged-in devices. An empty
+  // facility PIN ("") means "no gate" — every signed-in user is a supervisor
+  // (mirrors the mobile no-PIN unlocked state for parity). We resolve from the
+  // live server value when loaded, else the offline cache, so a cleared PIN
+  // unlocks here even before the query resolves (matching mobile's local read).
+  const resolvedPin =
+    typeof serverPin === "string"
+      ? serverPin
+      : (typeof window !== "undefined"
+          ? localStorage.getItem(SUPERVISOR_PIN_KEY)
+          : null);
+  const noFacilityPin = resolvedPin === "";
+  const isSupervisor = isManager || role === "supervisor" || noFacilityPin;
 
   // ── Glance overlay ────────────────────────────────────────────────────────
   const [showGlance, setShowGlance] = useState(false);
@@ -2179,6 +2201,40 @@ export default function Home() {
   const [showTemplatesDialog, setShowTemplatesDialog] = useState(false);
   const [templateNameInput, setTemplateNameInput] = useState("");
   const [templateSaveMode, setTemplateSaveMode] = useState(false);
+  // Server is the source of truth for templates. Once the list loads, reflect it
+  // into local display + cache. One-time migration: if the server has none but
+  // this device has local templates, seed the server from local (best-effort).
+  const templatesMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!templatesLoaded) return;
+    if (!templatesMigratedRef.current) {
+      templatesMigratedRef.current = true;
+      const local = loadTemplates();
+      if (serverTemplates.length === 0 && local.length > 0) {
+        saveRunTemplates(local)
+          .then((saved) => {
+            setTemplates(saved);
+            saveTemplates(saved);
+            cycleCountQc.setQueryData(["runTemplates"], saved);
+          })
+          .catch(() => {});
+        return;
+      }
+    }
+    setTemplates((prev) =>
+      JSON.stringify(prev) === JSON.stringify(serverTemplates) ? prev : serverTemplates,
+    );
+    saveTemplates(serverTemplates);
+  }, [templatesLoaded, serverTemplates, cycleCountQc]);
+  // Keep the local PIN cache fresh as an offline fallback for checkPin(). We
+  // persist an empty string too: "" is a valid facility value ("no gate"), so a
+  // PIN cleared on another device must survive a reload/offline session here, or
+  // the stale non-empty cache would wrongly re-lock this device.
+  useEffect(() => {
+    if (typeof serverPin === "string") {
+      try { localStorage.setItem(SUPERVISOR_PIN_KEY, serverPin); } catch {}
+    }
+  }, [serverPin]);
 
   // ── Downtime / stoppage log ───────────────────────────────────────────────
   const [showStopDialog, setShowStopDialog] = useState(false);
@@ -2235,6 +2291,14 @@ export default function Home() {
     window.addEventListener("offline", off);
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
   }, []);
+
+  // ── Server-write failure surface ───────────────────────────────────────────
+  // The sync push and the inventory-consume write are both best-effort/optimistic
+  // (they retry then give up). Previously a final failure was swallowed silently,
+  // so the user had no idea their work wasn't saved server-side. Track the two
+  // failure modes and surface a clear, dismissible banner + a red status dot.
+  const [syncPushFailed, setSyncPushFailed] = useState(false);
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
@@ -2951,6 +3015,38 @@ export default function Home() {
         setDayState(prev => {
           const newRuns = payload.dayState.runs;
           const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
+          // A true daily reset bumps resetAt strictly forward: adopt the remote
+          // day's overlays wholesale so the reset's empty maps clear ours. When
+          // resetAt is EQUAL (normal same-day concurrent editing across devices)
+          // we additively merge the staging checklist and substitution overlay
+          // per key/id instead of clobbering, so two devices each ticking a
+          // different item (or adding a different substitution) both survive —
+          // the same convergence model as the master-data list unions. An
+          // un-check / removal won't cross devices (the accepted union tradeoff,
+          // and these reset daily anyway).
+          const isReset = remoteResetAt > localResetAt;
+          const remoteStaged = payload.dayState.stagedItems ?? {};
+          const mergedStaged: Record<string, boolean> = isReset
+            ? remoteStaged
+            : (() => {
+                const out: Record<string, boolean> = { ...(prev.stagedItems ?? {}) };
+                for (const [k, val] of Object.entries(remoteStaged)) {
+                  out[k] = !!out[k] || !!val;
+                }
+                return out;
+              })();
+          const unionById = <T extends { id: string }>(a: readonly T[], b: readonly T[]): T[] => {
+            const byId = new Map<string, T>();
+            for (const x of a) byId.set(x.id, x);
+            for (const x of b) byId.set(x.id, x); // remote wins for the same id
+            return [...byId.values()];
+          };
+          const remoteSubs = payload.dayState.substitutions ?? [];
+          const remoteSubLog = payload.dayState.substitutionLog ?? [];
+          const mergedSubs = isReset ? remoteSubs : unionById(prev.substitutions ?? [], remoteSubs);
+          const mergedSubLog = isReset
+            ? remoteSubLog
+            : unionById(prev.substitutionLog ?? [], remoteSubLog).sort((x, y) => x.ts - y.ts);
           const newDs = {
             ...prev,
             runs: newRuns,
@@ -2958,15 +3054,9 @@ export default function Home() {
             shiftNotes: payload.dayState.shiftNotes ?? prev.shiftNotes,
             runToTime: payload.dayState.runToTime ?? prev.runToTime,
             resetAt: remoteResetAt > 0 ? remoteResetAt : prev.resetAt,
-            // Substitutions are an authoritative whole-day overlay: when we accept
-            // the remote day, accept its full substitution list (including an
-            // empty one, which is a remote "clear"). Don't merge — last writer of
-            // the accepted day wins, same as runs. The activity log rides along.
-            substitutions: payload.dayState.substitutions ?? [],
-            substitutionLog: payload.dayState.substitutionLog ?? [],
-            // Warehouse staging checklist rides along with the accepted day,
-            // same authoritative whole-map replacement as substitutions.
-            stagedItems: payload.dayState.stagedItems ?? {},
+            substitutions: mergedSubs,
+            substitutionLog: mergedSubLog,
+            stagedItems: mergedStaged,
           };
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
@@ -3061,16 +3151,10 @@ export default function Home() {
         }
       }
 
-      // ── Templates (remote wins for same id, local-only entries kept) ──
-      if (payload.templates && payload.templates.length > 0) {
-        const local = loadTemplates();
-        const remoteIds = new Set(payload.templates.map(t => t.id));
-        const merged = [...payload.templates, ...local.filter(t => !remoteIds.has(t.id))];
-        if (JSON.stringify(merged) !== JSON.stringify(local)) {
-          saveTemplates(merged);
-          setTemplates(merged);
-        }
-      }
+      // Templates are no longer reconciled from the sync payload — they are now
+      // facility-wide server master-data (see useRunTemplates). Merging them out
+      // of the additive day-state union here would resurrect server-deleted
+      // templates, so we intentionally ignore payload.templates on receive.
 
       // ── Simple list merges (union, no deletions) ──
       // Skip the setState (and the re-render it triggers) when the merged result is
@@ -3136,8 +3220,22 @@ export default function Home() {
       }
 
       // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
+      // Profiles are keyed `${brandLc}__${flavorLc}`. Like every other synced list
+      // they must honor the deletion/merge tombstones, or a profile for a deleted
+      // brand/flavor lingers in the blob and can resurrect (or seed) ghost data.
+      const profileKeyIsTombstoned = (k: string): boolean => {
+        const sep = k.indexOf("__");
+        if (sep < 0) return false;
+        const brandLc = k.slice(0, sep);
+        const flavorLc = k.slice(sep + 2);
+        if (deletedBrandSet.has(brandLc)) return true;
+        if ((deletedMap[`flavor:${brandLc}`] ?? []).includes(flavorLc)) return true;
+        if (tombSet.has(brandLc) || tombSet.has(flavorLc)) return true;
+        return false;
+      };
       if (payload.brandProfiles) {
         for (const [k, v] of Object.entries(payload.brandProfiles)) {
+          if (profileKeyIsTombstoned(k)) continue;
           try {
             // Strip mix recipe names from the sauce fields before saving
             const cleaned = { ...v };
@@ -3151,6 +3249,7 @@ export default function Home() {
       }
       if (payload.crustProfiles) {
         for (const [k, v] of Object.entries(payload.crustProfiles)) {
+          if (profileKeyIsTombstoned(k)) continue;
           try { localStorage.setItem(`run-calc-crust-profile-${k}`, JSON.stringify(v)); } catch {}
         }
       }
@@ -3309,7 +3408,7 @@ export default function Home() {
           for (const r of prevDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
             }
           }
           const finalDs: DayState = {
@@ -3389,6 +3488,7 @@ export default function Home() {
       body: JSON.stringify({ senderId: clientId.current, payload }),
     }).then(() => {
       pushAcknowledgedRef.current = true;
+      setSyncPushFailed(false);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
       if (sig !== undefined) lastSyncSigRef.current = sig;
@@ -3398,6 +3498,8 @@ export default function Home() {
       } else {
         // All retries exhausted — stop blocking remote state so other devices can still sync
         pushAcknowledgedRef.current = true;
+        // ...but tell the user their changes aren't backed up / shared yet.
+        setSyncPushFailed(true);
       }
     });
   }
@@ -3892,7 +3994,21 @@ export default function Home() {
   }
 
   function checkPin() {
-    const stored = localStorage.getItem(SUPERVISOR_PIN_KEY) ?? DEFAULT_SUPERVISOR_PIN;
+    // Resolve the facility PIN: live server value when loaded, else the offline
+    // cache, else the default. An empty resolved value ("") means "no gate" — we
+    // unlock without comparing. Using the same resolution offline ensures a PIN
+    // cleared on another device unlocks here too (not just when serverPin is live).
+    const stored =
+      (typeof serverPin === "string" ? serverPin : null) ??
+      localStorage.getItem(SUPERVISOR_PIN_KEY) ??
+      DEFAULT_SUPERVISOR_PIN;
+    if (stored === "") {
+      setRole("supervisor");
+      setShowPinDialog(false);
+      setPinInput("");
+      setPinError("");
+      return;
+    }
     if (pinInput === stored) {
       setRole("supervisor");
       setShowPinDialog(false);
@@ -3911,7 +4027,7 @@ export default function Home() {
     // from its stored values) before marking it ended.
     for (const r of dayState.runs) {
       if (r.id !== currentRunId && r.startedAt && !r.endedAt) {
-        void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => {});
+        void consumeRun(r.id, computeRunConsumptionLines(loadRunValues(r.id))).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
       }
     }
     const newRuns = dayState.runs.map((r, i) =>
@@ -3973,7 +4089,7 @@ export default function Home() {
     if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
     // Auto-deduct this run's materials from inventory (idempotent by runId;
     // no-op for any material that has no inventory item).
-    void consumeRun(currentRunId, computeRunConsumptionLines(cur)).catch(() => {});
+    void consumeRun(currentRunId, computeRunConsumptionLines(cur)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
     const newRuns = dayState.runs.map((r, i) =>
       i === dayState.currentIndex ? { ...r, pausedAt: undefined, endedAt: Date.now() } : r
     );
@@ -4630,14 +4746,28 @@ export default function Home() {
     const updated = [template, ...templates.filter(t => t.name !== trimmedName)].slice(0, MAX_TEMPLATES);
     setTemplates(updated);
     saveTemplates(updated);
-    schedulePush(dayStateRef.current);
+    cycleCountQc.setQueryData(["runTemplates"], updated);
+    saveRunTemplates(updated)
+      .then((saved) => {
+        setTemplates(saved);
+        saveTemplates(saved);
+        cycleCountQc.setQueryData(["runTemplates"], saved);
+      })
+      .catch(() => {});
   }
 
   function deleteTemplate(id: string) {
     const updated = templates.filter(t => t.id !== id);
     setTemplates(updated);
     saveTemplates(updated);
-    schedulePush(dayStateRef.current);
+    cycleCountQc.setQueryData(["runTemplates"], updated);
+    deleteRunTemplates([id])
+      .then((saved) => {
+        setTemplates(saved);
+        saveTemplates(saved);
+        cycleCountQc.setQueryData(["runTemplates"], saved);
+      })
+      .catch(() => {});
   }
 
   function applyTemplate(t: RunTemplate) {
@@ -5121,7 +5251,7 @@ export default function Home() {
           for (const r of storedDs.runs) {
             if (r.startedAt && !r.endedAt) {
               const vals = r.id === currentRunIdRef.current ? form.getValues() : loadRunValues(r.id);
-              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => {});
+              void consumeRun(r.id, computeRunConsumptionLines(vals)).catch(() => setWriteError("Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection."));
             }
           }
           // Auto-end any run that was still active when midnight hit
@@ -6832,9 +6962,39 @@ export default function Home() {
         const handlePinSave = () => {
           if (!newPin) { setPinChangeMsg("Enter a new PIN."); return; }
           if (newPin !== newPinConfirm) { setPinChangeMsg("PINs don't match."); return; }
-          localStorage.setItem(SUPERVISOR_PIN_KEY, newPin);
-          setNewPin(""); setNewPinConfirm("");
-          setPinChangeMsg("PIN updated successfully.");
+          updateSupervisorPin(newPin)
+            .then((saved) => {
+              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
+              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              setNewPin(""); setNewPinConfirm("");
+              setPinChangeMsg("PIN updated successfully.");
+            })
+            .catch((err) => {
+              setPinChangeMsg(
+                err instanceof Error && /\b403\b/.test(err.message)
+                  ? "Only a manager can change the supervisor PIN."
+                  : "Couldn't update the PIN. Try again.",
+              );
+            });
+        };
+
+        // Clear the facility PIN ("" = no gate, unlocked everywhere). Mirrors the
+        // mobile "Remove PIN lock" action; manager-gated server-side.
+        const handlePinClear = () => {
+          updateSupervisorPin("")
+            .then((saved) => {
+              try { localStorage.setItem(SUPERVISOR_PIN_KEY, saved); } catch {}
+              cycleCountQc.setQueryData(["supervisorPin"], saved);
+              setNewPin(""); setNewPinConfirm("");
+              setPinChangeMsg("PIN removed — settings are now unlocked.");
+            })
+            .catch((err) => {
+              setPinChangeMsg(
+                err instanceof Error && /\b403\b/.test(err.message)
+                  ? "Only a manager can change the supervisor PIN."
+                  : "Couldn't update the PIN. Try again.",
+              );
+            });
         };
 
         return (
@@ -7193,6 +7353,14 @@ export default function Home() {
                       className="w-full px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                       Save PIN
                     </button>
+                    {serverPin ? (
+                      <button type="button" onClick={handlePinClear}
+                        className="w-full px-4 py-2 rounded-md border border-border text-sm font-medium text-muted-foreground hover:text-foreground">
+                        Remove PIN lock
+                      </button>
+                    ) : (
+                      <p className="text-xs text-center text-muted-foreground">No PIN set — all settings are unlocked.</p>
+                    )}
                   </div>
                 )}
 
@@ -7962,8 +8130,8 @@ export default function Home() {
           <div className="print:hidden flex items-center gap-1.5 shrink-0">
             {/* Sync status dot */}
             <span
-              title={syncConnected ? "Sync connected" : isOnline ? "Reconnecting to sync…" : "Offline — changes saved locally"}
-              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${syncConnected ? "bg-emerald-500" : isOnline ? "bg-amber-400 animate-pulse" : "bg-zinc-500 animate-pulse"}`}
+              title={syncPushFailed ? "Not synced — last save to the server failed" : syncConnected ? "Sync connected" : isOnline ? "Reconnecting to sync…" : "Offline — changes saved locally"}
+              className={`h-2 w-2 rounded-full shrink-0 transition-colors ${syncPushFailed ? "bg-red-500 animate-pulse" : syncConnected ? "bg-emerald-500" : isOnline ? "bg-amber-400 animate-pulse" : "bg-zinc-500 animate-pulse"}`}
             />
             {/* Auto-save badge — hidden on xs to save space */}
             <span ref={savedFlashRef} style={{ opacity: 0, transition: "opacity 0.5s" }} className="hidden sm:flex text-[10px] font-semibold items-center gap-1 text-emerald-400 pointer-events-none">
@@ -8142,6 +8310,24 @@ export default function Home() {
 
         <Form {...form}>
           <form>
+            {(syncPushFailed || writeError) && (
+              <div className="print:hidden mb-3 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
+                <div className="flex-1 min-w-0">
+                  {syncPushFailed && (
+                    <p>Your latest changes haven't synced to the server. They're saved on this device, but other devices won't see them and they aren't backed up until the connection is restored.</p>
+                  )}
+                  {writeError && <p className={syncPushFailed ? "mt-1" : ""}>{writeError}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setSyncPushFailed(false); setWriteError(null); }}
+                  className="shrink-0 text-red-300 hover:text-red-100 text-xs font-semibold"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
             <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               {/* ─── RUN ─── */}

@@ -16,6 +16,7 @@ import GetStartedModal from "@/components/GetStartedModal";
 import GuidedTour from "@/components/GuidedTour";
 import ProactiveAlertBanner from "@/components/ProactiveAlertBanner";
 import SandboxBanner from "@/components/SandboxBanner";
+import SyncWriteErrorBanner from "@/components/SyncWriteErrorBanner";
 import { useGetStartedOverview } from "@workspace/onboarding";
 import { resetSandboxRequest, buildReorderDemandByKey } from "@/context/inventoryShared";
 import {
@@ -81,7 +82,8 @@ export default function TabLayout() {
   // hook owns cooldown + de-dup (see context/aiProactive.ts). Mounted here
   // (persistent across tab switches) to mirror the web hook in home.tsx
   // (replit.md parity).
-  const { allRuns, history, runToTime, scheduled, brandProfiles } = useRun();
+  const { allRuns, history, runToTime, scheduled, brandProfiles, writeError, dismissWriteError } =
+    useRun();
   const { alert: proactiveAlert, dismiss: dismissProactiveAlert } = useProactiveAlert({
     enabled: isManager,
     buildInput: () => {
@@ -296,6 +298,8 @@ export default function TabLayout() {
       </Tabs>
 
       <SandboxBanner visible={!!me?.sandbox} onReset={doSandboxReset} />
+
+      <SyncWriteErrorBanner message={writeError} onDismiss={dismissWriteError} />
 
       <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
 

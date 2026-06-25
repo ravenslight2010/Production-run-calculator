@@ -205,7 +205,7 @@ function rows(v: unknown): RecipeRow[] {
 
 // Builds mobile RunSettings from a web FormValues, preserving mobile-only fields
 // (e.g. doughBatchLbs) from the previous run's settings when present.
-function formValuesToSettings(
+export function formValuesToSettings(
   fv: WebFormValues | undefined,
   meta: WebRunMeta,
   prev: RunSettings | undefined,
@@ -488,14 +488,39 @@ export function applyPayloadToState(
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;
     if (ds.runToTime !== undefined) patch.runToTime = ds.runToTime;
-    // Substitutions are a today-only overlay: when the remote day is accepted,
-    // adopt its substitution list wholesale (web parity — replaced, not merged).
-    patch.substitutions = Array.isArray(ds.substitutions) ? ds.substitutions : [];
-    patch.substitutionLog = Array.isArray(ds.substitutionLog) ? ds.substitutionLog : [];
-    // Staging checklist is a today-only overlay too: adopt the accepted day's
-    // map wholesale (web parity — replaced, not merged).
-    patch.stagedItems =
+    // A true daily reset bumps resetAt strictly forward: adopt the remote day's
+    // overlays wholesale so the reset's empty maps clear ours. When resetAt is
+    // EQUAL (normal same-day concurrent editing across devices) additively merge
+    // the substitution overlay (by id) and the staging checklist (per key) so two
+    // devices each ticking a different item / adding a different substitution both
+    // survive — same convergence model as the master-data list unions. An
+    // un-check / removal won't cross devices (accepted union tradeoff; resets daily).
+    const isReset = remoteResetAt > prev.resetAt;
+    const remoteSubs = Array.isArray(ds.substitutions) ? ds.substitutions : [];
+    const remoteSubLog = Array.isArray(ds.substitutionLog) ? ds.substitutionLog : [];
+    const unionById = <T extends { id: string }>(a: readonly T[], b: readonly T[]): T[] => {
+      const byId = new Map<string, T>();
+      for (const x of a) byId.set(x.id, x);
+      for (const x of b) byId.set(x.id, x); // remote wins for the same id
+      return [...byId.values()];
+    };
+    patch.substitutions = isReset
+      ? remoteSubs
+      : unionById(prev.substitutions ?? [], remoteSubs);
+    patch.substitutionLog = isReset
+      ? remoteSubLog
+      : unionById(prev.substitutionLog ?? [], remoteSubLog).sort((x, y) => x.ts - y.ts);
+    const remoteStaged =
       ds.stagedItems && typeof ds.stagedItems === "object" ? ds.stagedItems : {};
+    if (isReset) {
+      patch.stagedItems = remoteStaged;
+    } else {
+      const out: Record<string, boolean> = { ...(prev.stagedItems ?? {}) };
+      for (const [k, val] of Object.entries(remoteStaged)) {
+        out[k] = !!out[k] || !!val;
+      }
+      patch.stagedItems = out;
+    }
     patch.resetAt = Math.max(prev.resetAt, remoteResetAt);
     patch.date = todayStr();
   }

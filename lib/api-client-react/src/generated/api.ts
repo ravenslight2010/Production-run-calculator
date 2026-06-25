@@ -44,6 +44,7 @@ import type {
   DeleteFreezerPullItemsInput,
   DeleteMixesInput,
   DeleteProductionRulesInput,
+  DeleteRunTemplatesInput,
   DeniedMergeList,
   FacilityKnowledgeList,
   FillMissingInput,
@@ -111,6 +112,7 @@ import type {
   RestockInput,
   RoleCapabilitiesUpdate,
   RoleDefinition,
+  RunTemplateList,
   SaveAiCorrectionsInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
@@ -124,6 +126,7 @@ import type {
   SavePhotoAliasesInput,
   SavePremixSheetInput,
   SaveProductionRulesInput,
+  SaveRunTemplatesInput,
   SaveSpecImportAliasesInput,
   SaveSpecSheetInput,
   SavedPremixSheetList,
@@ -139,6 +142,7 @@ import type {
   SuggestMergesResult,
   SummaryInput,
   SummaryResult,
+  SupervisorPin,
   TransferInput,
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
@@ -5427,6 +5431,378 @@ export const useDeleteFreezerPullItems = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteFreezerPullItemsMutationOptions(options));
+    }
+
+export const getListRunTemplatesUrl = () => {
+
+
+
+
+  return `/api/run-templates`
+}
+
+/**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
+ * @summary List facility-wide run templates
+ */
+export const listRunTemplates = async ( options?: RequestInit): Promise<RunTemplateList> => {
+
+  return customFetch<RunTemplateList>(getListRunTemplatesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRunTemplatesQueryKey = () => {
+    return [
+    `/api/run-templates`
+    ] as const;
+    }
+
+
+export const getListRunTemplatesQueryOptions = <TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRunTemplatesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRunTemplates>>> = ({ signal }) => listRunTemplates({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListRunTemplatesQueryResult = NonNullable<Awaited<ReturnType<typeof listRunTemplates>>>
+export type ListRunTemplatesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List facility-wide run templates
+ */
+
+export function useListRunTemplates<TData = Awaited<ReturnType<typeof listRunTemplates>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listRunTemplates>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListRunTemplatesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveRunTemplatesUrl = () => {
+
+
+
+
+  return `/api/run-templates`
+}
+
+/**
+ * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * @summary Create or update run templates
+ */
+export const saveRunTemplates = async (saveRunTemplatesInput: SaveRunTemplatesInput, options?: RequestInit): Promise<RunTemplateList> => {
+
+  return customFetch<RunTemplateList>(getSaveRunTemplatesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveRunTemplatesInput,)
+  }
+);}
+
+
+
+
+export const getSaveRunTemplatesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRunTemplates>>, TError,{data: BodyType<SaveRunTemplatesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveRunTemplates>>, TError,{data: BodyType<SaveRunTemplatesInput>}, TContext> => {
+
+const mutationKey = ['saveRunTemplates'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveRunTemplates>>, {data: BodyType<SaveRunTemplatesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveRunTemplates(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveRunTemplatesMutationResult = NonNullable<Awaited<ReturnType<typeof saveRunTemplates>>>
+    export type SaveRunTemplatesMutationBody = BodyType<SaveRunTemplatesInput>
+    export type SaveRunTemplatesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update run templates
+ */
+export const useSaveRunTemplates = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRunTemplates>>, TError,{data: BodyType<SaveRunTemplatesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveRunTemplates>>,
+        TError,
+        {data: BodyType<SaveRunTemplatesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveRunTemplatesMutationOptions(options));
+    }
+
+export const getDeleteRunTemplatesUrl = () => {
+
+
+
+
+  return `/api/run-templates`
+}
+
+/**
+ * Removes a batch of run templates by id. Any signed-in user may delete.
+ * @summary Delete run templates by id
+ */
+export const deleteRunTemplates = async (deleteRunTemplatesInput: DeleteRunTemplatesInput, options?: RequestInit): Promise<RunTemplateList> => {
+
+  return customFetch<RunTemplateList>(getDeleteRunTemplatesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteRunTemplatesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteRunTemplatesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRunTemplates>>, TError,{data: BodyType<DeleteRunTemplatesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteRunTemplates>>, TError,{data: BodyType<DeleteRunTemplatesInput>}, TContext> => {
+
+const mutationKey = ['deleteRunTemplates'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRunTemplates>>, {data: BodyType<DeleteRunTemplatesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteRunTemplates(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteRunTemplatesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteRunTemplates>>>
+    export type DeleteRunTemplatesMutationBody = BodyType<DeleteRunTemplatesInput>
+    export type DeleteRunTemplatesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete run templates by id
+ */
+export const useDeleteRunTemplates = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRunTemplates>>, TError,{data: BodyType<DeleteRunTemplatesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteRunTemplates>>,
+        TError,
+        {data: BodyType<DeleteRunTemplatesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteRunTemplatesMutationOptions(options));
+    }
+
+export const getGetSupervisorPinUrl = () => {
+
+
+
+
+  return `/api/supervisor-pin`
+}
+
+/**
+ * Returns the facility supervisor PIN. Reading is available to any signed-in user so both apps can perform the local PIN compare that gates supervisor actions (the PIN is a low-security convenience gate, not a secret).
+ * @summary Get the facility-wide supervisor PIN
+ */
+export const getSupervisorPin = async ( options?: RequestInit): Promise<SupervisorPin> => {
+
+  return customFetch<SupervisorPin>(getGetSupervisorPinUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSupervisorPinQueryKey = () => {
+    return [
+    `/api/supervisor-pin`
+    ] as const;
+    }
+
+
+export const getGetSupervisorPinQueryOptions = <TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSupervisorPinQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSupervisorPin>>> = ({ signal }) => getSupervisorPin({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSupervisorPinQueryResult = NonNullable<Awaited<ReturnType<typeof getSupervisorPin>>>
+export type GetSupervisorPinQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the facility-wide supervisor PIN
+ */
+
+export function useGetSupervisorPin<TData = Awaited<ReturnType<typeof getSupervisorPin>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSupervisorPin>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSupervisorPinQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getUpdateSupervisorPinUrl = () => {
+
+
+
+
+  return `/api/supervisor-pin`
+}
+
+/**
+ * Sets the facility supervisor PIN. Manager capability required so the facility-wide gate isn't changed out from under everyone by any user.
+ * @summary Update the facility-wide supervisor PIN (manager only)
+ */
+export const updateSupervisorPin = async (supervisorPin: SupervisorPin, options?: RequestInit): Promise<SupervisorPin> => {
+
+  return customFetch<SupervisorPin>(getUpdateSupervisorPinUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      supervisorPin,)
+  }
+);}
+
+
+
+
+export const getUpdateSupervisorPinMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSupervisorPin>>, TError,{data: BodyType<SupervisorPin>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSupervisorPin>>, TError,{data: BodyType<SupervisorPin>}, TContext> => {
+
+const mutationKey = ['updateSupervisorPin'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSupervisorPin>>, {data: BodyType<SupervisorPin>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateSupervisorPin(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateSupervisorPinMutationResult = NonNullable<Awaited<ReturnType<typeof updateSupervisorPin>>>
+    export type UpdateSupervisorPinMutationBody = BodyType<SupervisorPin>
+    export type UpdateSupervisorPinMutationError = ErrorType<void>
+
+    /**
+ * @summary Update the facility-wide supervisor PIN (manager only)
+ */
+export const useUpdateSupervisorPin = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSupervisorPin>>, TError,{data: BodyType<SupervisorPin>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSupervisorPin>>,
+        TError,
+        {data: BodyType<SupervisorPin>},
+        TContext
+      > => {
+      return useMutation(getUpdateSupervisorPinMutationOptions(options));
     }
 
 export const getListMixesUrl = () => {

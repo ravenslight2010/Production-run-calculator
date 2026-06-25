@@ -30,6 +30,16 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   type CandidateItem,
   type InventoryItem,
   type InventoryLot,
@@ -548,6 +558,7 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: Inve
   const [showHistory, setShowHistory] = useState(false);
   const [editThreshold, setEditThreshold] = useState(false);
   const [thresholdVal, setThresholdVal] = useState(String(item.reorderThreshold));
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -707,15 +718,42 @@ function ItemDetail({ item, locations, onChanged, expirySoonDays }: { item: Inve
           <button
             type="button"
             disabled={busy}
-            onClick={() => {
-              if (confirm(`Delete "${item.name}" and all its lots? This cannot be undone.`)) {
-                run(() => deleteInventoryItem(item.id));
-              }
-            }}
+            onClick={() => setConfirmDelete(true)}
             className="flex items-center gap-1.5 text-xs font-semibold text-red-500 hover:text-red-400 disabled:opacity-50"
           >
             <Trash2 className="w-3.5 h-3.5" /> Delete item
           </button>
+          <AlertDialog
+            open={confirmDelete}
+            onOpenChange={(open) => {
+              if (!open) setConfirmDelete(false);
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete item?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This permanently removes{" "}
+                  <span className="font-medium text-foreground">{item.name}</span> and all
+                  its lots. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setConfirmDelete(false);
+                    run(() => deleteInventoryItem(item.id));
+                  }}
+                  disabled={busy}
+                >
+                  Delete item
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       )}
     </div>
@@ -926,6 +964,7 @@ function LocationsCard({
   const [error, setError] = useState<string | null>(null);
   const [editId, setEditId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<InventoryLocation | null>(null);
 
   async function run(fn: () => Promise<unknown>) {
     setBusy(true);
@@ -1023,11 +1062,7 @@ function LocationsCard({
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => {
-                          if (confirm(`Delete location "${loc.name}"?`)) {
-                            run(() => deleteInventoryLocation(loc.id));
-                          }
-                        }}
+                        onClick={() => setDeleteTarget(loc)}
                         className="text-red-500 hover:text-red-400 disabled:opacity-50"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1064,6 +1099,38 @@ function LocationsCard({
           </p>
         </CardContent>
       )}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete location?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes{" "}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span>.
+              This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              onClick={(e) => {
+                e.preventDefault();
+                const target = deleteTarget;
+                setDeleteTarget(null);
+                if (target) run(() => deleteInventoryLocation(target.id));
+              }}
+              disabled={busy}
+            >
+              Delete location
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

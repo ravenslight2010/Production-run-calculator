@@ -1975,6 +1975,91 @@ export const DeleteFreezerPullItemsResponse = zod.object({
 
 
 /**
+ * Returns every facility-wide saved run template (a named run-setup preset). These are global master-data (not part of the per-day sync payload). Any signed-in user can read and write them — templates are a shared convenience, not a policy control.
+ * @summary List facility-wide run templates
+ */
+export const ListRunTemplatesResponse = zod.object({
+  "templates": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable template name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
+})
+
+
+/**
+ * Upserts a batch of run templates by id. Each template is normalized and validated server-side; malformed templates are dropped. Any signed-in user may save (matching the previous local behavior where anyone could create a template).
+ * @summary Create or update run templates
+ */
+export const SaveRunTemplatesBody = zod.object({
+  "templates": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable template name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).')).describe('The batch of run templates to create or update (by id)')
+})
+
+export const SaveRunTemplatesResponse = zod.object({
+  "templates": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable template name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
+})
+
+
+/**
+ * Removes a batch of run templates by id. Any signed-in user may delete.
+ * @summary Delete run templates by id
+ */
+export const DeleteRunTemplatesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the run templates to delete')
+})
+
+export const DeleteRunTemplatesResponse = zod.object({
+  "templates": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Human-readable template name'),
+  "values": zod.record(zod.string(), zod.unknown()).describe('Run configuration (cross-platform wire shape; opaque to the server)'),
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "createdAt": zod.string().describe('ISO-8601 timestamp the template was created')
+}).describe('A facility-wide saved run-setup template. `values` holds the run configuration in the shared cross-platform wire shape and is opaque to the server (each app maps it to\/from its own local form shape).'))
+})
+
+
+/**
+ * Returns the facility supervisor PIN. Reading is available to any signed-in user so both apps can perform the local PIN compare that gates supervisor actions (the PIN is a low-security convenience gate, not a secret).
+ * @summary Get the facility-wide supervisor PIN
+ */
+export const GetSupervisorPinResponse = zod.object({
+  "pin": zod.string().describe('The facility supervisor PIN')
+})
+
+
+/**
+ * Sets the facility supervisor PIN. Manager capability required so the facility-wide gate isn't changed out from under everyone by any user.
+ * @summary Update the facility-wide supervisor PIN (manager only)
+ */
+export const UpdateSupervisorPinBody = zod.object({
+  "pin": zod.string().describe('The facility supervisor PIN')
+})
+
+export const UpdateSupervisorPinResponse = zod.object({
+  "pin": zod.string().describe('The facility supervisor PIN')
+})
+
+
+/**
  * Returns every factory-wide mix (a pre-blended recipe — veggie/topping, cheese, sauce, … — made ahead for a given product). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the mix make-day plan; editing is manager-only.
  * @summary List manager-defined mixes
  */

@@ -28,3 +28,5 @@ export * from "./mixes";
 export * from "./cycleCountSchedules";
 export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";
+export * from "./runTemplates";
+export * from "./supervisorPinSettings";

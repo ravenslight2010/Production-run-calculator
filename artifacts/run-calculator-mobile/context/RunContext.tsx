@@ -31,7 +31,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { appStateToPayload, applyPayloadToState, flavorNamespace } from "./sync/mapping";
+import {
+  appStateToPayload,
+  applyPayloadToState,
+  flavorNamespace,
+  formValuesToSettings,
+  runToFormValues,
+} from "./sync/mapping";
 import {
   fetchToday,
   getApiBaseUrl,
@@ -40,7 +46,17 @@ import {
   putToday,
   type SyncStream,
 } from "./sync/client";
-import type { SyncPayload } from "./sync/payloadTypes";
+import type { SyncPayload, WebRunMeta } from "./sync/payloadTypes";
+import {
+  fetchRunTemplates,
+  saveRunTemplates as saveRemoteTemplates,
+  deleteRunTemplates as deleteRemoteTemplates,
+  type RemoteRunTemplate,
+} from "./runTemplatesApi";
+import {
+  fetchSupervisorPin,
+  updateSupervisorPin as updateRemotePin,
+} from "./supervisorPinApi";
 import {
   computeRunConsumptionLines,
   consumeRunInventory,
@@ -452,16 +468,21 @@ function closeOutRun(run: RunState, boundaryMs: number): RunState {
 function consumeOpenRunsForRollover(
   runs: RunState[],
   subs: IngredientSubstitution[] = [],
+  onError?: () => void,
 ): void {
   for (const r of runs) {
     if (r.startedAt != null && r.endedAt == null) {
       void consumeRunInventory(
         r.id,
         computeRunConsumptionLines(overlaySettings(r.settings, subs)),
-      ).catch(() => {});
+      ).catch(() => onError?.());
     }
   }
 }
+
+// Shared message for a failed inventory-consume write (web parity wording).
+const CONSUME_WRITE_ERR =
+  "Couldn't record a finished run's inventory use on the server — stock counts may be out of sync. Check your connection.";
 
 // Build the fresh next-day state from the current (already-normalized) state:
 // archive the prior day's runs frozen at local midnight, start a single empty
@@ -859,6 +880,45 @@ export interface RunTemplate {
   name: string;
   settings: RunSettings;
   createdAt: number;
+}
+
+// Templates are stored server-side in the cross-platform wire shape
+// (RemoteRunTemplate: WebFormValues + ISO createdAt). These convert between the
+// wire shape and the mobile RunTemplate (RunSettings + epoch createdAt) so the
+// rest of the app keeps working in mobile's native shape. Defined below where
+// DEFAULT_SETTINGS/DEFAULT_PROGRESS are available.
+function mobileTemplateToRemote(tpl: RunTemplate): RemoteRunTemplate {
+  const values = runToFormValues({
+    id: tpl.id,
+    settings: tpl.settings,
+    progress: DEFAULT_PROGRESS,
+    stoppages: [],
+    isRunning: false,
+  });
+  const remote: RemoteRunTemplate = {
+    id: tpl.id,
+    name: tpl.name,
+    values,
+    createdAt: new Date(tpl.createdAt).toISOString(),
+  };
+  if (tpl.settings.brand) remote.brand = tpl.settings.brand;
+  if (tpl.settings.flavor) remote.flavor = tpl.settings.flavor;
+  return remote;
+}
+
+function remoteTemplateToMobile(rt: RemoteRunTemplate): RunTemplate {
+  const meta = {
+    id: rt.id,
+    brand: rt.brand ?? "",
+    flavor: rt.flavor ?? "",
+  } as WebRunMeta;
+  const ts = Date.parse(rt.createdAt);
+  return {
+    id: rt.id,
+    name: rt.name,
+    settings: formValuesToSettings(rt.values, meta, undefined),
+    createdAt: Number.isFinite(ts) ? ts : Date.now(),
+  };
 }
 
 export interface HistoryDay {
@@ -1436,7 +1496,7 @@ interface RunContextValue {
   setRunToTime: (t: string) => void;
   // Supervisor PIN
   supervisorPin: string;
-  setSupervisorPin: (pin: string) => void;
+  setSupervisorPin: (pin: string) => Promise<void>;
   // Master data
   brands: string[];
   brandFlavors: Record<string, string[]>;
@@ -1496,6 +1556,10 @@ interface RunContextValue {
   applyScheduledDay: (date: string) => boolean;
   // Live multi-device sync connection status.
   syncStatus: SyncStatus;
+  // Set when an inventory-consume write to the server failed (best-effort write
+  // that previously failed silently). Surfaced as a dismissible banner.
+  writeError: string | null;
+  dismissWriteError: () => void;
 }
 
 const RunContext = createContext<RunContextValue | null>(null);
@@ -1727,6 +1791,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
   // ── Live-sync state/refs ───────────────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const dismissWriteError = useCallback(() => setWriteError(null), []);
   const [bootDone, setBootDone] = useState(false);
   const appStateRef = useRef(appState);
   appStateRef.current = appState;
@@ -1773,7 +1839,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
                 runs: parsed.runs.map(normalizeRun),
                 history,
               };
-              consumeOpenRunsForRollover(current.runs, current.substitutions ?? []);
+              consumeOpenRunsForRollover(current.runs, current.substitutions ?? [], () => setWriteError(CONSUME_WRITE_ERR));
               const next = buildNextDayState(current, today);
               setAppState(next);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -1811,7 +1877,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       const cur = appStateRef.current;
       const today = todayStr();
       if (!cur.date || cur.date === today) return;
-      consumeOpenRunsForRollover(cur.runs, cur.substitutions ?? []);
+      consumeOpenRunsForRollover(cur.runs, cur.substitutions ?? [], () => setWriteError(CONSUME_WRITE_ERR));
       const next = buildNextDayState(cur, today);
       setAppState(next);
       void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
@@ -1851,6 +1917,22 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     }
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, []);
+
+  // Reflect the server's canonical template list into local state + cache. The
+  // server is the source of truth, so this replaces (does not merge) the local
+  // list. Skips the setState when nothing changed to avoid a re-render storm.
+  const applyRemoteTemplates = useCallback(
+    (remote: RemoteRunTemplate[]) => {
+      const mapped = remote.map(remoteTemplateToMobile).slice(0, MAX_TEMPLATES);
+      setAppState((prev) => {
+        if (JSON.stringify(prev.templates) === JSON.stringify(mapped)) return prev;
+        const next = { ...prev, templates: mapped };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
 
   // One-time seed of the imported pizza-spec presets and dough recipes after
   // boot. Both are additive and marker-guarded so user-deleted brands/flavors/
@@ -2065,6 +2147,65 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     };
   }, [bootDone, doPush, persistNow]);
 
+  // ── Facility-wide run templates + supervisor PIN (server master-data) ───────
+  // These used to be per-device (AsyncStorage only) so they never followed the
+  // facility. They are now server-side, fetched here and reconciled into local
+  // state (which stays the display/offline cache). Templates: one-time migration
+  // seeds the server from local if the server is empty. PIN: NO auto-migration
+  // (default "1234" on both sides — pushing would clobber another device's PIN).
+  // Mirrors the web home.tsx reconciliation (replit.md parity). Best-effort and
+  // fail-safe: a failed fetch leaves the local cache untouched.
+  const templatesMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!bootDone) return;
+    if (!getApiBaseUrl()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const remote = await fetchRunTemplates();
+        if (cancelled) return;
+        const localTemplates = appStateRef.current.templates;
+        if (
+          !templatesMigratedRef.current &&
+          remote.length === 0 &&
+          localTemplates.length > 0
+        ) {
+          templatesMigratedRef.current = true;
+          const saved = await saveRemoteTemplates(
+            localTemplates.map(mobileTemplateToRemote),
+          );
+          if (cancelled) return;
+          applyRemoteTemplates(saved);
+        } else {
+          templatesMigratedRef.current = true;
+          applyRemoteTemplates(remote);
+        }
+      } catch {
+        // offline / not signed in — keep the local cache.
+      }
+      if (cancelled) return;
+      try {
+        const pin = await fetchSupervisorPin();
+        // An empty string is a valid facility value ("no PIN / unlocked"), so we
+        // only bail on a non-string (offline / not signed in). Applying "" lets a
+        // PIN cleared on another device propagate here and unlock the Setup tab.
+        if (cancelled || typeof pin !== "string") return;
+        setAppState((prev) => {
+          if (prev.supervisorPin === pin) return prev;
+          const next = { ...prev, supervisorPin: pin };
+          persist(next);
+          return next;
+        });
+      } catch {
+        // offline / not signed in — keep the local PIN.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootDone]);
+
   // Change-watcher: push local edits. The signature compare skips no-op renders
   // and echoes of just-applied remote state (whose signature was pre-recorded).
   useEffect(() => {
@@ -2149,7 +2290,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             void consumeRunInventory(
               r.id,
               computeRunConsumptionLines(overlaySettings(r.settings, prev.substitutions ?? [])),
-            ).catch(() => {});
+            ).catch(() => setWriteError(CONSUME_WRITE_ERR));
           }
         });
         const runs = prev.runs.map((r, i) =>
@@ -2175,7 +2316,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         void consumeRunInventory(
           r.id,
           computeRunConsumptionLines(overlaySettings(r.settings, appStateRef.current.substitutions ?? [])),
-        ).catch(() => {});
+        ).catch(() => setWriteError(CONSUME_WRITE_ERR));
         return { ...r, isRunning: false, endedAt: Date.now() };
       }),
     [updateCurrentRun],
@@ -2581,6 +2722,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
   const saveTemplate = useCallback(
     (name: string) => {
+      let toPush: RunTemplate[] | null = null;
       setAppState((prev) => {
         const cur = prev.runs[prev.currentIndex];
         const tpl: RunTemplate = {
@@ -2589,15 +2731,22 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           settings: { ...cur.settings },
           createdAt: Date.now(),
         };
-        const next = {
-          ...prev,
-          templates: [tpl, ...prev.templates].slice(0, MAX_TEMPLATES),
-        };
+        const templates = [tpl, ...prev.templates].slice(0, MAX_TEMPLATES);
+        toPush = templates;
+        const next = { ...prev, templates };
         persist(next);
         return next;
       });
+      // Write through to the facility-wide server list, then reconcile with the
+      // server's canonical response. Best-effort: optimistic local state stands
+      // if the push fails (offline).
+      if (toPush) {
+        saveRemoteTemplates((toPush as RunTemplate[]).map(mobileTemplateToRemote))
+          .then(applyRemoteTemplates)
+          .catch(() => {});
+      }
     },
-    [persist],
+    [persist, applyRemoteTemplates],
   );
 
   const applyTemplate = useCallback(
@@ -2628,8 +2777,10 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+      // Delete on the facility-wide server list too, then reconcile.
+      deleteRemoteTemplates([id]).then(applyRemoteTemplates).catch(() => {});
     },
-    [persist],
+    [persist, applyRemoteTemplates],
   );
 
   const setAutoTrack = useCallback(
@@ -2695,13 +2846,51 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  // The supervisor PIN is a facility-wide server setting. Changing it is
+  // manager-gated server-side, so we optimistically apply locally for a snappy
+  // UI, push to the server, then reconcile with the server's canonical value. If
+  // the push fails (e.g. a non-manager → 403, or offline) we re-fetch the
+  // canonical value and rethrow so the caller can surface the reason. An empty
+  // PIN is a valid "no gate" value.
+  //
+  // pinOpRef makes this last-write-wins: each call takes a monotonic token and
+  // only the latest in-flight op is allowed to touch state. This prevents a
+  // stale/slow request (or its failure handler) from clobbering a newer value —
+  // and we never revert to a captured local snapshot (which could be stale vs. a
+  // reconciliation poll that landed mid-flight); we re-read the server instead.
+  const pinOpRef = useRef(0);
   const setSupervisorPin = useCallback(
-    (pin: string) => {
+    async (pin: string) => {
+      const op = ++pinOpRef.current;
       setAppState((prev) => {
         const next = { ...prev, supervisorPin: pin };
         persist(next);
         return next;
       });
+      const applyIfLatest = (value: string) => {
+        if (pinOpRef.current !== op) return;
+        setAppState((prev) => {
+          if (prev.supervisorPin === value) return prev;
+          const next = { ...prev, supervisorPin: value };
+          persist(next);
+          return next;
+        });
+      };
+      try {
+        const saved = await updateRemotePin(pin);
+        applyIfLatest(saved);
+      } catch (err) {
+        // Don't revert to a captured snapshot (a reconciliation poll may have
+        // moved the value); re-read the canonical server value instead. If that
+        // also fails (offline), leave the optimistic value for the next poll.
+        try {
+          const canonical = await fetchSupervisorPin();
+          if (typeof canonical === "string") applyIfLatest(canonical);
+        } catch {
+          // offline — reconciliation effect will heal on reconnect.
+        }
+        throw err;
+      }
     },
     [persist],
   );
@@ -3730,9 +3919,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         moveScheduledRun,
         applyScheduledDay,
         syncStatus,
+        writeError,
+        dismissWriteError,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [appState, currentRun, syncStatus],
+    [appState, currentRun, syncStatus, writeError],
   );
 
   return (

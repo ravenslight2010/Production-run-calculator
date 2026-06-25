@@ -836,6 +836,7 @@ export default function MasterDataScreen() {
   const canApproveResets = hasCapability("approve-password-resets");
 
   const [pinDraft, setPinDraft] = useState("");
+  const [pinMsg, setPinMsg] = useState("");
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const [importOpen, setImportOpen] = useState(false);
 
@@ -1679,11 +1680,23 @@ export default function MasterDataScreen() {
             />
             <Pressable
               onPress={() => {
-                setSupervisorPin(pinDraft.trim());
-                setPinDraft("");
-                Haptics.notificationAsync(
-                  Haptics.NotificationFeedbackType.Success,
-                );
+                const next = pinDraft.trim();
+                setPinMsg("");
+                setSupervisorPin(next)
+                  .then(() => {
+                    setPinDraft("");
+                    setPinMsg("PIN updated.");
+                    Haptics.notificationAsync(
+                      Haptics.NotificationFeedbackType.Success,
+                    );
+                  })
+                  .catch((err: unknown) => {
+                    setPinMsg(
+                      err instanceof Error && /\b403\b/.test(err.message)
+                        ? "Only a manager can change the supervisor PIN."
+                        : "Couldn't update the PIN. Check your connection.",
+                    );
+                  });
               }}
               disabled={!pinDraft.trim()}
               style={({ pressed }) => [
@@ -1704,8 +1717,19 @@ export default function MasterDataScreen() {
           {supervisorPin ? (
             <Pressable
               onPress={() => {
-                setSupervisorPin("");
-                tap();
+                setPinMsg("");
+                setSupervisorPin("")
+                  .then(() => {
+                    setPinMsg("PIN removed — settings are now unlocked.");
+                    tap();
+                  })
+                  .catch((err: unknown) => {
+                    setPinMsg(
+                      err instanceof Error && /\b403\b/.test(err.message)
+                        ? "Only a manager can change the supervisor PIN."
+                        : "Couldn't update the PIN. Check your connection.",
+                    );
+                  });
               }}
               style={({ pressed }) => [
                 styles.clearPinBtn,
@@ -1717,6 +1741,11 @@ export default function MasterDataScreen() {
                 Remove PIN lock
               </Text>
             </Pressable>
+          ) : null}
+          {pinMsg ? (
+            <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+              {pinMsg}
+            </Text>
           ) : null}
         </CardSection>
 

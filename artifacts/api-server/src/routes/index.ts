@@ -22,6 +22,8 @@ import productionRulesRouter from "./productionRules";
 import freezerPullItemsRouter from "./freezerPullItems";
 import mixesRouter from "./mixes";
 import cycleCountSchedulesRouter from "./cycleCountSchedules";
+import runTemplatesRouter from "./runTemplates";
+import supervisorPinRouter from "./supervisorPin";
 import sandboxRouter from "./sandbox";
 import { requireAuth } from "../middlewares/requireAuth";
 import { noStoreMiddleware } from "../lib/cacheControl";
@@ -67,6 +69,8 @@ router.use(productionRulesRouter);
 router.use(freezerPullItemsRouter);
 router.use(mixesRouter);
 router.use(cycleCountSchedulesRouter);
+router.use(runTemplatesRouter);
+router.use(supervisorPinRouter);
 router.use(sandboxRouter);
 
 export default router;

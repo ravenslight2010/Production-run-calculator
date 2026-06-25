@@ -28,6 +28,10 @@ tags:
     description: Manager-defined factory-wide production rules
   - name: aiMemory
     description: Shared AI memory (facility knowledge + per-user conversation history)
+  - name: runTemplates
+    description: Facility-wide saved run-setup templates
+  - name: supervisorPin
+    description: Facility-wide supervisor PIN setting
 paths:
   /healthz:
     get:
@@ -1754,6 +1758,111 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FreezerPullItemList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
+  /run-templates:
+    get:
+      operationId: listRunTemplates
+      tags: [runTemplates]
+      summary: List facility-wide run templates
+      description: >-
+        Returns every facility-wide saved run template (a named run-setup
+        preset). These are global master-data (not part of the per-day sync
+        payload). Any signed-in user can read and write them — templates are a
+        shared convenience, not a policy control.
+      responses:
+        "200":
+          description: All run templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunTemplateList"
+    post:
+      operationId: saveRunTemplates
+      tags: [runTemplates]
+      summary: Create or update run templates
+      description: >-
+        Upserts a batch of run templates by id. Each template is normalized and
+        validated server-side; malformed templates are dropped. Any signed-in
+        user may save (matching the previous local behavior where anyone could
+        create a template).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveRunTemplatesInput"
+      responses:
+        "200":
+          description: The full updated template list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunTemplateList"
+        "400":
+          description: Invalid input
+    delete:
+      operationId: deleteRunTemplates
+      tags: [runTemplates]
+      summary: Delete run templates by id
+      description: >-
+        Removes a batch of run templates by id. Any signed-in user may delete.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteRunTemplatesInput"
+      responses:
+        "200":
+          description: The full updated template list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunTemplateList"
+        "400":
+          description: Invalid input
+
+  /supervisor-pin:
+    get:
+      operationId: getSupervisorPin
+      tags: [supervisorPin]
+      summary: Get the facility-wide supervisor PIN
+      description: >-
+        Returns the facility supervisor PIN. Reading is available to any
+        signed-in user so both apps can perform the local PIN compare that gates
+        supervisor actions (the PIN is a low-security convenience gate, not a
+        secret).
+      responses:
+        "200":
+          description: The current supervisor PIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupervisorPin"
+    put:
+      operationId: updateSupervisorPin
+      tags: [supervisorPin]
+      summary: Update the facility-wide supervisor PIN (manager only)
+      description: >-
+        Sets the facility supervisor PIN. Manager capability required so the
+        facility-wide gate isn't changed out from under everyone by any user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SupervisorPin"
+      responses:
+        "200":
+          description: The updated supervisor PIN
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupervisorPin"
         "400":
           description: Invalid input
         "403":
@@ -6121,6 +6230,77 @@ components:
           description: The ids of the freezer-pull items to delete
           items:
             type: string
+
+    RunTemplate:
+      type: object
+      description: >-
+        A facility-wide saved run-setup template. `values` holds the run
+        configuration in the shared cross-platform wire shape and is opaque to
+        the server (each app maps it to/from its own local form shape).
+      required:
+        - id
+        - name
+        - values
+        - createdAt
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Human-readable template name
+        values:
+          type: object
+          additionalProperties: true
+          description: Run configuration (cross-platform wire shape; opaque to the server)
+        brand:
+          type: string
+        flavor:
+          type: string
+        createdAt:
+          type: string
+          description: ISO-8601 timestamp the template was created
+
+    RunTemplateList:
+      type: object
+      required:
+        - templates
+      properties:
+        templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunTemplate"
+
+    SaveRunTemplatesInput:
+      type: object
+      required:
+        - templates
+      properties:
+        templates:
+          type: array
+          description: The batch of run templates to create or update (by id)
+          items:
+            $ref: "#/components/schemas/RunTemplate"
+
+    DeleteRunTemplatesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the run templates to delete
+          items:
+            type: string
+
+    SupervisorPin:
+      type: object
+      required:
+        - pin
+      properties:
+        pin:
+          type: string
+          description: The facility supervisor PIN
 
     MixComponent:
       type: object
