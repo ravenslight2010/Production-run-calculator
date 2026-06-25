@@ -17,6 +17,15 @@ function isValidDate(s: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+// "Today" for scheduling is the CLIENT's local date, not the server's. The app
+// is driven by client-local midnight, but the server runs in UTC in production,
+// so prefer the client-supplied `today` query param and fall back to the server
+// date only when it's absent or malformed.
+function clientToday(req: Request): string {
+  const t = req.query.today;
+  return typeof t === "string" && isValidDate(t) ? t : todayStr();
+}
+
 // Only ever push to clients watching the SAME data scope, so a sandbox writer's
 // state never streams into a live watcher's UI (or vice versa).
 function broadcast(data: unknown, senderId: string, scope: Scope): void {
@@ -88,10 +97,13 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
 
 router.get("/sync/scheduled", async (req: Request, res: Response): Promise<void> => {
   const includeRuns = req.query.include === "runs";
+  // "Future" is relative to the CLIENT's local date (see clientToday): filtering
+  // by the server's UTC date would make a user behind UTC lose their local
+  // "tomorrow" a day early.
   const rows = await db
     .select()
     .from(dailySyncTable)
-    .where(and(gt(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, currentScope())))
+    .where(and(gt(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())))
     .orderBy(asc(dailySyncTable.date));
   res.json(
     rows.map(r => {
@@ -148,7 +160,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
 router.delete("/sync/:date", async (req: Request<{ date: string }>, res: Response): Promise<void> => {
   const { date } = req.params;
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
-  if (date <= todayStr()) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
+  if (date <= clientToday(req)) { res.status(400).json({ error: "Cannot delete today or past days" }); return; }
   await db
     .delete(dailySyncTable)
     .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));

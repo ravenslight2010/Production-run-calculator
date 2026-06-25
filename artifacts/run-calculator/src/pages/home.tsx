@@ -2238,7 +2238,7 @@ export default function Home() {
 
   // ── Fetch scheduled future days for badge ──────────────────────────────────
   useEffect(() => {
-    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
   }, []);
 
   // ── Reorder runs dialog ────────────────────────────────────────────────────
@@ -2753,7 +2753,7 @@ export default function Home() {
         body: JSON.stringify({ payload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
       }
     } catch {}
@@ -2761,7 +2761,7 @@ export default function Home() {
   }
   async function deleteScheduledDay(date: string) {
     try {
-      await fetch(`/api/sync/${date}`, { method: "DELETE" });
+      await fetch(`/api/sync/${date}?today=${todayStr()}`, { method: "DELETE" });
       setScheduledDays(prev => prev.filter(d => d.date !== date));
       setScheduleDeleteConfirm(null);
     } catch {}
@@ -2775,7 +2775,7 @@ export default function Home() {
   }
   async function refreshScheduledDays() {
     try {
-      const d = await fetch("/api/sync/scheduled?include=runs").then(r => r.json());
+      const d = await fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json());
       setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[]);
     } catch {}
   }
@@ -2815,7 +2815,7 @@ export default function Home() {
     });
     if (!tRes.ok) return;
     if (source.length === 0) {
-      await fetch(`/api/sync/${fromDate}`, { method: "DELETE" });
+      await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, { method: "DELETE" });
     } else {
       const sourcePayload: SyncPayload = {
         ...src,
@@ -3337,7 +3337,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               // The new day's resetAt becomes the server-side session boundary
               // (pushed above), so the daily reset signs everyone out. Drop this
               // device to the login screen now instead of waiting for its next
@@ -4943,7 +4943,7 @@ export default function Home() {
         body: JSON.stringify({ payload: outPayload }),
       });
       if (res.ok) {
-        fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+        fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
     setShowImportDialog(false);
@@ -5027,7 +5027,7 @@ export default function Home() {
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
-    fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+    fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
     setImportProgress(null);
     setShowImportDialog(false);
     setImportResult(null);
@@ -5150,7 +5150,7 @@ export default function Home() {
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
-              fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
+              fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
               scheduleReset();
               return;
             }
@@ -8080,7 +8080,7 @@ export default function Home() {
                   </DropdownMenuItem>
                 )}
                 {isSupervisor && (
-                  <DropdownMenuItem onClick={() => { fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
+                  <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
                     {scheduledDays.length > 0 && (
                       <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold flex items-center justify-center leading-none">
@@ -9661,7 +9661,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           if (!isSupervisor) { setPinInput(""); setPinError(""); setShowPinDialog(true); return; }
-                          fetch("/api/sync/scheduled?include=runs").then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
+                          fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true);
                         }}
                         title={isSupervisor ? "Manage production schedule" : "Supervisor only — tap to enter PIN"}
                         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
