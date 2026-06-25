@@ -158,6 +158,99 @@ describe("GET /sync/scheduled — client-local-date filtering", () => {
   });
 });
 
+describe("/sync/today — client-local-date keying", () => {
+  // The live "today" row must be keyed by the CLIENT's local date too, matching
+  // /sync/scheduled. Otherwise a client behind UTC writes the live day into its
+  // local "tomorrow" row, clobbering a scheduled day (and its case counts).
+  it("GET reads the row for the client-supplied `today`", async () => {
+    const res = await fetch(`${baseUrl}/api/sync/today?today=2030-03-11`, {
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
+    expect(data?.dayState?.runs?.[0]?.id).toBe("run-2030-03-11");
+  });
+
+  it("PUT writes to the client-supplied `today` row, never the server's UTC date", async () => {
+    const payload = { dayState: { runs: [{ id: "live-run" }] }, runValues: { "live-run": { casesNeeded: 42 } } };
+    const put = await fetch(`${baseUrl}/api/sync/today?today=2030-03-20`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+    expect(put.status).toBe(200);
+    // The new row is readable via the explicit-date route under 2030-03-20.
+    const back = await fetch(`${baseUrl}/api/sync/2030-03-20`, { headers: authHeaders() });
+    const data = (await back.json()) as { runValues?: Record<string, { casesNeeded?: number }> } | null;
+    expect(data?.runValues?.["live-run"]?.casesNeeded).toBe(42);
+    // A pre-existing future scheduled day is left untouched (not clobbered).
+    const sched = await fetch(`${baseUrl}/api/sync/scheduled?today=2030-03-19`, { headers: authHeaders() });
+    const days = (await sched.json()) as Array<{ date: string }>;
+    expect(days.map((d) => d.date)).toContain("2030-03-20");
+  });
+});
+
+describe("/sync/events — date-scoped broadcasts", () => {
+  // Two live watchers on the SAME scope but DIFFERENT local dates must not
+  // receive each other's pushes, or a peer behind/ahead of UTC would clobber its
+  // live view with another calendar day's state.
+  // NOTE: controllers are aborted deterministically at the end so the open SSE
+  // connections don't hang afterAll's server.close().
+  function collectSenderIds(date: string, ctrl: AbortController, sink: string[]): Promise<void> {
+    return (async () => {
+      try {
+        const res = await fetch(
+          `${baseUrl}/api/sync/events?clientId=watcher-${date}&today=${date}`,
+          { headers: authHeaders(), signal: ctrl.signal },
+        );
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split("\n\n");
+          buf = frames.pop() ?? "";
+          for (const f of frames) {
+            const line = f.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+            const parsed = JSON.parse(line.slice("data: ".length)) as { senderId: string | null };
+            // Ignore the initial-row push (senderId: null); record broadcasts.
+            if (parsed.senderId) sink.push(parsed.senderId);
+          }
+        }
+      } catch {
+        // aborted or stream error — collection is best-effort.
+      }
+    })();
+  }
+
+  it("delivers a PUT /sync/today broadcast only to same-date watchers", async () => {
+    // Watcher A is on 2030-03-10, watcher B is on 2030-03-11. A push from a
+    // sender on 2030-03-10 must reach A and NOT B.
+    const ctrlA = new AbortController();
+    const ctrlB = new AbortController();
+    const aEvents: string[] = [];
+    const bEvents: string[] = [];
+    const pA = collectSenderIds("2030-03-10", ctrlA, aEvents);
+    const pB = collectSenderIds("2030-03-11", ctrlB, bEvents);
+    // Let both streams register before the push, then let it propagate.
+    await new Promise((r) => setTimeout(r, 400));
+    await fetch(`${baseUrl}/api/sync/today?today=2030-03-10`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "sender-A", payload: { dayState: { runs: [] }, runValues: {} } }),
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    ctrlA.abort();
+    ctrlB.abort();
+    await Promise.allSettled([pA, pB]);
+    expect(aEvents).toContain("sender-A");
+    expect(bEvents).not.toContain("sender-A");
+  });
+});
+
 describe("DELETE /sync/:date — client-local-date guard", () => {
   it("rejects deleting a day at or before the client-supplied `today`", async () => {
     const res = await fetch(`${baseUrl}/api/sync/2030-03-11?today=2030-03-11`, {

@@ -2003,7 +2003,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       setSyncStatus("offline");
       return;
     }
-    putToday(base, clientId, payload)
+    putToday(base, clientId, payload, todayStr())
       .then(() => {
         lastSyncSigRef.current = sig;
         setSyncStatus((s) => (s === "offline" ? "online" : s));
@@ -2080,7 +2080,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       clientIdRef.current = clientId;
       syncStartedRef.current = true;
       try {
-        const data = await fetchToday(base);
+        const data = await fetchToday(base, todayStr());
         if (cancelled) return;
         if (data) onRemote(data);
         else doPush(); // server empty for today — seed it with our state
@@ -2120,7 +2120,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         // offline / server error — local + sync tombstones still apply.
       }
       if (cancelled) return;
-      streamRef.current = openSyncStream(base, clientId, {
+      streamRef.current = openSyncStream(base, clientId, todayStr(), {
         onOpen: () => setSyncStatus("online"),
         onPayload: (payload, senderId) => {
           if (senderId && senderId === clientIdRef.current) return; // ignore our own echo

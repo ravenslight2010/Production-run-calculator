@@ -2650,7 +2650,7 @@ export default function Home() {
       // from the still-stale server copy. Best-effort: the local tombstone filter
       // is the backstop if this push fails.
       try {
-        await fetch("/api/sync/today", {
+        await fetch(`/api/sync/today?today=${todayStr()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2705,7 +2705,7 @@ export default function Home() {
       refreshAfterMerge();
       setChangeHistory(loadChangeHistory());
       try {
-        await fetch("/api/sync/today", {
+        await fetch(`/api/sync/today?today=${todayStr()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3285,7 +3285,7 @@ export default function Home() {
 
   // SSE connection — receives updates from other clients
   useEffect(() => {
-    const es = new EventSource("/api/sync/events?clientId=" + clientId.current);
+    const es = new EventSource(`/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`);
     es.onopen = () => {
       setSyncConnected(true);
       // Re-push our current state after every (re)connect so the server always has our latest,
@@ -3482,7 +3482,10 @@ export default function Home() {
     // build-date is no longer today, drop it (the rollover will push the fresh
     // day instead).
     if (payload.dayState.date && payload.dayState.date !== todayStr()) { pushAcknowledgedRef.current = true; return; }
-    fetch("/api/sync/today", {
+    // Key the live row by the CLIENT's local date (?today=). The server is UTC, so
+    // without this a client behind UTC writes the live day into its local
+    // "tomorrow" row — clobbering a scheduled day (and its case counts).
+    fetch(`/api/sync/today?today=${todayStr()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ senderId: clientId.current, payload }),

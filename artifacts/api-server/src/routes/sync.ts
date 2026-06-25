@@ -5,7 +5,7 @@ import { currentScope, type Scope } from "../lib/requestScope";
 
 const router: IRouter = Router();
 
-type SseClient = { res: Response; clientId: string; scope: Scope };
+type SseClient = { res: Response; clientId: string; scope: Scope; watchDate: string };
 const clients = new Set<SseClient>();
 
 function todayStr(): string {
@@ -26,28 +26,33 @@ function clientToday(req: Request): string {
   return typeof t === "string" && isValidDate(t) ? t : todayStr();
 }
 
-// Only ever push to clients watching the SAME data scope, so a sandbox writer's
-// state never streams into a live watcher's UI (or vice versa).
-function broadcast(data: unknown, senderId: string, scope: Scope): void {
+// Only ever push to clients watching the SAME data scope AND the SAME local date,
+// so a sandbox writer's state never streams into a live watcher's UI, and a peer
+// on a different local calendar day (behind/ahead of UTC) never receives another
+// day's state into its live view — the cross-date clobber this fix prevents.
+function broadcast(data: unknown, senderId: string, scope: Scope, date: string): void {
   const msg = `data: ${JSON.stringify({ data, senderId })}\n\n`;
   for (const client of clients) {
-    if (client.scope === scope && client.clientId !== senderId) {
+    if (client.scope === scope && client.watchDate === date && client.clientId !== senderId) {
       try { client.res.write(msg); } catch {}
     }
   }
 }
 
 router.get("/sync/today", async (req: Request, res: Response): Promise<void> => {
+  // "Today" is the CLIENT's local date (see clientToday). The server runs in UTC,
+  // so a client behind UTC would otherwise read/write a different calendar row
+  // than its scheduled days and rollover use — clobbering a scheduled "tomorrow".
   const [row] = await db
     .select()
     .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, currentScope())));
+    .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, currentScope())));
   res.json(row?.data ?? null);
 });
 
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
-  const today = todayStr();
+  const today = clientToday(req);
   const scope = currentScope();
   await db
     .insert(dailySyncTable)
@@ -56,7 +61,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
       target: [dailySyncTable.date, dailySyncTable.scope],
       set: { data: payload as any, updatedAt: new Date() },
     });
-  broadcast(payload, senderId, scope);
+  broadcast(payload, senderId, scope, today);
   res.json({ ok: true });
 });
 
@@ -73,12 +78,14 @@ router.get("/sync/events", async (req: Request, res: Response): Promise<void> =>
   const [row] = await db
     .select()
     .from(dailySyncTable)
-    .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, scope)));
+    .where(and(eq(dailySyncTable.date, clientToday(req)), eq(dailySyncTable.scope, scope)));
   if (row) {
     res.write(`data: ${JSON.stringify({ data: row.data, senderId: null })}\n\n`);
   }
 
-  const client: SseClient = { res, clientId, scope };
+  // Record the client's local date so broadcasts only reach peers on the SAME
+  // calendar day (see broadcast). Matches the initial-row lookup above.
+  const client: SseClient = { res, clientId, scope, watchDate: clientToday(req) };
   clients.add(client);
 
   const heartbeat = setInterval(() => {
@@ -150,9 +157,10 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
       target: [dailySyncTable.date, dailySyncTable.scope],
       set: { data: payload as any, updatedAt: new Date() },
     });
-  // Broadcast to live SSE clients when writing today's date (supports same-day watchers)
-  if (date === todayStr()) {
-    broadcast(payload, senderId, scope);
+  // Broadcast to live SSE clients when writing today's date (supports same-day
+  // watchers). "Today" is the client's local date, matching /sync/today's keying.
+  if (date === clientToday(req)) {
+    broadcast(payload, senderId, scope, date);
   }
   res.json({ ok: true });
 });

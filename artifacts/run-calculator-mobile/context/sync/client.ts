@@ -47,8 +47,14 @@ async function authHeaders(
   };
 }
 
-export async function fetchToday(baseUrl: string): Promise<SyncPayload | null> {
-  const res = await fetch(`${baseUrl}/api/sync/today`, {
+export async function fetchToday(
+  baseUrl: string,
+  today: string,
+): Promise<SyncPayload | null> {
+  // Key the live row by the CLIENT's local date (?today=). The server runs in
+  // UTC, so without this a client behind UTC reads/writes a different calendar
+  // row than its scheduled days and rollover use — clobbering a scheduled day.
+  const res = await fetch(`${baseUrl}/api/sync/today?today=${encodeURIComponent(today)}`, {
     headers: await authHeaders(),
   });
   if (!res.ok) {
@@ -64,8 +70,10 @@ export async function putToday(
   baseUrl: string,
   senderId: string,
   payload: SyncPayload,
+  today: string,
 ): Promise<void> {
-  const res = await fetch(`${baseUrl}/api/sync/today`, {
+  // ?today= keys the live row by the client's local date (see fetchToday).
+  const res = await fetch(`${baseUrl}/api/sync/today?today=${encodeURIComponent(today)}`, {
     method: "PUT",
     headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ senderId, payload }),
@@ -105,9 +113,11 @@ const RECONNECT_MAX_MS = 30_000;
 export function openSyncStream(
   baseUrl: string,
   clientId: string,
+  today: string,
   handlers: SyncStreamHandlers,
 ): SyncStream {
-  const url = `${baseUrl}/api/sync/events?clientId=${encodeURIComponent(clientId)}`;
+  // &today= keys the initial-row push by the client's local date (see fetchToday).
+  const url = `${baseUrl}/api/sync/events?clientId=${encodeURIComponent(clientId)}&today=${encodeURIComponent(today)}`;
   const isWeb =
     Platform.OS === "web" && typeof globalThis !== "undefined" && "EventSource" in globalThis;
 
