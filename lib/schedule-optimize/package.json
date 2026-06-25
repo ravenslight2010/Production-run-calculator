@@ -1,0 +1,19 @@
+{
+  "name": "@workspace/schedule-optimize",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@workspace/allergen": "workspace:*",
+    "@workspace/production-rules": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}

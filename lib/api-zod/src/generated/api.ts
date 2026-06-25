@@ -623,6 +623,63 @@ export const QualityCheckPhotoResponse = zod.object({
 
 
 /**
+ * Looks at a photo of a paper production/run sheet and extracts the distinct run rows it can read (brand, flavor, die size, cases needed, and an optional date) so they can be reviewed and added to the schedule. Read-only — never writes anything; each extracted row requires explicit user confirmation before it is applied through the existing schedule path.
+ * @summary Extract a production/run plan from a photo of a paper run sheet (AI vision); read-only
+ */
+export const ProductionSheetPhotoBody = zod.object({
+  "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
+  "notes": zod.string().optional().describe('Optional plain-language context the user wants considered (e.g. which line the sheet is for, or the date the sheet covers).')
+})
+
+export const ProductionSheetPhotoResponse = zod.object({
+  "rows": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().describe('Die size \/ crust spec as written on the sheet (may be blank)'),
+  "casesNeeded": zod.number().describe('Cases to produce for this run (0 when not readable)'),
+  "date": zod.string().nullable().describe('ISO date (YYYY-MM-DD) the sheet shows for this run, or null'),
+  "confidence": zod.number().describe('0..1 model confidence in this extracted row')
+}).describe('One run row the AI read off the production sheet.')),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when the sheet could not be read')
+})
+
+
+/**
+ * Looks at a photo of a finished-product label or pallet placard, reads the visible fields, and compares them against the expected values the client provides (brand, flavor, die size, date, lot code, case count). Returns a per-field match/mismatch breakdown plus an overall verdict. Read-only — never writes anything; a person reviews the result and decides what to do.
+ * @summary Verify a finished-product label or pallet placard against expected values (AI vision); read-only
+ */
+export const VerifyLabelPhotoBody = zod.object({
+  "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
+  "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
+  "expected": zod.object({
+  "brand": zod.string().optional(),
+  "flavor": zod.string().optional(),
+  "dieType": zod.string().optional(),
+  "date": zod.string().optional(),
+  "lotCode": zod.string().optional(),
+  "caseCount": zod.number().optional()
+}).optional().describe('The values the client expects the label\/pallet to show. All optional — only the provided fields are compared.'),
+  "notes": zod.string().optional().describe('Optional plain-language context the user wants considered')
+})
+
+export const VerifyLabelPhotoResponse = zod.object({
+  "verdict": zod.enum(['pass', 'warn', 'fail']).describe('Overall verdict — pass (all match), warn (unreadable\/uncertain), fail (mismatch)'),
+  "summary": zod.string().describe('One-or-two-sentence plain-language overall result'),
+  "confidence": zod.number().describe('0..1 model confidence in this verification'),
+  "fields": zod.array(zod.object({
+  "field": zod.string().describe('Which field this is (brand, flavor, dieType, date, lotCode, caseCount)'),
+  "expected": zod.string().nullable().describe('The expected value the client supplied, or null if none'),
+  "observed": zod.string().nullable().describe('What the AI read on the label, or null if unreadable\/absent'),
+  "match": zod.enum(['match', 'mismatch', 'unreadable'])
+}).describe('One expected field compared against what the AI read on the label.')),
+  "generatedAt": zod.number(),
+  "note": zod.string().optional().describe('Optional message when the label could not be read')
+})
+
+
+/**
  * Persists a structured record of a quality check a manager reviewed and confirmed (product type, verdict, confidence, summary, specific issues, optional notes and a small photo thumbnail). This builds a browsable history managers can audit and use to spot trends over time. The advisory /inventory/quality-photo endpoint never writes — this is the deliberate, user-driven save.
  * @summary Record a reviewed-and-confirmed quality check (manager only)
  */
@@ -1177,8 +1234,13 @@ export const UpdateProactiveAlertSettingsResponse = zod.object({
  * Given recent finished production history (grouped by day) and any already-scheduled future runs, predicts a suggested run plan for one upcoming day — what to run, rough case quantities, and a sensible sequence — plus a plain-language rationale and an honest confidence level. Grounded strictly in the supplied history and shared facility memory; explicit about uncertainty and returns a null forecast (with a note) when history is too thin to predict responsibly. Read-only — never writes or commits anything; the manager reviews and adjusts the suggestion into the editable schedule.
  * @summary Predict an upcoming day's run plan (AI); read-only
  */
+export const aiForecastBodyHorizonDaysMax = 7;
+
+
+
 export const AiForecastBody = zod.object({
-  "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the upcoming day to forecast'),
+  "targetDate": zod.string().describe('ISO date (YYYY-MM-DD) of the first upcoming day to forecast'),
+  "horizonDays": zod.number().min(1).max(aiForecastBodyHorizonDaysMax).optional().describe('How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday\'s history.'),
   "nowMs": zod.number().describe('Client clock in epoch ms (for relative reasoning)'),
   "history": zod.array(zod.object({
   "date": zod.string().describe('ISO date (YYYY-MM-DD) of the production day'),
@@ -1211,9 +1273,68 @@ export const AiForecastResponse = zod.object({
   "casesNeeded": zod.number().describe('Rough suggested case target'),
   "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
 }).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
-}),zod.null()]).describe('The predicted plan, or null when history is too thin to predict'),
+}),zod.null()]).describe('The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present.'),
+  "forecasts": zod.array(zod.object({
+  "targetDate": zod.string(),
+  "confidence": zod.enum(['high', 'medium', 'low']).describe('Honest confidence given how much history supports the prediction'),
+  "summary": zod.string().describe('Plain-language rationale for the whole plan, incl. caveats'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().describe('May be empty when the model is unsure'),
+  "casesNeeded": zod.number().describe('Rough suggested case target'),
+  "rationale": zod.string().describe('Short reason this run is suggested (grounded in history)')
+}).describe('One suggested run in the predicted plan (advisory; not committed).')).describe('Suggested runs in a sensible production sequence')
+})).optional().describe('One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon.'),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Explanation when no forecast could responsibly be produced')
+})
+
+
+/**
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, plain-language recap for floor staff and managers. The numeric stats are computed deterministically server-side; the AI only narrates them and never invents figures. Read-only — never writes or commits run data. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic plain-language summary built from the same stats is returned instead, so the caller always gets a usable recap.
+ * @summary Plain-language end-of-day / weekly production recap (AI); read-only
+ */
+export const AiSummaryBody = zod.object({
+  "scope": zod.enum(['day', 'week']).describe('Whether to recap a single day or a rolling week'),
+  "date": zod.string().describe('ISO date for the day, or the week-ending date for a weekly recap'),
+  "nowMs": zod.number().describe('Client clock in epoch ms'),
+  "runs": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number().describe('Cases the run was planned to make (casesNeeded)'),
+  "casesProduced": zod.number().describe('Cases actually produced\/finished'),
+  "finished": zod.boolean().describe('Whether the run was completed'),
+  "downtimeMinutes": zod.number().describe('Total stoppage\/downtime minutes on the run'),
+  "stoppageCount": zod.number().describe('Number of discrete stoppages on the run')
+}).describe('One run as shaped by the client for the production summary.')).describe('Runs in scope (today\'s runs, or the week\'s finished runs)'),
+  "incidentCount": zod.number().optional().describe('Issues reported within the scope (optional context)'),
+  "wasteFlaggedCount": zod.number().optional().describe('Inventory items flagged at-risk \/ waste within the scope (optional)')
+})
+
+export const AiSummaryResponse = zod.object({
+  "summary": zod.string().describe('Plain-language recap (AI narration, or deterministic fallback)'),
+  "stats": zod.object({
+  "scope": zod.enum(['day', 'week']),
+  "date": zod.string(),
+  "runsPlanned": zod.number(),
+  "runsFinished": zod.number(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "attainmentPct": zod.number(),
+  "totalDowntimeMinutes": zod.number(),
+  "totalStoppages": zod.number(),
+  "topDowntime": zod.union([zod.object({
+  "label": zod.string(),
+  "minutes": zod.number()
+}),zod.null()]).optional().describe('The single run with the most downtime, or null'),
+  "unfinishedRuns": zod.array(zod.string()),
+  "incidentCount": zod.number(),
+  "wasteFlaggedCount": zod.number(),
+  "hasData": zod.boolean()
+}).describe('Deterministic aggregates the recap is built from (shown in the UI).'),
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false when the deterministic fallback was used')
 })
 
 
@@ -1267,6 +1388,120 @@ export const AiForecastAccuracyResponse = zod.object({
 }).describe('Cross-day calibration summary rolled up from the per-day reviews.'),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Explanation when there is nothing to review yet')
+})
+
+
+/**
+ * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
+ * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ */
+export const AiIncidentClustersBody = zod.object({
+  "lookbackDays": zod.number().optional().describe('Only cluster incidents created within this many days (default 30)')
+}).describe('No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.')
+
+export const AiIncidentClustersResponse = zod.object({
+  "clusters": zod.array(zod.object({
+  "theme": zod.string().describe('Short human-readable label for the grouped issue'),
+  "rootCauseHypothesis": zod.string().describe('Plain-language guess at what these incidents share'),
+  "recommendedAction": zod.string().describe('A safe, advisory next step (never an automated fix)'),
+  "severity": zod.enum(['low', 'medium', 'high']),
+  "incidentIds": zod.array(zod.string()).describe('Verified ids of the incidents in this cluster'),
+  "incidentCount": zod.number().describe('Recurrence-weighted occurrences across the cluster')
+})),
+  "totalIncidents": zod.number().describe('How many incidents were considered'),
+  "note": zod.string().optional().describe('Optional explanation (e.g. too few incidents to cluster)'),
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI proposed the grouping; false for the deterministic fallback')
+})
+
+
+/**
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. The drift detection is computed server-side and is fully deterministic; the AI is only asked to NARRATE a short plain-language summary, and only when at least one anomaly is flagged (no flags → no AI call). Read-only and advisory — never edits or commits run data. Fail-safe: if the AI is unavailable, the deterministic anomaly list is still returned with an empty narration.
+ * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ */
+export const AiAnomaliesBody = zod.object({
+  "today": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "downtimeMinutes": zod.number(),
+  "stoppageCount": zod.number()
+}).describe('One finished run, in the flat shape both apps produce for summaries.')).describe('Today\'s finished runs to check'),
+  "history": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "casesPlanned": zod.number(),
+  "casesProduced": zod.number(),
+  "downtimeMinutes": zod.number(),
+  "stoppageCount": zod.number()
+}).describe('One finished run, in the flat shape both apps produce for summaries.')).describe('Recent finished runs from prior days (baseline pool)')
+})
+
+export const AiAnomaliesResponse = zod.object({
+  "anomalies": zod.array(zod.object({
+  "runLabel": zod.string(),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "metric": zod.enum(['downtime', 'yield', 'stoppages']),
+  "observed": zod.number(),
+  "baseline": zod.number(),
+  "severity": zod.enum(['low', 'medium', 'high']),
+  "baselineSamples": zod.number(),
+  "description": zod.string()
+})),
+  "checkedRuns": zod.number(),
+  "baselineRuns": zod.number(),
+  "summary": zod.string().describe('Plain-language narration (AI), or empty when nothing was flagged \/ AI unavailable'),
+  "note": zod.string().optional().describe('Optional explanation (e.g. not enough history to judge)'),
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
+})
+
+
+/**
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side and are fully deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to NARRATE a short plain-language explanation, and only when a better order exists (no improvement → no AI call). Read-only and advisory — never edits or commits the schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order is still returned with an empty narration.
+ * @summary Suggest an optimal run order for the day (AI narration); read-only
+ */
+export const AiScheduleOptimizeBody = zod.object({
+  "runs": zod.array(zod.object({
+  "id": zod.string(),
+  "label": zod.string().describe('Human label for messaging, e.g. \"Run 2 · Margherita\"'),
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "allergen": zod.enum(['none', 'egg', 'soy']),
+  "dieType": zod.string().optional().describe('Die\/crust type; a change between adjacent runs is a changeover')
+}).describe('One run planned for the day, in the flat shape both apps produce.')).describe('The runs planned for the day, in their current order'),
+  "rules": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['required-field', 'numeric-range', 'sequence']),
+  "enforcement": zod.enum(['flexible', 'strict']),
+  "enabled": zod.boolean(),
+  "attribute": zod.string().optional(),
+  "before": zod.string().optional(),
+  "after": zod.string().optional()
+}).describe('A factory sequence production rule (only sequence-type rules affect ordering).')).optional().describe('Factory production rules (optional; only sequence rules apply)')
+})
+
+export const AiScheduleOptimizeResponse = zod.object({
+  "order": zod.array(zod.string()).describe('Suggested run order (run ids), best-first'),
+  "changed": zod.boolean().describe('True when the suggested order differs from the input order'),
+  "improved": zod.boolean().describe('True when the suggested order is strictly better than the input'),
+  "before": zod.object({
+  "allergenViolations": zod.number(),
+  "ruleViolations": zod.number(),
+  "changeovers": zod.number()
+}),
+  "after": zod.object({
+  "allergenViolations": zod.number(),
+  "ruleViolations": zod.number(),
+  "changeovers": zod.number()
+}),
+  "summary": zod.string().describe('Plain-language narration (AI), or empty when no improvement \/ AI unavailable'),
+  "note": zod.string().optional().describe('Optional explanation (e.g. already optimally ordered)'),
+  "generatedAt": zod.number(),
+  "aiGenerated": zod.boolean().describe('True when the AI narrated; false otherwise')
 })
 
 

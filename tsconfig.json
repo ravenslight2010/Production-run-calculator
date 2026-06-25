@@ -58,6 +58,18 @@
       "path": "./lib/scheduled-recipe-check"
     },
     {
+      "path": "./lib/day-summary"
+    },
+    {
+      "path": "./lib/incident-cluster"
+    },
+    {
+      "path": "./lib/anomaly"
+    },
+    {
+      "path": "./lib/schedule-optimize"
+    },
+    {
       "path": "./lib/schedule-move"
     },
     {

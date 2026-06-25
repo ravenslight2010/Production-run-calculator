@@ -1,5 +1,6 @@
 import * as z from "zod";
 import type { ReorderItem } from "@workspace/inventory-math";
+import type { IncidentCluster } from "@workspace/incident-cluster";
 import { validateOptimizeBody, type OptimizeInput } from "./aiOptimize";
 import { MAX_FLAGGED_IN_PROMPT, type WasteFlaggedItem } from "./wasteInsight";
 
@@ -17,6 +18,14 @@ export type ProactiveImpact = "high" | "medium" | "low";
 export const PROACTIVE_MAX_TITLE_CHARS = 100;
 export const PROACTIVE_MAX_DETAIL_CHARS = 400;
 export const PROACTIVE_MAX_KEY_CHARS = 64;
+
+// How many recurring incident patterns to surface as grounding context. Kept
+// small so the watcher "learns" from the handful of most-reported problems
+// without flooding the prompt with one-off reports.
+export const PROACTIVE_MAX_INCIDENT_PATTERNS = 5;
+// Each grounded pattern's recommended-action hint is clamped to keep the section
+// compact.
+export const PROACTIVE_MAX_PATTERN_HINT_CHARS = 200;
 
 // Factory-wide knobs that let a manager tune how aggressive the watcher is.
 // Bounds keep the cadence sane so a misconfig can't hammer the (cost-capped) AI
@@ -155,6 +164,29 @@ export function sanitizeProactiveAlert(raw: unknown): {
   });
 }
 
+// Build the compact "recent incident patterns" grounding section from the
+// deterministic incident clusters (see @workspace/incident-cluster). Only
+// recurring patterns (2+ occurrences) are surfaced so a single one-off report
+// doesn't bias the watcher; returns "" when there's nothing worth grounding.
+// Pure + testable: the route does the DB read and clustering, this just formats.
+export function buildIncidentPatternsSection(
+  clusters: ReadonlyArray<IncidentCluster>,
+): string {
+  const recurring = clusters.filter((c) => c.incidentCount >= 2);
+  if (recurring.length === 0) return "";
+  const lines = recurring.slice(0, PROACTIVE_MAX_INCIDENT_PATTERNS).map((c) => {
+    const hint = (c.recommendedAction || c.rootCauseHypothesis || "").trim();
+    const hintText = hint ? `: ${clamp(hint, PROACTIVE_MAX_PATTERN_HINT_CHARS)}` : "";
+    return `- [${c.severity}] ${c.theme} — reported ${c.incidentCount}x${hintText}`;
+  });
+  return [
+    "RECENT REPORTED ISSUES (recurring problems staff have reported lately — " +
+      "context only, to inform your timing and wording; do NOT invent a new kind " +
+      "of nudge from these):",
+    ...lines,
+  ].join("\n");
+}
+
 // Shape the validated live-day input into a compact, model-friendly prompt.
 // Mirrors the optimize prompt's run formatting so the two assistants reason over
 // the same facts, but asks for a single timely decision instead of a list.
@@ -162,6 +194,7 @@ export function buildProactivePrompt(
   input: OptimizeInput,
   flaggedAtRisk: ReadonlyArray<WasteFlaggedItem> = [],
   lowStock: ReadonlyArray<ReorderItem> = [],
+  incidentPatterns: ReadonlyArray<IncidentCluster> = [],
 ): {
   system: string;
   user: string;
@@ -288,6 +321,12 @@ export function buildProactivePrompt(
           ` (reorder point ${it.reorderThreshold}), suggest ordering ${it.suggestedQty} ${it.unit}`,
       );
     }
+  }
+
+  const incidentSection = buildIncidentPatternsSection(incidentPatterns);
+  if (incidentSection) {
+    lines.push("");
+    lines.push(incidentSection);
   }
 
   lines.push("");

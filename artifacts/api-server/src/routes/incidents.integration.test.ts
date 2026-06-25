@@ -39,22 +39,29 @@ const mock = vi.hoisted(() => ({
   lastUserPrompt: "" as string,
 }));
 
-vi.mock("@workspace/integrations-openai-ai-server", () => ({
-  openai: {
-    chat: {
-      completions: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        create: async (args: any) => {
-          mock.calls += 1;
-          const messages = (args?.messages ?? []) as Array<{ role: string; content: string }>;
-          mock.lastUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
-          if (mock.shouldThrow) throw new Error("provider blew up");
-          return { choices: [{ message: { content: mock.nextContent } }] };
+vi.mock("@workspace/integrations-openai-ai-server", () => {
+  const AI_MODELS = { full: "gpt-5.4", cheap: "gpt-5-mini" } as const;
+  return {
+    openai: {
+      chat: {
+        completions: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          create: async (args: any) => {
+            mock.calls += 1;
+            const messages = (args?.messages ?? []) as Array<{ role: string; content: string }>;
+            mock.lastUserPrompt = messages.find((m) => m.role === "user")?.content ?? "";
+            if (mock.shouldThrow) throw new Error("provider blew up");
+            return { choices: [{ message: { content: mock.nextContent } }] };
+          },
         },
       },
     },
-  },
-}));
+    // Routes resolve their model via pickModel(); the mock must export it too,
+    // or the call throws "pickModel is not a function" and every route 502s.
+    AI_MODELS,
+    pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
+  };
+});
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];

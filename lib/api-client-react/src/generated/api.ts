@@ -22,6 +22,8 @@ import type {
 import type {
   AdjustInput,
   AiCorrectionList,
+  AnomalyInput,
+  AnomalyResult,
   AppendConversationInput,
   ApprovePasswordResetResult,
   AskInput,
@@ -58,11 +60,15 @@ import type {
   IdentifyPhotoResult,
   ImportAliasList,
   Incident,
+  IncidentClustersInput,
+  IncidentClustersResult,
   IncidentDiagnosis,
   InventoryItem,
   InventoryLedgerEntry,
   InventoryLocation,
   InventorySettings,
+  LabelVerifyInput,
+  LabelVerifyResult,
   ListInventoryLedgerParams,
   ListQualityChecksParams,
   MarkCycleCountCountedInput,
@@ -91,6 +97,8 @@ import type {
   ProductionRuleList,
   ProductionRun,
   ProductionRunInput,
+  ProductionSheetPhotoInput,
+  ProductionSheetPhotoResult,
   QualityCheckPhotoInput,
   QualityCheckRecord,
   QualityCheckRecordInput,
@@ -120,6 +128,8 @@ import type {
   SaveSpecSheetInput,
   SavedPremixSheetList,
   SavedSpecSheetList,
+  ScheduleOptimizeInput,
+  ScheduleOptimizeResponse,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -127,6 +137,8 @@ import type {
   StaffRoleUpdate,
   SuggestMergesInput,
   SuggestMergesResult,
+  SummaryInput,
+  SummaryResult,
   TransferInput,
   UnreviewedIncidentCount,
   UpdateInventoryItemInput,
@@ -2490,6 +2502,150 @@ export const useQualityCheckPhoto = <TError = ErrorType<void>,
       return useMutation(getQualityCheckPhotoMutationOptions(options));
     }
 
+export const getProductionSheetPhotoUrl = () => {
+
+
+
+
+  return `/api/inventory/production-sheet-photo`
+}
+
+/**
+ * Looks at a photo of a paper production/run sheet and extracts the distinct run rows it can read (brand, flavor, die size, cases needed, and an optional date) so they can be reviewed and added to the schedule. Read-only — never writes anything; each extracted row requires explicit user confirmation before it is applied through the existing schedule path.
+ * @summary Extract a production/run plan from a photo of a paper run sheet (AI vision); read-only
+ */
+export const productionSheetPhoto = async (productionSheetPhotoInput: ProductionSheetPhotoInput, options?: RequestInit): Promise<ProductionSheetPhotoResult> => {
+
+  return customFetch<ProductionSheetPhotoResult>(getProductionSheetPhotoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      productionSheetPhotoInput,)
+  }
+);}
+
+
+
+
+export const getProductionSheetPhotoMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof productionSheetPhoto>>, TError,{data: BodyType<ProductionSheetPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof productionSheetPhoto>>, TError,{data: BodyType<ProductionSheetPhotoInput>}, TContext> => {
+
+const mutationKey = ['productionSheetPhoto'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof productionSheetPhoto>>, {data: BodyType<ProductionSheetPhotoInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  productionSheetPhoto(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProductionSheetPhotoMutationResult = NonNullable<Awaited<ReturnType<typeof productionSheetPhoto>>>
+    export type ProductionSheetPhotoMutationBody = BodyType<ProductionSheetPhotoInput>
+    export type ProductionSheetPhotoMutationError = ErrorType<void>
+
+    /**
+ * @summary Extract a production/run plan from a photo of a paper run sheet (AI vision); read-only
+ */
+export const useProductionSheetPhoto = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof productionSheetPhoto>>, TError,{data: BodyType<ProductionSheetPhotoInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof productionSheetPhoto>>,
+        TError,
+        {data: BodyType<ProductionSheetPhotoInput>},
+        TContext
+      > => {
+      return useMutation(getProductionSheetPhotoMutationOptions(options));
+    }
+
+export const getVerifyLabelPhotoUrl = () => {
+
+
+
+
+  return `/api/inventory/label-verify`
+}
+
+/**
+ * Looks at a photo of a finished-product label or pallet placard, reads the visible fields, and compares them against the expected values the client provides (brand, flavor, die size, date, lot code, case count). Returns a per-field match/mismatch breakdown plus an overall verdict. Read-only — never writes anything; a person reviews the result and decides what to do.
+ * @summary Verify a finished-product label or pallet placard against expected values (AI vision); read-only
+ */
+export const verifyLabelPhoto = async (labelVerifyInput: LabelVerifyInput, options?: RequestInit): Promise<LabelVerifyResult> => {
+
+  return customFetch<LabelVerifyResult>(getVerifyLabelPhotoUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      labelVerifyInput,)
+  }
+);}
+
+
+
+
+export const getVerifyLabelPhotoMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyLabelPhoto>>, TError,{data: BodyType<LabelVerifyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof verifyLabelPhoto>>, TError,{data: BodyType<LabelVerifyInput>}, TContext> => {
+
+const mutationKey = ['verifyLabelPhoto'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof verifyLabelPhoto>>, {data: BodyType<LabelVerifyInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  verifyLabelPhoto(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type VerifyLabelPhotoMutationResult = NonNullable<Awaited<ReturnType<typeof verifyLabelPhoto>>>
+    export type VerifyLabelPhotoMutationBody = BodyType<LabelVerifyInput>
+    export type VerifyLabelPhotoMutationError = ErrorType<void>
+
+    /**
+ * @summary Verify a finished-product label or pallet placard against expected values (AI vision); read-only
+ */
+export const useVerifyLabelPhoto = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof verifyLabelPhoto>>, TError,{data: BodyType<LabelVerifyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof verifyLabelPhoto>>,
+        TError,
+        {data: BodyType<LabelVerifyInput>},
+        TContext
+      > => {
+      return useMutation(getVerifyLabelPhotoMutationOptions(options));
+    }
+
 export const getRecordQualityCheckUrl = () => {
 
 
@@ -3515,6 +3671,78 @@ export const useAiForecast = <TError = ErrorType<void>,
       return useMutation(getAiForecastMutationOptions(options));
     }
 
+export const getAiSummaryUrl = () => {
+
+
+
+
+  return `/api/ai/summary`
+}
+
+/**
+ * Given a day's (or rolling week's) runs — planned vs. produced cases, downtime/stoppages, unfinished runs, and any reported issues — returns a short, plain-language recap for floor staff and managers. The numeric stats are computed deterministically server-side; the AI only narrates them and never invents figures. Read-only — never writes or commits run data. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic plain-language summary built from the same stats is returned instead, so the caller always gets a usable recap.
+ * @summary Plain-language end-of-day / weekly production recap (AI); read-only
+ */
+export const aiSummary = async (summaryInput: SummaryInput, options?: RequestInit): Promise<SummaryResult> => {
+
+  return customFetch<SummaryResult>(getAiSummaryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      summaryInput,)
+  }
+);}
+
+
+
+
+export const getAiSummaryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,{data: BodyType<SummaryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,{data: BodyType<SummaryInput>}, TContext> => {
+
+const mutationKey = ['aiSummary'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiSummary>>, {data: BodyType<SummaryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiSummary(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiSummaryMutationResult = NonNullable<Awaited<ReturnType<typeof aiSummary>>>
+    export type AiSummaryMutationBody = BodyType<SummaryInput>
+    export type AiSummaryMutationError = ErrorType<void>
+
+    /**
+ * @summary Plain-language end-of-day / weekly production recap (AI); read-only
+ */
+export const useAiSummary = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiSummary>>, TError,{data: BodyType<SummaryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiSummary>>,
+        TError,
+        {data: BodyType<SummaryInput>},
+        TContext
+      > => {
+      return useMutation(getAiSummaryMutationOptions(options));
+    }
+
 export const getAiForecastAccuracyUrl = () => {
 
 
@@ -3585,6 +3813,222 @@ export const useAiForecastAccuracy = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAiForecastAccuracyMutationOptions(options));
+    }
+
+export const getAiIncidentClustersUrl = () => {
+
+
+
+
+  return `/api/ai/incident-clusters`
+}
+
+/**
+ * Reads the recorded incident log (manager-only) and groups recurring reports and crashes into a small number of root-cause themes, each with a plain-language hypothesis and a suggested next step. The AI only proposes groupings and narration; the server verifies every incident id, recomputes the per-theme counts deterministically, and never invents incidents or edits anything. Read-only and advisory. Fail-safe: if the AI is unavailable or returns nothing usable, a deterministic grouping (by screen and platform) is returned instead so managers always get a useful view.
+ * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ */
+export const aiIncidentClusters = async (incidentClustersInput?: IncidentClustersInput, options?: RequestInit): Promise<IncidentClustersResult> => {
+
+  return customFetch<IncidentClustersResult>(getAiIncidentClustersUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      incidentClustersInput,)
+  }
+);}
+
+
+
+
+export const getAiIncidentClustersMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,{data?: BodyType<IncidentClustersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,{data?: BodyType<IncidentClustersInput>}, TContext> => {
+
+const mutationKey = ['aiIncidentClusters'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiIncidentClusters>>, {data?: BodyType<IncidentClustersInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiIncidentClusters(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiIncidentClustersMutationResult = NonNullable<Awaited<ReturnType<typeof aiIncidentClusters>>>
+    export type AiIncidentClustersMutationBody = BodyType<IncidentClustersInput> | undefined
+    export type AiIncidentClustersMutationError = ErrorType<void>
+
+    /**
+ * @summary Group reported issues / crashes into root-cause themes (AI); manager-only, read-only
+ */
+export const useAiIncidentClusters = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiIncidentClusters>>, TError,{data?: BodyType<IncidentClustersInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiIncidentClusters>>,
+        TError,
+        {data?: BodyType<IncidentClustersInput>},
+        TContext
+      > => {
+      return useMutation(getAiIncidentClustersMutationOptions(options));
+    }
+
+export const getAiAnomaliesUrl = () => {
+
+
+
+
+  return `/api/ai/anomalies`
+}
+
+/**
+ * Given today's finished runs plus recent finished-run history, deterministically flags runs whose downtime, yield (cases attained vs. planned), or stoppage count drifted meaningfully from a per-product baseline. The drift detection is computed server-side and is fully deterministic; the AI is only asked to NARRATE a short plain-language summary, and only when at least one anomaly is flagged (no flags → no AI call). Read-only and advisory — never edits or commits run data. Fail-safe: if the AI is unavailable, the deterministic anomaly list is still returned with an empty narration.
+ * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ */
+export const aiAnomalies = async (anomalyInput: AnomalyInput, options?: RequestInit): Promise<AnomalyResult> => {
+
+  return customFetch<AnomalyResult>(getAiAnomaliesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      anomalyInput,)
+  }
+);}
+
+
+
+
+export const getAiAnomaliesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,{data: BodyType<AnomalyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,{data: BodyType<AnomalyInput>}, TContext> => {
+
+const mutationKey = ['aiAnomalies'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiAnomalies>>, {data: BodyType<AnomalyInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiAnomalies(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiAnomaliesMutationResult = NonNullable<Awaited<ReturnType<typeof aiAnomalies>>>
+    export type AiAnomaliesMutationBody = BodyType<AnomalyInput>
+    export type AiAnomaliesMutationError = ErrorType<void>
+
+    /**
+ * @summary Flag production runs that drifted from their historical norm (AI narration); read-only
+ */
+export const useAiAnomalies = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiAnomalies>>, TError,{data: BodyType<AnomalyInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiAnomalies>>,
+        TError,
+        {data: BodyType<AnomalyInput>},
+        TContext
+      > => {
+      return useMutation(getAiAnomaliesMutationOptions(options));
+    }
+
+export const getAiScheduleOptimizeUrl = () => {
+
+
+
+
+  return `/api/ai/schedule-optimize`
+}
+
+/**
+ * Given the runs planned for one day, deterministically proposes an ordering that schedules allergen runs at the end of the day, groups same brand/die together to minimize line changeovers, and honors factory sequence production rules. The ordering and all before/after metrics are computed server-side and are fully deterministic (shared @workspace/schedule-optimize lib); the AI is only asked to NARRATE a short plain-language explanation, and only when a better order exists (no improvement → no AI call). Read-only and advisory — never edits or commits the schedule. Fail-safe: if the AI is unavailable, the deterministic suggested order is still returned with an empty narration.
+ * @summary Suggest an optimal run order for the day (AI narration); read-only
+ */
+export const aiScheduleOptimize = async (scheduleOptimizeInput: ScheduleOptimizeInput, options?: RequestInit): Promise<ScheduleOptimizeResponse> => {
+
+  return customFetch<ScheduleOptimizeResponse>(getAiScheduleOptimizeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      scheduleOptimizeInput,)
+  }
+);}
+
+
+
+
+export const getAiScheduleOptimizeMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,{data: BodyType<ScheduleOptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,{data: BodyType<ScheduleOptimizeInput>}, TContext> => {
+
+const mutationKey = ['aiScheduleOptimize'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof aiScheduleOptimize>>, {data: BodyType<ScheduleOptimizeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  aiScheduleOptimize(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AiScheduleOptimizeMutationResult = NonNullable<Awaited<ReturnType<typeof aiScheduleOptimize>>>
+    export type AiScheduleOptimizeMutationBody = BodyType<ScheduleOptimizeInput>
+    export type AiScheduleOptimizeMutationError = ErrorType<void>
+
+    /**
+ * @summary Suggest an optimal run order for the day (AI narration); read-only
+ */
+export const useAiScheduleOptimize = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof aiScheduleOptimize>>, TError,{data: BodyType<ScheduleOptimizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof aiScheduleOptimize>>,
+        TError,
+        {data: BodyType<ScheduleOptimizeInput>},
+        TContext
+      > => {
+      return useMutation(getAiScheduleOptimizeMutationOptions(options));
     }
 
 export const getAiFillMissingUrl = () => {

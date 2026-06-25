@@ -266,6 +266,99 @@ export class InventoryApiError extends Error {
   }
 }
 
+// ── SSE response reader (for opt-in streaming AI chat) ──────────────────────
+// POST a request asking for `text/event-stream` and parse the server's SSE
+// frames: `delta` events stream answer text (via onDelta), a single `done` event
+// carries the same final payload the non-stream JSON endpoint returns, and an
+// `error` event (or any transport failure / non-OK status) throws an
+// InventoryApiError so the caller can fall back to the non-stream request.
+function parseSseFrame(frame: string): { event: string; data: string } {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+  }
+  return { event, data: dataLines.join("\n") };
+}
+
+export async function postEventStream<T>(
+  path: string,
+  body: unknown,
+  onDelta: (text: string) => void,
+  failMessage: string,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      "x-client-id": clientId,
+      ...(extraHeaders ?? {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok || !res.body) {
+    if (res.status === 401) onUnauthorized?.();
+    const retryAfterRaw = res.headers.get("Retry-After");
+    const retryAfterSec =
+      retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
+    let serverMessage: string | null = null;
+    try {
+      const errBody = (await res.json()) as { error?: unknown };
+      if (errBody && typeof errBody.error === "string") serverMessage = errBody.error;
+    } catch {
+      // non-JSON / unreadable error body; ignore
+    }
+    throw new InventoryApiError(res.status, failMessage, retryAfterSec, serverMessage);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let done: T | null = null;
+  let streamError: string | null = null;
+  const handleFrame = (frame: string): void => {
+    if (!frame.trim()) return;
+    const { event, data } = parseSseFrame(frame);
+    if (event === "delta") {
+      try {
+        const d = JSON.parse(data) as { text?: string };
+        if (d.text) onDelta(d.text);
+      } catch {
+        /* ignore malformed delta */
+      }
+    } else if (event === "done") {
+      try {
+        done = JSON.parse(data) as T;
+      } catch {
+        streamError = "Stream ended without a result";
+      }
+    } else if (event === "error") {
+      try {
+        const d = JSON.parse(data) as { error?: string };
+        streamError = d.error ?? "AI provider error";
+      } catch {
+        streamError = "AI provider error";
+      }
+    }
+  };
+  for (;;) {
+    const { value, done: rdDone } = await reader.read();
+    if (rdDone) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      handleFrame(buffer.slice(0, idx));
+      buffer = buffer.slice(idx + 2);
+    }
+  }
+  if (buffer.trim()) handleFrame(buffer);
+  if (streamError) throw new InventoryApiError(502, failMessage, null, streamError);
+  if (done == null) throw new InventoryApiError(502, failMessage, null, "Stream ended without a result");
+  return done;
+}
+
 // A 401 from a normal (already signed-in) request means the session ended —
 // most often because the daily reset advanced the server-side session boundary.
 // AuthContext registers a handler here so any such 401 routes the user back to
@@ -457,6 +550,76 @@ export const fetchQualityChecks = (filter?: {
   const qs = params.toString();
   return api<QualityCheckRecord[]>(`/inventory/quality-checks${qs ? `?${qs}` : ""}`);
 };
+
+// ── AI production-sheet photo → run rows (read-only, advisory) ───────────────
+export type ProductionSheetRow = {
+  brand: string;
+  flavor: string;
+  dieType: string;
+  casesNeeded: number;
+  date: string | null;
+  confidence: number;
+};
+export type ProductionSheetPhotoResult = {
+  rows: ProductionSheetRow[];
+  generatedAt: number;
+  note?: string;
+};
+export type ProductionSheetPhotoBody = {
+  imageBase64: string;
+  mimeType?: string;
+  notes?: string;
+};
+
+// Read-only: transcribes the run rows from a paper production sheet. Never
+// writes anything; the user confirms which rows to add through the existing
+// schedule path.
+export const productionSheetPhoto = (body: ProductionSheetPhotoBody) =>
+  api<ProductionSheetPhotoResult>("/inventory/production-sheet-photo", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// ── AI label / pallet verification (read-only, advisory) ─────────────────────
+export type LabelVerdict = "pass" | "warn" | "fail";
+export type LabelFieldMatch = "match" | "mismatch" | "unreadable";
+export type LabelExpected = {
+  brand?: string;
+  flavor?: string;
+  dieType?: string;
+  date?: string;
+  lotCode?: string;
+  caseCount?: number;
+};
+export type LabelFieldCheck = {
+  field: string;
+  expected: string | null;
+  observed: string | null;
+  match: LabelFieldMatch;
+};
+export type LabelVerifyResult = {
+  verdict: LabelVerdict;
+  summary: string;
+  confidence: number;
+  fields: LabelFieldCheck[];
+  generatedAt: number;
+  note?: string;
+};
+export type LabelVerifyBody = {
+  imageBase64: string;
+  mimeType?: string;
+  expected?: LabelExpected;
+  notes?: string;
+};
+
+// Read-only: compares a label/pallet photo against expected values. The overall
+// verdict is recomputed server-side from the per-field results; nothing is
+// written.
+export const verifyLabelPhoto = (body: LabelVerifyBody) =>
+  api<LabelVerifyResult>("/inventory/label-verify", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 // ── AI expiry & waste insight ────────────────────────────────────────────────
 export type WasteStatus = "expired" | "soon";
@@ -907,3 +1070,109 @@ export const markIncidentReviewed = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/review`, { method: "POST" });
 export const markIncidentResolved = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`, { method: "POST" });
+
+// Manager-only AI root-cause clustering across the incident log. Advisory and
+// read-only: the server reads the incidents itself, the AI only proposes the
+// grouping, and a deterministic grouping is returned if the AI is unavailable.
+export type IncidentClusterSeverity = "low" | "medium" | "high";
+export type IncidentCluster = {
+  theme: string;
+  rootCauseHypothesis: string;
+  recommendedAction: string;
+  severity: IncidentClusterSeverity;
+  incidentIds: string[];
+  incidentCount: number;
+};
+export type IncidentClustersResult = {
+  clusters: IncidentCluster[];
+  totalIncidents: number;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestIncidentClusters = (lookbackDays?: number) =>
+  api<IncidentClustersResult>("/ai/incident-clusters", {
+    method: "POST",
+    body: JSON.stringify(lookbackDays ? { lookbackDays } : {}),
+  });
+
+// AI predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
+// stoppages vs. a per-product baseline) is deterministic server-side; the AI
+// only narrates flagged anomalies. Advisory and read-only. Open to all staff.
+export type AnomalyMetric = "downtime" | "yield" | "stoppages";
+export type AnomalySeverity = "low" | "medium" | "high";
+export type AnomalyRunInput = {
+  brand: string;
+  flavor: string;
+  casesPlanned: number;
+  casesProduced: number;
+  downtimeMinutes: number;
+  stoppageCount: number;
+};
+export type Anomaly = {
+  runLabel: string;
+  brand: string;
+  flavor: string;
+  metric: AnomalyMetric;
+  observed: number;
+  baseline: number;
+  severity: AnomalySeverity;
+  baselineSamples: number;
+  description: string;
+};
+export type AnomalyResult = {
+  anomalies: Anomaly[];
+  checkedRuns: number;
+  baselineRuns: number;
+  summary: string;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestAnomalies = (
+  today: AnomalyRunInput[],
+  history: AnomalyRunInput[],
+) =>
+  api<AnomalyResult>("/ai/anomalies", {
+    method: "POST",
+    body: JSON.stringify({ today, history }),
+  });
+
+// AI schedule optimizer. The suggested run order (allergen runs end-of-day,
+// similar brand/die grouped to cut changeovers, factory sequence rules honored)
+// is computed deterministically server-side; the AI only narrates it, and only
+// when a strictly better order exists. Advisory and read-only — the manager
+// applies it through the normal move path. Manager-gated.
+export type ScheduleAllergen = "none" | "egg" | "soy";
+export type ScheduleRunInput = {
+  id: string;
+  label: string;
+  brand: string;
+  flavor: string;
+  allergen: ScheduleAllergen;
+  dieType?: string;
+};
+export type ScheduleMetrics = {
+  allergenViolations: number;
+  ruleViolations: number;
+  changeovers: number;
+};
+export type ScheduleOptimizeResult = {
+  order: string[];
+  changed: boolean;
+  improved: boolean;
+  before: ScheduleMetrics;
+  after: ScheduleMetrics;
+  summary: string;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestScheduleOptimize = (
+  runs: ScheduleRunInput[],
+  rules?: unknown[],
+) =>
+  api<ScheduleOptimizeResult>("/ai/schedule-optimize", {
+    method: "POST",
+    body: JSON.stringify({ runs, rules: rules ?? [] }),
+  });

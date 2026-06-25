@@ -8,7 +8,12 @@
 
 import type { OptimizeInput } from "./aiOptimize";
 import type { ConversationTurn } from "./aiMemory";
-import { InventoryApiError, inventoryClientId, photoErrorMessage } from "./inventoryShared";
+import {
+  InventoryApiError,
+  inventoryClientId,
+  photoErrorMessage,
+  postEventStream,
+} from "./inventoryShared";
 
 export type AskResult = {
   answer: string;
@@ -45,6 +50,22 @@ export async function requestAsk(question: string, dayState: OptimizeInput): Pro
     );
   }
   return (await res.json()) as AskResult;
+}
+
+// Streaming variant: stream the answer text live via onDelta, then resolve with
+// the same AskResult the non-stream endpoint returns. Throws InventoryApiError
+// on any failure so the caller can fall back to requestAsk. Mirrors mobile.
+export async function requestAskStream(
+  question: string,
+  dayState: OptimizeInput,
+  onDelta: (text: string) => void,
+): Promise<AskResult> {
+  return await postEventStream<AskResult>(
+    "/ai/ask",
+    { question, dayState },
+    onDelta,
+    "Ask request failed",
+  );
 }
 
 // Reuse the photo endpoint's friendly 429/413 messaging for parity.

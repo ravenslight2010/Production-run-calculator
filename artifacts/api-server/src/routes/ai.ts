@@ -70,6 +70,12 @@ import {
   validateOptimizeBody as validateProactiveBody,
 } from "./aiProactive";
 import {
+  buildFallbackClusters,
+  type IncidentCluster,
+  type IncidentForCluster,
+} from "@workspace/incident-cluster";
+import { listIncidents } from "../lib/incidents";
+import {
   flagExpiringItems,
   type FlaggableItem,
   type WasteFlaggedItem,
@@ -95,6 +101,7 @@ import {
   sanitizeRecipeAnswer,
   validateRecipeAssistBody,
 } from "./aiRecipeAssistant";
+import { wantsEventStream, sseFrame, extractJsonStringField } from "./aiStream";
 import {
   buildSpecReconcilePrompt,
   sanitizeSpecReconcileSummary,
@@ -104,10 +111,36 @@ import {
 import {
   aggregateForecastHistory,
   buildForecastPrompt,
-  sanitizeForecast,
+  sanitizeForecasts,
+  forecastTargetDates,
   validateForecastBody,
   FORECAST_MIN_RUNS,
 } from "./aiForecast";
+import {
+  validateSummaryBody,
+  toSummaryAggInput,
+  buildSummaryPrompt,
+  sanitizeSummary,
+} from "./aiSummary";
+import {
+  aggregateDaySummary,
+  buildFallbackSummary,
+} from "@workspace/day-summary";
+import {
+  validateAnomalyBody,
+  toAnomalyDetectInput,
+  buildAnomalyPrompt,
+  sanitizeAnomalySummary,
+  detectAnomalies,
+} from "./aiAnomalies";
+import {
+  validateScheduleBody,
+  toScheduleRuns,
+  toScheduleRules,
+  buildSchedulePrompt,
+  sanitizeScheduleSummary,
+  optimizeSchedule,
+} from "./aiScheduleOptimize";
 import {
   validateForecastAccuracyBody,
   buildForecastReviews,
@@ -232,6 +265,31 @@ const FORECAST_RATE_MAX = 10;
 const forecastRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(FORECAST_RATE_WINDOW_MS)
+    : undefined;
+
+const SUMMARY_RATE_WINDOW_MS = 60_000;
+const SUMMARY_RATE_MAX = 10;
+const summaryRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(SUMMARY_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the anomaly-flag narrator: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const ANOMALY_RATE_WINDOW_MS = 60_000;
+const ANOMALY_RATE_MAX = 10;
+const anomalyRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(ANOMALY_RATE_WINDOW_MS)
+    : undefined;
+
+// Same posture for the schedule-order narrator: per-user fixed window,
+// Postgres-backed in production so the cost cap holds across instances.
+const SCHEDULE_RATE_WINDOW_MS = 60_000;
+const SCHEDULE_RATE_MAX = 10;
+const scheduleRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(SCHEDULE_RATE_WINDOW_MS)
     : undefined;
 
 // Same posture for the saved spec-sheet cross-reference: per-user fixed window,
@@ -361,6 +419,80 @@ router.post(
     // new exchange, so the model sees the conversation as it stood at ask time.
     const userPrompt = await groundPromptWithMemory(req.log, user, { userId });
 
+    // Finalize the exchange identically for the stream and non-stream paths: run
+    // the same deterministic sanitize, then best-effort record the turns so the
+    // client renders from server truth. A write failure never drops the answer.
+    const finalize = async (
+      content: string,
+    ): Promise<{
+      answer: string;
+      turns: Array<{ role: "user" | "assistant"; text: string }>;
+      generatedAt: number;
+      note?: string;
+    }> => {
+      const { answer, note } = sanitizeAnswer(content);
+      const replyText = answer || note || "I couldn't find an answer in today's data.";
+      let turns: Array<{ role: "user" | "assistant"; text: string }> = [];
+      if (userId) {
+        try {
+          turns = await recordConversationTurns(userId, [
+            { role: "user", text: validation.data.question },
+            { role: "assistant", text: replyText },
+          ]);
+        } catch (err) {
+          req.log.error({ err }, "ai-ask failed to record conversation turns");
+        }
+      }
+      return { answer: replyText, turns, generatedAt: Date.now(), ...(note ? { note } : {}) };
+    };
+
+    // ── Streaming path (opt-in via Accept: text/event-stream) ────────────────
+    // Stream the answer text as it's generated, then send the same final payload
+    // the non-stream path returns. The client keeps a non-stream fallback.
+    if (wantsEventStream(req.headers.accept)) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      let content = "";
+      let emitted = "";
+      try {
+        const stream = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          stream: true,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        for await (const chunk of stream) {
+          const piece = chunk.choices[0]?.delta?.content ?? "";
+          if (!piece) continue;
+          content += piece;
+          const partial = extractJsonStringField(content, "answer");
+          if (partial.length > emitted.length) {
+            res.write(sseFrame("delta", { text: partial.slice(emitted.length) }));
+            emitted = partial;
+          }
+        }
+      } catch (err) {
+        req.log.error({ err }, "ai-ask stream failed");
+        res.write(sseFrame("error", { error: "AI provider error" }));
+        res.end();
+        return;
+      }
+      const payload = await finalize(content);
+      res.write(sseFrame("done", payload));
+      res.end();
+      return;
+    }
+
+    // ── Non-streaming path (default) ─────────────────────────────────────────
     let content = "";
     try {
       const response = await openai.chat.completions.create({
@@ -379,30 +511,7 @@ router.post(
       return;
     }
 
-    const { answer, note } = sanitizeAnswer(content);
-    const replyText = answer || note || "I couldn't find an answer in today's data.";
-
-    // Persist the exchange (user question + assistant reply) and return this
-    // user's updated conversation window so the client renders from server truth.
-    // Best-effort: a write failure must never drop the answer we already have.
-    let turns: Array<{ role: "user" | "assistant"; text: string }> = [];
-    if (userId) {
-      try {
-        turns = await recordConversationTurns(userId, [
-          { role: "user", text: validation.data.question },
-          { role: "assistant", text: replyText },
-        ]);
-      } catch (err) {
-        req.log.error({ err }, "ai-ask failed to record conversation turns");
-      }
-    }
-
-    res.json({
-      answer: replyText,
-      turns,
-      generatedAt: Date.now(),
-      ...(note ? { note } : {}),
-    });
+    res.json(await finalize(content));
   },
 );
 
@@ -550,6 +659,72 @@ router.post(
       facilityDomains: ["ingredient", "general"],
     });
 
+    // The model may only target a recipe we actually sent: collect the ids so a
+    // hallucinated/off-target suggestion is dropped rather than offered to apply.
+    const knownRecipeIds = new Set(
+      validation.data.recipes
+        .map((r) => r.id?.trim())
+        .filter((id): id is string => !!id),
+    );
+    // Finalize identically for the stream and non-stream paths: same
+    // deterministic sanitize, same drop-off-target-suggestion guard.
+    const finalize = (content: string) => {
+      const { answer, note, suggestion } = sanitizeRecipeAnswer(content, knownRecipeIds);
+      const replyText = answer || note || "I couldn't answer that from the recipe data.";
+      return {
+        answer: replyText,
+        generatedAt: Date.now(),
+        ...(note ? { note } : {}),
+        ...(suggestion ? { suggestion } : {}),
+      };
+    };
+
+    // ── Streaming path (opt-in via Accept: text/event-stream) ────────────────
+    // Stream the answer text, then send the same final payload the non-stream
+    // path returns (incl. any apply-able suggestion). Client keeps a fallback.
+    if (wantsEventStream(req.headers.accept)) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+      let content = "";
+      let emitted = "";
+      try {
+        const stream = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 2048,
+          response_format: { type: "json_object" },
+          stream: true,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: grounded },
+          ],
+        });
+        for await (const chunk of stream) {
+          const piece = chunk.choices[0]?.delta?.content ?? "";
+          if (!piece) continue;
+          content += piece;
+          const partial = extractJsonStringField(content, "answer");
+          if (partial.length > emitted.length) {
+            res.write(sseFrame("delta", { text: partial.slice(emitted.length) }));
+            emitted = partial;
+          }
+        }
+      } catch (err) {
+        req.log.error({ err }, "ai-recipe-assistant stream failed");
+        res.write(sseFrame("error", { error: "AI provider error" }));
+        res.end();
+        return;
+      }
+      res.write(sseFrame("done", finalize(content)));
+      res.end();
+      return;
+    }
+
+    // ── Non-streaming path (default) ─────────────────────────────────────────
     let content = "";
     try {
       const response = await openai.chat.completions.create({
@@ -568,22 +743,7 @@ router.post(
       return;
     }
 
-    // The model may only target a recipe we actually sent: collect the ids so a
-    // hallucinated/off-target suggestion is dropped rather than offered to apply.
-    const knownRecipeIds = new Set(
-      validation.data.recipes
-        .map((r) => r.id?.trim())
-        .filter((id): id is string => !!id),
-    );
-    const { answer, note, suggestion } = sanitizeRecipeAnswer(content, knownRecipeIds);
-    const replyText = answer || note || "I couldn't answer that from the recipe data.";
-
-    res.json({
-      answer: replyText,
-      generatedAt: Date.now(),
-      ...(note ? { note } : {}),
-      ...(suggestion ? { suggestion } : {}),
-    });
+    res.json(finalize(content));
   },
 );
 
@@ -875,6 +1035,37 @@ async function loadLowStockReorderItems(
   }
 }
 
+// Recent recurring incident patterns, for grounding the proactive watcher so it
+// "learns" from problems staff have reported lately. Reuses the SAME deterministic
+// grouping the manager-facing incident-clusters view uses (@workspace/incident-
+// cluster), so what the watcher sees as context matches what managers see. Only a
+// recent window is considered, and the pure prompt builder further filters to
+// recurring (2+) clusters. Fail-safe: any read error yields no patterns and the
+// poll continues uninterrupted.
+const INCIDENT_PATTERN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+async function loadRecentIncidentPatterns(log: {
+  error: (obj: unknown, msg?: string) => void;
+}): Promise<IncidentCluster[]> {
+  try {
+    const incidents = await listIncidents();
+    const cutoff = Date.now() - INCIDENT_PATTERN_WINDOW_MS;
+    const forCluster: IncidentForCluster[] = incidents
+      .filter((i) => new Date(i.createdAt).getTime() >= cutoff)
+      .map((i) => ({
+        id: i.id,
+        appPlatform: i.appPlatform,
+        screen: i.screen,
+        source: i.source,
+        message: i.context.description || i.context.errorMessage || "",
+        count: i.recurrence?.count ?? 1,
+      }));
+    return buildFallbackClusters(forCluster);
+  } catch (err) {
+    log.error({ err }, "proactive-alert: failed to load incident patterns (non-fatal)");
+    return [];
+  }
+}
+
 // Proactive watcher: same live-day input as /ai/optimize, but returns at most a
 // single timely, dismissible nudge (or null). Polled on a cadence by the client
 // while a day is running; the client owns de-dup/cooldown via the returned key.
@@ -894,9 +1085,10 @@ router.post(
       return;
     }
 
-    const [flaggedAtRisk, lowStock] = await Promise.all([
+    const [flaggedAtRisk, lowStock, incidentPatterns] = await Promise.all([
       loadFlaggedAtRiskStock(req.log),
       loadLowStockReorderItems(req.log, validation.data.reorderDemandByKey ?? {}),
+      loadRecentIncidentPatterns(req.log),
     ]);
 
     // On an idle day (no run started) the only nudges worth surfacing are stock
@@ -909,7 +1101,12 @@ router.post(
     }
 
     const knowledge = await loadFacilityKnowledge(req.log);
-    const { system, user } = buildProactivePrompt(validation.data, flaggedAtRisk, lowStock);
+    const { system, user } = buildProactivePrompt(
+      validation.data,
+      flaggedAtRisk,
+      lowStock,
+      incidentPatterns,
+    );
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
     let content = "";
@@ -1076,6 +1273,13 @@ router.post(
       buildForecastReviews(knowledge, validation.data.history),
     );
     const accuracyGrounding = formatAccuracyGrounding(accuracyTrend);
+    // Expand the requested horizon into the concrete list of days to forecast so
+    // multi-day output can be matched back to real dates deterministically.
+    const targetDates = forecastTargetDates(
+      validation.data.targetDate,
+      validation.data.horizonDays,
+    );
+
     const { system, user } = buildForecastPrompt(validation.data, accuracyGrounding);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
@@ -1083,7 +1287,9 @@ router.post(
     try {
       const response = await openai.chat.completions.create({
         model: pickModel("full"),
-        max_completion_tokens: 4096,
+        // Multi-day plans produce proportionally more output; give the longer
+        // horizons more room while keeping a sane ceiling.
+        max_completion_tokens: targetDates.length > 1 ? 8192 : 4096,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
@@ -1102,33 +1308,327 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-forecast non-JSON response");
-      res.json({ forecast: null, generatedAt: Date.now() });
+      res.json({ forecast: null, forecasts: [], generatedAt: Date.now() });
       return;
     }
 
-    const { forecast, note } = sanitizeForecast(raw, validation.data.targetDate);
+    const { forecasts, note } = sanitizeForecasts(raw, targetDates);
 
-    // Record the produced forecast back through the shared facility-memory write
-    // path (best-effort) so future forecasts — and any later accuracy review —
-    // can reference what was predicted for this kind of day. A write failure
-    // must never break the response, so swallow errors.
-    if (forecast) {
-      void recordFacilityKnowledge([
-        {
+    // Record each produced day's plan back through the shared facility-memory
+    // write path (best-effort) so future forecasts — and any later accuracy
+    // review — can reference what was predicted for this kind of day. A write
+    // failure must never break the response, so swallow errors.
+    if (forecasts.length) {
+      void recordFacilityKnowledge(
+        forecasts.map((plan) => ({
           domain: "forecast",
-          key: `plan:${forecast.targetDate}`,
-          fact: formatForecastFact(forecast),
+          key: `plan:${plan.targetDate}`,
+          fact: formatForecastFact(plan),
           source: "demand-forecaster",
-        },
-      ]).catch((err) => {
+        })),
+      ).catch((err) => {
         req.log.error({ err }, "failed to record forecast to facility memory");
       });
     }
 
     res.json({
-      forecast,
+      // forecast (singular) stays populated with the first day's plan for
+      // backward compatibility with older clients; forecasts carries every day.
+      forecast: forecasts[0] ?? null,
+      forecasts,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
+    });
+  },
+);
+
+// End-of-day / weekly production recap. Stats are computed deterministically
+// from the supplied runs (shared @workspace/day-summary lib); the model only
+// NARRATES them. Open to all signed-in staff (informational, like ask-the-day),
+// rate-limited per user. Fail-safe: any AI failure or unusable output falls back
+// to the deterministic plain-language summary built from the same stats, so the
+// caller always gets a usable recap. Read-only — never writes run data.
+router.post(
+  "/ai/summary",
+  rateLimit({
+    windowMs: SUMMARY_RATE_WINDOW_MS,
+    max: SUMMARY_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: summaryRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateSummaryBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Deterministic stats first — these are what the UI shows and what the
+    // fallback recap is built from. The AI never sees raw run data beyond this.
+    const stats = aggregateDaySummary(toSummaryAggInput(validation.data));
+    const fallback = buildFallbackSummary(stats);
+
+    // Nothing to narrate: skip the AI call entirely and return the deterministic
+    // "no runs" recap. Honest and cheap.
+    if (!stats.hasData) {
+      res.json({
+        summary: fallback,
+        stats,
+        generatedAt: Date.now(),
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const { system, user } = buildSummaryPrompt(stats);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 1024,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      // Fail-safe: AI provider error still returns a usable deterministic recap.
+      req.log.error({ err }, "ai-summary call failed; using deterministic fallback");
+      res.json({
+        summary: fallback,
+        stats,
+        generatedAt: Date.now(),
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-summary non-JSON response");
+      res.json({
+        summary: fallback,
+        stats,
+        generatedAt: Date.now(),
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    const narrated = sanitizeSummary(raw);
+    res.json({
+      summary: narrated ?? fallback,
+      stats,
+      generatedAt: Date.now(),
+      aiGenerated: narrated != null,
+    });
+  },
+);
+
+// Predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
+// stoppages vs. a per-product baseline) is computed deterministically from the
+// supplied runs (shared @workspace/anomaly lib); the model only NARRATES the
+// flagged anomalies — and only when at least one is flagged (no flags → no AI
+// call), mirroring the waste-insight posture. Open to all signed-in staff
+// (informational), rate-limited per user. Fail-safe: any AI failure or unusable
+// output returns the deterministic anomaly list with an empty narration.
+// Read-only — never writes run data.
+router.post(
+  "/ai/anomalies",
+  rateLimit({
+    windowMs: ANOMALY_RATE_WINDOW_MS,
+    max: ANOMALY_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: anomalyRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateAnomalyBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Deterministic detection first — this is what the UI shows. The AI never
+    // sees raw run data beyond the flagged anomalies.
+    const result = detectAnomalies(toAnomalyDetectInput(validation.data));
+
+    const baseResponse = {
+      anomalies: result.anomalies,
+      checkedRuns: result.checkedRuns,
+      baselineRuns: result.baselineRuns,
+      generatedAt: Date.now(),
+    };
+
+    // Not enough history to judge anything → honest note, no AI call.
+    if (result.baselineRuns < 3) {
+      res.json({
+        ...baseResponse,
+        summary: "",
+        note: "Not enough run history yet to spot anomalies.",
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    // Nothing drifted → skip the AI call entirely. Cheap and honest.
+    if (result.anomalies.length === 0) {
+      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const { system, user } = buildAnomalyPrompt(result);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 1024,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      // Fail-safe: AI provider error still returns the deterministic anomalies.
+      req.log.error({ err }, "ai-anomalies call failed; returning anomalies without narration");
+      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "ai-anomalies non-JSON response");
+      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      return;
+    }
+
+    const narrated = sanitizeAnomalySummary(raw);
+    res.json({
+      ...baseResponse,
+      summary: narrated ?? "",
+      aiGenerated: narrated != null,
+    });
+  },
+);
+
+// AI schedule-order suggestion. Given the runs planned for one day, the server
+// DETERMINISTICALLY proposes an ordering (allergen runs end-of-day, similar
+// brand/die grouped to cut changeovers, factory sequence rules honored — shared
+// @workspace/schedule-optimize lib). The model only NARRATES the suggested
+// order, and only when a strictly better order exists (no improvement → no AI
+// call), mirroring the anomaly posture. Manager-gated (use-ai-tools) and
+// rate-limited per user. Fail-safe: any AI failure or unusable output returns
+// the deterministic suggested order with an empty narration. Read-only — never
+// writes the schedule; the manager applies it through the normal move path.
+router.post(
+  "/ai/schedule-optimize",
+  requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: SCHEDULE_RATE_WINDOW_MS,
+    max: SCHEDULE_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: scheduleRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateScheduleBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+
+    // Deterministic ordering first — this is what the UI shows. The AI never
+    // sees raw run data beyond the suggested order's FACTS block.
+    const result = optimizeSchedule(
+      toScheduleRuns(validation.data),
+      toScheduleRules(validation.data),
+    );
+
+    const baseResponse = {
+      order: result.order,
+      changed: result.changed,
+      improved: result.improved,
+      before: result.before,
+      after: result.after,
+      generatedAt: Date.now(),
+    };
+
+    // Fewer than 2 runs, or no strictly better order → skip the AI call
+    // entirely. Cheap and honest.
+    if (result.ordered.length < 2) {
+      res.json({
+        ...baseResponse,
+        summary: "",
+        note: "Not enough runs to reorder.",
+        aiGenerated: false,
+      });
+      return;
+    }
+    if (!result.improved) {
+      res.json({
+        ...baseResponse,
+        summary: "",
+        note: "Runs are already in a good order.",
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    const knowledge = await loadFacilityKnowledge(req.log);
+    const { system, user } = buildSchedulePrompt(result);
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 1024,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      // Fail-safe: AI provider error still returns the deterministic order.
+      req.log.error(
+        { err },
+        "ai-schedule-optimize call failed; returning order without narration",
+      );
+      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn(
+        { content: content.slice(0, 200) },
+        "ai-schedule-optimize non-JSON response",
+      );
+      res.json({ ...baseResponse, summary: "", aiGenerated: false });
+      return;
+    }
+
+    const narrated = sanitizeScheduleSummary(raw);
+    res.json({
+      ...baseResponse,
+      summary: narrated ?? "",
+      aiGenerated: narrated != null,
     });
   },
 );

@@ -15,7 +15,7 @@
 
 import { getAuthToken } from "@workspace/api-client-react";
 import { getApiBaseUrl, getOrCreateClientId } from "./sync/client";
-import { InventoryApiError, photoErrorMessage } from "./inventoryShared";
+import { InventoryApiError, photoErrorMessage, postEventStream } from "./inventoryShared";
 import {
   buildRecipeAssistContext,
   RECIPE_FIELD_IDS,
@@ -77,6 +77,22 @@ export async function requestRecipeAssist(input: RecipeAssistInput): Promise<Rec
     );
   }
   return (await res.json()) as RecipeAssistResult;
+}
+
+// Streaming variant: stream the answer text live via onDelta, then resolve with
+// the same RecipeAssistResult (incl. any apply-able suggestion) the non-stream
+// endpoint returns. Throws InventoryApiError on any failure so the caller can
+// fall back to requestRecipeAssist. Mirrors web.
+export async function requestRecipeAssistStream(
+  input: RecipeAssistInput,
+  onDelta: (text: string) => void,
+): Promise<RecipeAssistResult> {
+  return await postEventStream<RecipeAssistResult>(
+    "/ai/recipe-assistant",
+    input,
+    onDelta,
+    "Recipe assistant request failed",
+  );
 }
 
 // Reuse the photo endpoint's friendly 429/413 messaging for parity.

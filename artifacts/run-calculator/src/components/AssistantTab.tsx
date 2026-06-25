@@ -17,7 +17,9 @@ import {
   VolumeX,
   CalendarClock,
   CalendarPlus,
+  FileText,
   ChefHat,
+  ListOrdered,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,16 +40,18 @@ import {
   requestOptimize,
   optimizeErrorMessage,
 } from "../aiOptimize";
-import { requestAsk, askErrorMessage } from "../aiAsk";
+import { requestAsk, requestAskStream, askErrorMessage, type AskResult } from "../aiAsk";
 import { requestCommand, commandErrorMessage } from "../aiCommand";
 import type { VoiceCommandAction, VoiceCommandResult } from "@workspace/voice-commands";
 import { useSpeechInput } from "../useSpeechInput";
 import { useSpeechOutput } from "../useSpeechOutput";
 import {
   type RecipeAssistInput,
+  type RecipeAssistResult,
   type RecipeAssistSuggestion,
   type RecipeApplyTarget,
   requestRecipeAssist,
+  requestRecipeAssistStream,
   recipeAssistErrorMessage,
 } from "../aiRecipe";
 import {
@@ -62,6 +66,22 @@ import {
   requestForecastAccuracy,
   forecastErrorMessage,
 } from "../aiForecast";
+import {
+  type SummaryInput,
+  type SummaryResult,
+  type SummaryScope,
+  requestSummary,
+  summaryErrorMessage,
+} from "../aiSummary";
+import {
+  requestAnomalies,
+  type AnomalyResult,
+  type AnomalyRunInput,
+  type AnomalySeverity,
+  requestScheduleOptimize,
+  type ScheduleRunInput,
+  type ScheduleOptimizeResult,
+} from "../inventoryShared";
 import { fetchConversationHistory, type ConversationTurn } from "../aiMemory";
 import { useMe } from "../useRole";
 import ReviewBadge from "./ReviewBadge";
@@ -261,6 +281,9 @@ function AskChat({
   const [note, setNote] = useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [voiceResults, setVoiceResults] = useState<VoiceCommandResult[]>([]);
+  // Live answer text as it streams in; null when not streaming. Shown as a
+  // provisional assistant bubble until the server's `done` payload replaces it.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Voice input: a FINAL transcript is sent to /ai/command, which decides whether
@@ -343,8 +366,23 @@ function AskChat({
     // Optimistically show the question; server truth replaces it on reply.
     setTurns([...turns, { role: "user", text: q }]);
     setQuestion("");
+    const input = buildInput();
     try {
-      const res = await requestAsk(q, buildInput());
+      // Stream the answer live; the server's `done` payload (turns/note) replaces
+      // the provisional bubble. Fall back to the non-stream request if streaming
+      // fails for any reason so the feature still works on flaky transports.
+      let res: AskResult;
+      try {
+        let acc = "";
+        setStreamingText("");
+        res = await requestAskStream(q, input, (chunk) => {
+          acc += chunk;
+          setStreamingText(acc);
+        });
+      } catch {
+        setStreamingText(null);
+        res = await requestAsk(q, input);
+      }
       if (res.turns.length) setTurns(res.turns);
       if (res.note) setNote(res.note);
     } catch (e) {
@@ -352,6 +390,7 @@ function AskChat({
       setQuestion(q);
       setError(askErrorMessage(e));
     } finally {
+      setStreamingText(null);
       setLoading(false);
     }
   }
@@ -436,12 +475,24 @@ function AskChat({
               </div>
             ))
           )}
-          {loading && (
+          {loading && streamingText ? (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+              <div
+                className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm text-foreground"
+                data-testid="ask-turn-streaming"
+              >
+                {streamingText}
+                <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground/60 align-middle" />
               </div>
             </div>
+          ) : (
+            loading && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+                </div>
+              </div>
+            )
           )}
         </div>
 
@@ -703,6 +754,8 @@ function RecipeAssistChat({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // Live answer text as it streams in; null when not streaming.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Voice input: a FINAL transcript is sent straight through the normal ask flow
@@ -771,7 +824,21 @@ function RecipeAssistChat({
     setQuestion("");
     try {
       const ctx = buildContext();
-      const res = await requestRecipeAssist({ ...ctx, question: q });
+      // Stream the answer live; the server's `done` payload (answer + any
+      // apply-able suggestion) becomes the final assistant turn. Fall back to the
+      // non-stream request if streaming fails so the feature still works.
+      let res: RecipeAssistResult;
+      try {
+        let acc = "";
+        setStreamingText("");
+        res = await requestRecipeAssistStream({ ...ctx, question: q }, (chunk) => {
+          acc += chunk;
+          setStreamingText(acc);
+        });
+      } catch {
+        setStreamingText(null);
+        res = await requestRecipeAssist({ ...ctx, question: q });
+      }
       setTurns((cur) => [
         ...cur,
         { role: "assistant", text: res.answer, suggestion: res.suggestion },
@@ -782,6 +849,7 @@ function RecipeAssistChat({
       setQuestion(q);
       setError(recipeAssistErrorMessage(e));
     } finally {
+      setStreamingText(null);
       setLoading(false);
     }
   }
@@ -845,12 +913,24 @@ function RecipeAssistChat({
               </div>
             ))
           )}
-          {loading && (
+          {loading && streamingText ? (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+              <div
+                className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-muted px-3 py-2 text-sm text-foreground"
+                data-testid="recipe-assist-turn-streaming"
+              >
+                {streamingText}
+                <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-foreground/60 align-middle" />
               </div>
             </div>
+          ) : (
+            loading && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking…
+                </div>
+              </div>
+            )
           )}
         </div>
 
@@ -952,31 +1032,454 @@ function tomorrowStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Plain-language production recap, open to ALL staff (not manager-gated). Pick
+// Day (today's runs) or Week (recent history); the server computes the numbers
+// deterministically and the AI only narrates them. Read-only and fail-safe — if
+// the AI is unavailable a deterministic recap is shown instead. Informational.
+function SummarySection({
+  buildSummary,
+}: {
+  buildSummary: (scope: SummaryScope) => SummaryInput;
+}) {
+  const [scope, setScope] = useState<SummaryScope>("day");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<SummaryResult | null>(null);
+
+  async function generate(next: SummaryScope) {
+    setScope(next);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestSummary(buildSummary(next));
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const stats = result?.stats ?? null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileText className="w-5 h-5 text-primary" />
+          Production Recap
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          A plain-language summary of how the day (or week) ran — planned vs. produced, downtime,
+          and anything that didn&apos;t finish. Informational only.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant={scope === "day" ? "default" : "outline"}
+            onClick={() => generate("day")}
+            disabled={loading}
+            className="flex-1 gap-2"
+            data-testid="button-summary-day"
+          >
+            {loading && scope === "day" ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+            Today
+          </Button>
+          <Button
+            type="button"
+            variant={scope === "week" ? "default" : "outline"}
+            onClick={() => generate("week")}
+            disabled={loading}
+            className="flex-1 gap-2"
+            data-testid="button-summary-week"
+          >
+            {loading && scope === "week" ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CalendarClock className="w-4 h-4" />
+            )}
+            This week
+          </Button>
+        </div>
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-3" data-testid="summary-result">
+            <p className="text-sm leading-relaxed text-foreground" data-testid="summary-text">
+              {result.summary}
+            </p>
+            {stats && stats.hasData && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="rounded-lg border border-border bg-card/60 p-2 text-center">
+                  <p className="text-lg font-bold text-foreground">
+                    {stats.runsFinished}/{stats.runsPlanned}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Runs finished
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-card/60 p-2 text-center">
+                  <p className="text-lg font-bold text-foreground">{stats.attainmentPct}%</p>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Attainment
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-card/60 p-2 text-center">
+                  <p className="text-lg font-bold text-foreground">{stats.casesProduced}</p>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Cases made
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-card/60 p-2 text-center">
+                  <p className="text-lg font-bold text-foreground">{stats.totalDowntimeMinutes}m</p>
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Downtime
+                  </p>
+                </div>
+              </div>
+            )}
+            {!result.aiGenerated && (
+              <p className="text-[10px] text-muted-foreground">
+                Showing a computed recap (AI narration unavailable).
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const ANOMALY_SEVERITY_CLASS: Record<AnomalySeverity, string> = {
+  high: "bg-red-500/15 text-red-400",
+  medium: "bg-amber-500/15 text-amber-400",
+  low: "bg-sky-500/15 text-sky-400",
+};
+
+const ANOMALY_METRIC_LABEL: Record<string, string> = {
+  downtime: "Downtime",
+  yield: "Yield",
+  stoppages: "Stoppages",
+};
+
+// Predictive-maintenance / anomaly check, open to ALL staff. Compares today's
+// finished runs against recent history; drift detection is deterministic
+// server-side and the AI only narrates flagged anomalies. Read-only and
+// fail-safe — if nothing drifted (or there's too little history) it says so, and
+// if the AI is unavailable the deterministic flags still show. Informational.
+function AnomalySection({
+  buildAnomaly,
+}: {
+  buildAnomaly: () => { today: AnomalyRunInput[]; history: AnomalyRunInput[] };
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<AnomalyResult | null>(null);
+
+  async function check() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { today, history } = buildAnomaly();
+      const res = await requestAnomalies(today, history);
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Gauge className="w-5 h-5 text-primary" />
+          Anomaly Check
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Flags today&apos;s runs that drifted from their usual downtime, yield, or stoppage
+          count vs. recent history. Advisory only.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button
+          type="button"
+          onClick={check}
+          disabled={loading}
+          className="w-full gap-2"
+          data-testid="button-anomaly-check"
+        >
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gauge className="w-4 h-4" />}
+          {result ? "Re-check" : "Check for anomalies"}
+        </Button>
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-3" data-testid="anomaly-result">
+            {result.summary && (
+              <p className="text-sm leading-relaxed text-foreground" data-testid="anomaly-text">
+                {result.summary}
+              </p>
+            )}
+            {result.note ? (
+              <p className="text-sm text-muted-foreground">{result.note}</p>
+            ) : result.anomalies.length === 0 ? (
+              <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>
+                  Nothing unusual across {result.checkedRuns}{" "}
+                  {result.checkedRuns === 1 ? "run" : "runs"} today.
+                </span>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {result.anomalies.map((a, i) => (
+                  <div
+                    key={i}
+                    className="rounded-lg border border-border bg-card/60 p-2.5 space-y-1"
+                    data-testid={`anomaly-item-${i}`}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide ${ANOMALY_SEVERITY_CLASS[a.severity]}`}
+                      >
+                        {a.severity}
+                      </span>
+                      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {ANOMALY_METRIC_LABEL[a.metric] ?? a.metric}
+                      </span>
+                      <span className="text-sm font-medium text-foreground">{a.runLabel}</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{a.description}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.anomalies.length > 0 && !result.aiGenerated && (
+              <p className="text-[10px] text-muted-foreground">
+                Showing computed flags (AI narration unavailable).
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// Manager-only schedule optimizer. The suggested run order (allergen runs
+// end-of-day, similar brand/die grouped to cut changeovers, factory sequence
+// rules honored) is computed deterministically server-side; the AI only narrates
+// it, and only when a strictly better order exists. Advisory: the manager taps
+// "Apply this order" to reorder today's runs (with an inline Undo) — nothing is
+// reordered without the explicit tap.
+function ScheduleSection({
+  buildSchedule,
+  onApplySchedule,
+}: {
+  buildSchedule: () => ScheduleRunInput[];
+  onApplySchedule: (order: string[]) => { ok: boolean; message: string; undo?: () => void };
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ScheduleOptimizeResult | null>(null);
+  const [runs, setRuns] = useState<ScheduleRunInput[]>([]);
+  const [applyMsg, setApplyMsg] = useState<string | null>(null);
+  const [undo, setUndo] = useState<(() => void) | null>(null);
+
+  async function optimize() {
+    setLoading(true);
+    setError(null);
+    setApplyMsg(null);
+    setUndo(null);
+    try {
+      const input = buildSchedule();
+      setRuns(input);
+      const res = await requestScheduleOptimize(input);
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function apply() {
+    if (!result) return;
+    const r = onApplySchedule(result.order);
+    setApplyMsg(r.message);
+    setUndo(() => r.undo ?? null);
+  }
+
+  const labelById = new Map(runs.map((r) => [r.id, r.label]));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ListOrdered className="w-5 h-5 text-primary" />
+          Schedule Optimizer
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Suggests an order for today&apos;s runs — allergen runs last, similar brand/die grouped
+          to cut changeovers, factory sequence rules honored. Advisory; you apply it with one tap.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Button
+          type="button"
+          onClick={optimize}
+          disabled={loading}
+          className="w-full gap-2"
+          data-testid="button-schedule-optimize"
+        >
+          {loading ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <ListOrdered className="w-4 h-4" />
+          )}
+          {result ? "Re-optimize" : "Suggest an order"}
+        </Button>
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <AlertTriangle className="mt-0.5 w-3.5 h-3.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {result && (
+          <div className="space-y-3" data-testid="schedule-result">
+            {result.summary && (
+              <p className="text-sm leading-relaxed text-foreground" data-testid="schedule-text">
+                {result.summary}
+              </p>
+            )}
+            {result.note && !result.improved ? (
+              <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-400">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{result.note}</span>
+              </div>
+            ) : result.improved ? (
+              <>
+                <div className="rounded-lg border border-border bg-card/60 p-2.5 space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    Suggested order
+                  </p>
+                  <ol className="space-y-1">
+                    {result.order.map((id, i) => (
+                      <li
+                        key={id}
+                        className="flex items-center gap-2 text-sm text-foreground"
+                        data-testid={`schedule-order-${i}`}
+                      >
+                        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground">
+                          {i + 1}
+                        </span>
+                        <span>{labelById.get(id) ?? id}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="text-[11px] text-muted-foreground">
+                    Changeovers {result.before.changeovers} → {result.after.changeovers} · rule
+                    issues {result.before.ruleViolations} → {result.after.ruleViolations} · allergen
+                    sequence {result.before.allergenViolations} → {result.after.allergenViolations}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={apply}
+                  variant="secondary"
+                  className="w-full gap-2"
+                  data-testid="button-schedule-apply"
+                >
+                  <Check className="w-4 h-4" />
+                  Apply this order
+                </Button>
+                {!result.aiGenerated && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Showing computed order (AI narration unavailable).
+                  </p>
+                )}
+              </>
+            ) : null}
+
+            {applyMsg && (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                <span className="text-foreground">{applyMsg}</span>
+                {undo && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      undo();
+                      setApplyMsg("Order restored");
+                      setUndo(null);
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                    data-testid="button-schedule-undo"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    Undo
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // Manager-only demand forecast. Predicts an upcoming day's run plan grounded in
 // real history; advisory only. The manager picks the target day (defaults to
 // tomorrow) then taps "Add to schedule" to review the suggestion in the editable
 // schedule editor — nothing is committed here.
+const FORECAST_HORIZONS = [1, 3, 7] as const;
+
 function ForecastSection({
   buildForecast,
   onApplyForecast,
 }: {
-  buildForecast: (targetDate: string) => ForecastInput;
+  buildForecast: (targetDate: string, horizonDays: number) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<
-    { forecast: ForecastPlan | null; note?: string; generatedAt: number } | null
+    { forecast: ForecastPlan | null; forecasts?: ForecastPlan[]; note?: string; generatedAt: number } | null
   >(null);
-  const [applied, setApplied] = useState(false);
+  // Track which day plans the manager has already opened in the schedule, keyed
+  // by the plan's targetDate so each day in a multi-day horizon applies once.
+  const [appliedDates, setAppliedDates] = useState<Set<string>>(new Set());
   const [targetDate, setTargetDate] = useState(tomorrowStr());
+  const [horizonDays, setHorizonDays] = useState(1);
 
   async function predict() {
     setLoading(true);
     setError(null);
-    setApplied(false);
+    setAppliedDates(new Set());
     try {
-      const res = await requestForecast(buildForecast(targetDate || tomorrowStr()));
+      const res = await requestForecast(buildForecast(targetDate || tomorrowStr(), horizonDays));
       setResult(res);
     } catch (e) {
       setError(forecastErrorMessage(e));
@@ -985,7 +1488,13 @@ function ForecastSection({
     }
   }
 
-  const plan = result?.forecast ?? null;
+  // Prefer the multi-day list; fall back to the single forecast for back-compat.
+  const plans: ForecastPlan[] =
+    result?.forecasts && result.forecasts.length > 0
+      ? result.forecasts
+      : result?.forecast
+        ? [result.forecast]
+        : [];
 
   return (
     <>
@@ -996,9 +1505,10 @@ function ForecastSection({
             Demand Forecast
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Predict an upcoming day&apos;s run plan from recent production history — what to run,
-            rough quantities, and a sensible order. Advisory only; you review and adjust it in the
-            schedule before anything is planned.
+            Predict one or more upcoming days&apos; run plans from recent production history — what
+            to run, rough quantities, and a sensible order, grounded in each day&apos;s weekday and
+            the recent trend. Advisory only; you review and adjust it in the schedule before anything
+            is planned.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1007,7 +1517,7 @@ function ForecastSection({
               htmlFor="forecast-target-date"
               className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground"
             >
-              Forecast day
+              Starting day
             </label>
             <input
               id="forecast-target-date"
@@ -1018,6 +1528,28 @@ function ForecastSection({
               className="h-9 w-full rounded-md border border-border/60 bg-muted/40 px-3 text-sm outline-none transition-colors focus:border-primary/60"
               data-testid="input-forecast-date"
             />
+          </div>
+          <div className="space-y-1.5">
+            <span className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              How many days
+            </span>
+            <div className="flex gap-2">
+              {FORECAST_HORIZONS.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setHorizonDays(h)}
+                  className={`h-9 flex-1 rounded-md border px-3 text-sm font-semibold transition-colors ${
+                    horizonDays === h
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/60 bg-muted/40 text-muted-foreground hover:border-primary/40"
+                  }`}
+                  data-testid={`button-forecast-horizon-${h}`}
+                >
+                  {h === 1 ? "1 day" : `${h} days`}
+                </button>
+              ))}
+            </div>
           </div>
           <Button onClick={predict} disabled={loading} className="gap-2" data-testid="button-forecast">
             {loading ? (
@@ -1030,7 +1562,10 @@ function ForecastSection({
               </>
             ) : (
               <>
-                <CalendarClock className="w-4 h-4" /> Forecast {formatTargetDate(targetDate || tomorrowStr())}
+                <CalendarClock className="w-4 h-4" /> Forecast{" "}
+                {horizonDays === 1
+                  ? formatTargetDate(targetDate || tomorrowStr())
+                  : `${horizonDays} days`}
               </>
             )}
           </Button>
@@ -1043,7 +1578,7 @@ function ForecastSection({
         </CardContent>
       </Card>
 
-      {result && !plan && (
+      {result && plans.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <CalendarClock className="w-6 h-6 text-muted-foreground" />
@@ -1056,69 +1591,73 @@ function ForecastSection({
         </Card>
       )}
 
-      {plan && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-start justify-between gap-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarClock className="w-4 h-4 text-primary" />
-                Plan for {formatTargetDate(plan.targetDate)}
-              </CardTitle>
-              <span
-                className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${confidenceClass(plan.confidence)}`}
-                data-testid="forecast-confidence"
-              >
-                {plan.confidence} confidence
-              </span>
-            </div>
-            {plan.summary && (
-              <p className="text-xs leading-relaxed text-muted-foreground">{plan.summary}</p>
-            )}
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {plan.runs.map((r, i) => (
-              <div key={i} className="rounded-lg border border-border bg-card/60 p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-foreground">
-                    {r.brand}
-                    {r.flavor ? ` · ${r.flavor}` : ""}
-                  </p>
-                  <span className="shrink-0 text-xs font-bold text-primary">
-                    {r.casesNeeded > 0 ? `${r.casesNeeded} cs` : "—"}
-                  </span>
-                </div>
-                {r.dieType && (
-                  <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
-                    Die: {r.dieType}
-                  </p>
-                )}
-                {r.rationale && (
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{r.rationale}</p>
-                )}
-              </div>
-            ))}
-            {result?.note && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>{result.note}</span>
-              </div>
-            )}
-            <Button
-              variant={applied ? "secondary" : "default"}
-              className="mt-1 w-full gap-2"
-              disabled={applied}
-              onClick={() => {
-                onApplyForecast(plan);
-                setApplied(true);
-              }}
-              data-testid="button-apply-forecast"
-            >
-              {applied ? <Check className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
-              {applied ? "Opened in schedule" : "Add to schedule"}
-            </Button>
-          </CardContent>
-        </Card>
+      {plans.length > 0 && result?.note && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{result.note}</span>
+        </div>
       )}
+
+      {plans.map((plan) => {
+        const applied = appliedDates.has(plan.targetDate);
+        return (
+          <Card key={plan.targetDate}>
+            <CardHeader>
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <CalendarClock className="w-4 h-4 text-primary" />
+                  Plan for {formatTargetDate(plan.targetDate)}
+                </CardTitle>
+                <span
+                  className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${confidenceClass(plan.confidence)}`}
+                  data-testid="forecast-confidence"
+                >
+                  {plan.confidence} confidence
+                </span>
+              </div>
+              {plan.summary && (
+                <p className="text-xs leading-relaxed text-muted-foreground">{plan.summary}</p>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {plan.runs.map((r, i) => (
+                <div key={i} className="rounded-lg border border-border bg-card/60 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-foreground">
+                      {r.brand}
+                      {r.flavor ? ` · ${r.flavor}` : ""}
+                    </p>
+                    <span className="shrink-0 text-xs font-bold text-primary">
+                      {r.casesNeeded > 0 ? `${r.casesNeeded} cs` : "—"}
+                    </span>
+                  </div>
+                  {r.dieType && (
+                    <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">
+                      Die: {r.dieType}
+                    </p>
+                  )}
+                  {r.rationale && (
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{r.rationale}</p>
+                  )}
+                </div>
+              ))}
+              <Button
+                variant={applied ? "secondary" : "default"}
+                className="mt-1 w-full gap-2"
+                disabled={applied}
+                onClick={() => {
+                  onApplyForecast(plan);
+                  setAppliedDates((prev) => new Set(prev).add(plan.targetDate));
+                }}
+                data-testid="button-apply-forecast"
+              >
+                {applied ? <Check className="h-4 w-4" /> : <CalendarPlus className="h-4 w-4" />}
+                {applied ? "Opened in schedule" : "Add to schedule"}
+              </Button>
+            </CardContent>
+          </Card>
+        );
+      })}
     </>
   );
 }
@@ -1354,6 +1893,10 @@ export default function AssistantTab({
   recipeDefaultTargetId,
   onApplyAction,
   onApplyVoiceCommand,
+  buildSummary,
+  buildAnomaly,
+  buildSchedule,
+  onApplySchedule,
   buildForecast,
   onApplyForecast,
   buildAccuracy,
@@ -1368,7 +1911,11 @@ export default function AssistantTab({
   recipeDefaultTargetId: string;
   onApplyAction: (action: OptimizeAction) => { ok: boolean; message: string };
   onApplyVoiceCommand: (actions: VoiceCommandAction[]) => Promise<VoiceCommandResult[]>;
-  buildForecast: (targetDate: string) => ForecastInput;
+  buildSummary: (scope: SummaryScope) => SummaryInput;
+  buildAnomaly: () => { today: AnomalyRunInput[]; history: AnomalyRunInput[] };
+  buildSchedule: () => ScheduleRunInput[];
+  onApplySchedule: (order: string[]) => { ok: boolean; message: string; undo?: () => void };
+  buildForecast: (targetDate: string, horizonDays: number) => ForecastInput;
   onApplyForecast: (plan: ForecastPlan) => void;
   buildAccuracy: () => ForecastAccuracyInput;
 }) {
@@ -1418,8 +1965,14 @@ export default function AssistantTab({
         defaultTargetId={recipeDefaultTargetId}
       />
 
+      <SummarySection buildSummary={buildSummary} />
+
+      <AnomalySection buildAnomaly={buildAnomaly} />
+
       {!canUseAiTools ? null : (
       <>
+      <ScheduleSection buildSchedule={buildSchedule} onApplySchedule={onApplySchedule} />
+
       <ForecastSection buildForecast={buildForecast} onApplyForecast={onApplyForecast} />
 
       <AccuracySection buildAccuracy={buildAccuracy} />

@@ -9,8 +9,14 @@ import type { ForecastHistoryDay } from './forecastHistoryDay';
 import type { OptimizeScheduledRun } from './optimizeScheduledRun';
 
 export interface ForecastInput {
-  /** ISO date (YYYY-MM-DD) of the upcoming day to forecast */
+  /** ISO date (YYYY-MM-DD) of the first upcoming day to forecast */
   targetDate: string;
+  /**
+     * How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday's history.
+     * @minimum 1
+     * @maximum 7
+     */
+  horizonDays?: number;
   /** Client clock in epoch ms (for relative reasoning) */
   nowMs: number;
   /** Recent finished production days, most useful when several weeks deep */

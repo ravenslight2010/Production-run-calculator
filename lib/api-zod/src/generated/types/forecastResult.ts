@@ -8,8 +8,10 @@
 import type { ForecastPlan } from './forecastPlan';
 
 export interface ForecastResult {
-  /** The predicted plan, or null when history is too thin to predict */
+  /** The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present. */
   forecast: ForecastPlan | null;
+  /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
+  forecasts?: ForecastPlan[];
   generatedAt: number;
   /** Explanation when no forecast could responsibly be produced */
   note?: string;

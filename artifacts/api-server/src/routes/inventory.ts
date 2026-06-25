@@ -36,6 +36,17 @@ import {
   validateQualityPhotoBody,
 } from "./qualityPhoto";
 import {
+  buildProductionSheetPrompt,
+  sanitizeSheetRows,
+  validateProductionSheetBody,
+} from "./productionSheetPhoto";
+import {
+  buildLabelVerifyPrompt,
+  expectedToMap,
+  sanitizeLabelVerification,
+  validateLabelVerifyBody,
+} from "./labelVerify";
+import {
   parseHistoryFilter,
   rowToRecord,
   validateRecordQualityCheckBody,
@@ -81,6 +92,18 @@ const qualityRateStore =
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
 const wasteRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
+    : undefined;
+
+// The two vision-expansion endpoints (production-sheet transcription and
+// label/pallet verification) get their own cost caps for the same reason —
+// same per-user posture and Postgres-in-prod backing as the limiters above.
+const productionSheetRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
+    : undefined;
+const labelVerifyRateStore =
   process.env.NODE_ENV === "production"
     ? new PostgresRateLimitStore(PHOTO_RATE_WINDOW_MS)
     : undefined;
@@ -620,6 +643,141 @@ router.post(
     }
     const { assessment, note } = sanitizeAssessment(raw);
     res.json({ assessment, generatedAt: Date.now(), ...(note ? { note } : {}) });
+  },
+);
+
+// POST /inventory/production-sheet-photo — read a photo of a paper production/run
+// sheet and transcribe the run rows it lists so they can be reviewed and added
+// to the schedule. Read-only and advisory: every extracted row is confirmed by
+// the user before it is applied through the existing schedule path. Validation +
+// model-output sanitizing live in ./productionSheetPhoto so they can be
+// unit-tested without a DB or the vision provider.
+router.post(
+  "/inventory/production-sheet-photo",
+  requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: productionSheetRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateProductionSheetBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const input = validation.data;
+    const dataUri = `data:${input.mimeType || "image/jpeg"};base64,${input.imageBase64}`;
+    const { system, userText } = buildProductionSheetPrompt(input);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 8192,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "production-sheet-photo vision call failed");
+      res.status(502).json({ error: "Vision provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "production-sheet-photo non-JSON response");
+      res.json({
+        rows: [],
+        generatedAt: Date.now(),
+        note: "The production sheet could not be read. Please try another photo.",
+      });
+      return;
+    }
+    const { rows, note } = sanitizeSheetRows(raw);
+    res.json({ rows, generatedAt: Date.now(), ...(note ? { note } : {}) });
+  },
+);
+
+// POST /inventory/label-verify — read a photo of a finished-product label or
+// pallet placard and compare the visible fields against the expected values the
+// client supplies. Returns a per-field match/mismatch breakdown plus an overall
+// verdict. Read-only and advisory: a person reviews the result and decides what
+// to do. The overall verdict is RECOMPUTED server-side from the per-field
+// results so a model "pass" can never mask a real mismatch. Validation +
+// sanitizing live in ./labelVerify for unit testing.
+router.post(
+  "/inventory/label-verify",
+  requireCapability("use-ai-tools"),
+  rateLimit({
+    windowMs: PHOTO_RATE_WINDOW_MS,
+    max: PHOTO_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: labelVerifyRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateLabelVerifyBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const input = validation.data;
+    const expected = expectedToMap(input.expected);
+    const dataUri = `data:${input.mimeType || "image/jpeg"};base64,${input.imageBase64}`;
+    const { system, userText } = buildLabelVerifyPrompt(input);
+
+    let content = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 8192,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      });
+      content = response.choices[0]?.message?.content ?? "";
+    } catch (err) {
+      req.log.error({ err }, "label-verify vision call failed");
+      res.status(502).json({ error: "Vision provider error" });
+      return;
+    }
+
+    let raw: unknown;
+    try {
+      raw = JSON.parse(content);
+    } catch {
+      req.log.warn({ content: content.slice(0, 200) }, "label-verify non-JSON response");
+      const { result } = sanitizeLabelVerification(null, expected);
+      res.json({
+        ...result,
+        generatedAt: Date.now(),
+        note: "The label could not be read. Please try another photo.",
+      });
+      return;
+    }
+    const { result, note } = sanitizeLabelVerification(raw, expected);
+    res.json({ ...result, generatedAt: Date.now(), ...(note ? { note } : {}) });
   },
 );
 

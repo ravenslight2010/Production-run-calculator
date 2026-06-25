@@ -176,18 +176,27 @@ importers:
       '@workspace/ai-review':
         specifier: workspace:*
         version: link:../../lib/ai-review
+      '@workspace/anomaly':
+        specifier: workspace:*
+        version: link:../../lib/anomaly
       '@workspace/api-zod':
         specifier: workspace:*
         version: link:../../lib/api-zod
       '@workspace/cycle-count':
         specifier: workspace:*
         version: link:../../lib/cycle-count
+      '@workspace/day-summary':
+        specifier: workspace:*
+        version: link:../../lib/day-summary
       '@workspace/db':
         specifier: workspace:*
         version: link:../../lib/db
       '@workspace/freezer-pull':
         specifier: workspace:*
         version: link:../../lib/freezer-pull
+      '@workspace/incident-cluster':
+        specifier: workspace:*
+        version: link:../../lib/incident-cluster
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
@@ -209,6 +218,9 @@ importers:
       '@workspace/production-rules':
         specifier: workspace:*
         version: link:../../lib/production-rules
+      '@workspace/schedule-optimize':
+        specifier: workspace:*
+        version: link:../../lib/schedule-optimize
       '@workspace/spec-import':
         specifier: workspace:*
         version: link:../../lib/spec-import
@@ -963,6 +975,12 @@ importers:
 
   lib/allergen: {}
 
+  lib/anomaly:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
   lib/api-client-react:
     dependencies:
       '@tanstack/react-query':
@@ -982,6 +1000,12 @@ importers:
         version: 3.25.76
 
   lib/cycle-count:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
+  lib/day-summary:
     devDependencies:
       vitest:
         specifier: ^4.1.9
@@ -1015,6 +1039,12 @@ importers:
   lib/fill-missing: {}
 
   lib/freezer-pull:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
+  lib/incident-cluster:
     devDependencies:
       vitest:
         specifier: ^4.1.9
@@ -1098,6 +1128,19 @@ importers:
   lib/recipe-apply: {}
 
   lib/schedule-move:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
+  lib/schedule-optimize:
+    dependencies:
+      '@workspace/allergen':
+        specifier: workspace:*
+        version: link:../allergen
+      '@workspace/production-rules':
+        specifier: workspace:*
+        version: link:../production-rules
     devDependencies:
       vitest:
         specifier: ^4.1.9

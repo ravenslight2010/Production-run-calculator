@@ -39,16 +39,38 @@ import {
   type ForecastAccuracyProductStatus,
   type ForecastAccuracyTrend,
 } from "@/context/aiForecast";
-import { askErrorMessage, requestAsk } from "@/context/aiAsk";
+import { askErrorMessage, requestAsk, requestAskStream, type AskResult } from "@/context/aiAsk";
 import {
   buildRecipeAssistContext,
   recipeAssistErrorMessage,
   requestRecipeAssist,
+  requestRecipeAssistStream,
   type RecipeAssistInput,
+  type RecipeAssistResult,
   type RecipeAssistSuggestion,
   type RecipeApplyTarget,
 } from "@/context/aiRecipe";
 import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
+import {
+  buildDaySummaryInput,
+  buildWeekSummaryInput,
+  requestSummary,
+  summaryErrorMessage,
+  type SummaryInput,
+  type SummaryResult,
+  type SummaryScope,
+} from "@/context/aiSummary";
+import { buildAnomalyInput } from "@/context/aiAnomaly";
+import { buildScheduleInput } from "@/context/aiSchedule";
+import {
+  requestAnomalies,
+  type AnomalyResult,
+  type AnomalyRunInput,
+  type AnomalySeverity,
+  requestScheduleOptimize,
+  type ScheduleRunInput,
+  type ScheduleOptimizeResult,
+} from "@/context/inventoryShared";
 import { fetchConversationHistory, type ConversationTurn } from "@/context/aiMemory";
 import { requestCommand, commandErrorMessage } from "@/context/aiCommand";
 import { restockInventory, adjustInventory } from "@/context/inventoryShared";
@@ -267,6 +289,9 @@ function AskChat({
   const [note, setNote] = React.useState<string | null>(null);
   const [voiceBusy, setVoiceBusy] = React.useState(false);
   const [voiceResults, setVoiceResults] = React.useState<VoiceCommandResult[]>([]);
+  // Live answer text as it streams in; null when not streaming. Shown as a
+  // provisional assistant bubble until the server's `done` payload replaces it.
+  const [streamingText, setStreamingText] = React.useState<string | null>(null);
   const scrollRef = React.useRef<ScrollView | null>(null);
 
   // Voice input: a FINAL transcript is sent to /ai/command, which decides whether
@@ -351,8 +376,23 @@ function AskChat({
     // Optimistically show the question; server truth replaces it on reply.
     setTurns([...turns, { role: "user", text: q }]);
     setQuestion("");
+    const input = buildInput();
     try {
-      const res = await requestAsk(q, buildInput());
+      // Stream the answer live; the server's `done` payload (turns/note) replaces
+      // the provisional bubble. Fall back to the non-stream request if streaming
+      // fails for any reason so the feature still works on flaky transports.
+      let res: AskResult;
+      try {
+        let acc = "";
+        setStreamingText("");
+        res = await requestAskStream(q, input, (chunk) => {
+          acc += chunk;
+          setStreamingText(acc);
+        });
+      } catch {
+        setStreamingText(null);
+        res = await requestAsk(q, input);
+      }
       if (res.turns.length) setTurns(res.turns);
       if (res.note) setNote(res.note);
     } catch (e) {
@@ -360,6 +400,7 @@ function AskChat({
       setQuestion(q);
       setError(askErrorMessage(e));
     } finally {
+      setStreamingText(null);
       setLoading(false);
     }
   }
@@ -427,7 +468,13 @@ function AskChat({
             </View>
           ))
         )}
-        {loading ? (
+        {loading && streamingText !== null ? (
+          <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted }]}>
+            <Text style={[styles.bubbleText, { color: colors.foreground }]}>
+              {streamingText.length > 0 ? streamingText : "…"}
+            </Text>
+          </View>
+        ) : loading ? (
           <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted, flexDirection: "row", alignItems: "center", gap: 8 }]}>
             <ActivityIndicator size="small" color={colors.mutedForeground} />
             <Text style={[styles.bubbleText, { color: colors.mutedForeground }]}>Thinking…</Text>
@@ -689,6 +736,9 @@ function RecipeAssistChat({
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [note, setNote] = React.useState<string | null>(null);
+  // Live answer text as it streams in; null when not streaming. Shown as a
+  // provisional assistant bubble until the server's `done` payload replaces it.
+  const [streamingText, setStreamingText] = React.useState<string | null>(null);
   const scrollRef = React.useRef<ScrollView | null>(null);
 
   // Voice input: a FINAL transcript is sent straight through the normal ask flow
@@ -758,7 +808,21 @@ function RecipeAssistChat({
     setQuestion("");
     try {
       const ctx = buildContext();
-      const res = await requestRecipeAssist({ ...ctx, question: q });
+      // Stream the answer live; the server's `done` payload (answer + any
+      // apply-able suggestion) becomes the final assistant turn. Fall back to the
+      // non-stream request if streaming fails so the feature still works.
+      let res: RecipeAssistResult;
+      try {
+        let acc = "";
+        setStreamingText("");
+        res = await requestRecipeAssistStream({ ...ctx, question: q }, (chunk) => {
+          acc += chunk;
+          setStreamingText(acc);
+        });
+      } catch {
+        setStreamingText(null);
+        res = await requestRecipeAssist({ ...ctx, question: q });
+      }
       setTurns((cur) => [
         ...cur,
         { role: "assistant", text: res.answer, suggestion: res.suggestion },
@@ -769,6 +833,7 @@ function RecipeAssistChat({
       setQuestion(q);
       setError(recipeAssistErrorMessage(e));
     } finally {
+      setStreamingText(null);
       setLoading(false);
     }
   }
@@ -814,7 +879,13 @@ function RecipeAssistChat({
             </View>
           ))
         )}
-        {loading ? (
+        {loading && streamingText !== null ? (
+          <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted }]}>
+            <Text style={[styles.bubbleText, { color: colors.foreground }]}>
+              {streamingText.length > 0 ? streamingText : "…"}
+            </Text>
+          </View>
+        ) : loading ? (
           <View style={[styles.bubble, { alignSelf: "flex-start", backgroundColor: colors.muted, flexDirection: "row", alignItems: "center", gap: 8 }]}>
             <ActivityIndicator size="small" color={colors.mutedForeground} />
             <Text style={[styles.bubbleText, { color: colors.mutedForeground }]}>Thinking…</Text>
@@ -952,16 +1023,502 @@ function formatTargetDate(iso: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
+// Plain-language production recap, open to ALL staff (not manager-gated). Pick
+// Today (today's runs) or This week (recent history); the server computes the
+// numbers deterministically and the AI only narrates them. Read-only and
+// fail-safe — if the AI is unavailable a deterministic recap is shown instead.
+// EXACT mirror of the web SummarySection (replit.md parity).
+function SummarySection({
+  buildSummary,
+}: {
+  buildSummary: (scope: SummaryScope) => SummaryInput;
+}) {
+  const colors = useColors();
+  const [scope, setScope] = React.useState<SummaryScope>("day");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<SummaryResult | null>(null);
+
+  async function generate(next: SummaryScope) {
+    setScope(next);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await requestSummary(buildSummary(next));
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const stats = result?.stats ?? null;
+
+  return (
+    <Card title="Production Recap" icon="file-text" accent>
+      <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+        A plain-language summary of how the day (or week) ran — planned vs. produced, downtime, and
+        anything that didn&apos;t finish. Informational only.
+      </Text>
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+        <View style={{ flex: 1 }}>
+          <Button
+            label={loading && scope === "day" ? "…" : "Today"}
+            icon="file-text"
+            variant={scope === "day" ? "primary" : "outline"}
+            disabled={loading}
+            onPress={() => generate("day")}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            label={loading && scope === "week" ? "…" : "This week"}
+            icon="calendar"
+            variant={scope === "week" ? "primary" : "outline"}
+            disabled={loading}
+            onPress={() => generate("week")}
+          />
+        </View>
+      </View>
+
+      {error ? (
+        <View
+          style={[
+            styles.errorBox,
+            { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" },
+          ]}
+        >
+          <Feather name="alert-triangle" size={13} color="#f87171" />
+          <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      {result ? (
+        <View style={{ gap: 10, marginTop: 10 }} testID="summary-result">
+          <Text style={[styles.recDetail, { color: colors.foreground, marginTop: 0 }]} testID="summary-text">
+            {result.summary}
+          </Text>
+          {stats && stats.hasData ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {[
+                { v: `${stats.runsFinished}/${stats.runsPlanned}`, l: "Runs finished" },
+                { v: `${stats.attainmentPct}%`, l: "Attainment" },
+                { v: `${stats.casesProduced}`, l: "Cases made" },
+                { v: `${stats.totalDowntimeMinutes}m`, l: "Downtime" },
+              ].map((s, i) => (
+                <View
+                  key={i}
+                  style={{
+                    flexGrow: 1,
+                    flexBasis: "45%",
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    borderRadius: 10,
+                    paddingVertical: 8,
+                    alignItems: "center",
+                    backgroundColor: colors.background,
+                  }}
+                >
+                  <Text style={{ fontSize: 17, fontWeight: "700", color: colors.foreground }}>
+                    {s.v}
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      color: colors.mutedForeground,
+                    }}
+                  >
+                    {s.l}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {!result.aiGenerated ? (
+            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+              Showing a computed recap (AI narration unavailable).
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+const ANOMALY_SEVERITY_COLORS: Record<AnomalySeverity, { bg: string; fg: string }> = {
+  high: { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
+  medium: { bg: "rgba(245,158,11,0.15)", fg: "#fbbf24" },
+  low: { bg: "rgba(56,189,248,0.15)", fg: "#38bdf8" },
+};
+
+const ANOMALY_METRIC_LABEL: Record<string, string> = {
+  downtime: "Downtime",
+  yield: "Yield",
+  stoppages: "Stoppages",
+};
+
+// Predictive-maintenance / anomaly check, open to ALL staff. Compares today's
+// finished runs against recent history; drift detection is deterministic
+// server-side and the AI only narrates flagged anomalies. Read-only and
+// fail-safe — if nothing drifted (or there's too little history) it says so, and
+// if the AI is unavailable the deterministic flags still show. EXACT mirror of
+// the web AnomalySection (replit.md parity).
+function AnomalySection({
+  buildAnomaly,
+}: {
+  buildAnomaly: () => { today: AnomalyRunInput[]; history: AnomalyRunInput[] };
+}) {
+  const colors = useColors();
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<AnomalyResult | null>(null);
+
+  async function check() {
+    setLoading(true);
+    setError(null);
+    try {
+      const { today, history } = buildAnomaly();
+      const res = await requestAnomalies(today, history);
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card title="Anomaly Check" icon="activity" accent>
+      <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+        Flags today&apos;s runs that drifted from their usual downtime, yield, or stoppage count
+        vs. recent history. Advisory only.
+      </Text>
+      <Button
+        label={loading ? "Checking…" : result ? "Re-check" : "Check for anomalies"}
+        icon={result && !loading ? "refresh-cw" : "activity"}
+        disabled={loading}
+        onPress={check}
+      />
+
+      {error ? (
+        <View
+          style={[
+            styles.errorBox,
+            { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" },
+          ]}
+        >
+          <Feather name="alert-triangle" size={13} color="#f87171" />
+          <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      {result ? (
+        <View style={{ gap: 10, marginTop: 10 }} testID="anomaly-result">
+          {result.summary ? (
+            <Text
+              style={[styles.recDetail, { color: colors.foreground, marginTop: 0 }]}
+              testID="anomaly-text"
+            >
+              {result.summary}
+            </Text>
+          ) : null}
+          {result.note ? (
+            <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{result.note}</Text>
+          ) : result.anomalies.length === 0 ? (
+            <View
+              style={[
+                styles.errorBox,
+                { borderColor: "rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.1)" },
+              ]}
+            >
+              <Feather name="check" size={13} color="#34d399" />
+              <Text style={[styles.errorText, { color: "#34d399" }]}>
+                Nothing unusual across {result.checkedRuns}{" "}
+                {result.checkedRuns === 1 ? "run" : "runs"} today.
+              </Text>
+            </View>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {result.anomalies.map((a, i) => {
+                const sev = ANOMALY_SEVERITY_COLORS[a.severity];
+                return (
+                  <View
+                    key={i}
+                    testID={`anomaly-item-${i}`}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderRadius: 10,
+                      padding: 10,
+                      gap: 4,
+                      backgroundColor: colors.background,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                      <Text
+                        style={{
+                          fontSize: 9,
+                          fontWeight: "700",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                          color: sev.fg,
+                          backgroundColor: sev.bg,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 999,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {a.severity}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 9,
+                          fontWeight: "600",
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                          color: colors.mutedForeground,
+                          backgroundColor: colors.muted,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 999,
+                          overflow: "hidden",
+                        }}
+                      >
+                        {ANOMALY_METRIC_LABEL[a.metric] ?? a.metric}
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: "600", color: colors.foreground }}>
+                        {a.runLabel}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: colors.mutedForeground }}>
+                      {a.description}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+          {result.anomalies.length > 0 && !result.aiGenerated ? (
+            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+              Showing computed flags (AI narration unavailable).
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+// Manager-only schedule optimizer. The suggested run order (allergen runs
+// end-of-day, similar brand/die grouped to cut changeovers, factory sequence
+// rules honored) is computed deterministically server-side; the AI only narrates
+// it, and only when a strictly better order exists. Advisory: the manager taps
+// "Apply this order" to reorder today's runs (with an inline Undo) — nothing is
+// reordered without the explicit tap. EXACT mirror of the web ScheduleSection
+// (replit.md parity).
+function ScheduleSection({
+  buildSchedule,
+  onApplySchedule,
+}: {
+  buildSchedule: () => ScheduleRunInput[];
+  onApplySchedule: (order: string[]) => { ok: boolean; message: string; undo?: () => void };
+}) {
+  const colors = useColors();
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [result, setResult] = React.useState<ScheduleOptimizeResult | null>(null);
+  const [runs, setRuns] = React.useState<ScheduleRunInput[]>([]);
+  const [applyMsg, setApplyMsg] = React.useState<string | null>(null);
+  const [undo, setUndo] = React.useState<(() => void) | null>(null);
+
+  async function optimize() {
+    setLoading(true);
+    setError(null);
+    setApplyMsg(null);
+    setUndo(null);
+    try {
+      const input = buildSchedule();
+      setRuns(input);
+      const res = await requestScheduleOptimize(input);
+      setResult(res);
+    } catch (e) {
+      setError(summaryErrorMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function apply() {
+    if (!result) return;
+    const r = onApplySchedule(result.order);
+    setApplyMsg(r.message);
+    setUndo(() => r.undo ?? null);
+  }
+
+  const labelById = new Map(runs.map((r) => [r.id, r.label]));
+
+  return (
+    <Card title="Schedule Optimizer" icon="list" accent>
+      <Text style={[styles.intro, { color: colors.mutedForeground }]}>
+        Suggests an order for today&apos;s runs — allergen runs last, similar brand/die grouped to
+        cut changeovers, factory sequence rules honored. Advisory; you apply it with one tap.
+      </Text>
+      <Button
+        label={loading ? "Optimizing…" : result ? "Re-optimize" : "Suggest an order"}
+        icon={result && !loading ? "refresh-cw" : "list"}
+        disabled={loading}
+        onPress={optimize}
+      />
+
+      {error ? (
+        <View
+          style={[
+            styles.errorBox,
+            { borderColor: "rgba(239,68,68,0.3)", backgroundColor: "rgba(239,68,68,0.1)" },
+          ]}
+        >
+          <Feather name="alert-triangle" size={13} color="#f87171" />
+          <Text style={[styles.errorText, { color: "#f87171" }]}>{error}</Text>
+        </View>
+      ) : null}
+
+      {result ? (
+        <View style={{ gap: 10, marginTop: 10 }} testID="schedule-result">
+          {result.summary ? (
+            <Text
+              style={[styles.recDetail, { color: colors.foreground, marginTop: 0 }]}
+              testID="schedule-text"
+            >
+              {result.summary}
+            </Text>
+          ) : null}
+          {result.note && !result.improved ? (
+            <View
+              style={[
+                styles.errorBox,
+                { borderColor: "rgba(16,185,129,0.3)", backgroundColor: "rgba(16,185,129,0.1)" },
+              ]}
+            >
+              <Feather name="check" size={13} color="#34d399" />
+              <Text style={[styles.errorText, { color: "#34d399" }]}>{result.note}</Text>
+            </View>
+          ) : result.improved ? (
+            <>
+              <View
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 10,
+                  padding: 10,
+                  gap: 6,
+                  backgroundColor: colors.background,
+                }}
+              >
+                <Text
+                  style={{
+                    fontSize: 10,
+                    fontWeight: "700",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    color: colors.mutedForeground,
+                  }}
+                >
+                  Suggested order
+                </Text>
+                {result.order.map((id, i) => (
+                  <View
+                    key={id}
+                    testID={`schedule-order-${i}`}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        fontWeight: "700",
+                        color: colors.mutedForeground,
+                        backgroundColor: colors.muted,
+                        width: 20,
+                        height: 20,
+                        borderRadius: 999,
+                        textAlign: "center",
+                        lineHeight: 20,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {i + 1}
+                    </Text>
+                    <Text style={{ fontSize: 14, color: colors.foreground }}>
+                      {labelById.get(id) ?? id}
+                    </Text>
+                  </View>
+                ))}
+                <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
+                  Changeovers {result.before.changeovers} → {result.after.changeovers} · rule issues{" "}
+                  {result.before.ruleViolations} → {result.after.ruleViolations} · allergen sequence{" "}
+                  {result.before.allergenViolations} → {result.after.allergenViolations}
+                </Text>
+              </View>
+              <Button label="Apply this order" icon="check" variant="outline" onPress={apply} />
+              {!result.aiGenerated ? (
+                <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+                  Showing computed order (AI narration unavailable).
+                </Text>
+              ) : null}
+            </>
+          ) : null}
+
+          {applyMsg ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+                backgroundColor: colors.muted,
+              }}
+            >
+              <Text style={{ fontSize: 14, color: colors.foreground }}>{applyMsg}</Text>
+              {undo ? (
+                <Pressable
+                  onPress={() => {
+                    undo();
+                    setApplyMsg("Order restored");
+                    setUndo(null);
+                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                >
+                  <Feather name="rotate-ccw" size={13} color={colors.primary} />
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: colors.primary }}>Undo</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
 // Manager-only demand forecast. Predicts an upcoming day's run plan grounded in
 // real history; advisory only. The manager picks the target day (defaults to
 // tomorrow) then tapping "Add to schedule" adds the runs to the schedule for the
 // target date and navigates there for review — nothing is auto-committed. EXACT
 // mirror of the web ForecastSection (replit.md parity).
+const FORECAST_HORIZONS = [1, 3, 7] as const;
+
 function ForecastSection({
   buildForecast,
   onApplyForecast,
 }: {
-  buildForecast: (targetDate: string) => ReturnType<typeof buildForecastInput>;
+  buildForecast: (targetDate: string, horizonDays: number) => ReturnType<typeof buildForecastInput>;
   onApplyForecast: (plan: ForecastPlan) => void;
 }) {
   const colors = useColors();
@@ -969,20 +1526,24 @@ function ForecastSection({
   const [error, setError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<{
     forecast: ForecastPlan | null;
+    forecasts?: ForecastPlan[];
     note?: string;
     generatedAt: number;
   } | null>(null);
-  const [applied, setApplied] = React.useState(false);
+  // Track which day plans have already been opened in the schedule, keyed by the
+  // plan's targetDate so each day in a multi-day horizon applies once.
+  const [appliedDates, setAppliedDates] = React.useState<Set<string>>(new Set());
   const [windowStart, setWindowStart] = React.useState(0);
   const dates = React.useMemo(() => futureDates(windowStart, 14), [windowStart]);
   const [targetDate, setTargetDate] = React.useState(tomorrowStr());
+  const [horizonDays, setHorizonDays] = React.useState(1);
 
   async function predict() {
     setLoading(true);
     setError(null);
-    setApplied(false);
+    setAppliedDates(new Set());
     try {
-      const res = await requestForecast(buildForecast(targetDate || tomorrowStr()));
+      const res = await requestForecast(buildForecast(targetDate || tomorrowStr(), horizonDays));
       setResult(res);
     } catch (e) {
       setError(forecastErrorMessage(e));
@@ -991,7 +1552,13 @@ function ForecastSection({
     }
   }
 
-  const plan = result?.forecast ?? null;
+  // Prefer the multi-day list; fall back to the single forecast for back-compat.
+  const plans: ForecastPlan[] =
+    result?.forecasts && result.forecasts.length > 0
+      ? result.forecasts
+      : result?.forecast
+        ? [result.forecast]
+        : [];
   const tomorrow = tomorrowStr();
 
   return (
@@ -1072,13 +1639,45 @@ function ForecastSection({
             );
           })}
         </ScrollView>
+        <Text style={[styles.forecastDateLabel, { color: colors.mutedForeground, marginTop: 12 }]}>
+          HOW MANY DAYS
+        </Text>
+        <View style={styles.forecastHorizonRow}>
+          {FORECAST_HORIZONS.map((h) => {
+            const sel = horizonDays === h;
+            return (
+              <Pressable
+                key={h}
+                onPress={() => setHorizonDays(h)}
+                style={[
+                  styles.forecastHorizonBtn,
+                  {
+                    backgroundColor: sel ? colors.primary : colors.background,
+                    borderColor: sel ? colors.primary : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.forecastHorizonText,
+                    { color: sel ? colors.primaryForeground : colors.foreground },
+                  ]}
+                >
+                  {h === 1 ? "1 day" : `${h} days`}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <Button
           label={
             loading
               ? "Forecasting…"
               : result
                 ? "Re-forecast"
-                : `Forecast ${formatTargetDate(targetDate || tomorrow)}`
+                : horizonDays === 1
+                  ? `Forecast ${formatTargetDate(targetDate || tomorrow)}`
+                  : `Forecast ${horizonDays} days`
           }
           icon={result && !loading ? "refresh-cw" : "calendar"}
           onPress={predict}
@@ -1093,7 +1692,7 @@ function ForecastSection({
         ) : null}
       </Card>
 
-      {result && !plan ? (
+      {result && plans.length === 0 ? (
         <Card>
           <View style={styles.emptyBox}>
             <Feather name="calendar" size={22} color={colors.mutedForeground} />
@@ -1106,65 +1705,69 @@ function ForecastSection({
         </Card>
       ) : null}
 
-      {plan ? (
-        <Card title={`Plan for ${formatTargetDate(plan.targetDate)}`} icon="calendar">
-          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-            <View style={[styles.badge, { backgroundColor: confidenceColors(plan.confidence).bg }]}>
-              <Text style={[styles.badgeText, { color: confidenceColors(plan.confidence).fg }]}>
-                {plan.confidence.toUpperCase()} CONFIDENCE
-              </Text>
-            </View>
-          </View>
-          {plan.summary ? (
-            <Text style={[styles.recDetail, { color: colors.mutedForeground, marginTop: 0 }]}>
-              {plan.summary}
-            </Text>
-          ) : null}
-          <View style={{ gap: 8, marginTop: 10 }}>
-            {plan.runs.map((r, i) => (
-              <View
-                key={i}
-                style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
-              >
-                <View style={styles.recHeader}>
-                  <Text style={[styles.recTitle, { color: colors.foreground }]}>
-                    {r.brand}
-                    {r.flavor ? ` · ${r.flavor}` : ""}
-                  </Text>
-                  <Text style={[styles.recApplies, { color: colors.primary, marginTop: 0 }]}>
-                    {r.casesNeeded > 0 ? `${r.casesNeeded} cs` : "—"}
-                  </Text>
-                </View>
-                {r.dieType ? (
-                  <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
-                    Die: {r.dieType}
-                  </Text>
-                ) : null}
-                {r.rationale ? (
-                  <Text style={[styles.recDetail, { color: colors.mutedForeground }]}>{r.rationale}</Text>
-                ) : null}
-              </View>
-            ))}
-          </View>
-          {result?.note ? (
-            <View style={[styles.errorBox, { borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.1)" }]}>
-              <Feather name="alert-triangle" size={14} color="#fbbf24" />
-              <Text style={[styles.errorText, { color: "#fbbf24" }]}>{result.note}</Text>
-            </View>
-          ) : null}
-          <Button
-            label={applied ? "Opened in schedule" : "Add to schedule"}
-            icon={applied ? "check" : "calendar"}
-            variant={applied ? "outline" : "primary"}
-            disabled={applied}
-            onPress={() => {
-              onApplyForecast(plan);
-              setApplied(true);
-            }}
-            style={{ marginTop: 12 }}
-          />
-        </Card>
+      {plans.length > 0 && result?.note ? (
+        <View style={[styles.errorBox, { borderColor: "rgba(245,158,11,0.3)", backgroundColor: "rgba(245,158,11,0.1)" }]}>
+          <Feather name="alert-triangle" size={14} color="#fbbf24" />
+          <Text style={[styles.errorText, { color: "#fbbf24" }]}>{result.note}</Text>
+        </View>
       ) : null}
+
+      {plans.map((plan) => {
+        const applied = appliedDates.has(plan.targetDate);
+        return (
+          <Card key={plan.targetDate} title={`Plan for ${formatTargetDate(plan.targetDate)}`} icon="calendar">
+            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+              <View style={[styles.badge, { backgroundColor: confidenceColors(plan.confidence).bg }]}>
+                <Text style={[styles.badgeText, { color: confidenceColors(plan.confidence).fg }]}>
+                  {plan.confidence.toUpperCase()} CONFIDENCE
+                </Text>
+              </View>
+            </View>
+            {plan.summary ? (
+              <Text style={[styles.recDetail, { color: colors.mutedForeground, marginTop: 0 }]}>
+                {plan.summary}
+              </Text>
+            ) : null}
+            <View style={{ gap: 8, marginTop: 10 }}>
+              {plan.runs.map((r, i) => (
+                <View
+                  key={i}
+                  style={[styles.recCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+                >
+                  <View style={styles.recHeader}>
+                    <Text style={[styles.recTitle, { color: colors.foreground }]}>
+                      {r.brand}
+                      {r.flavor ? ` · ${r.flavor}` : ""}
+                    </Text>
+                    <Text style={[styles.recApplies, { color: colors.primary, marginTop: 0 }]}>
+                      {r.casesNeeded > 0 ? `${r.casesNeeded} cs` : "—"}
+                    </Text>
+                  </View>
+                  {r.dieType ? (
+                    <Text style={[styles.recApplies, { color: colors.mutedForeground }]}>
+                      Die: {r.dieType}
+                    </Text>
+                  ) : null}
+                  {r.rationale ? (
+                    <Text style={[styles.recDetail, { color: colors.mutedForeground }]}>{r.rationale}</Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+            <Button
+              label={applied ? "Opened in schedule" : "Add to schedule"}
+              icon={applied ? "check" : "calendar"}
+              variant={applied ? "outline" : "primary"}
+              disabled={applied}
+              onPress={() => {
+                onApplyForecast(plan);
+                setAppliedDates((prev) => new Set(prev).add(plan.targetDate));
+              }}
+              style={{ marginTop: 12 }}
+            />
+          </Card>
+        );
+      })}
     </>
   );
 }
@@ -1375,6 +1978,7 @@ export default function AssistantScreen() {
     scheduled,
     setRunToTime,
     moveRun,
+    reorderRuns,
     updateRunSettingsById,
     addScheduledRun,
     cheeseIngredients,
@@ -1837,7 +2441,7 @@ export default function AssistantScreen() {
   // Shapes recent finished history + scheduled days into the forecast wire input.
   // Mirrors the web buildForecast wiring (replit.md parity).
   const buildForecast = React.useCallback(
-    (targetDate: string) => {
+    (targetDate: string, horizonDays: number) => {
       const scheduledDays = Object.entries(scheduled).map(([date, runs]) => ({
         date,
         runs: runs.map((r) => ({
@@ -1849,6 +2453,7 @@ export default function AssistantScreen() {
       }));
       return buildForecastInput({
         targetDate: targetDate || tomorrowStr(),
+        horizonDays,
         nowMs: Date.now(),
         history,
         scheduledDays,
@@ -1862,6 +2467,44 @@ export default function AssistantScreen() {
   const buildAccuracy = React.useCallback(() => {
     return buildForecastAccuracyInput({ nowMs: Date.now(), history });
   }, [history]);
+
+  // Shapes today's runs (day scope) or recent history (week scope) into the
+  // recap wire input. Mirrors the web buildSummary wiring (replit.md parity).
+  const buildSummary = React.useCallback(
+    (scope: SummaryScope) =>
+      scope === "week"
+        ? buildWeekSummaryInput({ date: todayStr(), nowMs: Date.now(), history })
+        : buildDaySummaryInput({ date: todayStr(), nowMs: Date.now(), runs: allRuns }),
+    [history, allRuns],
+  );
+
+  const buildAnomaly = React.useCallback(
+    () =>
+      buildAnomalyInput({
+        date: todayStr(),
+        nowMs: Date.now(),
+        runs: allRuns,
+        history,
+      }),
+    [allRuns, history],
+  );
+
+  const buildSchedule = React.useCallback(
+    () => buildScheduleInput({ nowMs: Date.now(), runs: allRuns }),
+    [allRuns],
+  );
+
+  // Apply an AI-suggested run order via the single-shot context reorder, mapping
+  // its result to the {ok,message,undo} shape the ScheduleSection renders.
+  // Advisory: runs only on the manager's explicit tap. Mirrors web applyScheduleOrder.
+  const applyScheduleOrder = React.useCallback(
+    (order: string[]): { ok: boolean; message: string; undo?: () => void } => {
+      const r = reorderRuns(order);
+      if (!r.changed) return { ok: true, message: "Already in suggested order" };
+      return { ok: true, message: "Run order updated", undo: r.undo };
+    },
+    [reorderRuns],
+  );
 
   // Non-destructive apply: add each forecast run to the schedule for the target
   // date, then navigate to the schedule screen so the manager reviews/adjusts.
@@ -1910,8 +2553,14 @@ export default function AssistantScreen() {
         defaultTargetId={run?.id ?? ""}
       />
 
+      <SummarySection buildSummary={buildSummary} />
+
+      <AnomalySection buildAnomaly={buildAnomaly} />
+
       {!canUseAiTools ? null : (
       <>
+      <ScheduleSection buildSchedule={buildSchedule} onApplySchedule={applyScheduleOrder} />
+
       <ForecastSection buildForecast={buildForecast} onApplyForecast={applyForecast} />
 
       <AccuracySection buildAccuracy={buildAccuracy} />
@@ -1990,6 +2639,15 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.bold,
     letterSpacing: 1,
   },
+  forecastHorizonRow: { flexDirection: "row", gap: 8, marginTop: 6 },
+  forecastHorizonBtn: {
+    flex: 1,
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 9,
+  },
+  forecastHorizonText: { fontSize: 13, fontFamily: FONTS.bold },
   forecastNavRow: { flexDirection: "row", gap: 6 },
   forecastNavBtn: {
     flexDirection: "row",

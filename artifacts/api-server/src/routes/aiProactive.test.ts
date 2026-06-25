@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildProactivePrompt,
+  buildIncidentPatternsSection,
   clampProactiveSettings,
   isDayActive,
   sanitizeProactiveAlert,
@@ -9,12 +10,27 @@ import {
   PROACTIVE_MAX_TITLE_CHARS,
   PROACTIVE_MAX_DETAIL_CHARS,
   PROACTIVE_MAX_KEY_CHARS,
+  PROACTIVE_MAX_INCIDENT_PATTERNS,
+  PROACTIVE_MAX_PATTERN_HINT_CHARS,
   PROACTIVE_POLL_SECONDS_MIN,
   PROACTIVE_POLL_SECONDS_MAX,
   PROACTIVE_COOLDOWN_SECONDS_MIN,
   PROACTIVE_COOLDOWN_SECONDS_MAX,
   type OptimizeInput,
 } from "./aiProactive";
+import type { IncidentCluster } from "@workspace/incident-cluster";
+
+function cluster(overrides: Partial<IncidentCluster> = {}): IncidentCluster {
+  return {
+    theme: "Run (web)",
+    rootCauseHypothesis: "Reports cluster on the Run screen.",
+    recommendedAction: "Review the Run screen reports together.",
+    severity: "medium",
+    incidentIds: ["i1", "i2"],
+    incidentCount: 2,
+    ...overrides,
+  };
+}
 
 function baseInput(overrides: Partial<OptimizeInput> = {}): OptimizeInput {
   return {
@@ -329,6 +345,71 @@ describe("buildProactivePrompt", () => {
     expect(user).toContain("stock-expiring");
     expect(user).toContain("LOW STOCK (at or below reorder point — reorder now):");
     expect(user).toContain("reorder-now");
+  });
+
+  it("folds recurring incident patterns into the prompt as context", () => {
+    const { user } = buildProactivePrompt(baseInput(), [], [], [
+      cluster({ theme: "Run (web)", incidentCount: 4, severity: "high" }),
+    ]);
+    expect(user).toContain("RECENT REPORTED ISSUES");
+    expect(user).toContain("- [high] Run (web) — reported 4x");
+  });
+
+  it("omits the incident-patterns section when there are no recurring patterns", () => {
+    const { user } = buildProactivePrompt(baseInput(), [], [], [
+      cluster({ incidentCount: 1 }),
+    ]);
+    expect(user).not.toContain("RECENT REPORTED ISSUES");
+  });
+
+  it("omits the incident-patterns section when none are provided", () => {
+    const { user } = buildProactivePrompt(baseInput());
+    expect(user).not.toContain("RECENT REPORTED ISSUES");
+  });
+});
+
+describe("buildIncidentPatternsSection", () => {
+  it("returns empty string when given no clusters", () => {
+    expect(buildIncidentPatternsSection([])).toBe("");
+  });
+
+  it("drops one-off (non-recurring) clusters", () => {
+    expect(buildIncidentPatternsSection([cluster({ incidentCount: 1 })])).toBe("");
+  });
+
+  it("keeps only recurring clusters and formats each as one line", () => {
+    const out = buildIncidentPatternsSection([
+      cluster({ theme: "Run (web)", incidentCount: 3, severity: "high" }),
+      cluster({ theme: "Setup (mobile)", incidentCount: 1 }),
+    ]);
+    expect(out).toContain("RECENT REPORTED ISSUES");
+    expect(out).toContain("- [high] Run (web) — reported 3x: Review the Run screen reports together.");
+    expect(out).not.toContain("Setup (mobile)");
+  });
+
+  it("falls back to the root-cause hypothesis when no recommended action", () => {
+    const out = buildIncidentPatternsSection([
+      cluster({ recommendedAction: "", rootCauseHypothesis: "Likely a shared trigger." }),
+    ]);
+    expect(out).toContain("Likely a shared trigger.");
+  });
+
+  it("caps the number of patterns surfaced", () => {
+    const many = Array.from({ length: PROACTIVE_MAX_INCIDENT_PATTERNS + 4 }, (_, i) =>
+      cluster({ theme: `Screen ${i}`, incidentCount: 2 }),
+    );
+    const out = buildIncidentPatternsSection(many);
+    const lines = out.split("\n").filter((l) => l.startsWith("- "));
+    expect(lines).toHaveLength(PROACTIVE_MAX_INCIDENT_PATTERNS);
+  });
+
+  it("clamps a long hint", () => {
+    const long = "x".repeat(PROACTIVE_MAX_PATTERN_HINT_CHARS + 50);
+    const out = buildIncidentPatternsSection([cluster({ recommendedAction: long })]);
+    const hintLine = out.split("\n").find((l) => l.startsWith("- "))!;
+    // line prefix "- [medium] Run (web) — reported 2x: " plus the clamped hint
+    expect(hintLine).toContain("x".repeat(PROACTIVE_MAX_PATTERN_HINT_CHARS));
+    expect(hintLine).not.toContain("x".repeat(PROACTIVE_MAX_PATTERN_HINT_CHARS + 1));
   });
 });
 

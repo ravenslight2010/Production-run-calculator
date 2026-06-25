@@ -26,6 +26,7 @@ export type ForecastHistoryDay = {
 
 export type ForecastInput = {
   targetDate: string;
+  horizonDays?: number;
   nowMs: number;
   history: ForecastHistoryDay[];
   scheduledRuns: OptimizeScheduledRun[];
@@ -48,6 +49,7 @@ export type ForecastPlan = {
 
 export type ForecastResult = {
   forecast: ForecastPlan | null;
+  forecasts?: ForecastPlan[];
   generatedAt: number;
   note?: string;
 };
@@ -137,6 +139,7 @@ function buildForecastHistory(args: {
 // mapped to the compact forecast history shape.
 export function buildForecastInput(args: {
   targetDate: string;
+  horizonDays?: number;
   nowMs: number;
   history: HistoryDay[];
   runValuesForHistory: (day: HistoryDay, run: RunMeta) => FormValues | undefined;
@@ -157,7 +160,13 @@ export function buildForecastInput(args: {
     }
   }
 
-  return { targetDate: args.targetDate, nowMs: args.nowMs, history, scheduledRuns };
+  return {
+    targetDate: args.targetDate,
+    ...(args.horizonDays != null ? { horizonDays: args.horizonDays } : {}),
+    nowMs: args.nowMs,
+    history,
+    scheduledRuns,
+  };
 }
 
 // ── API client (raw fetch, matches inventoryShared) ──────────────────────────

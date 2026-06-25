@@ -30,6 +30,7 @@ export type ForecastHistoryDay = {
 
 export type ForecastInput = {
   targetDate: string;
+  horizonDays?: number;
   nowMs: number;
   history: ForecastHistoryDay[];
   scheduledRuns: OptimizeScheduledRun[];
@@ -52,6 +53,7 @@ export type ForecastPlan = {
 
 export type ForecastResult = {
   forecast: ForecastPlan | null;
+  forecasts?: ForecastPlan[];
   generatedAt: number;
   note?: string;
 };
@@ -134,6 +136,7 @@ function buildForecastHistory(args: { nowMs: number; history: HistoryDay[] }): F
 // minutes consistent with optimize/ask) and only finished ones are mapped.
 export function buildForecastInput(args: {
   targetDate: string;
+  horizonDays?: number;
   nowMs: number;
   history: HistoryDay[];
   scheduledDays: ForecastScheduledDayInput[];
@@ -153,7 +156,13 @@ export function buildForecastInput(args: {
     }
   }
 
-  return { targetDate: args.targetDate, nowMs: args.nowMs, history, scheduledRuns };
+  return {
+    targetDate: args.targetDate,
+    ...(args.horizonDays != null ? { horizonDays: args.horizonDays } : {}),
+    nowMs: args.nowMs,
+    history,
+    scheduledRuns,
+  };
 }
 
 // ── API client (raw fetch + Bearer, matches requestOptimize) ─────────────────

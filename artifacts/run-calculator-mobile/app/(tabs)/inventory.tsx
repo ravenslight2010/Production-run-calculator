@@ -63,10 +63,17 @@ import {
   qualityCheckPhoto,
   recordQualityCheck,
   wasteInsight,
+  productionSheetPhoto,
+  verifyLabelPhoto,
   type QualityProductType,
   type QualityStatus,
   type QualityCheckResult,
   type WasteInsightResult,
+  type ProductionSheetPhotoResult,
+  type LabelVerifyResult,
+  type LabelExpected,
+  type LabelVerdict,
+  type LabelFieldMatch,
 } from "@/context/inventoryShared";
 import { getOrCreateClientId } from "@/context/sync/client";
 import { useMe } from "@/hooks/useRole";
@@ -384,6 +391,12 @@ export default function InventoryScreen() {
 
         {/* AI quality/defect photo check (use-ai-tools: paid AI action) */}
         {canUseAiTools && <QualityCheckCard />}
+
+        {/* AI production-sheet transcription (use-ai-tools: paid AI action) */}
+        {canUseAiTools && <ProductionSheetCard />}
+
+        {/* AI label / pallet verification (use-ai-tools: paid AI action) */}
+        {canUseAiTools && <LabelVerifyCard />}
 
         {/* AI expiry & waste insight (use-ai-tools: paid AI action) */}
         {canUseAiTools && <WasteInsightCard />}
@@ -2280,6 +2293,508 @@ function QualityCheckCard() {
                   onPress={confirmOutcome}
                 />
               )}
+            </View>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+// ── AI production-sheet photo → run rows (read-only, advisory) ───────────────
+// Photograph a paper run sheet to transcribe its rows. Advisory only — the user
+// re-enters the runs they want through the schedule; nothing is saved here.
+// Mirrors the web card.
+function ProductionSheetCard() {
+  const colors = useColors();
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<ProductionSheetPhotoResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  async function analyze(imageBase64: string | null | undefined) {
+    if (!imageBase64) return;
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await productionSheetPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
+    if (!asset?.uri) return;
+    let base64: string | null;
+    setPreparing(true);
+    try {
+      base64 = await prepareImageBase64(
+        asset.uri,
+        asset.width ?? MAX_PHOTO_EDGE,
+        asset.height ?? MAX_PHOTO_EDGE,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process photo");
+      return;
+    } finally {
+      setPreparing(false);
+    }
+    await analyze(base64);
+  }
+
+  async function takePhoto() {
+    setError(null);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setError("Camera permission is required to take a photo.");
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  async function pickPhoto() {
+    setError(null);
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  return (
+    <Card title="Read Run Sheet" icon="file-text" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "camera"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Scan"}
+        </Text>
+      </Pressable>
+
+      {open && (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            Photograph a paper run sheet to transcribe its rows. This is advisory only — review the
+            results and add the runs you want through the schedule yourself. Nothing is saved.
+          </Text>
+          <TextInput
+            placeholder="Optional context (e.g. Line 2 sheet, covers tomorrow)"
+            placeholderTextColor={colors.mutedForeground}
+            value={notes}
+            onChangeText={setNotes}
+            style={inputStyle}
+          />
+          <View style={styles.formRow}>
+            <View style={{ flex: 1 }}>
+              <Button label="Take photo" icon="camera" size="sm" disabled={preparing || analyzing} onPress={takePhoto} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={preparing || analyzing} onPress={pickPhoto} />
+            </View>
+          </View>
+
+          {(preparing || analyzing) && (
+            <View style={styles.analyzingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                {preparing ? "Preparing photo…" : "Reading sheet…"}
+              </Text>
+            </View>
+          )}
+          {error && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>
+              {lastImageRef.current && (
+                <Button
+                  label={retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                  icon="refresh-cw"
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing || retryIn > 0}
+                  onPress={retry}
+                />
+              )}
+            </View>
+          )}
+
+          {result && (
+            <View
+              style={[styles.reviewRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+            >
+              {result.note ? (
+                <Text style={[styles.muted, { color: colors.warning, fontStyle: "normal" }]}>
+                  {result.note}
+                </Text>
+              ) : null}
+              {result.rows.length === 0 ? (
+                <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                  No run rows could be read.
+                </Text>
+              ) : (
+                <View style={{ gap: 6 }}>
+                  {result.rows.map((r, i) => (
+                    <View
+                      key={i}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={{ color: colors.foreground, fontFamily: FONTS.medium, fontSize: 13 }}
+                        >
+                          {[r.brand, r.flavor].filter(Boolean).join(" ") || "—"}
+                        </Text>
+                        <Text
+                          style={{ color: colors.mutedForeground, fontFamily: FONTS.regular, fontSize: 11 }}
+                        >
+                          {[
+                            r.dieType || null,
+                            r.casesNeeded ? `${r.casesNeeded} cases` : null,
+                            r.date || null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ") || " "}
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          color: colors.mutedForeground,
+                          fontFamily: FONTS.mono,
+                          fontSize: 11,
+                        }}
+                      >
+                        {Math.round(r.confidence * 100)}%
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+// ── AI label / pallet verification (read-only, advisory) ─────────────────────
+// Photograph a finished-product label/pallet placard and compare it against the
+// expected brand/flavor/die/date/lot/case-count. The server recomputes the
+// overall verdict from the per-field results; nothing is written.
+// Mirrors the web card.
+const LABEL_VERDICT_META: Record<
+  LabelVerdict,
+  { label: string; icon: keyof typeof Feather.glyphMap; color: (c: ReturnType<typeof useColors>) => string }
+> = {
+  pass: { label: "Pass", icon: "check-circle", color: (c) => c.success ?? c.primary },
+  warn: { label: "Check", icon: "alert-triangle", color: (c) => c.warning },
+  fail: { label: "Mismatch", icon: "x-circle", color: (c) => c.destructive },
+};
+const LABEL_MATCH_ICON: Record<LabelFieldMatch, keyof typeof Feather.glyphMap> = {
+  match: "check-circle",
+  mismatch: "x-circle",
+  unreadable: "alert-triangle",
+};
+const LABEL_FIELD_LABELS: Record<string, string> = {
+  brand: "Brand",
+  flavor: "Flavor",
+  dieType: "Die size",
+  date: "Date",
+  lotCode: "Lot code",
+  caseCount: "Case count",
+};
+
+function LabelVerifyCard() {
+  const colors = useColors();
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [brand, setBrand] = useState("");
+  const [flavor, setFlavor] = useState("");
+  const [dieType, setDieType] = useState("");
+  const [date, setDate] = useState("");
+  const [lotCode, setLotCode] = useState("");
+  const [caseCount, setCaseCount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<LabelVerifyResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  const inputStyle = [
+    styles.input,
+    { borderColor: colors.border, color: colors.foreground, backgroundColor: colors.background },
+  ];
+
+  function buildExpected(): LabelExpected {
+    const exp: LabelExpected = {};
+    if (brand.trim()) exp.brand = brand.trim();
+    if (flavor.trim()) exp.flavor = flavor.trim();
+    if (dieType.trim()) exp.dieType = dieType.trim();
+    if (date.trim()) exp.date = date.trim();
+    if (lotCode.trim()) exp.lotCode = lotCode.trim();
+    const cc = Number(caseCount);
+    if (caseCount.trim() && Number.isFinite(cc)) exp.caseCount = cc;
+    return exp;
+  }
+
+  async function analyze(imageBase64: string | null | undefined) {
+    if (!imageBase64) return;
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await verifyLabelPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        expected: buildExpected(),
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (e instanceof InventoryApiError && e.status === 429 && e.retryAfterSec && e.retryAfterSec > 0) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  async function analyzeAsset(asset: ImagePicker.ImagePickerAsset | undefined) {
+    if (!asset?.uri) return;
+    let base64: string | null;
+    setPreparing(true);
+    try {
+      base64 = await prepareImageBase64(
+        asset.uri,
+        asset.width ?? MAX_PHOTO_EDGE,
+        asset.height ?? MAX_PHOTO_EDGE,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process photo");
+      return;
+    } finally {
+      setPreparing(false);
+    }
+    await analyze(base64);
+  }
+
+  async function takePhoto() {
+    setError(null);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      setError("Camera permission is required to take a photo.");
+      return;
+    }
+    const res = await ImagePicker.launchCameraAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  async function pickPhoto() {
+    setError(null);
+    const res = await ImagePicker.launchImageLibraryAsync({ quality: 1, mediaTypes: ["images"] });
+    if (!res.canceled) await analyzeAsset(res.assets[0]);
+  }
+
+  const meta = result ? LABEL_VERDICT_META[result.verdict] : null;
+
+  return (
+    <Card title="Verify Label" icon="tag" style={{ marginBottom: 16 }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        style={({ pressed }) => [
+          styles.toggleBtn,
+          { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Feather name={open ? "chevron-down" : "camera"} size={14} color={colors.mutedForeground} />
+        <Text style={[styles.toggleBtnText, { color: colors.mutedForeground }]}>
+          {open ? "Close" : "Verify"}
+        </Text>
+      </Pressable>
+
+      {open && (
+        <View style={{ marginTop: 12, gap: 10 }}>
+          <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            Enter what the label should say, then photograph it. The AI reads the label and flags any
+            mismatch. Advisory only — nothing is recorded; you decide what to do.
+          </Text>
+          <View style={styles.formRow}>
+            <TextInput placeholder="Brand" placeholderTextColor={colors.mutedForeground} value={brand} onChangeText={setBrand} style={[inputStyle, { flex: 1 }]} />
+            <TextInput placeholder="Flavor" placeholderTextColor={colors.mutedForeground} value={flavor} onChangeText={setFlavor} style={[inputStyle, { flex: 1 }]} />
+          </View>
+          <View style={styles.formRow}>
+            <TextInput placeholder="Die size" placeholderTextColor={colors.mutedForeground} value={dieType} onChangeText={setDieType} style={[inputStyle, { flex: 1 }]} />
+            <TextInput placeholder="Date" placeholderTextColor={colors.mutedForeground} value={date} onChangeText={setDate} style={[inputStyle, { flex: 1 }]} />
+          </View>
+          <View style={styles.formRow}>
+            <TextInput placeholder="Lot code" placeholderTextColor={colors.mutedForeground} value={lotCode} onChangeText={setLotCode} style={[inputStyle, { flex: 1 }]} />
+            <TextInput placeholder="Case count" placeholderTextColor={colors.mutedForeground} keyboardType="numeric" value={caseCount} onChangeText={setCaseCount} style={[inputStyle, { flex: 1 }]} />
+          </View>
+          <TextInput
+            placeholder="Optional context"
+            placeholderTextColor={colors.mutedForeground}
+            value={notes}
+            onChangeText={setNotes}
+            style={inputStyle}
+          />
+          <View style={styles.formRow}>
+            <View style={{ flex: 1 }}>
+              <Button label="Take photo" icon="camera" size="sm" disabled={preparing || analyzing} onPress={takePhoto} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button label="Upload" icon="image" variant="outline" size="sm" disabled={preparing || analyzing} onPress={pickPhoto} />
+            </View>
+          </View>
+
+          {(preparing || analyzing) && (
+            <View style={styles.analyzingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                {preparing ? "Preparing photo…" : "Verifying…"}
+              </Text>
+            </View>
+          )}
+          {error && (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.muted, { color: colors.destructive }]}>{error}</Text>
+              {lastImageRef.current && (
+                <Button
+                  label={retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                  icon="refresh-cw"
+                  variant="outline"
+                  size="sm"
+                  disabled={analyzing || retryIn > 0}
+                  onPress={retry}
+                />
+              )}
+            </View>
+          )}
+
+          {result && meta && (
+            <View
+              style={[styles.reviewRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+            >
+              <View style={styles.reviewHeader}>
+                <View style={[styles.badge, { borderColor: meta.color(colors) }]}>
+                  <Feather name={meta.icon} size={12} color={meta.color(colors)} />
+                  <Text style={[styles.badgeText, { color: meta.color(colors), marginLeft: 4 }]}>
+                    {meta.label.toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.muted, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+                  {Math.round(result.confidence * 100)}% confidence
+                </Text>
+              </View>
+              {result.summary ? (
+                <Text style={{ color: colors.foreground, fontFamily: FONTS.regular, fontSize: 13 }}>
+                  {result.summary}
+                </Text>
+              ) : null}
+              {result.note ? (
+                <Text style={[styles.muted, { color: colors.warning, fontStyle: "normal" }]}>
+                  {result.note}
+                </Text>
+              ) : null}
+              <View style={{ gap: 4 }}>
+                {result.fields
+                  .filter((f) => f.expected != null)
+                  .map((f) => (
+                    <View key={f.field} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Feather
+                        name={LABEL_MATCH_ICON[f.match]}
+                        size={12}
+                        color={
+                          f.match === "match"
+                            ? (colors.success ?? colors.primary)
+                            : f.match === "mismatch"
+                              ? colors.destructive
+                              : colors.mutedForeground
+                        }
+                      />
+                      <Text
+                        style={{
+                          color: colors.mutedForeground,
+                          fontFamily: FONTS.bold,
+                          fontSize: 11,
+                          width: 64,
+                        }}
+                      >
+                        {LABEL_FIELD_LABELS[f.field] ?? f.field}
+                      </Text>
+                      <Text
+                        style={{
+                          color: colors.foreground,
+                          fontFamily: FONTS.regular,
+                          fontSize: 11,
+                          flex: 1,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {f.expected}
+                        {f.match === "mismatch" && f.observed ? (
+                          <Text style={{ color: colors.destructive }}> → saw “{f.observed}”</Text>
+                        ) : f.match === "unreadable" ? (
+                          <Text style={{ color: colors.mutedForeground }}> → not readable</Text>
+                        ) : null}
+                      </Text>
+                    </View>
+                  ))}
+              </View>
             </View>
           )}
         </View>

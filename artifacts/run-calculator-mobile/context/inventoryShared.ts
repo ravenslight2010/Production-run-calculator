@@ -639,6 +639,114 @@ export const markIncidentReviewed = (id: string) =>
 export const markIncidentResolved = (id: string) =>
   api<Incident>(`/incidents/${encodeURIComponent(id)}/resolve`, { method: "POST" });
 
+// Manager-only AI root-cause clustering across the incident log. Advisory and
+// read-only: the server reads the incidents itself, the AI only proposes the
+// grouping, and a deterministic grouping is returned if the AI is unavailable.
+// EXACT mirror of the web wrapper (replit.md parity).
+export type IncidentClusterSeverity = "low" | "medium" | "high";
+export type IncidentCluster = {
+  theme: string;
+  rootCauseHypothesis: string;
+  recommendedAction: string;
+  severity: IncidentClusterSeverity;
+  incidentIds: string[];
+  incidentCount: number;
+};
+export type IncidentClustersResult = {
+  clusters: IncidentCluster[];
+  totalIncidents: number;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestIncidentClusters = (lookbackDays?: number) =>
+  api<IncidentClustersResult>("/ai/incident-clusters", {
+    method: "POST",
+    body: JSON.stringify(lookbackDays ? { lookbackDays } : {}),
+  });
+
+// AI predictive-maintenance / anomaly flags. Drift detection (downtime/yield/
+// stoppages vs. a per-product baseline) is deterministic server-side; the AI
+// only narrates flagged anomalies. Advisory and read-only. Open to all staff.
+// EXACT mirror of the web wrapper (replit.md parity).
+export type AnomalyMetric = "downtime" | "yield" | "stoppages";
+export type AnomalySeverity = "low" | "medium" | "high";
+export type AnomalyRunInput = {
+  brand: string;
+  flavor: string;
+  casesPlanned: number;
+  casesProduced: number;
+  downtimeMinutes: number;
+  stoppageCount: number;
+};
+export type Anomaly = {
+  runLabel: string;
+  brand: string;
+  flavor: string;
+  metric: AnomalyMetric;
+  observed: number;
+  baseline: number;
+  severity: AnomalySeverity;
+  baselineSamples: number;
+  description: string;
+};
+export type AnomalyResult = {
+  anomalies: Anomaly[];
+  checkedRuns: number;
+  baselineRuns: number;
+  summary: string;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestAnomalies = (
+  today: AnomalyRunInput[],
+  history: AnomalyRunInput[],
+) =>
+  api<AnomalyResult>("/ai/anomalies", {
+    method: "POST",
+    body: JSON.stringify({ today, history }),
+  });
+
+// AI schedule optimizer. The suggested run order (allergen runs end-of-day,
+// similar brand/die grouped to cut changeovers, factory sequence rules honored)
+// is computed deterministically server-side; the AI only narrates it, and only
+// when a strictly better order exists. Advisory and read-only — the manager
+// applies it through the normal move path. Manager-gated.
+export type ScheduleAllergen = "none" | "egg" | "soy";
+export type ScheduleRunInput = {
+  id: string;
+  label: string;
+  brand: string;
+  flavor: string;
+  allergen: ScheduleAllergen;
+  dieType?: string;
+};
+export type ScheduleMetrics = {
+  allergenViolations: number;
+  ruleViolations: number;
+  changeovers: number;
+};
+export type ScheduleOptimizeResult = {
+  order: string[];
+  changed: boolean;
+  improved: boolean;
+  before: ScheduleMetrics;
+  after: ScheduleMetrics;
+  summary: string;
+  note?: string;
+  generatedAt: number;
+  aiGenerated: boolean;
+};
+export const requestScheduleOptimize = (
+  runs: ScheduleRunInput[],
+  rules?: unknown[],
+) =>
+  api<ScheduleOptimizeResult>("/ai/schedule-optimize", {
+    method: "POST",
+    body: JSON.stringify({ runs, rules: rules ?? [] }),
+  });
+
 export const fetchInventory = () => api<InventoryItem[]>("/inventory");
 export const fetchInventorySettings = () =>
   api<InventorySettings>("/inventory/settings");
@@ -841,6 +949,76 @@ export const fetchQualityChecks = (filter?: {
   return api<QualityCheckRecord[]>(`/inventory/quality-checks${qs ? `?${qs}` : ""}`);
 };
 
+// ── AI production-sheet photo → run rows (read-only, advisory) ───────────────
+export type ProductionSheetRow = {
+  brand: string;
+  flavor: string;
+  dieType: string;
+  casesNeeded: number;
+  date: string | null;
+  confidence: number;
+};
+export type ProductionSheetPhotoResult = {
+  rows: ProductionSheetRow[];
+  generatedAt: number;
+  note?: string;
+};
+export type ProductionSheetPhotoBody = {
+  imageBase64: string;
+  mimeType?: string;
+  notes?: string;
+};
+
+// Read-only: transcribes the run rows from a paper production sheet. Never
+// writes anything; the user confirms which rows to add through the existing
+// schedule path.
+export const productionSheetPhoto = (body: ProductionSheetPhotoBody) =>
+  api<ProductionSheetPhotoResult>("/inventory/production-sheet-photo", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+// ── AI label / pallet verification (read-only, advisory) ─────────────────────
+export type LabelVerdict = "pass" | "warn" | "fail";
+export type LabelFieldMatch = "match" | "mismatch" | "unreadable";
+export type LabelExpected = {
+  brand?: string;
+  flavor?: string;
+  dieType?: string;
+  date?: string;
+  lotCode?: string;
+  caseCount?: number;
+};
+export type LabelFieldCheck = {
+  field: string;
+  expected: string | null;
+  observed: string | null;
+  match: LabelFieldMatch;
+};
+export type LabelVerifyResult = {
+  verdict: LabelVerdict;
+  summary: string;
+  confidence: number;
+  fields: LabelFieldCheck[];
+  generatedAt: number;
+  note?: string;
+};
+export type LabelVerifyBody = {
+  imageBase64: string;
+  mimeType?: string;
+  expected?: LabelExpected;
+  notes?: string;
+};
+
+// Read-only: compares a label/pallet photo against expected values. The overall
+// verdict is recomputed server-side from the per-field results; nothing is
+// written.
+export const verifyLabelPhoto = (body: LabelVerifyBody) =>
+  api<LabelVerifyResult>("/inventory/label-verify", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
 // ── AI expiry & waste insight ────────────────────────────────────────────────
 export type WasteStatus = "expired" | "soon";
 export type WasteInsightItem = {
@@ -1010,4 +1188,168 @@ export function openInventoryStream(
       es?.close();
     },
   };
+}
+
+// ── SSE response reader (for opt-in streaming AI chat) ──────────────────────
+// Mirrors web's postEventStream: POST asking for `text/event-stream`, stream
+// answer text via onDelta from `delta` events, resolve with the final payload
+// from the single `done` event, and throw an InventoryApiError on an `error`
+// event or any transport/non-OK failure so the caller falls back to non-stream.
+// Expo web has a streaming fetch body (getReader); native RN does not, so it
+// uses react-native-sse with a POST body exactly like openInventoryStream.
+function parseSseFrameMobile(frame: string): { event: string; data: string } {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+  }
+  return { event, data: dataLines.join("\n") };
+}
+
+export async function postEventStream<T>(
+  path: string,
+  body: unknown,
+  onDelta: (text: string) => void,
+  failMessage: string,
+): Promise<T> {
+  const base = getApiBaseUrl();
+  if (!base) throw new Error("No API base URL (sync disabled)");
+  const clientId = await getOrCreateClientId();
+  const token = await getAuthToken();
+  const url = `${base}/api${path}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+    "x-client-id": clientId,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const payloadStr = JSON.stringify(body);
+
+  // Expo web: stream the fetch body with a reader, same as the web app.
+  if (
+    Platform.OS === "web" &&
+    typeof globalThis !== "undefined" &&
+    "ReadableStream" in globalThis
+  ) {
+    const res = await fetch(url, { method: "POST", headers, body: payloadStr });
+    if (!res.ok || !res.body) {
+      if (res.status === 401) notifyUnauthorized();
+      const retryAfterRaw = res.headers.get("Retry-After");
+      const retryAfterSec =
+        retryAfterRaw != null && Number.isFinite(Number(retryAfterRaw)) ? Number(retryAfterRaw) : null;
+      let serverMessage: string | null = null;
+      try {
+        const errBody = (await res.json()) as { error?: unknown };
+        if (errBody && typeof errBody.error === "string") serverMessage = errBody.error;
+      } catch {
+        /* ignore */
+      }
+      throw new InventoryApiError(res.status, failMessage, retryAfterSec, serverMessage);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let done: T | null = null;
+    let streamError: string | null = null;
+    const handleFrame = (frame: string): void => {
+      if (!frame.trim()) return;
+      const { event, data } = parseSseFrameMobile(frame);
+      if (event === "delta") {
+        try {
+          const d = JSON.parse(data) as { text?: string };
+          if (d.text) onDelta(d.text);
+        } catch {
+          /* ignore malformed delta */
+        }
+      } else if (event === "done") {
+        try {
+          done = JSON.parse(data) as T;
+        } catch {
+          streamError = "Stream ended without a result";
+        }
+      } else if (event === "error") {
+        try {
+          const d = JSON.parse(data) as { error?: string };
+          streamError = d.error ?? "AI provider error";
+        } catch {
+          streamError = "AI provider error";
+        }
+      }
+    };
+    for (;;) {
+      const { value, done: rdDone } = await reader.read();
+      if (rdDone) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        handleFrame(buffer.slice(0, idx));
+        buffer = buffer.slice(idx + 2);
+      }
+    }
+    if (buffer.trim()) handleFrame(buffer);
+    if (streamError) throw new InventoryApiError(502, failMessage, null, streamError);
+    if (done == null)
+      throw new InventoryApiError(502, failMessage, null, "Stream ended without a result");
+    return done;
+  }
+
+  // Native: react-native-sse with a POST body (RN fetch can't stream a body).
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const RNEventSource = require("react-native-sse").default as new (
+      url: string,
+      opts?: Record<string, unknown>,
+    ) => {
+      addEventListener: (type: string, listener: (event: SseMessageEvent) => void) => void;
+      close: () => void;
+    };
+    const es = new RNEventSource(url, {
+      method: "POST",
+      headers,
+      body: payloadStr,
+      pollingInterval: 0,
+    });
+    const fail = (message: string, status = 502): void => {
+      if (settled) return;
+      settled = true;
+      es.close();
+      reject(new InventoryApiError(status, failMessage, null, message));
+    };
+    es.addEventListener("delta", (event: SseMessageEvent) => {
+      if (settled || !event.data) return;
+      try {
+        const d = JSON.parse(event.data) as { text?: string };
+        if (d.text) onDelta(d.text);
+      } catch {
+        /* ignore malformed delta */
+      }
+    });
+    es.addEventListener("done", (event: SseMessageEvent) => {
+      if (settled) return;
+      try {
+        const payload = JSON.parse(event.data ?? "") as T;
+        settled = true;
+        es.close();
+        resolve(payload);
+      } catch {
+        fail("Stream ended without a result");
+      }
+    });
+    // react-native-sse routes both server `event: error` frames (which carry
+    // .data) and transport errors to "error" listeners; either way we fall back.
+    es.addEventListener("error", (event: SseMessageEvent) => {
+      if (settled) return;
+      if (event.data) {
+        try {
+          const d = JSON.parse(event.data) as { error?: string };
+          fail(d.error ?? "AI provider error");
+          return;
+        } catch {
+          /* fall through to generic */
+        }
+      }
+      fail("AI provider error");
+    });
+  });
 }

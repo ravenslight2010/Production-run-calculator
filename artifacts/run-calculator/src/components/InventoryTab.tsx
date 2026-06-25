@@ -21,6 +21,9 @@ import {
   Recycle,
   ArrowRightLeft,
   MapPin,
+  FileText,
+  Tag,
+  XCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,10 +55,17 @@ import {
   qualityCheckPhoto,
   recordQualityCheck,
   wasteInsight,
+  productionSheetPhoto,
+  verifyLabelPhoto,
   type QualityCheckResult,
   type QualityProductType,
   type QualityStatus,
   type WasteInsightResult,
+  type ProductionSheetPhotoResult,
+  type LabelVerifyResult,
+  type LabelExpected,
+  type LabelVerdict,
+  type LabelFieldMatch,
   MAX_IMAGE_BASE64_CHARS,
   isHeicFile,
   HEIC_UNSUPPORTED_MESSAGE,
@@ -370,6 +380,10 @@ export default function InventoryTab({
       {canUseAiTools && <PhotoIntakeCard candidates={matchCandidates} locations={locations} onCommitted={load} />}
 
       {canUseAiTools && <QualityCheckCard />}
+
+      {canUseAiTools && <ProductionSheetCard />}
+
+      {canUseAiTools && <LabelVerifyCard />}
 
       {canUseAiTools && <WasteInsightCard />}
 
@@ -1552,6 +1566,433 @@ function QualityCheckCard() {
                   )}
                 </Button>
               )}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── AI production-sheet photo → run transcription (read-only, advisory) ──────
+// Photograph a paper run sheet; the AI transcribes the run rows it can read so
+// staff can review them and re-enter the ones they want into the schedule.
+// Nothing is written — this is purely a reading aid.
+function ProductionSheetCard() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<ProductionSheetPhotoResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  async function analyze(imageBase64: string) {
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await productionSheetPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (
+        e instanceof InventoryApiError &&
+        e.status === 429 &&
+        e.retryAfterSec &&
+        e.retryAfterSec > 0
+      ) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function onPick(file: File | null) {
+    if (!file) return;
+    let imageBase64: string;
+    setError(null);
+    setPreparing(true);
+    try {
+      imageBase64 = await fileToBase64Jpeg(file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read photo");
+      return;
+    } finally {
+      setPreparing(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+    await analyze(imageBase64);
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <FileText className="w-4 h-4" /> Read Run Sheet
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />}{" "}
+            {open ? "Close" : "Scan"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Photograph a paper run sheet to transcribe its rows. This is advisory only — review the
+            results and add the runs you want through the schedule yourself. Nothing is saved.
+          </p>
+          <Input
+            placeholder="Optional context (e.g. Line 2 sheet, covers tomorrow)"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="h-8 text-xs"
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            size="sm"
+            className="h-9 w-full text-sm"
+            disabled={preparing || analyzing}
+            onClick={() => fileRef.current?.click()}
+          >
+            {preparing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
+              </>
+            ) : analyzing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading sheet…
+              </>
+            ) : (
+              <>
+                <Camera className="w-3.5 h-3.5" /> Choose photo
+              </>
+            )}
+          </Button>
+
+          {error && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-red-500">{error}</p>
+              {lastImageRef.current && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 w-full text-xs"
+                  disabled={analyzing || retryIn > 0}
+                  onClick={retry}
+                >
+                  <Loader2 className={`w-3.5 h-3.5 ${analyzing ? "animate-spin" : "hidden"}`} />
+                  {retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {result && (
+            <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
+              {result.note && <p className="text-[11px] text-amber-500">{result.note}</p>}
+              {result.rows.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No run rows could be read.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {result.rows.map((r, i) => (
+                    <li
+                      key={i}
+                      className="text-xs flex items-start justify-between gap-2 border-b border-border/30 last:border-0 pb-1.5 last:pb-0"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-semibold text-foreground/90">
+                          {[r.brand, r.flavor].filter(Boolean).join(" ") || "—"}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {r.dieType ? ` · ${r.dieType}` : ""}
+                          {r.casesNeeded ? ` · ${r.casesNeeded} cases` : ""}
+                          {r.date ? ` · ${r.date}` : ""}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">
+                        {Math.round(r.confidence * 100)}%
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+// ── AI label / pallet verification (read-only, advisory) ─────────────────────
+// Photograph a finished-product label or pallet placard and compare it against
+// the expected brand/flavor/die/date/lot/case-count. The server recomputes the
+// overall verdict from the per-field results; nothing is written.
+const LABEL_VERDICT_META: Record<
+  LabelVerdict,
+  { label: string; cls: string; icon: typeof CheckCircle2 }
+> = {
+  pass: { label: "Pass", cls: "text-emerald-500 border-emerald-500/40 bg-emerald-500/10", icon: CheckCircle2 },
+  warn: { label: "Check", cls: "text-amber-500 border-amber-500/40 bg-amber-500/10", icon: AlertTriangle },
+  fail: { label: "Mismatch", cls: "text-red-500 border-red-500/40 bg-red-500/10", icon: XCircle },
+};
+const LABEL_MATCH_META: Record<LabelFieldMatch, { cls: string; icon: typeof CheckCircle2 }> = {
+  match: { cls: "text-emerald-500", icon: CheckCircle2 },
+  mismatch: { cls: "text-red-500", icon: XCircle },
+  unreadable: { cls: "text-muted-foreground", icon: AlertTriangle },
+};
+const LABEL_FIELD_LABELS: Record<string, string> = {
+  brand: "Brand",
+  flavor: "Flavor",
+  dieType: "Die size",
+  date: "Date",
+  lotCode: "Lot code",
+  caseCount: "Case count",
+};
+
+function LabelVerifyCard() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const lastImageRef = useRef<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [brand, setBrand] = useState("");
+  const [flavor, setFlavor] = useState("");
+  const [dieType, setDieType] = useState("");
+  const [date, setDate] = useState("");
+  const [lotCode, setLotCode] = useState("");
+  const [caseCount, setCaseCount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryIn, setRetryIn] = useState(0);
+  const [result, setResult] = useState<LabelVerifyResult | null>(null);
+
+  const counting = retryIn > 0;
+  useEffect(() => {
+    if (!counting) return;
+    const t = setInterval(() => setRetryIn((s) => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [counting]);
+
+  function buildExpected(): LabelExpected {
+    const exp: LabelExpected = {};
+    if (brand.trim()) exp.brand = brand.trim();
+    if (flavor.trim()) exp.flavor = flavor.trim();
+    if (dieType.trim()) exp.dieType = dieType.trim();
+    if (date.trim()) exp.date = date.trim();
+    if (lotCode.trim()) exp.lotCode = lotCode.trim();
+    const cc = Number(caseCount);
+    if (caseCount.trim() && Number.isFinite(cc)) exp.caseCount = cc;
+    return exp;
+  }
+
+  async function analyze(imageBase64: string) {
+    lastImageRef.current = imageBase64;
+    setError(null);
+    setResult(null);
+    setRetryIn(0);
+    setAnalyzing(true);
+    try {
+      const res = await verifyLabelPhoto({
+        imageBase64,
+        mimeType: "image/jpeg",
+        expected: buildExpected(),
+        notes: notes.trim() || undefined,
+      });
+      setResult(res);
+    } catch (e) {
+      setError(photoErrorMessage(e));
+      if (
+        e instanceof InventoryApiError &&
+        e.status === 429 &&
+        e.retryAfterSec &&
+        e.retryAfterSec > 0
+      ) {
+        setRetryIn(e.retryAfterSec);
+      }
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function onPick(file: File | null) {
+    if (!file) return;
+    let imageBase64: string;
+    setError(null);
+    setPreparing(true);
+    try {
+      imageBase64 = await fileToBase64Jpeg(file);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read photo");
+      return;
+    } finally {
+      setPreparing(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+    await analyze(imageBase64);
+  }
+
+  function retry() {
+    if (lastImageRef.current) void analyze(lastImageRef.current);
+  }
+
+  const meta = result ? LABEL_VERDICT_META[result.verdict] : null;
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <Tag className="w-4 h-4" /> Verify Label
+          </CardTitle>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/60 text-xs font-semibold text-muted-foreground hover:bg-muted/50 transition-colors"
+          >
+            {open ? <ChevronDown className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />}{" "}
+            {open ? "Close" : "Verify"}
+          </button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent className="px-4 pb-4 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Enter what the label should say, then photograph it. The AI reads the label and flags
+            any mismatch. Advisory only — nothing is recorded; you decide what to do.
+          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <Input placeholder="Brand" value={brand} onChange={(e) => setBrand(e.target.value)} className="h-8 text-xs" />
+            <Input placeholder="Flavor" value={flavor} onChange={(e) => setFlavor(e.target.value)} className="h-8 text-xs" />
+            <Input placeholder="Die size" value={dieType} onChange={(e) => setDieType(e.target.value)} className="h-8 text-xs" />
+            <Input placeholder="Date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 text-xs" />
+            <Input placeholder="Lot code" value={lotCode} onChange={(e) => setLotCode(e.target.value)} className="h-8 text-xs" />
+            <Input placeholder="Case count" inputMode="numeric" value={caseCount} onChange={(e) => setCaseCount(e.target.value)} className="h-8 text-xs" />
+          </div>
+          <Input
+            placeholder="Optional context"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="h-8 text-xs"
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => onPick(e.target.files?.[0] ?? null)}
+          />
+          <Button
+            size="sm"
+            className="h-9 w-full text-sm"
+            disabled={preparing || analyzing}
+            onClick={() => fileRef.current?.click()}
+          >
+            {preparing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing photo…
+              </>
+            ) : analyzing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" /> Verifying…
+              </>
+            ) : (
+              <>
+                <Camera className="w-3.5 h-3.5" /> Choose photo
+              </>
+            )}
+          </Button>
+
+          {error && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-red-500">{error}</p>
+              {lastImageRef.current && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 w-full text-xs"
+                  disabled={analyzing || retryIn > 0}
+                  onClick={retry}
+                >
+                  <Loader2 className={`w-3.5 h-3.5 ${analyzing ? "animate-spin" : "hidden"}`} />
+                  {retryIn > 0 ? `Try again in ${retryIn}s` : "Try again"}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {result && meta && (
+            <div className="rounded-md border border-border/40 bg-muted/10 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`flex items-center gap-1.5 text-[11px] font-bold uppercase border rounded px-1.5 py-0.5 ${meta.cls}`}
+                >
+                  <meta.icon className="w-3.5 h-3.5" /> {meta.label}
+                </span>
+                <span className="text-[11px] font-medium text-muted-foreground tabular-nums">
+                  {Math.round(result.confidence * 100)}% confidence
+                </span>
+              </div>
+              {result.summary && <p className="text-xs text-foreground/90">{result.summary}</p>}
+              {result.note && <p className="text-[11px] text-amber-500">{result.note}</p>}
+              <ul className="space-y-1">
+                {result.fields
+                  .filter((f) => f.expected != null)
+                  .map((f) => {
+                    const fm = LABEL_MATCH_META[f.match];
+                    return (
+                      <li key={f.field} className="text-[11px] flex items-center gap-1.5">
+                        <fm.icon className={`w-3.5 h-3.5 shrink-0 ${fm.cls}`} />
+                        <span className="font-semibold text-muted-foreground w-16 shrink-0">
+                          {LABEL_FIELD_LABELS[f.field] ?? f.field}
+                        </span>
+                        <span className="text-foreground/80 truncate">
+                          {f.expected}
+                          {f.match === "mismatch" && f.observed ? (
+                            <span className="text-red-500"> → saw “{f.observed}”</span>
+                          ) : f.match === "unreadable" ? (
+                            <span className="text-muted-foreground"> → not readable</span>
+                          ) : null}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
             </div>
           )}
         </CardContent>

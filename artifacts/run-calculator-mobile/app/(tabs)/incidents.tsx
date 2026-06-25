@@ -9,7 +9,10 @@ import {
   fetchIncidents,
   markIncidentResolved,
   markIncidentReviewed,
+  requestIncidentClusters,
   type Incident,
+  type IncidentCluster,
+  type IncidentClustersResult,
 } from "@/context/inventoryShared";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
@@ -17,6 +20,155 @@ import { useMe } from "@/hooks/useRole";
 type StatusFilter = "all" | "new" | "reviewed" | "resolved";
 type PlatformFilter = "all" | "web" | "mobile";
 type SourceFilter = "all" | "user_report" | "auto_crash";
+
+const SEVERITY_COLOR: Record<IncidentCluster["severity"], string> = {
+  high: "#f87171",
+  medium: "#fbbf24",
+  low: "#38bdf8",
+};
+
+// Manager-only AI root-cause clustering. On demand, asks the server to group the
+// incident log into recurring themes; advisory and read-only. The server falls
+// back to a deterministic grouping when the AI is unavailable, so this always
+// returns something useful. EXACT mirror of the web ClustersPanel (replit.md parity).
+function ClustersPanel({
+  disabled,
+  colors,
+}: {
+  disabled: boolean;
+  colors: ReturnType<typeof useColors>;
+}) {
+  const [result, setResult] = useState<IncidentClustersResult | null>(null);
+  const find = useMutation({
+    mutationFn: () => requestIncidentClusters(),
+    onSuccess: setResult,
+  });
+
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: 12,
+        padding: 12,
+        gap: 10,
+        backgroundColor: colors.card,
+        marginBottom: 12,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+          <Feather name="git-merge" size={16} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontFamily: FONTS.medium, color: colors.foreground }}>
+              Find patterns
+            </Text>
+            <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
+              Group recurring reports & crashes into likely root causes. Advisory only.
+            </Text>
+          </View>
+        </View>
+        <Pressable
+          onPress={() => find.mutate()}
+          disabled={disabled || find.isPending}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: colors.border,
+            opacity: disabled || find.isPending ? 0.5 : pressed ? 0.7 : 1,
+          })}
+        >
+          {find.isPending ? (
+            <ActivityIndicator size="small" color={colors.foreground} />
+          ) : (
+            <Feather name="zap" size={14} color={colors.foreground} />
+          )}
+          <Text style={{ fontSize: 13, fontFamily: FONTS.medium, color: colors.foreground }}>
+            {result ? "Refresh" : "Analyze"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {find.isError ? (
+        <Text style={{ fontSize: 13, color: colors.destructive }}>
+          Couldn&apos;t analyze the incident log.
+        </Text>
+      ) : null}
+
+      {result ? (
+        <View style={{ gap: 8 }} testID="incident-clusters-result">
+          {result.note ? (
+            <Text style={{ fontSize: 13, color: colors.mutedForeground }}>{result.note}</Text>
+          ) : (
+            result.clusters.map((c, i) => (
+              <View
+                key={i}
+                style={{
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 8,
+                  padding: 10,
+                  gap: 4,
+                  backgroundColor: colors.background,
+                }}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                  <View
+                    style={{
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      borderRadius: 999,
+                      backgroundColor: SEVERITY_COLOR[c.severity] + "26",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 9,
+                        fontFamily: FONTS.bold,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.5,
+                        color: SEVERITY_COLOR[c.severity],
+                      }}
+                    >
+                      {c.severity}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 13, fontFamily: FONTS.medium, color: colors.foreground }}>
+                    {c.theme}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: colors.mutedForeground }}>
+                    {c.incidentCount} {c.incidentCount === 1 ? "incident" : "incidents"}
+                  </Text>
+                </View>
+                {c.rootCauseHypothesis ? (
+                  <Text style={{ fontSize: 13, color: colors.mutedForeground }}>
+                    {c.rootCauseHypothesis}
+                  </Text>
+                ) : null}
+                {c.recommendedAction ? (
+                  <Text style={{ fontSize: 13, color: colors.foreground }}>
+                    <Text style={{ fontFamily: FONTS.medium }}>Next step: </Text>
+                    {c.recommendedAction}
+                  </Text>
+                ) : null}
+              </View>
+            ))
+          )}
+          {!result.aiGenerated && !result.note ? (
+            <Text style={{ fontSize: 10, color: colors.mutedForeground }}>
+              Showing a computed grouping (AI narration unavailable).
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 function timeAgo(iso: string): string {
   const then = Date.parse(iso);
@@ -257,6 +409,7 @@ export default function IncidentsScreen() {
       style={{ backgroundColor: colors.background }}
       contentContainerStyle={[styles.container, { paddingBottom: insets.bottom + 100 }]}
     >
+      {hasIncidents && <ClustersPanel disabled={isLoading} colors={colors} />}
       {hasIncidents && (
         <View style={styles.filters}>
           <FilterRow<StatusFilter>

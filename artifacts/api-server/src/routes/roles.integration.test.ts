@@ -55,17 +55,24 @@ const ROLE_CAPS: Record<string, Capability[]> = {
 
 // Mock the OpenAI vision client so POST /inventory/identify-photo returns a
 // valid (empty) result without making a paid call.
-vi.mock("@workspace/integrations-openai-ai-server", () => ({
-  openai: {
-    chat: {
-      completions: {
-        create: async () => ({
-          choices: [{ message: { content: JSON.stringify({ items: [] }) } }],
-        }),
+vi.mock("@workspace/integrations-openai-ai-server", () => {
+  const AI_MODELS = { full: "gpt-5.4", cheap: "gpt-5-mini" } as const;
+  return {
+    openai: {
+      chat: {
+        completions: {
+          create: async () => ({
+            choices: [{ message: { content: JSON.stringify({ items: [] }) } }],
+          }),
+        },
       },
     },
-  },
-}));
+    // Routes resolve their model via pickModel(); the mock must export it too,
+    // or the call throws "pickModel is not a function" and every route 502s.
+    AI_MODELS,
+    pickModel: (kind: keyof typeof AI_MODELS = "full") => AI_MODELS[kind],
+  };
+});
 
 type DbModule = typeof import("@workspace/db");
 let db: DbModule["db"];

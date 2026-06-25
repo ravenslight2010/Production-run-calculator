@@ -1395,6 +1395,7 @@ interface RunContextValue {
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
   moveRun: (fromIdx: number, toIdx: number) => void;
+  reorderRuns: (order: string[]) => { changed: boolean; undo: () => void };
   updateRunSettingsById: (runId: string, partial: Partial<RunSettings>) => void;
   // Capture / restore the full run list + focused index so a structural change
   // (finish run, remove run, start/end stoppage) can be cleanly reverted to its
@@ -2377,6 +2378,44 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+    },
+    [persist],
+  );
+
+  // Reorder today's runs to follow an AI-suggested sequence (array of run ids)
+  // in a SINGLE state update — runs not named in the order keep their relative
+  // position and are appended after the ordered ones. Returns whether anything
+  // changed plus an undo that restores the exact prior order/focus. Mirrors the
+  // web home.tsx applyScheduleOrder (replit.md parity).
+  const reorderRuns = useCallback(
+    (order: string[]): { changed: boolean; undo: () => void } => {
+      const prev = appStateRef.current;
+      const prevRuns = prev.runs;
+      const prevIndex = prev.currentIndex;
+      const rank = new Map(order.map((id, i) => [id, i]));
+      const reordered = [...prevRuns].sort((a, b) => {
+        const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER;
+        const rb = rank.has(b.id) ? rank.get(b.id)! : Number.MAX_SAFE_INTEGER;
+        if (ra !== rb) return ra - rb;
+        return prevRuns.indexOf(a) - prevRuns.indexOf(b);
+      });
+      const changed = !reordered.every((r, i) => r.id === prevRuns[i]?.id);
+      const undo = () => {
+        setAppState((cur) => {
+          const next = { ...cur, runs: prevRuns, currentIndex: prevIndex };
+          persist(next);
+          return next;
+        });
+      };
+      if (!changed) return { changed: false, undo };
+      setAppState((cur) => {
+        const focused = prevRuns[prevIndex];
+        const currentIndex = reordered.indexOf(focused);
+        const next = { ...cur, runs: reordered, currentIndex };
+        persist(next);
+        return next;
+      });
+      return { changed: true, undo };
     },
     [persist],
   );
@@ -3620,6 +3659,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         switchRun,
         deleteRun,
         moveRun,
+        reorderRuns,
         updateRunSettingsById,
         updateProgressForRun,
         captureRunsSnapshot,

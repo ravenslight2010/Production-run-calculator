@@ -336,6 +336,116 @@ export interface QualityCheckResult {
   note?: string;
 }
 
+export interface ProductionSheetPhotoInput {
+  /** Base64-encoded image data (no data URI prefix) */
+  imageBase64: string;
+  /** Image MIME type, e.g. image/jpeg */
+  mimeType?: string;
+  /** Optional plain-language context the user wants considered (e.g. which line the sheet is for, or the date the sheet covers). */
+  notes?: string;
+}
+
+/**
+ * One run row the AI read off the production sheet.
+ */
+export interface ProductionSheetRow {
+  brand: string;
+  flavor: string;
+  /** Die size / crust spec as written on the sheet (may be blank) */
+  dieType: string;
+  /** Cases to produce for this run (0 when not readable) */
+  casesNeeded: number;
+  /**
+     * ISO date (YYYY-MM-DD) the sheet shows for this run, or null
+     * @nullable
+     */
+  date: string | null;
+  /** 0..1 model confidence in this extracted row */
+  confidence: number;
+}
+
+export interface ProductionSheetPhotoResult {
+  rows: ProductionSheetRow[];
+  generatedAt: number;
+  /** Optional message when the sheet could not be read */
+  note?: string;
+}
+
+/**
+ * The values the client expects the label/pallet to show. All optional — only the provided fields are compared.
+ */
+export interface LabelExpected {
+  brand?: string;
+  flavor?: string;
+  dieType?: string;
+  date?: string;
+  lotCode?: string;
+  caseCount?: number;
+}
+
+export type LabelFieldCheckMatch = typeof LabelFieldCheckMatch[keyof typeof LabelFieldCheckMatch];
+
+
+export const LabelFieldCheckMatch = {
+  match: 'match',
+  mismatch: 'mismatch',
+  unreadable: 'unreadable',
+} as const;
+
+/**
+ * One expected field compared against what the AI read on the label.
+ */
+export interface LabelFieldCheck {
+  /** Which field this is (brand, flavor, dieType, date, lotCode, caseCount) */
+  field: string;
+  /**
+     * The expected value the client supplied, or null if none
+     * @nullable
+     */
+  expected: string | null;
+  /**
+     * What the AI read on the label, or null if unreadable/absent
+     * @nullable
+     */
+  observed: string | null;
+  match: LabelFieldCheckMatch;
+}
+
+export interface LabelVerifyInput {
+  /** Base64-encoded image data (no data URI prefix) */
+  imageBase64: string;
+  /** Image MIME type, e.g. image/jpeg */
+  mimeType?: string;
+  expected?: LabelExpected;
+  /** Optional plain-language context the user wants considered */
+  notes?: string;
+}
+
+/**
+ * Overall verdict — pass (all match), warn (unreadable/uncertain), fail (mismatch)
+ */
+export type LabelVerifyResultVerdict = typeof LabelVerifyResultVerdict[keyof typeof LabelVerifyResultVerdict];
+
+
+export const LabelVerifyResultVerdict = {
+  pass: 'pass',
+  warn: 'warn',
+  fail: 'fail',
+} as const;
+
+export interface LabelVerifyResult {
+  /** Overall verdict — pass (all match), warn (unreadable/uncertain), fail (mismatch) */
+  verdict: LabelVerifyResultVerdict;
+  /** One-or-two-sentence plain-language overall result */
+  summary: string;
+  /** 0..1 model confidence in this verification */
+  confidence: number;
+  fields: LabelFieldCheck[];
+  generatedAt: number;
+  /** Optional message when the label could not be read */
+  note?: string;
+}
+
 export type QualityCheckRecordInputProductType = typeof QualityCheckRecordInputProductType[keyof typeof QualityCheckRecordInputProductType];
 
 
@@ -1187,8 +1297,14 @@ export interface ForecastHistoryDay {
 }
 
 export interface ForecastInput {
-  /** ISO date (YYYY-MM-DD) of the upcoming day to forecast */
+  /** ISO date (YYYY-MM-DD) of the first upcoming day to forecast */
   targetDate: string;
+  /**
+     * How many consecutive days to forecast starting at targetDate (1-7, default 1). Each day gets its own plan grounded in that weekday's history.
+     * @minimum 1
+     * @maximum 7
+     */
+  horizonDays?: number;
   /** Client clock in epoch ms (for relative reasoning) */
   nowMs: number;
   /** Recent finished production days, most useful when several weeks deep */
@@ -1234,11 +1350,292 @@ export interface ForecastPlan {
 }
 
 export interface ForecastResult {
-  /** The predicted plan, or null when history is too thin to predict */
+  /** The predicted plan for the first day (back-compat), or null when history is too thin to predict. Equals forecasts[0] when present. */
   forecast: ForecastPlan | null;
+  /** One predicted plan per requested day in the horizon, in date order. Present whenever at least one day could be forecast; single-element for a one-day horizon. */
+  forecasts?: ForecastPlan[];
   generatedAt: number;
   /** Explanation when no forecast could responsibly be produced */
   note?: string;
+}
+
+/**
+ * One run as shaped by the client for the production summary.
+ */
+export interface SummaryRunInput {
+  brand: string;
+  flavor: string;
+  /** Cases the run was planned to make (casesNeeded) */
+  casesPlanned: number;
+  /** Cases actually produced/finished */
+  casesProduced: number;
+  /** Whether the run was completed */
+  finished: boolean;
+  /** Total stoppage/downtime minutes on the run */
+  downtimeMinutes: number;
+  /** Number of discrete stoppages on the run */
+  stoppageCount: number;
+}
+
+/**
+ * Whether to recap a single day or a rolling week
+ */
+export type SummaryInputScope = typeof SummaryInputScope[keyof typeof SummaryInputScope];
+
+
+export const SummaryInputScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+export interface SummaryInput {
+  /** Whether to recap a single day or a rolling week */
+  scope: SummaryInputScope;
+  /** ISO date for the day, or the week-ending date for a weekly recap */
+  date: string;
+  /** Client clock in epoch ms */
+  nowMs: number;
+  /** Runs in scope (today's runs, or the week's finished runs) */
+  runs: SummaryRunInput[];
+  /** Issues reported within the scope (optional context) */
+  incidentCount?: number;
+  /** Inventory items flagged at-risk / waste within the scope (optional) */
+  wasteFlaggedCount?: number;
+}
+
+export type SummaryStatsScope = typeof SummaryStatsScope[keyof typeof SummaryStatsScope];
+
+
+export const SummaryStatsScope = {
+  day: 'day',
+  week: 'week',
+} as const;
+
+/**
+ * The single run with the most downtime, or null
+ */
+export type SummaryStatsTopDowntime = {
+  label: string;
+  minutes: number;
+} | null;
+
+/**
+ * Deterministic aggregates the recap is built from (shown in the UI).
+ */
+export interface SummaryStats {
+  scope: SummaryStatsScope;
+  date: string;
+  runsPlanned: number;
+  runsFinished: number;
+  casesPlanned: number;
+  casesProduced: number;
+  attainmentPct: number;
+  totalDowntimeMinutes: number;
+  totalStoppages: number;
+  /** The single run with the most downtime, or null */
+  topDowntime?: SummaryStatsTopDowntime;
+  unfinishedRuns: string[];
+  incidentCount: number;
+  wasteFlaggedCount: number;
+  hasData: boolean;
+}
+
+export interface SummaryResult {
+  /** Plain-language recap (AI narration, or deterministic fallback) */
+  summary: string;
+  stats: SummaryStats;
+  generatedAt: number;
+  /** True when the AI narrated; false when the deterministic fallback was used */
+  aiGenerated: boolean;
+}
+
+/**
+ * No client-supplied data is required — the server reads the incident log itself. An optional lookbackDays trims how far back to cluster.
+ */
+export interface IncidentClustersInput {
+  /** Only cluster incidents created within this many days (default 30) */
+  lookbackDays?: number;
+}
+
+export type IncidentClusterSeverity = typeof IncidentClusterSeverity[keyof typeof IncidentClusterSeverity];
+
+
+export const IncidentClusterSeverity = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface IncidentCluster {
+  /** Short human-readable label for the grouped issue */
+  theme: string;
+  /** Plain-language guess at what these incidents share */
+  rootCauseHypothesis: string;
+  /** A safe, advisory next step (never an automated fix) */
+  recommendedAction: string;
+  severity: IncidentClusterSeverity;
+  /** Verified ids of the incidents in this cluster */
+  incidentIds: string[];
+  /** Recurrence-weighted occurrences across the cluster */
+  incidentCount: number;
+}
+
+export interface IncidentClustersResult {
+  clusters: IncidentCluster[];
+  /** How many incidents were considered */
+  totalIncidents: number;
+  /** Optional explanation (e.g. too few incidents to cluster) */
+  note?: string;
+  generatedAt: number;
+  /** True when the AI proposed the grouping; false for the deterministic fallback */
+  aiGenerated: boolean;
+}
+
+/**
+ * One finished run, in the flat shape both apps produce for summaries.
+ */
+export interface AnomalyRunInput {
+  brand: string;
+  flavor: string;
+  casesPlanned: number;
+  casesProduced: number;
+  downtimeMinutes: number;
+  stoppageCount: number;
+}
+
+export interface AnomalyInput {
+  /** Today's finished runs to check */
+  today: AnomalyRunInput[];
+  /** Recent finished runs from prior days (baseline pool) */
+  history: AnomalyRunInput[];
+}
+
+export type AnomalyMetric = typeof AnomalyMetric[keyof typeof AnomalyMetric];
+
+
+export const AnomalyMetric = {
+  downtime: 'downtime',
+  yield: 'yield',
+  stoppages: 'stoppages',
+} as const;
+
+export type AnomalySeverity = typeof AnomalySeverity[keyof typeof AnomalySeverity];
+
+
+export const AnomalySeverity = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface Anomaly {
+  runLabel: string;
+  brand: string;
+  flavor: string;
+  metric: AnomalyMetric;
+  observed: number;
+  baseline: number;
+  severity: AnomalySeverity;
+  baselineSamples: number;
+  description: string;
+}
+
+export interface AnomalyResult {
+  anomalies: Anomaly[];
+  checkedRuns: number;
+  baselineRuns: number;
+  /** Plain-language narration (AI), or empty when nothing was flagged / AI unavailable */
+  summary: string;
+  /** Optional explanation (e.g. not enough history to judge) */
+  note?: string;
+  generatedAt: number;
+  /** True when the AI narrated; false otherwise */
+  aiGenerated: boolean;
+}
+
+export type ScheduleOptimizeRunInputAllergen = typeof ScheduleOptimizeRunInputAllergen[keyof typeof ScheduleOptimizeRunInputAllergen];
+
+
+export const ScheduleOptimizeRunInputAllergen = {
+  none: 'none',
+  egg: 'egg',
+  soy: 'soy',
+} as const;
+
+/**
+ * One run planned for the day, in the flat shape both apps produce.
+ */
+export interface ScheduleOptimizeRunInput {
+  id: string;
+  /** Human label for messaging, e.g. "Run 2 · Margherita" */
+  label: string;
+  brand: string;
+  flavor: string;
+  allergen: ScheduleOptimizeRunInputAllergen;
+  /** Die/crust type; a change between adjacent runs is a changeover */
+  dieType?: string;
+}
+
+export type ScheduleOptimizeRuleInputType = typeof ScheduleOptimizeRuleInputType[keyof typeof ScheduleOptimizeRuleInputType];
+
+
+export const ScheduleOptimizeRuleInputType = {
+  'required-field': 'required-field',
+  'numeric-range': 'numeric-range',
+  sequence: 'sequence',
+} as const;
+
+export type ScheduleOptimizeRuleInputEnforcement = typeof ScheduleOptimizeRuleInputEnforcement[keyof typeof ScheduleOptimizeRuleInputEnforcement];
+
+
+export const ScheduleOptimizeRuleInputEnforcement = {
+  flexible: 'flexible',
+  strict: 'strict',
+} as const;
+
+/**
+ * A factory sequence production rule (only sequence-type rules affect ordering).
+ */
+export interface ScheduleOptimizeRuleInput {
+  id: string;
+  name: string;
+  type: ScheduleOptimizeRuleInputType;
+  enforcement: ScheduleOptimizeRuleInputEnforcement;
+  enabled: boolean;
+  attribute?: string;
+  before?: string;
+  after?: string;
+}
+
+export interface ScheduleOptimizeInput {
+  /** The runs planned for the day, in their current order */
+  runs: ScheduleOptimizeRunInput[];
+  /** Factory production rules (optional; only sequence rules apply) */
+  rules?: ScheduleOptimizeRuleInput[];
+}
+
+export interface ScheduleMetrics {
+  allergenViolations: number;
+  ruleViolations: number;
+  changeovers: number;
+}
+
+export interface ScheduleOptimizeResponse {
+  /** Suggested run order (run ids), best-first */
+  order: string[];
+  /** True when the suggested order differs from the input order */
+  changed: boolean;
+  /** True when the suggested order is strictly better than the input */
+  improved: boolean;
+  before: ScheduleMetrics;
+  after: ScheduleMetrics;
+  /** Plain-language narration (AI), or empty when no improvement / AI unavailable */
+  summary: string;
+  /** Optional explanation (e.g. already optimally ordered) */
+  note?: string;
+  generatedAt: number;
+  /** True when the AI narrated; false otherwise */
+  aiGenerated: boolean;
 }
 
 /**

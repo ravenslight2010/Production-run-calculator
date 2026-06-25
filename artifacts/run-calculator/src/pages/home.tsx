@@ -169,6 +169,9 @@ import {
 import { applyRecipeSuggestion as applyRecipeSuggestionShared } from "@workspace/recipe-apply";
 import { moveEntries, relocateValues } from "@workspace/schedule-move";
 import { buildForecastInput, buildForecastAccuracyInput, type ForecastPlan } from "../aiForecast";
+import { buildDaySummaryInput, buildWeekSummaryInput } from "../aiSummary";
+import { buildAnomalyInput } from "../aiAnomaly";
+import { buildScheduleInput } from "../aiSchedule";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
 import {
@@ -4004,6 +4007,40 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     schedulePush(newDs);
+  }
+
+  // Apply an AI-suggested run order (array of run ids) to today's runs. Runs are
+  // reordered to follow the suggested sequence; any run not in the suggestion
+  // keeps its relative position and is appended after the ordered ones. Advisory:
+  // only runs on the manager's explicit tap. Returns an undo to restore the
+  // prior order. Mirrors the mobile applyScheduleOrder for parity.
+  function applyScheduleOrder(order: string[]): { ok: boolean; message: string; undo?: () => void } {
+    const prevRuns = dayState.runs;
+    const prevIndex = dayState.currentIndex;
+    const rank = new Map(order.map((id, i) => [id, i]));
+    const reordered = [...prevRuns].sort((a, b) => {
+      const ra = rank.has(a.id) ? rank.get(a.id)! : Number.MAX_SAFE_INTEGER;
+      const rb = rank.has(b.id) ? rank.get(b.id)! : Number.MAX_SAFE_INTEGER;
+      if (ra !== rb) return ra - rb;
+      return prevRuns.indexOf(a) - prevRuns.indexOf(b);
+    });
+    const unchanged = reordered.every((r, i) => r.id === prevRuns[i]?.id);
+    if (unchanged) return { ok: true, message: "Already in suggested order" };
+    const newCurrentIndex = reordered.indexOf(prevRuns[prevIndex]);
+    const newDs = { ...dayState, runs: reordered, currentIndex: newCurrentIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs);
+    return {
+      ok: true,
+      message: "Run order updated",
+      undo: () => {
+        const restored = { ...dayStateRef.current, runs: prevRuns, currentIndex: prevIndex };
+        setDayState(restored);
+        saveDayState(restored);
+        schedulePush(restored);
+      },
+    };
   }
 
   // Apply a one-tap AI recommendation action by routing it to the existing
@@ -9871,9 +9908,46 @@ export default function Home() {
                   recipeDefaultTargetId={currentRunId}
                   onApplyAction={applyOptimizeAction}
                   onApplyVoiceCommand={applyVoiceCommand}
-                  buildForecast={(targetDate) =>
+                  buildSummary={(scope) =>
+                    scope === "week"
+                      ? buildWeekSummaryInput({
+                          date: todayStr(),
+                          nowMs: Date.now(),
+                          history,
+                          runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                        })
+                      : buildDaySummaryInput({
+                          date: todayStr(),
+                          nowMs: Date.now(),
+                          runs: dayState.runs,
+                          runValues: (run) =>
+                            run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                        })
+                  }
+                  buildAnomaly={() =>
+                    buildAnomalyInput({
+                      date: todayStr(),
+                      nowMs: Date.now(),
+                      runs: dayState.runs,
+                      runValues: (run) =>
+                        run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                      history,
+                      runValuesForHistory: (day, run) => day.runValues?.[run.id],
+                    })
+                  }
+                  buildSchedule={() =>
+                    buildScheduleInput({
+                      nowMs: Date.now(),
+                      runs: dayState.runs,
+                      runValues: (run) =>
+                        run.id === currentRunId ? form.getValues() : loadRunValues(run.id),
+                    })
+                  }
+                  onApplySchedule={applyScheduleOrder}
+                  buildForecast={(targetDate, horizonDays) =>
                     buildForecastInput({
                       targetDate: targetDate || tomorrowStr(),
+                      horizonDays,
                       nowMs: Date.now(),
                       history,
                       runValuesForHistory: (day, run) => day.runValues?.[run.id],

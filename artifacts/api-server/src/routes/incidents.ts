@@ -29,6 +29,15 @@ import {
   appendFacilityMemoryBlock,
   recordFacilityKnowledge,
 } from "./aiMemoryContext";
+import {
+  buildClustersPrompt,
+  buildFallbackClusters,
+  CLUSTER_MIN_INCIDENTS,
+  DEFAULT_LOOKBACK_DAYS,
+  sanitizeClusterResponse,
+  shapeIncidents,
+  validateClustersBody,
+} from "./aiIncidentClusters";
 
 const router: IRouter = Router();
 
@@ -172,6 +181,78 @@ router.post(
       diagnosis,
       workaround,
       recurrence: history.recurrence,
+    });
+  },
+);
+
+// POST /ai/incident-clusters — manager-only root-cause clustering across the
+// incident log. The server reads the incidents itself, asks the AI to PROPOSE a
+// grouping, then verifies every id and recomputes counts deterministically.
+// Advisory, read-only, fail-safe (deterministic grouping when AI is unavailable).
+router.post(
+  "/ai/incident-clusters",
+  requireCapability("review-incidents"),
+  rateLimit({
+    windowMs: REPORT_RATE_WINDOW_MS,
+    max: REPORT_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: reportRateStore,
+  }),
+  async (req, res): Promise<void> => {
+    const validation = validateClustersBody(req.body);
+    if (!validation.ok) {
+      res.status(validation.status).json({ error: validation.error });
+      return;
+    }
+    const lookbackDays =
+      validation.data.lookbackDays && validation.data.lookbackDays > 0
+        ? validation.data.lookbackDays
+        : DEFAULT_LOOKBACK_DAYS;
+
+    const incidents = await listIncidents();
+    const { shaped, byId } = shapeIncidents(incidents, lookbackDays, Date.now());
+
+    // Too few to cluster — return an empty, honest result rather than spend a
+    // paid call inventing patterns out of one or two reports.
+    if (shaped.length < CLUSTER_MIN_INCIDENTS) {
+      res.json({
+        clusters: [],
+        totalIncidents: shaped.length,
+        note:
+          shaped.length === 0
+            ? "No incidents in the selected window yet."
+            : "Not enough incidents yet to find a pattern.",
+        generatedAt: Date.now(),
+        aiGenerated: false,
+      });
+      return;
+    }
+
+    const { system, user } = buildClustersPrompt(shaped);
+    let clusters = null;
+    try {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 2048,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      });
+      const content = response.choices[0]?.message?.content ?? "";
+      clusters = sanitizeClusterResponse(JSON.parse(content), byId);
+    } catch (err) {
+      req.log.warn({ err }, "incident clustering failed; using deterministic fallback");
+    }
+
+    const aiGenerated = clusters !== null;
+    const finalClusters = clusters ?? buildFallbackClusters(shaped);
+    res.json({
+      clusters: finalClusters,
+      totalIncidents: shaped.length,
+      generatedAt: Date.now(),
+      aiGenerated,
     });
   },
 );
