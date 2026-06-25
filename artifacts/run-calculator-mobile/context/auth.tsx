@@ -224,15 +224,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyToken]);
 
-  // A 401 on an already-signed-in request means the session is gone (typically
-  // the daily reset advanced the boundary) — discard the token and show login.
+  // A 401 on an already-signed-in request usually means the session is gone (the
+  // daily reset advanced the boundary). But it can also be a STALE request that
+  // was already in flight when the user signed in and only resolved afterward —
+  // discarding the token here would bounce the just-logged-in user back to login
+  // (the "had to sign in 3×" symptom). So re-probe via revalidate(): it re-checks
+  // /me and only signs out when /me itself 401s (session genuinely gone), keeps
+  // the user when the session is still valid, and leaves things as-is when
+  // offline. /me is a session-probe path, so its own 401 won't re-enter here.
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      void applyToken(null);
-      setMe(null);
+      void revalidate();
     });
     return () => setUnauthorizedHandler(null);
-  }, [applyToken]);
+  }, [revalidate]);
 
   // Changing a password doesn't rotate the session token, so the stored token
   // stays valid — nothing to update locally beyond surfacing success/failure.

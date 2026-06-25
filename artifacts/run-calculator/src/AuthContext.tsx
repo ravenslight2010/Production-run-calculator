@@ -132,11 +132,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void qc.invalidateQueries({ queryKey: ["me"] });
   }, [qc]);
 
-  // Any 401 from an authenticated request means the session is gone (typically
-  // the daily reset advanced the boundary) — bounce to the login screen.
+  // A 401 on an authenticated request usually means the session ended (the daily
+  // reset advanced the boundary). But it can also be a STALE request that was
+  // already in flight when the user signed in and only resolved afterward —
+  // hard-nulling ["me"] here would bounce the just-logged-in user straight back
+  // to the login screen (the "had to sign in 3×" symptom). So instead of nulling
+  // blindly, re-probe the session: invalidating ["me"] refetches /me, whose
+  // queryFn maps a real 401 to null (signed out) but keeps the user when the
+  // session is actually still valid. /me is a session-probe path, so its own 401
+  // can't re-enter this handler (no loop).
   useEffect(() => {
     setUnauthorizedHandler(() => {
-      qc.setQueryData(["me"], null);
+      void qc.invalidateQueries({ queryKey: ["me"] });
     });
     return () => setUnauthorizedHandler(null);
   }, [qc]);
