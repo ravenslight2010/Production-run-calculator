@@ -226,6 +226,11 @@ export type DayState = {
 export type SyncPayload = {
   dayState: { runs: RunMeta[]; shiftNotes?: string; runToTime?: string; resetAt?: number; date?: string; substitutions?: IngredientSubstitution[]; substitutionLog?: SubstitutionLogEntry[]; stagedItems?: Record<string, boolean> };
   runValues: Record<string, FormValues>;
+  // Per-run monotonic edit timestamp (run id -> ms). Lets the apply path reject a
+  // stale remote that would clobber a fresher local edit (the "click away and my
+  // change vanished" lost-update). Only used to BLOCK overwriting strictly-newer
+  // local values; absent/equal entries fall back to the prior accept behavior.
+  runValuesUpdatedAt?: Record<string, number>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientTypes?: string[];

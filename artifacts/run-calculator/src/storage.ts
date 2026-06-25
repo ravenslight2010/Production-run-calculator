@@ -414,6 +414,26 @@ export function saveRunValues(id: string, values: FormValues): void {
   try { localStorage.setItem(RUN_KEY(id), JSON.stringify(values)); } catch {}
 }
 
+// Per-run monotonic edit timestamps (run id -> ms of last local edit). Synced via
+// SyncPayload.runValuesUpdatedAt so the apply path can tell a fresher local edit
+// from a stale remote and refuse to clobber it. Bumped only on real local edits.
+const RUN_VALUES_UPDATED_KEY = "run-calc-runvalues-updated";
+export function loadRunValuesUpdated(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(RUN_VALUES_UPDATED_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, number>;
+  } catch {}
+  return {};
+}
+export function saveRunValuesUpdated(map: Record<string, number>): void {
+  try { localStorage.setItem(RUN_VALUES_UPDATED_KEY, JSON.stringify(map)); } catch {}
+}
+export function markRunValuesUpdated(id: string, ts: number = Date.now()): void {
+  const m = loadRunValuesUpdated();
+  m[id] = ts;
+  saveRunValuesUpdated(m);
+}
+
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);

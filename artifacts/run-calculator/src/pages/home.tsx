@@ -72,6 +72,9 @@ import {
   archiveDayToHistory,
   loadRunValues,
   saveRunValues,
+  loadRunValuesUpdated,
+  saveRunValuesUpdated,
+  markRunValuesUpdated,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3003,11 +3006,29 @@ export default function Home() {
       const remoteDateOk = !remoteDate || remoteDate === todayStr();
       const acceptRemoteDay = remoteDateOk && remoteResetAt >= localResetAt;
 
+      // Per-run lost-update guard: compare each run's edit timestamp. We only
+      // REJECT a remote run's values when our local edit is STRICTLY newer — so
+      // unedited/imported runs (both ts 0) still adopt the remote exactly as
+      // before. `rejectedStale` triggers a re-push so peers converge on our edit.
+      const remoteUpd = payload.runValuesUpdatedAt ?? {};
+      const localUpd = loadRunValuesUpdated();
+      let rejectedStale = false;
+
       // ── Run values (only accept if we're taking the remote day) ──
       if (acceptRemoteDay) {
+        const mergedUpd: Record<string, number> = { ...localUpd };
         for (const [id, vals] of Object.entries(payload.runValues)) {
-          saveRunValues(id, vals as FormValues);
+          const rTs = remoteUpd[id] ?? 0;
+          const lTs = localUpd[id] ?? 0;
+          if (lTs > rTs) {
+            // Local edit is fresher than this remote — keep ours, re-push later.
+            rejectedStale = true;
+          } else {
+            saveRunValues(id, vals as FormValues);
+            if (rTs > lTs) mergedUpd[id] = rTs;
+          }
         }
+        saveRunValuesUpdated(mergedUpd);
       }
 
       // ── Day state (runs + shiftNotes + runToTime) ──
@@ -3072,7 +3093,12 @@ export default function Home() {
         const currentId = dayStateRef.current.runs[dayStateRef.current.currentIndex]?.id;
         const currentRunInPayload = payload.dayState.runs.find(r => r.id === currentId);
         if (currentRunInPayload?.subTab) setDoughSubTab(currentRunInPayload.subTab);
-        if (currentId && payload.runValues[currentId] && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current) {
+        // Never reset the live form to a remote value that is older than our own
+        // edit for this run (per-run lost-update guard). Equal/absent timestamps
+        // fall through to the prior time-quiet + push-ack behavior.
+        const curLocalTs = currentId ? (localUpd[currentId] ?? 0) : 0;
+        const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
+        if (currentId && payload.runValues[currentId] && curLocalTs <= curRemoteTs && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current) {
           const merged = { ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) };
           form.reset(merged);
           resetFieldArrays(merged);
@@ -3279,7 +3305,16 @@ export default function Home() {
         }
       }
 
-      requestAnimationFrame(() => { isSyncApplyingRef.current = false; });
+      requestAnimationFrame(() => {
+        isSyncApplyingRef.current = false;
+        // We kept a strictly-newer local run value over a stale remote — re-push so
+        // peers adopt ours and converge. Clear the signature gate so the push isn't
+        // skipped as a no-op, and defer until isSyncApplyingRef is cleared above.
+        if (rejectedStale) {
+          lastSyncSigRef.current = "";
+          schedulePush(dayStateRef.current, 0);
+        }
+      });
     };
   });
 
@@ -3531,6 +3566,7 @@ export default function Home() {
     return {
       dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
+      runValuesUpdatedAt: loadRunValuesUpdated(),
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
       ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
@@ -3594,11 +3630,15 @@ export default function Home() {
     const run = ds?.runs[ds?.currentIndex];
     const runId = run?.id;
     if (runId) {
+      const now = Date.now();
       saveRunValues(runId, v);
+      // Stamp this run's edit time so an in-flight stale remote can't clobber it
+      // (the "click away and my change disappeared" lost-update).
+      markRunValuesUpdated(runId, now);
       if (run?.brand || run?.flavor) {
         saveProfile(run.brand, run.flavor, v);
       }
-      lastLocalEditRef.current = Date.now();
+      lastLocalEditRef.current = now;
       schedulePush(ds, 2000);
       flashSaved();
     }

@@ -34,6 +34,7 @@ import React, {
 import {
   appStateToPayload,
   applyPayloadToState,
+  diffStampRunEdits,
   flavorNamespace,
   formValuesToSettings,
   runToFormValues,
@@ -1800,6 +1801,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const lastRemoteRawRef = useRef<SyncPayload | null>(null);
   const lastSyncSigRef = useRef<string>("");
   const lastLocalEditRef = useRef<number>(0);
+  // Per-run edit timestamps (run id -> ms) + last-seen per-run form-value strings.
+  // In-memory (platform-adapted vs web's localStorage): protection only matters
+  // for live edits in the current session. Lets the apply path reject a stale
+  // remote that would clobber a fresher local edit. See web app for parity.
+  const runValuesUpdatedAtRef = useRef<Record<string, number>>({});
+  const lastRunValsRef = useRef<Record<string, string>>({});
+  // Whether lastRunValsRef has been seeded with a baseline yet. The first
+  // observed snapshot (initial load) only PRIMES the baseline — it must not
+  // stamp edit timestamps, or every loaded/imported run would be mistaken for a
+  // fresh local edit. Once primed, any new-or-changed run id is a real edit.
+  const editAttribPrimedRef = useRef(false);
   const pendingRemoteRef = useRef<SyncPayload | null>(null);
   const deferTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1995,8 +2007,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     let payload: SyncPayload;
     let sig: string;
     try {
-      payload = appStateToPayload(appStateRef.current, lastRemoteRawRef.current);
-      sig = stableStringify(payload);
+      // Send the real per-run timestamps, but compute the echo/no-op signature
+      // WITHOUT them (map-less) so timestamps never perturb it — must match the
+      // change-watcher's and commitRemote's sig computation.
+      payload = appStateToPayload(appStateRef.current, lastRemoteRawRef.current, runValuesUpdatedAtRef.current);
+      sig = stableStringify(appStateToPayload(appStateRef.current, lastRemoteRawRef.current));
     } catch {
       // Runs in a setTimeout, so a throw here is uncaught and would crash the
       // whole app. Sync is best-effort — degrade to offline instead.
@@ -2035,11 +2050,36 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     const commitRemote = (payload: SyncPayload) => {
       setAppState((prev) => {
         try {
-          const { patch } = applyPayloadToState(payload, prev);
+          const { patch, mergedUpdatedAt, rejectedStale } = applyPayloadToState(
+            payload,
+            prev,
+            runValuesUpdatedAtRef.current,
+          );
+          runValuesUpdatedAtRef.current = mergedUpdatedAt;
           const next = { ...prev, ...patch };
           lastRemoteRawRef.current = payload;
+          // Reseed the edit-attribution baseline to the just-applied state so a
+          // remote-adopted value isn't mistaken for a local edit on the next
+          // watcher tick (the watcher usually early-returns on the matching sig,
+          // but a subsequent unrelated edit must still diff against this state).
+          const seededVals: Record<string, string> = {};
+          for (const [id, vals] of Object.entries(
+            appStateToPayload(next, payload).runValues,
+          )) {
+            seededVals[id] = stableStringify(vals);
+          }
+          lastRunValsRef.current = seededVals;
+          editAttribPrimedRef.current = true;
+          // Map-less sig (no 3rd arg) — must match doPush/change-watcher.
           lastSyncSigRef.current = stableStringify(appStateToPayload(next, payload));
           persistNow(next);
+          if (rejectedStale) {
+            // We kept a strictly-newer local run value over a stale remote —
+            // re-push so peers adopt ours and converge (web parity). Clear the
+            // signature gate so the push isn't skipped as a no-op.
+            lastSyncSigRef.current = "";
+            schedulePushRef.current();
+          }
           return next;
         } catch {
           // A malformed remote payload (arriving via the SSE callback) must not
@@ -2217,7 +2257,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     if (sig === lastSyncSigRef.current) return;
-    lastLocalEditRef.current = Date.now();
+    const now = Date.now();
+    lastLocalEditRef.current = now;
+    // Attribute the change to specific run(s) by diffing each run's form values
+    // against the last-seen snapshot, and stamp their edit timestamp. This is the
+    // mobile equivalent of the web autosave's per-run markRunValuesUpdated.
+    try {
+      const built = appStateToPayload(appState, lastRemoteRawRef.current);
+      const nextVals: Record<string, string> = {};
+      for (const [id, vals] of Object.entries(built.runValues)) {
+        nextVals[id] = stableStringify(vals);
+      }
+      const { updatedAt } = diffStampRunEdits(
+        nextVals,
+        lastRunValsRef.current,
+        editAttribPrimedRef.current,
+        now,
+        runValuesUpdatedAtRef.current,
+      );
+      runValuesUpdatedAtRef.current = updatedAt;
+      lastRunValsRef.current = nextVals;
+      editAttribPrimedRef.current = true;
+    } catch {
+      // Best-effort attribution; sync still proceeds without a per-run stamp.
+    }
     lastSyncSigRef.current = sig;
     schedulePush();
   }, [appState, schedulePush]);

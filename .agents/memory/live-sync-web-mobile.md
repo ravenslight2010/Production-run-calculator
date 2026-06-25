@@ -43,10 +43,28 @@ contract is owned by web + db and is untyped on the server. Mobile mirrors it in
   Set the synced signature only in the PUT success path (never before/on
   failure, or a failed push is marked synced and never retries = silent lost
   update). Web previously lacked this gate while mobile had it — a parity trap.
-- **Residual lost-update:** signature gating stops the repeating clobber but a
-  ≤30s one-shot echo race can still drop a concurrent edit. Fully closing it
-  needs a monotonic `updatedAt`/rev on the payload (reject older remote
-  runValues) — not yet implemented; would need web+mobile parity.
+- **Residual lost-update (RESOLVED):** signature gating stops the repeating
+  clobber, but a one-shot echo race could still drop a concurrent edit. Closed by
+  per-run edit timestamps `SyncPayload.runValuesUpdatedAt` (run id → ms). On apply
+  a remote run's values are REJECTED only when `localTs > remoteTs` STRICTLY
+  (both 0 = unedited/imported still adopts remote, so prior behavior is intact);
+  on reject set a `rejectedStale` flag and force a re-push (clear `lastSyncSigRef`
+  → schedulePush) so peers converge. Timestamps merge to per-id max. Server is
+  untyped jsonb passthrough → NO server/codegen change.
+  - **Web** writes via localStorage (`run-calc-runvalues-updated`,
+    load/save/markRunValuesUpdated); autosave stamps the edited run directly.
+  - **Mobile** keeps the map IN-MEMORY (refs `runValuesUpdatedAtRef` +
+    `lastRunValsRef` + `editAttribPrimedRef`) — documented platform asymmetry;
+    protection only needs to cover live-session edits. Attribution is by a
+    per-run value diff in the change-watcher via pure `diffStampRunEdits`.
+  - **Attribution priming pitfall (mobile):** the first snapshot after load must
+    only SEED the baseline (no stamping) or every loaded/imported run looks like a
+    fresh local edit; once primed, any new-or-changed run id stamps `now`. Also
+    reseed the baseline in `commitRemote` so a remote-adopted value isn't
+    mis-stamped as a local edit on the next watcher tick.
+  - **Sig stays map-less:** `appStateToPayload`'s timestamp arg defaults to `{}`
+    and is passed ONLY when building the payload to PUT — never in the
+    signature/echo path, or timestamps would perturb no-op detection.
 - **Push reliability:** `putToday` throws on non-OK; `doPush` records the synced
   signature ONLY after a successful PUT, else marks offline + retries
   (`PUSH_RETRY_MS`). **Why:** recording the signature before/ignoring failures

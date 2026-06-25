@@ -318,6 +318,11 @@ function metaToRun(
 export function appStateToPayload(
   state: SyncableState,
   lastRaw: SyncPayload | null,
+  // Per-run edit timestamps. Passed ONLY when building the payload to actually
+  // PUT/broadcast; omitted everywhere a stable signature is needed (echo/no-op
+  // detection) so timestamps never perturb the signature. Defaults to {} so the
+  // signature path is constant.
+  runValuesUpdatedAt: Record<string, number> = {},
 ): SyncPayload {
   const rawMetaById = new Map<string, WebRunMeta>(
     (lastRaw?.dayState?.runs ?? []).map((m) => [m.id, m]),
@@ -341,6 +346,7 @@ export function appStateToPayload(
       stagedItems: state.stagedItems ?? {},
     },
     runValues,
+    runValuesUpdatedAt,
     brands: state.brands,
     brandFlavors: state.brandFlavors,
     pepTypes: state.pepTypes,
@@ -351,6 +357,32 @@ export function appStateToPayload(
     mergedAway: state.mergedAway ?? [],
     deletedItems: state.deletedItems ?? {},
   };
+}
+
+// Per-run edit attribution: given the current per-run form-value strings, the
+// last-seen baseline, and whether a baseline has been established yet ("primed"),
+// stamp `now` for any run whose value is new-or-changed and return the updated
+// timestamp map. Before priming (the very first snapshot after load) nothing is
+// stamped — otherwise every loaded/imported run would look like a fresh local
+// edit. This is the mobile analogue of the web autosave's markRunValuesUpdated;
+// callers own the baseline ref (lastVals) and the primed flag. Pure + importable.
+export function diffStampRunEdits(
+  nextValStrings: Record<string, string>,
+  lastVals: Record<string, string>,
+  primed: boolean,
+  now: number,
+  currentUpdatedAt: Record<string, number>,
+): { updatedAt: Record<string, number>; stamped: boolean } {
+  if (!primed) return { updatedAt: currentUpdatedAt, stamped: false };
+  let updatedAt = currentUpdatedAt;
+  let stamped = false;
+  for (const [id, s] of Object.entries(nextValStrings)) {
+    if (lastVals[id] !== s) {
+      updatedAt = { ...updatedAt, [id]: now };
+      stamped = true;
+    }
+  }
+  return { updatedAt, stamped };
 }
 
 // Namespace for a brand's flavor list in the deletion-tombstone map. Must match
@@ -430,8 +462,29 @@ function unionBrandFlavors(
 export function applyPayloadToState(
   payload: SyncPayload,
   prev: SyncableState,
-): { patch: SyncableStatePatch; acceptedDay: boolean } {
+  // Local per-run edit timestamps (run id -> ms). Used to reject a stale remote
+  // that would clobber a fresher local edit. Defaults to {} (all 0 = no local
+  // edits recorded → prior accept-remote behavior).
+  localUpdatedAt: Record<string, number> = {},
+): {
+  patch: SyncableStatePatch;
+  acceptedDay: boolean;
+  // Merged per-run timestamps (per-id max of local + remote) for the caller to
+  // persist as the new local map.
+  mergedUpdatedAt: Record<string, number>;
+  // True when we kept a strictly-newer local run value over a stale remote, so
+  // the caller should re-push to converge peers (web parity).
+  rejectedStale: boolean;
+} {
   const patch: SyncableStatePatch = {};
+  const remoteUpdatedAt = payload.runValuesUpdatedAt ?? {};
+  // Merge per-run timestamps (per-id max), independent of whether the day is
+  // accepted, so the map always reflects the freshest known edit time.
+  const mergedUpdatedAt: Record<string, number> = { ...localUpdatedAt };
+  for (const [id, ts] of Object.entries(remoteUpdatedAt)) {
+    mergedUpdatedAt[id] = Math.max(mergedUpdatedAt[id] ?? 0, ts);
+  }
+  let rejectedStale = false;
 
   // Merge tombstones (union remote+local). A merge removes source names locally,
   // but the additive list unions below would resurrect them from a stale peer.
@@ -481,9 +534,19 @@ export function applyPayloadToState(
       (meta): meta is WebRunMeta =>
         !!meta && typeof meta === "object" && typeof meta.id === "string",
     );
-    const runs = remoteRuns.map((meta) =>
-      metaToRun(meta, payload.runValues?.[meta.id], prevById.get(meta.id)),
-    );
+    const runs = remoteRuns.map((meta) => {
+      const prevRun = prevById.get(meta.id);
+      const lTs = localUpdatedAt[meta.id] ?? 0;
+      const rTs = remoteUpdatedAt[meta.id] ?? 0;
+      // Local edit strictly newer than this remote — keep our run wholesale so a
+      // stale remote can't clobber the just-made edit (web parity). Equal/absent
+      // timestamps fall through to the prior accept-remote behavior.
+      if (prevRun && lTs > rTs) {
+        rejectedStale = true;
+        return prevRun;
+      }
+      return metaToRun(meta, payload.runValues?.[meta.id], prevRun);
+    });
     patch.runs = runs.length > 0 ? runs : prev.runs;
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;
@@ -525,5 +588,5 @@ export function applyPayloadToState(
     patch.date = todayStr();
   }
 
-  return { patch, acceptedDay };
+  return { patch, acceptedDay, mergedUpdatedAt, rejectedStale };
 }

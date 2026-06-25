@@ -130,6 +130,9 @@ export interface SyncDayState {
 export interface SyncPayload {
   dayState: SyncDayState;
   runValues: Record<string, WebFormValues>;
+  // Per-run monotonic edit timestamp (run id -> ms). Mirrors the web app: lets the
+  // apply path reject a stale remote that would clobber a fresher local edit.
+  runValuesUpdatedAt?: Record<string, number>;
   brands?: string[];
   brandFlavors?: Record<string, string[]>;
   ingredientTypes?: string[];
