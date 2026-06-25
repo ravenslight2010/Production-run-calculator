@@ -7,6 +7,7 @@ import {
   gridsToPromptText,
   splitGridsForPrompt,
   applyNameMatches,
+  collectMatchCandidates,
   crossFillSpecImport,
   recipeTargets,
   sanitizeParsedSpecImport,
@@ -16,6 +17,7 @@ import {
   type ParsedSpecImport,
   type SheetGrid,
   type SpecImportAlias,
+  type SpecMatchKnown,
   type CanonicalResult,
 } from "@workspace/spec-import";
 
@@ -430,6 +432,116 @@ describe("applyNameMatches", () => {
     const out = applyNameMatches(base(), [], []);
     expect(out.parsed.profiles[0].brand).toBe("Tombstn");
     expect(out.aliases).toEqual([]);
+  });
+
+  it("applies kind-scoped ingredient + applicator/pepperoni matches and records aliases", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        {
+          brand: "Tombstone",
+          flavor: "Pepperoni",
+          dieType: "",
+          applicators: [{ type: "Mozz", lbs: 1 }],
+          pepperonis: [{ type: "Pep Cup", count: 30 }],
+        },
+      ],
+      recipes: [
+        { kind: "dough", name: "D", rows: [{ ingredient: "Bread Flr", lbs: 1 }] },
+        { kind: "sauce", name: "S", rows: [{ ingredient: "Tom Paste", lbs: 2 }] },
+      ],
+    };
+    const out = applyNameMatches(parsed, [], [], {
+      ingredientMatches: [
+        { kind: "dough", candidate: "Bread Flr", match: "Bread Flour" },
+        { kind: "sauce", candidate: "Tom Paste", match: "Tomato Paste" },
+      ],
+      appTypeMatches: [{ candidate: "Mozz", match: "Mozzarella" }],
+      pepTypeMatches: [{ candidate: "Pep Cup", match: "Pepperoni Cup" }],
+    });
+    expect(out.parsed.recipes[0].rows[0].ingredient).toBe("Bread Flour");
+    expect(out.parsed.recipes[1].rows[0].ingredient).toBe("Tomato Paste");
+    expect(out.parsed.profiles[0].applicators[0].type).toBe("Mozzarella");
+    expect(out.parsed.profiles[0].pepperonis[0].type).toBe("Pepperoni Cup");
+    expect(out.aliases.find((a) => a.kind === "doughIngredient")?.canonicalName).toBe("Bread Flour");
+    expect(out.aliases.find((a) => a.kind === "sauceIngredient")?.canonicalName).toBe("Tomato Paste");
+    expect(out.aliases.find((a) => a.kind === "appType")?.canonicalName).toBe("Mozzarella");
+    expect(out.aliases.find((a) => a.kind === "pepType")?.canonicalName).toBe("Pepperoni Cup");
+  });
+
+  it("does NOT rename an ingredient match under a different recipe kind", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "cheese", name: "C", rows: [{ ingredient: "Bread Flr", lbs: 1 }] }],
+    };
+    const out = applyNameMatches(parsed, [], [], {
+      ingredientMatches: [{ kind: "dough", candidate: "Bread Flr", match: "Bread Flour" }],
+    });
+    expect(out.parsed.recipes[0].rows[0].ingredient).toBe("Bread Flr");
+  });
+});
+
+describe("collectMatchCandidates", () => {
+  const known: SpecMatchKnown = {
+    brands: ["Tombstone"],
+    flavorsByBrand: { Tombstone: ["Pepperoni"] },
+    doughIngredients: ["Bread Flour"],
+    sauceIngredients: ["Tomato Paste"],
+    cheeseIngredients: ["Mozzarella"],
+    appTypes: ["Mozzarella"],
+    pepTypes: ["Pepperoni Cup"],
+  };
+
+  it("collects only names absent from the known lists", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        {
+          brand: "Newco",
+          flavor: "Spicy",
+          dieType: "",
+          applicators: [{ type: "Mozz", lbs: 1 }, { type: "Mozzarella", lbs: 1 }],
+          pepperonis: [{ type: "Pep Cup", count: 1 }],
+        },
+        // Flavor under a KNOWN brand that isn't saved yet → collected.
+        { brand: "Tombstone", flavor: "Sausage", dieType: "", applicators: [], pepperonis: [] },
+        // Flavor under a known brand that IS saved → not collected.
+        { brand: "Tombstone", flavor: "Pepperoni", dieType: "", applicators: [], pepperonis: [] },
+      ],
+      recipes: [
+        { kind: "dough", name: "D", rows: [{ ingredient: "Bread Flr", lbs: 1 }, { ingredient: "Bread Flour", lbs: 1 }] },
+      ],
+    };
+    const c = collectMatchCandidates(parsed, known);
+    expect(c.brands).toEqual(["Newco"]);
+    // "Spicy" is under a NEW brand → not collected (matcher scopes flavors to a known brand).
+    expect(c.flavors).toEqual([{ brand: "Tombstone", flavor: "Sausage" }]);
+    expect(c.ingredients).toEqual([{ kind: "dough", name: "Bread Flr" }]);
+    expect(c.appTypes).toEqual(["Mozz"]);
+    expect(c.pepTypes).toEqual(["Pep Cup"]);
+  });
+
+  it("dedupes case-insensitively and returns empty arrays when everything is known", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "newco", flavor: "x", dieType: "", applicators: [], pepperonis: [] },
+        { brand: "NEWCO", flavor: "x", dieType: "", applicators: [], pepperonis: [] },
+      ],
+      recipes: [],
+    };
+    const c = collectMatchCandidates(parsed, known);
+    expect(c.brands).toHaveLength(1);
+
+    const allKnown: ParsedSpecImport = {
+      profiles: [
+        { brand: "Tombstone", flavor: "Pepperoni", dieType: "", applicators: [{ type: "Mozzarella", lbs: 1 }], pepperonis: [{ type: "Pepperoni Cup", count: 1 }] },
+      ],
+      recipes: [{ kind: "dough", name: "D", rows: [{ ingredient: "Bread Flour", lbs: 1 }] }],
+    };
+    const c2 = collectMatchCandidates(allKnown, known);
+    expect(c2.brands).toEqual([]);
+    expect(c2.flavors).toEqual([]);
+    expect(c2.ingredients).toEqual([]);
+    expect(c2.appTypes).toEqual([]);
+    expect(c2.pepTypes).toEqual([]);
   });
 });
 

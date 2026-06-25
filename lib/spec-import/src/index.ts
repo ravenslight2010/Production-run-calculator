@@ -597,12 +597,24 @@ export function summarizeSpecImport(
 export type NameMatch = { candidate: string; match: string };
 /** A brand-scoped flavor match: `match` is the existing flavor within `brand`. */
 export type ScopedNameMatch = { brand: string; candidate: string; match: string };
+/** A recipe-kind-scoped ingredient match: `match` is an existing ingredient in that kind's pool. */
+export type IngredientNameMatch = { kind: "dough" | "sauce" | "cheese"; candidate: string; match: string };
+
+/** Optional non-brand/flavor AI matches applied alongside brand/flavor. */
+export type ExtraNameMatches = {
+  ingredientMatches?: ReadonlyArray<IngredientNameMatch>;
+  appTypeMatches?: ReadonlyArray<NameMatch>;
+  pepTypeMatches?: ReadonlyArray<NameMatch>;
+};
 
 export type AppliedNameMatches = {
   parsed: ParsedSpecImport;
   /** Brand + brand-scoped flavor alias pairs worth remembering (self-refs dropped). */
   aliases: SpecImportAlias[];
 };
+
+const recipeKindToIngredientAliasKind = (k: "dough" | "sauce" | "cheese"): SpecAliasKind =>
+  k === "dough" ? "doughIngredient" : k === "sauce" ? "sauceIngredient" : "cheeseIngredient";
 
 /**
  * Apply confident AI brand/flavor matches to a canonicalized parse so names that
@@ -617,6 +629,7 @@ export function applyNameMatches(
   parsed: ParsedSpecImport,
   brandMatches: ReadonlyArray<NameMatch>,
   flavorMatches: ReadonlyArray<ScopedNameMatch>,
+  extra: ExtraNameMatches = {},
 ): AppliedNameMatches {
   const brandMap = new Map<string, string>();
   for (const m of brandMatches) {
@@ -647,10 +660,42 @@ export function applyNameMatches(
     return flavorMap.get(flavorKey(brand ?? "", flavor)) ?? flavor;
   };
 
+  // Recipe-kind-scoped ingredient renames + flat applicator/pepperoni-type renames.
+  const ingKey = (kind: string, name: string) => `${kind}\u0000${name.trim().toLowerCase()}`;
+  const ingMap = new Map<string, string>();
+  for (const m of extra.ingredientMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match) continue;
+    ingMap.set(ingKey(m.kind, cand), match);
+  }
+  const appMap = new Map<string, string>();
+  for (const m of extra.appTypeMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match) continue;
+    appMap.set(cand.toLowerCase(), match);
+  }
+  const pepMap = new Map<string, string>();
+  for (const m of extra.pepTypeMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match) continue;
+    pepMap.set(cand.toLowerCase(), match);
+  }
+  const renameApp = (t: string) => appMap.get(t.trim().toLowerCase()) ?? t;
+  const renamePep = (t: string) => pepMap.get(t.trim().toLowerCase()) ?? t;
+
   const profiles = parsed.profiles.map((p) => {
     const brand = renameBrand(p.brand) ?? p.brand;
     const flavor = renameFlavor(brand, p.flavor) ?? p.flavor;
-    return { ...p, brand, flavor };
+    const applicators = appMap.size
+      ? p.applicators.map((a) => ({ ...a, type: renameApp(a.type) }))
+      : p.applicators;
+    const pepperonis = pepMap.size
+      ? p.pepperonis.map((pp) => ({ ...pp, type: renamePep(pp.type) }))
+      : p.pepperonis;
+    return { ...p, brand, flavor, applicators, pepperonis };
   });
 
   const recipes = parsed.recipes.map((r) => {
@@ -663,6 +708,12 @@ export function applyNameMatches(
       out.targets = r.targets.map((t): ParsedRecipeTarget => {
         const brand = renameBrand(t.brand) ?? t.brand;
         return { brand, flavor: renameFlavor(brand, t.flavor) ?? t.flavor };
+      });
+    }
+    if (ingMap.size && r.rows.length) {
+      out.rows = r.rows.map((row) => {
+        const match = ingMap.get(ingKey(r.kind, row.ingredient));
+        return match ? { ...row, ingredient: match } : row;
       });
     }
     return out;
@@ -692,10 +743,145 @@ export function applyNameMatches(
       context: brand,
     });
   }
+  for (const m of extra.ingredientMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    const kind = recipeKindToIngredientAliasKind(m.kind);
+    aliasByKey.set(specAliasKey(kind, cand, null), {
+      kind,
+      externalName: cand,
+      canonicalName: match,
+      context: null,
+    });
+  }
+  for (const m of extra.appTypeMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    aliasByKey.set(specAliasKey("appType", cand, null), {
+      kind: "appType",
+      externalName: cand,
+      canonicalName: match,
+      context: null,
+    });
+  }
+  for (const m of extra.pepTypeMatches ?? []) {
+    const cand = (m.candidate ?? "").trim();
+    const match = (m.match ?? "").trim();
+    if (!cand || !match || cand.toLowerCase() === match.toLowerCase()) continue;
+    aliasByKey.set(specAliasKey("pepType", cand, null), {
+      kind: "pepType",
+      externalName: cand,
+      canonicalName: match,
+      context: null,
+    });
+  }
 
   return {
     parsed: { profiles, recipes, ...(parsed.note ? { note: parsed.note } : {}) },
     aliases: [...aliasByKey.values()],
+  };
+}
+
+export type SpecMatchKnown = {
+  brands: ReadonlyArray<string>;
+  flavorsByBrand: Readonly<Record<string, ReadonlyArray<string>>>;
+  doughIngredients: ReadonlyArray<string>;
+  sauceIngredients: ReadonlyArray<string>;
+  cheeseIngredients: ReadonlyArray<string>;
+  appTypes: ReadonlyArray<string>;
+  pepTypes: ReadonlyArray<string>;
+};
+
+export type SpecMatchCandidates = {
+  brands: string[];
+  flavors: { brand: string; flavor: string }[];
+  ingredients: { kind: "dough" | "sauce" | "cheese"; name: string }[];
+  appTypes: string[];
+  pepTypes: string[];
+};
+
+/**
+ * Collect names in a canonicalized parse that are NOT present in the known saved
+ * lists and therefore are candidates for an AI match pass (so a fuzzy "new" name
+ * can be folded onto an existing one instead of creating a duplicate). Flavors
+ * are only collected under an ALREADY-known brand (the match endpoint scopes
+ * flavors to a resolved brand); run brand matching first, then re-collect to pick
+ * up flavors that fall under a newly-corrected brand. Pure.
+ */
+export function collectMatchCandidates(
+  parsed: ParsedSpecImport,
+  known: SpecMatchKnown,
+): SpecMatchCandidates {
+  const lc = (s: string) => s.trim().toLowerCase();
+  const brandSet = new Set(known.brands.map(lc));
+  const flavorsByBrand = new Map<string, Set<string>>();
+  for (const [b, fs] of Object.entries(known.flavorsByBrand)) {
+    flavorsByBrand.set(lc(b), new Set((fs ?? []).map(lc)));
+  }
+  const doughSet = new Set(known.doughIngredients.map(lc));
+  const sauceSet = new Set(known.sauceIngredients.map(lc));
+  const cheeseSet = new Set(known.cheeseIngredients.map(lc));
+  const appSet = new Set(known.appTypes.map(lc));
+  const pepSet = new Set(known.pepTypes.map(lc));
+  const setFor = (kind: "dough" | "sauce" | "cheese") =>
+    kind === "dough" ? doughSet : kind === "sauce" ? sauceSet : cheeseSet;
+
+  const brands = new Map<string, string>();
+  const flavors = new Map<string, { brand: string; flavor: string }>();
+  const ingredients = new Map<string, { kind: "dough" | "sauce" | "cheese"; name: string }>();
+  const appTypes = new Map<string, string>();
+  const pepTypes = new Map<string, string>();
+
+  const noteBrand = (b?: string) => {
+    const t = (b ?? "").trim();
+    if (t && !brandSet.has(lc(t))) brands.set(lc(t), t);
+  };
+  const noteFlavor = (brand?: string, flavor?: string) => {
+    const b = (brand ?? "").trim();
+    const f = (flavor ?? "").trim();
+    if (!b || !f || !brandSet.has(lc(b))) return;
+    const kf = flavorsByBrand.get(lc(b));
+    if (kf && kf.has(lc(f))) return;
+    flavors.set(`${lc(b)}\u0000${lc(f)}`, { brand: b, flavor: f });
+  };
+  const noteApp = (t?: string) => {
+    const v = (t ?? "").trim();
+    if (v && !appSet.has(lc(v))) appTypes.set(lc(v), v);
+  };
+  const notePep = (t?: string) => {
+    const v = (t ?? "").trim();
+    if (v && !pepSet.has(lc(v))) pepTypes.set(lc(v), v);
+  };
+  const noteIng = (kind: "dough" | "sauce" | "cheese", name?: string) => {
+    const v = (name ?? "").trim();
+    if (!v || setFor(kind).has(lc(v))) return;
+    ingredients.set(`${kind}\u0000${lc(v)}`, { kind, name: v });
+  };
+
+  for (const p of parsed.profiles) {
+    noteBrand(p.brand);
+    noteFlavor(p.brand, p.flavor);
+    for (const a of p.applicators) noteApp(a.type);
+    for (const pp of p.pepperonis) notePep(pp.type);
+  }
+  for (const r of parsed.recipes) {
+    noteBrand(r.brand);
+    noteFlavor(r.brand, r.flavor);
+    for (const t of r.targets ?? []) {
+      noteBrand(t.brand);
+      noteFlavor(t.brand, t.flavor);
+    }
+    for (const row of r.rows) noteIng(r.kind, row.ingredient);
+  }
+
+  return {
+    brands: [...brands.values()],
+    flavors: [...flavors.values()],
+    ingredients: [...ingredients.values()],
+    appTypes: [...appTypes.values()],
+    pepTypes: [...pepTypes.values()],
   };
 }
 

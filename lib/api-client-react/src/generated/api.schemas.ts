@@ -1824,9 +1824,36 @@ export interface MatchImportCandidateFlavor {
 }
 
 /**
+ * The recipe kind whose ingredient pool this name belongs to
+ */
+export type MatchImportCandidateIngredientKind = typeof MatchImportCandidateIngredientKind[keyof typeof MatchImportCandidateIngredientKind];
+
+
+export const MatchImportCandidateIngredientKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+} as const;
+
+/**
+ * An imported recipe ingredient name (scoped to a recipe kind) needing a match.
+ */
+export interface MatchImportCandidateIngredient {
+  /** The recipe kind whose ingredient pool this name belongs to */
+  kind: MatchImportCandidateIngredientKind;
+  /** The imported ingredient name that did not exactly match */
+  name: string;
+}
+
+/**
  * Saved flavors keyed by brand name (allowed flavor targets)
  */
 export type MatchImportInputBrandFlavors = {[key: string]: string[]};
+
+/**
+ * Saved recipe ingredient names keyed by recipe kind (dough/sauce/cheese); the allowed match targets for ingredient names. Optional.
+ */
+export type MatchImportInputKnownIngredients = {[key: string]: string[]};
 
 export interface MatchImportInput {
   /** All saved brand names (the allowed match targets for brands) */
@@ -1837,6 +1864,18 @@ export interface MatchImportInput {
   unmatchedBrands: string[];
   /** Imported flavors (under a resolved brand) with no exact match */
   unmatchedFlavors: MatchImportCandidateFlavor[];
+  /** Saved recipe ingredient names keyed by recipe kind (dough/sauce/cheese); the allowed match targets for ingredient names. Optional. */
+  knownIngredients?: MatchImportInputKnownIngredients;
+  /** All saved applicator/topping type names (allowed targets). Optional. */
+  knownAppTypes?: string[];
+  /** All saved pepperoni type names (allowed targets). Optional. */
+  knownPepTypes?: string[];
+  /** Imported recipe ingredient names with no exact saved match. Optional. */
+  unmatchedIngredients?: MatchImportCandidateIngredient[];
+  /** Imported applicator/topping type names with no exact saved match. Optional. */
+  unmatchedAppTypes?: string[];
+  /** Imported pepperoni type names with no exact saved match. Optional. */
+  unmatchedPepTypes?: string[];
 }
 
 export interface MatchImportBrandMatch {
@@ -2401,9 +2440,45 @@ export interface ParseSpecSheetResult {
   generatedAt: number;
 }
 
+export interface MatchImportNameMatch {
+  /** The imported name (echoes an unmatched entry) */
+  candidate: string;
+  /** The saved name it best matches (always one of the known list) */
+  match: string;
+  review?: ReviewVerdict;
+}
+
+/**
+ * The recipe kind whose ingredient pool the match belongs to
+ */
+export type MatchImportIngredientMatchKind = typeof MatchImportIngredientMatchKind[keyof typeof MatchImportIngredientMatchKind];
+
+
+export const MatchImportIngredientMatchKind = {
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+} as const;
+
+export interface MatchImportIngredientMatch {
+  /** The recipe kind whose ingredient pool the match belongs to */
+  kind: MatchImportIngredientMatchKind;
+  /** The imported ingredient name (echoes an unmatchedIngredients entry) */
+  candidate: string;
+  /** The saved ingredient it best matches (within that kind's pool) */
+  match: string;
+  review?: ReviewVerdict;
+}
+
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];
+  /** Confident matches for imported recipe ingredient names. Optional. */
+  ingredientMatches?: MatchImportIngredientMatch[];
+  /** Confident matches for imported applicator/topping type names. Optional. */
+  appTypeMatches?: MatchImportNameMatch[];
+  /** Confident matches for imported pepperoni type names. Optional. */
+  pepTypeMatches?: MatchImportNameMatch[];
   generatedAt: number;
   /** Optional message when no matches could be made */
   note?: string;

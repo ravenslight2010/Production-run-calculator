@@ -7,10 +7,18 @@
  */
 import type { MatchImportBrandMatch } from './matchImportBrandMatch';
 import type { MatchImportFlavorMatch } from './matchImportFlavorMatch';
+import type { MatchImportIngredientMatch } from './matchImportIngredientMatch';
+import type { MatchImportNameMatch } from './matchImportNameMatch';
 
 export interface MatchImportResult {
   brandMatches: MatchImportBrandMatch[];
   flavorMatches: MatchImportFlavorMatch[];
+  /** Confident matches for imported recipe ingredient names. Optional. */
+  ingredientMatches?: MatchImportIngredientMatch[];
+  /** Confident matches for imported applicator/topping type names. Optional. */
+  appTypeMatches?: MatchImportNameMatch[];
+  /** Confident matches for imported pepperoni type names. Optional. */
+  pepTypeMatches?: MatchImportNameMatch[];
   generatedAt: number;
   /** Optional message when no matches could be made */
   note?: string;

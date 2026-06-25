@@ -5632,6 +5632,21 @@ components:
           type: string
           description: The imported flavor name that did not exactly match
 
+    MatchImportCandidateIngredient:
+      type: object
+      description: An imported recipe ingredient name (scoped to a recipe kind) needing a match.
+      required:
+        - kind
+        - name
+      properties:
+        kind:
+          type: string
+          enum: [dough, sauce, cheese]
+          description: The recipe kind whose ingredient pool this name belongs to
+        name:
+          type: string
+          description: The imported ingredient name that did not exactly match
+
     MatchImportInput:
       type: object
       required:
@@ -5662,6 +5677,40 @@ components:
           description: Imported flavors (under a resolved brand) with no exact match
           items:
             $ref: "#/components/schemas/MatchImportCandidateFlavor"
+        knownIngredients:
+          type: object
+          description: >-
+            Saved recipe ingredient names keyed by recipe kind (dough/sauce/cheese);
+            the allowed match targets for ingredient names. Optional.
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        knownAppTypes:
+          type: array
+          description: All saved applicator/topping type names (allowed targets). Optional.
+          items:
+            type: string
+        knownPepTypes:
+          type: array
+          description: All saved pepperoni type names (allowed targets). Optional.
+          items:
+            type: string
+        unmatchedIngredients:
+          type: array
+          description: Imported recipe ingredient names with no exact saved match. Optional.
+          items:
+            $ref: "#/components/schemas/MatchImportCandidateIngredient"
+        unmatchedAppTypes:
+          type: array
+          description: Imported applicator/topping type names with no exact saved match. Optional.
+          items:
+            type: string
+        unmatchedPepTypes:
+          type: array
+          description: Imported pepperoni type names with no exact saved match. Optional.
+          items:
+            type: string
 
     MatchImportBrandMatch:
       type: object
@@ -6757,6 +6806,41 @@ components:
         generatedAt:
           type: number
 
+    MatchImportNameMatch:
+      type: object
+      required:
+        - candidate
+        - match
+      properties:
+        candidate:
+          type: string
+          description: The imported name (echoes an unmatched entry)
+        match:
+          type: string
+          description: The saved name it best matches (always one of the known list)
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
+
+    MatchImportIngredientMatch:
+      type: object
+      required:
+        - kind
+        - candidate
+        - match
+      properties:
+        kind:
+          type: string
+          enum: [dough, sauce, cheese]
+          description: The recipe kind whose ingredient pool the match belongs to
+        candidate:
+          type: string
+          description: The imported ingredient name (echoes an unmatchedIngredients entry)
+        match:
+          type: string
+          description: The saved ingredient it best matches (within that kind's pool)
+        review:
+          $ref: "#/components/schemas/ReviewVerdict"
+
     MatchImportResult:
       type: object
       required:
@@ -6772,6 +6856,21 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MatchImportFlavorMatch"
+        ingredientMatches:
+          type: array
+          description: Confident matches for imported recipe ingredient names. Optional.
+          items:
+            $ref: "#/components/schemas/MatchImportIngredientMatch"
+        appTypeMatches:
+          type: array
+          description: Confident matches for imported applicator/topping type names. Optional.
+          items:
+            $ref: "#/components/schemas/MatchImportNameMatch"
+        pepTypeMatches:
+          type: array
+          description: Confident matches for imported pepperoni type names. Optional.
+          items:
+            $ref: "#/components/schemas/MatchImportNameMatch"
         generatedAt:
           type: number
         note:

@@ -1553,7 +1553,16 @@ export const AiMatchImportBody = zod.object({
   "unmatchedFlavors": zod.array(zod.object({
   "brand": zod.string().describe('The saved brand this flavor belongs to (already resolved)'),
   "flavor": zod.string().describe('The imported flavor name that did not exactly match')
-}).describe('An imported flavor (under a resolved saved brand) needing a match.')).describe('Imported flavors (under a resolved brand) with no exact match')
+}).describe('An imported flavor (under a resolved saved brand) needing a match.')).describe('Imported flavors (under a resolved brand) with no exact match'),
+  "knownIngredients": zod.record(zod.string(), zod.array(zod.string())).optional().describe('Saved recipe ingredient names keyed by recipe kind (dough\/sauce\/cheese); the allowed match targets for ingredient names. Optional.'),
+  "knownAppTypes": zod.array(zod.string()).optional().describe('All saved applicator\/topping type names (allowed targets). Optional.'),
+  "knownPepTypes": zod.array(zod.string()).optional().describe('All saved pepperoni type names (allowed targets). Optional.'),
+  "unmatchedIngredients": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool this name belongs to'),
+  "name": zod.string().describe('The imported ingredient name that did not exactly match')
+}).describe('An imported recipe ingredient name (scoped to a recipe kind) needing a match.')).optional().describe('Imported recipe ingredient names with no exact saved match. Optional.'),
+  "unmatchedAppTypes": zod.array(zod.string()).optional().describe('Imported applicator\/topping type names with no exact saved match. Optional.'),
+  "unmatchedPepTypes": zod.array(zod.string()).optional().describe('Imported pepperoni type names with no exact saved match. Optional.')
 })
 
 export const AiMatchImportResponse = zod.object({
@@ -1574,6 +1583,31 @@ export const AiMatchImportResponse = zod.object({
   "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
+  "ingredientMatches": zod.array(zod.object({
+  "kind": zod.enum(['dough', 'sauce', 'cheese']).describe('The recipe kind whose ingredient pool the match belongs to'),
+  "candidate": zod.string().describe('The imported ingredient name (echoes an unmatchedIngredients entry)'),
+  "match": zod.string().describe('The saved ingredient it best matches (within that kind\'s pool)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})).optional().describe('Confident matches for imported recipe ingredient names. Optional.'),
+  "appTypeMatches": zod.array(zod.object({
+  "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})).optional().describe('Confident matches for imported applicator\/topping type names. Optional.'),
+  "pepTypeMatches": zod.array(zod.object({
+  "candidate": zod.string().describe('The imported name (echoes an unmatched entry)'),
+  "match": zod.string().describe('The saved name it best matches (always one of the known list)'),
+  "review": zod.object({
+  "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
+  "reason": zod.string().optional().describe('Short reason for a warn\/reject verdict')
+}).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
+})).optional().describe('Confident matches for imported pepperoni type names. Optional.'),
   "generatedAt": zod.number(),
   "note": zod.string().optional().describe('Optional message when no matches could be made')
 })

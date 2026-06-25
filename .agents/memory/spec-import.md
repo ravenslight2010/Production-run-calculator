@@ -69,10 +69,28 @@ The prepare flow runs ONE fixed sequence on both apps (`src/specImport.ts`,
 `context/specImport.ts`): chunked parse → canonicalize → AI match pass →
 `applyNameMatches` → `crossFillSpecImport` → reconcile diff → dropped-row note.
 Any change to one app's order/logic must land in the other verbatim.
-- **AI match pass is fail-safe.** Names that canonicalize as "new" are sent to
-  the EXISTING `/ai/match-import` in ONE call; server-sanitized matches are
-  applied and merged into `newAliases` (learned). Wrap in try/catch — on ANY
-  failure keep the canonical parse and continue; never block the import.
+- **AI match pass is fail-safe AND two-pass (brand→flavor).** Names that
+  canonicalize as "new" go to the EXISTING `/ai/match-import`. Pass 1 sends
+  brands+flavors+ingredients+applicators+pepperoni; pass 2 re-collects ONLY
+  newly-surfaced flavors (deduped via `askedFlavorKeys`) under the now-corrected
+  brand names. Server-sanitized matches are applied (incl. extra-domain via
+  `applyNameMatches`'s `extra` param) and merged into `newAliases` (learned).
+  Wrap in try/catch — on ANY failure keep the canonical parse and continue.
+- **Match-import now covers 5 domains, all canonicalized server-side.** Besides
+  brand/flavor, `/ai/match-import` matches ingredient (kind-scoped),
+  applicator, and pepperoni names. `sanitizeMatchImport` drops anything whose
+  candidate wasn't asked OR whose match isn't a real saved target (via
+  `findCanonical`), so a hallucinated name can never rename to a non-existent
+  target. Reviewer runs over all 5 domains.
+- **GOTCHA: `knownIngredients` in the match-import body is a RECORD keyed by
+  recipe kind (`{dough,sauce,cheese: string[]}`), NOT a flattened `{kind,name}[]`.**
+  Only `unmatchedIngredients` is the `{kind,name}[]` array. The hand-written
+  client `MatchImportInput` once drifted to the flattened shape for
+  `knownIngredients` → server Zod 400 → swallowed by `linkParsed`'s `catch {}` →
+  whole match pass silently no-ops. **Why:** the client type is hand-maintained,
+  not generated, so it can drift from `AiMatchImportBody`. Guarded by
+  `aiMatchImport.test.ts` (accepts record, rejects array). Keep web+mobile
+  `MatchImportInput` in lockstep with the OpenAPI `MatchImportInput` schema.
 - **Cross-fill is conservative (D5).** `crossFillSpecImport` fills a profile's
   missing `dieType`/`sauceOzPerPizza` from same-brand siblings ONLY when all
   specifying siblings AGREE; never overrides a value that's already set; leaves

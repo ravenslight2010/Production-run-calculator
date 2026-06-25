@@ -18,6 +18,12 @@ export type MatchImportInput = {
   brandFlavors: Record<string, string[]>;
   unmatchedBrands: string[];
   unmatchedFlavors: { brand: string; flavor: string }[];
+  knownIngredients?: Record<"dough" | "sauce" | "cheese", string[]>;
+  knownAppTypes?: string[];
+  knownPepTypes?: string[];
+  unmatchedIngredients?: { kind: "dough" | "sauce" | "cheese"; name: string }[];
+  unmatchedAppTypes?: string[];
+  unmatchedPepTypes?: string[];
 };
 
 export type BrandMatch = { candidate: string; match: string; review?: ReviewVerdict };
@@ -27,10 +33,20 @@ export type FlavorMatch = {
   match: string;
   review?: ReviewVerdict;
 };
+export type IngredientMatch = {
+  kind: "dough" | "sauce" | "cheese";
+  candidate: string;
+  match: string;
+  review?: ReviewVerdict;
+};
+export type NameMatch = { candidate: string; match: string; review?: ReviewVerdict };
 
 export type MatchImportResult = {
   brandMatches: BrandMatch[];
   flavorMatches: FlavorMatch[];
+  ingredientMatches?: IngredientMatch[];
+  appTypeMatches?: NameMatch[];
+  pepTypeMatches?: NameMatch[];
   generatedAt: number;
   note?: string;
 };

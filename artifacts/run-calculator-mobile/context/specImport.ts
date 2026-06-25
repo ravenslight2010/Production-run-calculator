@@ -18,6 +18,7 @@ import * as XLSX from "xlsx";
 import {
   applyNameMatches,
   canonicalize,
+  collectMatchCandidates,
   collectSpecAliases,
   crossFillSpecImport,
   gridsToPromptText,
@@ -26,6 +27,7 @@ import {
   splitGridsForPrompt,
   summarizeSpecImport,
   type CanonicalResult,
+  type ExtraNameMatches,
   type NameMatch,
   type ParsedRecipe,
   type ParsedRecipeTarget,
@@ -35,6 +37,7 @@ import {
   type SpecAliasKind,
   type SpecImportAlias,
   type SpecImportSummary,
+  type SpecMatchKnown,
 } from "@workspace/spec-import";
 import {
   reconcileSpecWithRecipes,
@@ -304,47 +307,52 @@ async function linkParsed(
   store: SpecImportStore,
 ): Promise<{ parsed: ParsedSpecImport; matchAliases: SpecImportAlias[] }> {
   let working = parsed;
-  let matchAliases: SpecImportAlias[] = [];
+  const known = store.known;
+  const aliasByKey = new Map<string, SpecImportAlias>();
+  const recordAliases = (aliases: SpecImportAlias[]) => {
+    for (const a of aliases) aliasByKey.set(specMatchAliasKey(a), a);
+  };
+
+  const matchKnown: SpecMatchKnown = {
+    brands: known.brands,
+    flavorsByBrand: known.flavorsByBrand,
+    doughIngredients: known.doughIngredients,
+    sauceIngredients: known.sauceIngredients,
+    cheeseIngredients: known.cheeseIngredients,
+    appTypes: known.appTypes,
+    pepTypes: known.pepTypes,
+  };
+  // Known ingredients keyed by recipe kind for the match request's known pool.
+  const knownIngredientsInput = {
+    dough: known.doughIngredients,
+    sauce: known.sauceIngredients,
+    cheese: known.cheeseIngredients,
+  };
 
   try {
-    const known = store.known;
-    const knownBrandSet = new Set(known.brands.map((b) => b.trim().toLowerCase()));
-    // Brand candidates that canonicalized as new (not an existing saved brand).
-    const brandCandidates = new Map<string, string>();
-    const noteBrand = (b?: string) => {
-      const t = (b ?? "").trim();
-      if (t && !knownBrandSet.has(t.toLowerCase())) brandCandidates.set(t.toLowerCase(), t);
-    };
-    // Flavor candidates under an EXISTING brand whose flavor is not yet saved.
-    const flavorCandidates = new Map<string, { brand: string; flavor: string }>();
-    const noteFlavor = (brand?: string, flavor?: string) => {
-      const b = (brand ?? "").trim();
-      const f = (flavor ?? "").trim();
-      if (!b || !f || !knownBrandSet.has(b.toLowerCase())) return;
-      const knownFlavors = new Set((known.flavorsByBrand[b] ?? []).map((x) => x.trim().toLowerCase()));
-      if (knownFlavors.has(f.toLowerCase())) return;
-      flavorCandidates.set(`${b.toLowerCase()}\u0000${f.toLowerCase()}`, { brand: b, flavor: f });
-    };
-
-    for (const p of working.profiles) {
-      noteBrand(p.brand);
-      noteFlavor(p.brand, p.flavor);
-    }
-    for (const r of working.recipes) {
-      noteBrand(r.brand);
-      noteFlavor(r.brand, r.flavor);
-      for (const t of r.targets ?? []) {
-        noteBrand(t.brand);
-        noteFlavor(t.brand, t.flavor);
-      }
-    }
-
-    if (brandCandidates.size || flavorCandidates.size) {
+    // Pass 1: brands + flavors-under-known-brands + ingredients/applicators/pepperonis.
+    const c1 = collectMatchCandidates(working, matchKnown);
+    const askedFlavorKeys = new Set(
+      c1.flavors.map((f) => `${f.brand.trim().toLowerCase()}\u0000${f.flavor.trim().toLowerCase()}`),
+    );
+    if (
+      c1.brands.length ||
+      c1.flavors.length ||
+      c1.ingredients.length ||
+      c1.appTypes.length ||
+      c1.pepTypes.length
+    ) {
       const result = await requestMatchImport({
         brands: known.brands,
         brandFlavors: known.flavorsByBrand,
-        unmatchedBrands: [...brandCandidates.values()],
-        unmatchedFlavors: [...flavorCandidates.values()],
+        unmatchedBrands: c1.brands,
+        unmatchedFlavors: c1.flavors,
+        knownIngredients: knownIngredientsInput,
+        knownAppTypes: known.appTypes,
+        knownPepTypes: known.pepTypes,
+        unmatchedIngredients: c1.ingredients,
+        unmatchedAppTypes: c1.appTypes,
+        unmatchedPepTypes: c1.pepTypes,
       });
       const brandMatches: NameMatch[] = result.brandMatches.map((m) => ({
         candidate: m.candidate,
@@ -355,16 +363,64 @@ async function linkParsed(
         candidate: m.candidate,
         match: m.match,
       }));
-      const applied = applyNameMatches(working, brandMatches, flavorMatches);
+      const extra: ExtraNameMatches = {
+        ingredientMatches: (result.ingredientMatches ?? []).map((m) => ({
+          kind: m.kind,
+          candidate: m.candidate,
+          match: m.match,
+        })),
+        appTypeMatches: (result.appTypeMatches ?? []).map((m) => ({
+          candidate: m.candidate,
+          match: m.match,
+        })),
+        pepTypeMatches: (result.pepTypeMatches ?? []).map((m) => ({
+          candidate: m.candidate,
+          match: m.match,
+        })),
+      };
+      const applied = applyNameMatches(working, brandMatches, flavorMatches, extra);
       working = applied.parsed;
-      matchAliases = applied.aliases;
+      recordAliases(applied.aliases);
+
+      // Pass 2: brand matches may have moved a flavor under a now-known brand.
+      // Re-collect ONLY new flavor candidates (not asked in pass 1) and match them.
+      const c2 = collectMatchCandidates(working, matchKnown);
+      const newFlavors = c2.flavors.filter(
+        (f) =>
+          !askedFlavorKeys.has(
+            `${f.brand.trim().toLowerCase()}\u0000${f.flavor.trim().toLowerCase()}`,
+          ),
+      );
+      if (newFlavors.length) {
+        const r2 = await requestMatchImport({
+          brands: known.brands,
+          brandFlavors: known.flavorsByBrand,
+          unmatchedBrands: [],
+          unmatchedFlavors: newFlavors,
+        });
+        const flavorMatches2: ScopedNameMatch[] = r2.flavorMatches.map((m) => ({
+          brand: m.brand,
+          candidate: m.candidate,
+          match: m.match,
+        }));
+        if (flavorMatches2.length) {
+          const applied2 = applyNameMatches(working, [], flavorMatches2);
+          working = applied2.parsed;
+          recordAliases(applied2.aliases);
+        }
+      }
     }
   } catch {
     // Fail-safe: keep the canonicalized parse exactly as-is.
   }
 
   working = crossFillSpecImport(working).parsed;
-  return { parsed: working, matchAliases };
+  return { parsed: working, matchAliases: [...aliasByKey.values()] };
+}
+
+/** Stable dedupe key for a learned alias (kind + external name + optional context). */
+function specMatchAliasKey(a: SpecImportAlias): string {
+  return `${a.kind}\u0000${a.externalName.trim().toLowerCase()}\u0000${(a.context ?? "").trim().toLowerCase()}`;
 }
 
 /** Build the "what will change" diff of the incoming spec vs current recipes. */

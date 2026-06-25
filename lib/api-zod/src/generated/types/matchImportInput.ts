@@ -6,7 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MatchImportCandidateFlavor } from './matchImportCandidateFlavor';
+import type { MatchImportCandidateIngredient } from './matchImportCandidateIngredient';
 import type { MatchImportInputBrandFlavors } from './matchImportInputBrandFlavors';
+import type { MatchImportInputKnownIngredients } from './matchImportInputKnownIngredients';
 
 export interface MatchImportInput {
   /** All saved brand names (the allowed match targets for brands) */
@@ -17,4 +19,16 @@ export interface MatchImportInput {
   unmatchedBrands: string[];
   /** Imported flavors (under a resolved brand) with no exact match */
   unmatchedFlavors: MatchImportCandidateFlavor[];
+  /** Saved recipe ingredient names keyed by recipe kind (dough/sauce/cheese); the allowed match targets for ingredient names. Optional. */
+  knownIngredients?: MatchImportInputKnownIngredients;
+  /** All saved applicator/topping type names (allowed targets). Optional. */
+  knownAppTypes?: string[];
+  /** All saved pepperoni type names (allowed targets). Optional. */
+  knownPepTypes?: string[];
+  /** Imported recipe ingredient names with no exact saved match. Optional. */
+  unmatchedIngredients?: MatchImportCandidateIngredient[];
+  /** Imported applicator/topping type names with no exact saved match. Optional. */
+  unmatchedAppTypes?: string[];
+  /** Imported pepperoni type names with no exact saved match. Optional. */
+  unmatchedPepTypes?: string[];
 }

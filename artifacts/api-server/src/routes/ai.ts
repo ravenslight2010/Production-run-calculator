@@ -1818,12 +1818,13 @@ router.post(
       return;
     }
 
-    const { brandMatches, flavorMatches, note } = sanitizeMatchImport(raw, validation.data);
+    const { brandMatches, flavorMatches, ingredientMatches, appTypeMatches, pepTypeMatches, note } =
+      sanitizeMatchImport(raw, validation.data);
 
     const verdicts = await reviewSuggestions({
-      featureLabel: "spreadsheet brand/flavor matches to existing saved names",
+      featureLabel: "spreadsheet name matches to existing saved names",
       instructions:
-        "Flag any match where the imported name is likely NOT the same real-world product as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same product.",
+        "Flag any match where the imported name is likely NOT the same real-world item as the matched saved name (a wrong or coincidental match). Approve matches that clearly refer to the same item.",
       items: [
         ...brandMatches.map((m, i) => ({
           id: `brand-${i}`,
@@ -1832,6 +1833,18 @@ router.post(
         ...flavorMatches.map((m, i) => ({
           id: `flavor-${i}`,
           text: `Imported flavor "${m.candidate}" (brand ${m.brand}) matched to saved "${m.match}"`,
+        })),
+        ...ingredientMatches.map((m, i) => ({
+          id: `ingredient-${i}`,
+          text: `Imported ${m.kind} ingredient "${m.candidate}" matched to saved "${m.match}"`,
+        })),
+        ...appTypeMatches.map((m, i) => ({
+          id: `app-${i}`,
+          text: `Imported applicator type "${m.candidate}" matched to saved "${m.match}"`,
+        })),
+        ...pepTypeMatches.map((m, i) => ({
+          id: `pep-${i}`,
+          text: `Imported pepperoni type "${m.candidate}" matched to saved "${m.match}"`,
         })),
       ],
       log: req.log,
@@ -1844,10 +1857,25 @@ router.post(
       const v = verdicts.get(`flavor-${i}`);
       return v ? { ...m, review: v } : m;
     });
+    const reviewedIngredients = ingredientMatches.map((m, i) => {
+      const v = verdicts.get(`ingredient-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
+    const reviewedAppTypes = appTypeMatches.map((m, i) => {
+      const v = verdicts.get(`app-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
+    const reviewedPepTypes = pepTypeMatches.map((m, i) => {
+      const v = verdicts.get(`pep-${i}`);
+      return v ? { ...m, review: v } : m;
+    });
 
     res.json({
       brandMatches: reviewedBrands,
       flavorMatches: reviewedFlavors,
+      ingredientMatches: reviewedIngredients,
+      appTypeMatches: reviewedAppTypes,
+      pepTypeMatches: reviewedPepTypes,
       generatedAt: Date.now(),
       ...(note ? { note } : {}),
     });
