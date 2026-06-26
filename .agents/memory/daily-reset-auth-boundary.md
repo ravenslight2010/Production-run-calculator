@@ -10,10 +10,25 @@ token whose issued-at predates the latest reset is rejected server-side, so it
 applies to every device — not just the one that detected midnight.
 
 **Server:** tokens carry `iat`; `verifyToken` returns `{ sub, iat }`. requireAuth
-(now async) 401s when `boundaryMs > 0 && iat*1000 < boundaryMs`. Boundary comes
-from a short (~15s) in-memory cached read of TODAY's row only (never max across
-rows — scheduling future days writes resetAt on FUTURE rows). The read fails
-**open** (returns last cached) so a DB blip never mass-logs-out.
+(now async) 401s when `boundaryMs > 0 && (iat + 1) * 1000 <= boundaryMs`. Boundary
+comes from a short (~15s) in-memory cached read of TODAY's row only (never max
+across rows — scheduling future days writes resetAt on FUTURE rows). The read
+fails **open** (returns last cached) so a DB blip never mass-logs-out.
+
+**iat is whole seconds, boundary is full-ms — fence on the WHOLE second.** `iat`
+is `Math.floor(now/1000)`, but `resetAt` (the boundary) is `Date.now()` to the ms,
+and the rollover stamps it at the moment the first device opens the new day (any
+time of day, NOT local midnight). The naive `iat*1000 < boundaryMs` wrongly fences
+a token issued in the SAME wall-clock second as — but just AFTER — the reset: the
+fresh sign-in returns 200 + sets the cookie, then every following request 401s →
+user silently bounced back to login with NO error (classic "sign in not working"
+report; shows up in logs as a burst of rapid sign-in 200s then silence). Fix: fence
+only when the token's ENTIRE issuance second precedes the boundary —
+`(iat + 1) * 1000 <= boundaryMs` — so a token issued in the boundary's second is
+never falsely rejected (≤1s slack on a once-a-day fence is harmless). Server-only
+(both clients just react to 401s — no parity concern). Tests in
+`sessionBoundary.integration.test.ts` forge explicit-`iat` tokens via `tokenWithIat`
+to pin the same-second vs strictly-before cases.
 
 **Why PROCESS_START_SEC for legacy tokens (no `iat`):** treat their issued-at as
 process start. On the introducing deploy, today's reset boundary was set in the

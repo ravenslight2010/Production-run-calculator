@@ -165,6 +165,19 @@ function legacyToken(sub: string): string {
   return `${body}.${sig}`;
 }
 
+// Forge a token with an explicit whole-second `iat`, signed with the live secret.
+// Lets a test pin the exact relationship between the token's second-granularity
+// issue time and a millisecond boundary (impossible with signToken's iat=now).
+function tokenWithIat(sub: string, iatSec: number): string {
+  const secret = process.env.AUTH_TOKEN_SECRET || process.env.SESSION_SECRET;
+  if (!secret) throw new Error("missing token secret");
+  const b64url = (s: Buffer | string) =>
+    Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const body = b64url(JSON.stringify({ sub, iat: iatSec, exp: iatSec + 100_000 }));
+  const sig = b64url(createHmac("sha256", secret).update(body).digest());
+  return `${body}.${sig}`;
+}
+
 describe("daily-reset session fence", () => {
   it("rejects a token issued before today's reset (401)", async () => {
     // Reset boundary sits in the future relative to the token we are about to
@@ -194,6 +207,39 @@ describe("daily-reset session fence", () => {
     await writeReset(tomorrowStr(), Date.now() + 1_000_000_000);
     const res = await meWith(signToken(USER));
     expect(res.status).toBe(200);
+  });
+
+  it("accepts a token issued in the SAME second as the reset (200)", async () => {
+    // The rollover stamps resetAt = Date.now() (full ms) whenever the first
+    // device opens the new day — any time of day. A user signing in during that
+    // same wall-clock second mints a token whose `iat` is floored to whole
+    // seconds, so iat*1000 can land up to ~999ms BEHIND the millisecond boundary
+    // even though the sign-in actually happened AFTER the reset. That fresh
+    // session must NOT be fenced (the old `iat*1000 < boundaryMs` check bounced
+    // it straight back to login with no error).
+    const iatSec = Math.floor(Date.now() / 1000);
+    await writeReset(todayStr(), iatSec * 1000 + 500); // 500ms into the same second
+    const res = await meWith(tokenWithIat(USER, iatSec));
+    expect(res.status).toBe(200);
+  });
+
+  it("still fences a token from a second strictly before the reset (401)", async () => {
+    // A token whose entire issuance second precedes the boundary (>= 1s older) is
+    // genuinely from before the reset and must remain fenced.
+    const iatSec = Math.floor(Date.now() / 1000);
+    await writeReset(todayStr(), iatSec * 1000 + 1500); // 1.5s after the token's second
+    const res = await meWith(tokenWithIat(USER, iatSec));
+    expect(res.status).toBe(401);
+  });
+
+  it("fences at the exact one-second threshold boundary (401)", async () => {
+    // Locks the off-by-one contract: when the boundary lands exactly on the START
+    // of the NEXT second ((iat + 1) * 1000), the token's whole second is before it,
+    // so it must be fenced. (Guards against a regression back to a `<` comparison.)
+    const iatSec = Math.floor(Date.now() / 1000);
+    await writeReset(todayStr(), (iatSec + 1) * 1000);
+    const res = await meWith(tokenWithIat(USER, iatSec));
+    expect(res.status).toBe(401);
   });
 
   it("fences out a legacy token (no iat) when the reset is in the future (401)", async () => {

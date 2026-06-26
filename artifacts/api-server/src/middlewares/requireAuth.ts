@@ -51,8 +51,19 @@ export async function requireAuth(
   // Daily-reset fence: a token minted before today's reset boundary is no longer
   // valid, so the new production day starts from a re-authenticated state. This
   // is a single cached read, never a per-request DB query.
+  //
+  // `iat` is stamped in whole seconds (Math.floor(now/1000)), so a token's TRUE
+  // issue time lies somewhere in [iat*1000, iat*1000 + 1000). The boundary
+  // (dayState.resetAt) is full-millisecond. Comparing `iat*1000 < boundaryMs`
+  // therefore wrongly fences a token that was actually issued in the SAME second
+  // as — but slightly AFTER — the reset: the rollover stamps resetAt = Date.now()
+  // (any time of day, whenever the first device opens the new day), and a user
+  // signing in during that same second gets a 200 + cookie but is then 401'd on
+  // every following request, silently bouncing back to login. Fence only when the
+  // token's entire issuance second is before the boundary, so a fresh sign-in is
+  // never rejected (the ~<1s of slack on a once-a-day boundary is harmless).
   const boundaryMs = await getSessionBoundaryMs();
-  if (boundaryMs > 0 && verified.iat * 1000 < boundaryMs) {
+  if (boundaryMs > 0 && (verified.iat + 1) * 1000 <= boundaryMs) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }
