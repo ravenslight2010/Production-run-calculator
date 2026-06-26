@@ -10,6 +10,7 @@ import {
   collectMatchCandidates,
   crossFillSpecImport,
   recipeTargets,
+  recipeApplyTargets,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
@@ -253,6 +254,49 @@ describe("recipeTargets", () => {
         targets: [{ brand: " Brand ", flavor: " Flavor " }],
       }),
     ).toEqual([{ brand: "Brand", flavor: "Flavor" }]);
+  });
+});
+
+describe("recipeApplyTargets", () => {
+  const profiles = [
+    { brand: "Lowes", flavor: "Pepperoni", applicators: [], pepperonis: [] },
+    { brand: "Lowes", flavor: "Cheese", applicators: [], pepperonis: [] },
+    { brand: "Lowes", flavor: "Pepperoni", applicators: [], pepperonis: [] }, // dup
+    { brand: "DiGiorno", flavor: "Supreme", applicators: [], pepperonis: [] },
+  ];
+
+  it("uses explicit targets unchanged when present (no broadening)", () => {
+    expect(
+      recipeApplyTargets(
+        {
+          kind: "dough",
+          name: "D",
+          rows: [],
+          brand: "Lowes",
+          flavor: "Pepperoni",
+        },
+        profiles,
+      ),
+    ).toEqual([{ brand: "Lowes", flavor: "Pepperoni" }]);
+  });
+
+  it("positive: a brand-only recipe (empty explicit targets) links to all same-brand profiles, de-duped", () => {
+    expect(
+      recipeApplyTargets({ kind: "dough", name: "D", rows: [], brand: "lowes" }, profiles),
+    ).toEqual([
+      { brand: "Lowes", flavor: "Pepperoni" },
+      { brand: "Lowes", flavor: "Cheese" },
+    ]);
+  });
+
+  it("negative: a recipe with no brand anchor links to nothing (never broadcast)", () => {
+    expect(recipeApplyTargets({ kind: "sauce", name: "S", rows: [] }, profiles)).toEqual([]);
+  });
+
+  it("negative: a brand with no same-brand profile in the import links to nothing", () => {
+    expect(
+      recipeApplyTargets({ kind: "sauce", name: "S", rows: [], brand: "Unknown" }, profiles),
+    ).toEqual([]);
   });
 });
 

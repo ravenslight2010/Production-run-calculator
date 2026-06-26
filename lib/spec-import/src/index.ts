@@ -106,6 +106,51 @@ export function recipeTargets(r: ParsedRecipe): ParsedRecipeTarget[] {
   return out;
 }
 
+/**
+ * The brand+flavor profiles a recipe should tie to AT APPLY TIME. When the
+ * recipe carries explicit targets (a singular brand+flavor and/or a `targets`
+ * list), those win unchanged — a value the sheet actually specifies is never
+ * broadened. Only when `recipeTargets(r)` is empty does a conservative
+ * same-import fallback kick in:
+ *
+ *   - If the recipe carries a brand but no flavor (so `recipeTargets` dropped it
+ *     for lacking a flavor), it links to EVERY profile in THIS import that shares
+ *     that brand — i.e. "one dough/sauce/cheese procedure for all flavors of the
+ *     product". This is the apply-time backstop for a shared recipe the AI failed
+ *     to populate `targets[]` for.
+ *   - A recipe with no brand anchor at all stays unlinked: broadcasting it across
+ *     unrelated products (e.g. every "Pepperoni" profile) would be ambiguous, so
+ *     non-equivalent profiles are never linked.
+ *
+ * Pure + non-mutating. Both apps' apply step MUST call this (not `recipeTargets`
+ * directly) so the fallback stays identical across web and mobile.
+ */
+export function recipeApplyTargets(
+  r: ParsedRecipe,
+  profiles: ReadonlyArray<ParsedProfile>,
+): ParsedRecipeTarget[] {
+  const explicit = recipeTargets(r);
+  if (explicit.length) return explicit;
+  // No explicit target. A brand without a flavor is the only safe anchor:
+  // link to every same-brand profile in this import.
+  const brand = (r.brand ?? "").trim();
+  if (!brand) return [];
+  const wantBrand = brand.toLowerCase();
+  const out: ParsedRecipeTarget[] = [];
+  const seen = new Set<string>();
+  for (const p of profiles) {
+    const pb = p.brand.trim();
+    const pf = p.flavor.trim();
+    if (!pb || !pf) continue;
+    if (pb.toLowerCase() !== wantBrand) continue;
+    const key = `${pb.toLowerCase()}\u0000${pf.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ brand: pb, flavor: pf });
+  }
+  return out;
+}
+
 // ── Learned aliases ─────────────────────────────────────────────────────────
 
 export type SpecAliasKind =

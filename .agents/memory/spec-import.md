@@ -44,8 +44,15 @@ applying (no per-item prompts).
   optional `targets: {brand,flavor}[]`; the AI emits ONE recipe with `targets[]`
   instead of N duplicates. Shared `recipeTargets(r)` = de-duped (case-insensitive)
   union of singular brand/flavor + targets[], dropping entries missing either.
-- **Both apply paths MUST loop `recipeTargets(r)`** (web storage + mobile RunContext)
-  so the one recipe ties to every profile; canonicalize each target like singular.
+- **Both apply paths MUST loop `recipeApplyTargets(r, parsed.profiles)`** (web storage
+  + mobile RunContext), NOT `recipeTargets` directly, so the one recipe ties to every
+  profile identically. `recipeApplyTargets` = explicit `recipeTargets` when present,
+  else a conservative same-import fallback: a brand-only recipe (no flavor, so
+  `recipeTargets` is empty) links to ALL same-brand profiles in the import; a recipe
+  with no brand anchor links to nothing (never broadcast across unrelated products).
+  **Why:** the AI sometimes leaves `targets[]` empty for a shared recipe; the prompt
+  nudge (D3) is best-effort, so the deterministic apply-time fallback is the backstop.
+  Keep the fallback semantics web+mobile-identical; never broaden an explicit target.
 - **`summarizeSpecImport` intentionally counts by recipe (so a multi-target import
   is 1 recipe, not N)** — do not "fix" it to count targets.
 

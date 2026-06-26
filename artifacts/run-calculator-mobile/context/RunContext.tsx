@@ -19,7 +19,7 @@ import {
   CHEESE_RECIPES,
   CHEESE_BRAND_SPECS,
 } from "@/data/specSeed";
-import { recipeTargets } from "@workspace/spec-import";
+import { recipeApplyTargets } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
 import React, {
@@ -3292,12 +3292,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         }
 
         // ── Tie recipes onto their profiles ──
-        // One recipe can serve many brand/flavor profiles (recipeTargets unions
-        // the singular brand/flavor with the targets[] list), so it ties to each
-        // without being duplicated in the recipe library.
+        // One recipe can serve many brand/flavor profiles (recipeApplyTargets
+        // unions the singular brand/flavor with the targets[] list, then falls
+        // back to all same-brand profiles in this import when targets are empty),
+        // so it ties to each without being duplicated in the recipe library.
         for (const r of parsed.recipes) {
           const rows = r.rows.map((row) => ({ ingredient: row.ingredient, lbs: row.lbs }));
-          for (const { brand, flavor } of recipeTargets(r)) {
+          for (const { brand, flavor } of recipeApplyTargets(r, parsed.profiles)) {
             registerBrandFlavor(brand, flavor);
             const key = profileKey(brand, flavor);
             const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
