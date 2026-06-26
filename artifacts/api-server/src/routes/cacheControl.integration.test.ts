@@ -226,6 +226,33 @@ describe("no-store cache headers on at-risk GET endpoints", () => {
   });
 });
 
+describe("no-store routes never answer with 304 (conditional revalidation defeated)", () => {
+  // no-store stops clients from caching going forward, but Express still emits an
+  // ETag and short-circuits to a 304 if a client (or a URL-keyed intermediary
+  // cache) revalidates with If-None-Match — handing back the client's OWN stale,
+  // possibly cross-scope, body. noStoreMiddleware strips conditional-request
+  // headers so these routes always return a fresh 200. Lock that in on a
+  // representative at-risk GET (the sync scheduled list, which the original
+  // incident showed rendering empty via a 304 revalidation loop).
+  it("re-requesting an at-risk GET with the prior ETag still returns 200, not 304", async () => {
+    const pathname = "/api/sync/scheduled";
+    const first = await get(pathname);
+    await first.arrayBuffer();
+    const etag = first.headers.get("etag");
+    expect(etag, "Express should emit an ETag for the JSON response").toBeTruthy();
+    const second = await fetch(`${baseUrl}${pathname}`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${signToken(MANAGER)}`,
+        "if-none-match": etag as string,
+      },
+    });
+    await second.arrayBuffer();
+    expect(second.status).toBe(200);
+    expectNoStore(second);
+  });
+});
+
 describe("intentional no-store exclusions", () => {
   // Non-streaming exclusions (health probe, username lookup) must stay freely
   // cacheable — derived from CACHE_CONTROL_EXCLUSIONS so a newly-added exclusion

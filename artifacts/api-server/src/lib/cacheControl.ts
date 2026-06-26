@@ -101,6 +101,14 @@ function installNoStoreGuard(res: Response): void {
   } as Response["writeHead"];
 }
 
+// Conditional-request headers that trigger Express's 304 "Not Modified" path.
+// Express emits an ETag for JSON responses regardless of Cache-Control, so a
+// client (or a URL-keyed intermediary cache) holding a prior copy can revalidate
+// with these headers and get a 304 — which serves the client's OWN cached body,
+// stale or cross-scope. `no-store` does NOT prevent this: it asks clients not to
+// store, but it neither disables the server's ETag nor the 304 short-circuit.
+const CONDITIONAL_REQUEST_HEADERS = ["if-none-match", "if-modified-since"];
+
 // Router-level middleware: guarantees the no-store triplet on every GET response
 // whose path is not in CACHE_CONTROL_EXCLUSIONS. We set the headers up front (so
 // they're observable mid-handler) AND re-stamp them at flush time via
@@ -108,8 +116,16 @@ function installNoStoreGuard(res: Response): void {
 // can't silently override the guard). Handlers therefore never need to call
 // `noStore(res)` themselves, and a brand-new shared GET can't ship cacheable
 // unless its route is deliberately added to CACHE_CONTROL_EXCLUSIONS.
+//
+// We ALSO strip the request's conditional-revalidation headers so Express never
+// answers these routes with a 304: `no-store` keeps clients from caching going
+// forward, but anything still holding a pre-fix (or cross-scope) cached entry
+// would otherwise revalidate and be handed back its own stale body. Forcing a
+// full 200 with the current body makes freshness deterministic. The payloads are
+// small shared-data JSON, so the lost 304 bandwidth saving is negligible.
 export function noStoreMiddleware(req: Request, res: Response, next: NextFunction): void {
   if (req.method === "GET" && !isExcludedFromNoStore(req.path)) {
+    for (const header of CONDITIONAL_REQUEST_HEADERS) delete req.headers[header];
     noStore(res);
     installNoStoreGuard(res);
   }

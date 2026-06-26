@@ -40,6 +40,20 @@ deliberately NOT excluded** (they were, until a production incident). The old
   it's this cache bug, not a persistence bug.
 no-store on these fixes it; the separate SSE stream still live-pushes today's row.
 
+**no-store does NOT stop Express from returning 304.** Express emits an ETag for
+JSON responses regardless of Cache-Control, and short-circuits to `304 Not
+Modified` whenever a request carries a matching `If-None-Match` — the response's
+`no-store` is irrelevant to that decision. So a client (or URL-keyed intermediary)
+that still holds a pre-fix or cross-scope cached copy keeps revalidating and is
+handed back its OWN stale body. This is why a "not saving" report can persist even
+after no-store ships and even after a redeploy: origin logs keep showing
+`/sync/scheduled → 304`. Fix: `noStoreMiddleware` ALSO deletes the conditional
+request headers (`if-none-match`, `if-modified-since`) for non-excluded GETs, so
+`req.fresh` is always false and the route always returns a fresh `200`. Stripping
+the RESPONSE ETag would be too late — the 304 decision happens in Express's `send`
+before `writeHead`. Locked in by an integration test (re-request with the prior
+ETag must still be 200, not 304). Server-only change; no web/mobile parity impact.
+
 Inventory's SSE broadcasts only a NUDGE (`{type:"inventory"}`) — clients must
 refetch `/inventory`, so that GET needs no-store. Rule of thumb after this
 incident: **shared mutable data GET → no-store, full stop.** The only safe
