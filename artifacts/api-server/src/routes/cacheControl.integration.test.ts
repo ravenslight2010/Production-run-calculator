@@ -227,9 +227,10 @@ describe("no-store cache headers on at-risk GET endpoints", () => {
 });
 
 describe("intentional no-store exclusions", () => {
-  // Non-streaming exclusions (health probe, username lookup, full-payload sync
-  // GETs) must stay freely cacheable — derived from CACHE_CONTROL_EXCLUSIONS so
-  // a newly-added exclusion is verified automatically.
+  // Non-streaming exclusions (health probe, username lookup) must stay freely
+  // cacheable — derived from CACHE_CONTROL_EXCLUSIONS so a newly-added exclusion
+  // is verified automatically. (The sync data GETs are NOT excluded anymore — see
+  // cacheControl.ts — so they are checked by the at-risk no-store suite above.)
   const PLAIN_EXCLUSIONS = Object.keys(CACHE_CONTROL_EXCLUSIONS).filter(
     (pattern) => !SSE_EXCLUSIONS.has(pattern),
   );

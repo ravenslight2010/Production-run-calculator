@@ -27,18 +27,26 @@ export function noStore(res: Response): void {
 // the exception stays auditable. This is the single source of truth — both the
 // middleware (runtime) and the structural guard test consume it.
 //
-// See `.agents/memory/no-store-cache-headers.md` for the sync-vs-inventory
-// (full-payload-SSE vs nudge-SSE) exclusion rationale.
+// See `.agents/memory/no-store-cache-headers.md` for the rationale and the
+// production incident that removed the sync data GETs from this list.
+//
+// NOTE: the sync DATA GETs (/sync/today, /sync/scheduled, /sync/:date) used to
+// be excluded here on the theory that "edits arrive via the full-payload SSE
+// push, so the GET can be cached." That theory was unsound and caused a
+// production bug where a live user's schedule rendered EMPTY:
+//   1. The SSE broadcast is scoped to (scope + today's date) — it never pushes
+//      scheduled/future-day changes, so the scheduled list genuinely relies on
+//      the GET refetch. A cacheable GET therefore serves a stale (empty) list.
+//   2. The cache key is the URL only; it encodes no scope or user. The seeded
+//      sandbox `test` account and a live account hit the SAME url, so a shared
+//      cache can serve one scope's result to the other (also a sandbox-isolation
+//      hole). The 304s observed in production confirmed this revalidation loop.
+// Making them no-store like every other shared-data GET fixes both. The SSE
+// live-push still works (no-store does not affect the separate SSE stream).
 export const CACHE_CONTROL_EXCLUSIONS: Record<string, string> = {
   "/healthz": "Public platform health probe — must stay freely cacheable.",
   "/auth/username-available":
     "Transient public availability lookup, not shared mutable list data — not subject to the stale-list bug.",
-  // Live-sync SSE pushes the FULL day-state payload to clients, so they never
-  // rely on a cached GET refetch to observe another user's edit. (Contrast with
-  // inventory's SSE, which only nudges, so /inventory IS no-store.)
-  "/sync/today": "Live-sync GET; edits arrive via the full-payload SSE push, not a refetch.",
-  "/sync/scheduled": "Live-sync GET; edits arrive via the full-payload SSE push, not a refetch.",
-  "/sync/:date": "Live-sync GET; edits arrive via the full-payload SSE push, not a refetch.",
   // SSE streams set their own streaming headers; applying noStore would be wrong.
   "/sync/events": "SSE stream — sets its own streaming headers.",
   "/inventory/events": "SSE stream — sets its own streaming headers.",

@@ -96,12 +96,15 @@ describe("no-store exclusion list cannot grow without review", () => {
   //    exactly how the stale-data bug would be reintroduced, so it must be a
   //    deliberate edit to this list — reviewed alongside the cacheControl.ts
   //    change. If you intentionally add/remove an exclusion, update this array.
+  // The sync DATA GETs (/sync/today, /sync/scheduled, /sync/:date) were
+  // intentionally REMOVED from the exclusion list: caching them caused a
+  // production bug where a live user's schedule rendered empty (stale/304) and
+  // risked cross-scope contamination (URL cache key carries no scope). They are
+  // no-store now. Only the SSE streams and the two genuinely-cacheable public
+  // GETs remain excluded. See `.agents/memory/no-store-cache-headers.md`.
   const KNOWN_SAFE_EXCLUSIONS = [
     "/healthz",
     "/auth/username-available",
-    "/sync/today",
-    "/sync/scheduled",
-    "/sync/:date",
     "/sync/events",
     "/inventory/events",
   ].sort();
