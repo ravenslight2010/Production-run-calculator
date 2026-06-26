@@ -31,6 +31,13 @@ deliberately NOT excluded** (they were, until a production incident). The old
 - Symptom: a live user opened the published app and their schedule was EMPTY
   though future live rows existed; origin logs showed `/sync/scheduled → 304`
   (only that endpoint, because only it was cacheable).
+- Same bug also presents as "<field> isn't saving" (e.g. "cases needed isn't
+  saving on schedule import / manual entry"): the PUT persists fine, but the UI
+  re-reads through the cached GET and shows the stale copy. It tends to be
+  reported via the most VISIBLE field (cases needed is on the schedule list).
+  Before treating a "not saving" report as a write bug, DB-verify the write
+  first (`executeSql({environment:"production"})`) — if the value is in the row,
+  it's this cache bug, not a persistence bug.
 no-store on these fixes it; the separate SSE stream still live-pushes today's row.
 
 Inventory's SSE broadcasts only a NUDGE (`{type:"inventory"}`) — clients must
