@@ -26,3 +26,15 @@ The `deepEqual(loadRunValues(runId), v)` guard compares the live form against **
 **Mobile parity:** `diffStampRunEdits` gained an optional `emptyValString` param and **never stamps a run whose serialized value equals the empty/default** (`s === emptyValString`). Caller passes `stableStringify(runToFormValues(makeNewRun()))` (runToFormValues ignores the id, so deterministic). Mirrors web's "never stamp an all-DEFAULT value".
 
 Tests: `artifacts/run-calculator/src/runValuesEqual.test.ts` locks the predicate `deepEqual(v, DEFAULT) && !deepEqual(stored, DEFAULT)`. Do NOT regress either guard.
+
+## The autosave guards still aren't enough — guard the PUSH BOUNDARY too
+
+The two `[v]`-effect guards only cover the **autosave write path**. The sync **push payload** is built separately, and for the CURRENT run it reads the value from the **live form** (`form.getValues()`) while reading the edit-stamp map (`runValuesUpdatedAt`) **independently from localStorage**. During mount/hydration and right after ANY programmatic `form.reset()`, the form is transiently all-default while localStorage still holds the real value **and its real stamp**. ANY push firing in that window — periodic 30s push, SSE-reconnect re-push, or a `schedulePush` triggered by unrelated state — emits `runValues[curId]=DEFAULT` paired with the run's REAL stamp. Equal stamps → every peer's per-run lost-update guard ACCEPTS the empty value → real data wiped. The autosave guards never run for these paths.
+
+**Confirmed in prod (6th report):** today's row had a run with intact identity (Costco/THREE MEAT, identity lives on the run object and is pushed as-is) but `runValues` reset to EXACTLY `DEFAULT_VALUES`, while `runValuesUpdatedAt` still carried a real stamp. Value/stamp decoupling, exactly as above.
+
+**Fix (durable rule):** never let an all-default LIVE form overwrite a populated STORED value at the push boundary either. The current-run value in `buildSyncPayload` goes through the pure `pickCurrentRunPushValue(live, stored)` (storage.ts): returns `stored` when `deepEqual(live, DEFAULT) && !deepEqual(stored, DEFAULT)`, else `live`. Self-heals from durable localStorage and covers EVERY push path, not just direct edits. Test: `artifacts/run-calculator/src/pickCurrentRunPushValue.test.ts`.
+
+**Why mobile needs no equivalent:** mobile builds both `runValues` and stamps from the SAME `state.runs` object (no separate transiently-empty form), and `diffStampRunEdits` already refuses to stamp all-default runs. The value/stamp decoupling is a web-only react-hook-form hydration artifact.
+
+**General principle:** the `/api/sync` server is a dumb last-writer-wins blob store; ALL protection is client-side. A guard on the write path is insufficient if a separate code path can still PUSH the unprotected value — protect at the payload-construction boundary so it's path-independent.

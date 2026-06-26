@@ -76,6 +76,7 @@ import {
   saveRunValuesUpdated,
   markRunValuesUpdated,
   deepEqual,
+  pickCurrentRunPushValue,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3572,7 +3573,26 @@ export default function Home() {
     const curId = ds.runs[ds.currentIndex]?.id;
     const runValues: Record<string, FormValues> = {};
     for (const run of ds.runs) {
-      runValues[run.id] = run.id === curId ? form.getValues() : loadRunValues(run.id);
+      if (run.id === curId) {
+        // The current run is normally pushed from the LIVE form so an in-progress
+        // edit is shared immediately. But the form is transiently all-default
+        // during mount/hydration and right after a programmatic form.reset()
+        // (run switch, daily rollover, sync-apply) before the run's real values
+        // are loaded back in. The stamp map (runValuesUpdatedAt below) is read
+        // independently from localStorage and still carries this run's real edit
+        // time, so a push firing in that window (periodic 30s, SSE-reconnect
+        // re-push, or any schedulePush) would emit an EMPTY value paired with a
+        // REAL stamp — and because the stamps are equal the per-run lost-update
+        // guard on every peer ACCEPTS the empty value, wiping real data on the
+        // shared day-state row (the recurring "I entered it, refreshed, it
+        // vanished" loss). Never push an all-default current-run form over a
+        // populated stored value; fall back to the durable localStorage copy.
+        // Mirrors the autosave [v] effect's guard, applied at the push boundary
+        // so it covers EVERY push path, not just direct edits.
+        runValues[run.id] = pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id));
+      } else {
+        runValues[run.id] = loadRunValues(run.id);
+      }
     }
     // Collect brand+flavor profiles from localStorage
     const brandProfiles: Record<string, Partial<FormValues>> = {};

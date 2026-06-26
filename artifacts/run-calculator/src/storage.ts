@@ -466,6 +466,29 @@ export function deepEqual(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
+// Decide which value to PUSH for the CURRENT run when building a sync payload.
+// The current run is normally pushed from the live form so an in-progress edit is
+// shared immediately, but the form is transiently all-default during mount /
+// hydration and right after any programmatic form.reset() (run switch, daily
+// rollover, sync-apply) before the run's real values are loaded back in. The
+// stamp map (runValuesUpdatedAt) is read independently from localStorage and
+// still carries this run's real edit time, so a push firing in that window would
+// emit an EMPTY value paired with a REAL stamp — and because the stamps are equal
+// the per-run lost-update guard on every peer ACCEPTS it, wiping real data on the
+// shared day-state row (the recurring "I entered it, refreshed, it vanished"
+// loss). Never let an all-default live form overwrite a populated stored value;
+// fall back to the durable localStorage copy. Returns `live` in every other case
+// (genuine edit, or a legitimately blank run whose stored value is also default),
+// so this only blocks the populated→empty transition.
+export function pickCurrentRunPushValue(
+  live: FormValues,
+  stored: FormValues,
+): FormValues {
+  return deepEqual(live, DEFAULT_VALUES) && !deepEqual(stored, DEFAULT_VALUES)
+    ? stored
+    : live;
+}
+
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);
