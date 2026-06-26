@@ -434,6 +434,38 @@ export function markRunValuesUpdated(id: string, ts: number = Date.now()): void 
   saveRunValuesUpdated(m);
 }
 
+// Structural deep-equality used by the autosave effect to tell a real user edit
+// from a programmatic re-emit of the SAME stored run values. A run switch,
+// sync-apply, daily rollover, or post-login load all call form.reset(...) which
+// re-fires form.watch() with values that are already persisted; without this we
+// would re-stamp markRunValuesUpdated() on a non-edit, defeating the per-run
+// lost-update guard and letting a loaded/stale/empty value win the merge and
+// clobber a peer's real edit (multi-device "I entered it and it vanished" data
+// loss). Mirrors mobile's primed-baseline diffStampRunEdits, which only stamps
+// genuine changes. Objects compare key-order-independently; arrays compare by
+// index (recipe-row order is meaningful).
+export function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    const ak = Object.keys(a as object);
+    const bk = Object.keys(b as object);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+    }
+    return true;
+  }
+  return a === b;
+}
+
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);

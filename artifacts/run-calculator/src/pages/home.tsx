@@ -75,6 +75,7 @@ import {
   loadRunValuesUpdated,
   saveRunValuesUpdated,
   markRunValuesUpdated,
+  deepEqual,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3651,19 +3652,29 @@ export default function Home() {
     const ds = dayStateRef.current;
     const run = ds?.runs[ds?.currentIndex];
     const runId = run?.id;
-    if (runId) {
-      const now = Date.now();
-      saveRunValues(runId, v);
-      // Stamp this run's edit time so an in-flight stale remote can't clobber it
-      // (the "click away and my change disappeared" lost-update).
-      markRunValuesUpdated(runId, now);
-      if (run?.brand || run?.flavor) {
-        saveProfile(run.brand, run.flavor, v);
-      }
-      lastLocalEditRef.current = now;
-      schedulePush(ds, 2000);
-      flashSaved();
+    if (!runId) return;
+    // Only treat this as a real user edit when the live form actually DIFFERS from
+    // the values already stored for this run. A programmatic form.reset() — run
+    // switch, sync-apply (the merge resets the live form to the accepted remote),
+    // daily rollover, or post-login load — re-emits the SAME persisted values
+    // through form.watch(). Without this guard the effect would re-stamp them with
+    // a fresh markRunValuesUpdated() time, defeating the per-run lost-update guard
+    // and letting a loaded/stale/empty value win the merge across devices and
+    // clobber a peer's genuine edit (the "I entered cases needed and it vanished"
+    // multi-device data loss). Mirrors mobile's primed-baseline diffStampRunEdits,
+    // which only stamps genuine changes.
+    if (deepEqual(loadRunValues(runId), v)) return;
+    const now = Date.now();
+    saveRunValues(runId, v);
+    // Stamp this run's edit time so an in-flight stale remote can't clobber it
+    // (the "click away and my change disappeared" lost-update).
+    markRunValuesUpdated(runId, now);
+    if (run?.brand || run?.flavor) {
+      saveProfile(run.brand, run.flavor, v);
     }
+    lastLocalEditRef.current = now;
+    schedulePush(ds, 2000);
+    flashSaved();
   }, [v]);
 
   // Commit a single confirmed value from the "Fill in missing data" panel. Goes
