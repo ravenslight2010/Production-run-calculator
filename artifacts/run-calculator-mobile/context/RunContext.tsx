@@ -2268,12 +2268,18 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       for (const [id, vals] of Object.entries(built.runValues)) {
         nextVals[id] = stableStringify(vals);
       }
+      // Serialized shape of an all-default/empty run, so diffStampRunEdits can
+      // refuse to stamp a populated→empty transition and clobber real data on
+      // the shared day-state row (web parity). runToFormValues ignores the run
+      // id, so this is deterministic regardless of makeNewRun's random id.
+      const emptyValString = stableStringify(runToFormValues(makeNewRun()));
       const { updatedAt } = diffStampRunEdits(
         nextVals,
         lastRunValsRef.current,
         editAttribPrimedRef.current,
         now,
         runValuesUpdatedAtRef.current,
+        emptyValString,
       );
       runValuesUpdatedAtRef.current = updatedAt;
       lastRunValsRef.current = nextVals;

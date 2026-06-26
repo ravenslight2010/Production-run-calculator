@@ -226,4 +226,64 @@ describe("diffStampRunEdits — mobile per-run edit attribution", () => {
     expect(stamped).toBe(false);
     expect(updatedAt).toEqual({ r1: 500 });
   });
+
+  // Empty-over-populated guard (web parity). A programmatic reset to the
+  // all-default/empty run value must NEVER be stamped — that fresh timestamp
+  // would win the per-run lost-update guard on every peer and clobber real data
+  // on the SHARED daily_sync row (the recurring "I entered it, waited,
+  // refreshed, and it vanished" loss). Web never stamps an all-DEFAULT form;
+  // mobile mirrors that by skipping any value equal to emptyValString.
+  const EMPTY = "__EMPTY__";
+
+  it("does NOT stamp a populated→empty transition (the clobber vector)", () => {
+    const { updatedAt, stamped } = mapping.diffStampRunEdits(
+      { r1: EMPTY }, // run reset to all-default
+      { r1: "populated" }, // baseline had real data
+      true,
+      4000,
+      { r1: 500 },
+      EMPTY,
+    );
+    expect(stamped).toBe(false);
+    expect(updatedAt).toEqual({ r1: 500 }); // prior stamp untouched
+  });
+
+  it("does NOT stamp a brand-new empty run (absent from baseline)", () => {
+    const { updatedAt, stamped } = mapping.diffStampRunEdits(
+      { r1: EMPTY },
+      {}, // new run id, no baseline
+      true,
+      4000,
+      {},
+      EMPTY,
+    );
+    expect(stamped).toBe(false);
+    expect(updatedAt).toEqual({});
+  });
+
+  it("STILL stamps a genuine populated edit when an emptyValString is supplied", () => {
+    const { updatedAt, stamped } = mapping.diffStampRunEdits(
+      { r1: "v1-edited" },
+      { r1: "v1" },
+      true,
+      4000,
+      { r1: 500 },
+      EMPTY,
+    );
+    expect(stamped).toBe(true);
+    expect(updatedAt).toEqual({ r1: 4000 });
+  });
+
+  it("STILL stamps first real data typed into a previously-empty run", () => {
+    const { updatedAt, stamped } = mapping.diffStampRunEdits(
+      { r1: "populated" },
+      { r1: EMPTY }, // baseline was empty
+      true,
+      4000,
+      {},
+      EMPTY,
+    );
+    expect(stamped).toBe(true);
+    expect(updatedAt).toEqual({ r1: 4000 });
+  });
 });

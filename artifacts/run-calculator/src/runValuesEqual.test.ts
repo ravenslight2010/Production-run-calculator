@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { deepEqual } from "./storage";
+import { DEFAULT_VALUES } from "./types";
 
 describe("deepEqual — autosave edit attribution", () => {
   it("treats a re-emit of identical values as NOT an edit (key order irrelevant)", () => {
@@ -51,5 +52,47 @@ describe("deepEqual — autosave edit attribution", () => {
     expect(deepEqual({ a: null }, { a: undefined })).toBe(false);
     expect(deepEqual({ a: 0 }, { a: null })).toBe(false);
     expect(deepEqual(null, null)).toBe(true);
+  });
+});
+
+// The autosave effect adds a second, semantic guard on top of deepEqual: it must
+// NEVER save+stamp an all-default form over a populated stored value. A genuine
+// user edit never reduces every field to its default at once — an all-default
+// form is always a programmatic reset (mount/init race, daily rollover, or a
+// sync-apply echo) re-emitting through form.watch() while localStorage still
+// holds the real values. Stamping it mints a fresh markRunValuesUpdated() time
+// that wins the per-run lost-update guard on every connected tab and clobbers
+// the real run data on the shared day-state row. This block locks in that guard
+// predicate exactly as written in home.tsx.
+describe("autosave guard — empty form must not clobber populated stored value", () => {
+  // The exact predicate from the effect: skip when the live form equals DEFAULT
+  // but the stored value does not.
+  const blocksClobber = (v: unknown, stored: unknown) =>
+    deepEqual(v, DEFAULT_VALUES) && !deepEqual(stored, DEFAULT_VALUES);
+
+  it("BLOCKS a default form from overwriting a populated stored value", () => {
+    const stored = { ...DEFAULT_VALUES, casesNeeded: 500, crustsPerCycle: 12 };
+    expect(blocksClobber({ ...DEFAULT_VALUES }, stored)).toBe(true);
+  });
+
+  it("BLOCKS even when only a single real field is populated (e.g. cases-needed)", () => {
+    const stored = { ...DEFAULT_VALUES, casesNeeded: 384 };
+    expect(blocksClobber({ ...DEFAULT_VALUES }, stored)).toBe(true);
+  });
+
+  it("does NOT block a genuine edit (form differs from default)", () => {
+    const stored = { ...DEFAULT_VALUES, casesNeeded: 500 };
+    const edited = { ...DEFAULT_VALUES, casesNeeded: 600 };
+    expect(blocksClobber(edited, stored)).toBe(false);
+  });
+
+  it("does NOT block when the stored value is itself default (a legitimately blank run)", () => {
+    expect(blocksClobber({ ...DEFAULT_VALUES }, { ...DEFAULT_VALUES })).toBe(false);
+  });
+
+  it("does NOT block typing the first value into a blank run", () => {
+    const stored = { ...DEFAULT_VALUES };
+    const typing = { ...DEFAULT_VALUES, casesNeeded: 1 };
+    expect(blocksClobber(typing, stored)).toBe(false);
   });
 });

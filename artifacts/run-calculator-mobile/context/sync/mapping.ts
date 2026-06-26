@@ -372,12 +372,21 @@ export function diffStampRunEdits(
   primed: boolean,
   now: number,
   currentUpdatedAt: Record<string, number>,
+  emptyValString?: string,
 ): { updatedAt: Record<string, number>; stamped: boolean } {
   if (!primed) return { updatedAt: currentUpdatedAt, stamped: false };
   let updatedAt = currentUpdatedAt;
   let stamped = false;
   for (const [id, s] of Object.entries(nextValStrings)) {
     if (lastVals[id] !== s) {
+      // Never stamp a run whose serialized value is the all-default/empty run.
+      // Mirrors the web autosave, which never stamps an all-DEFAULT form: such a
+      // value is always a programmatic reset (rollover, sync-apply echo, init
+      // race), never a genuine simultaneous clear of every field. Stamping it
+      // would mint a FRESH edit time that wins the per-run lost-update guard on
+      // every peer and clobber real run data on the shared day-state row (the
+      // recurring "I entered it, waited, refreshed, and it vanished" loss).
+      if (emptyValString !== undefined && s === emptyValString) continue;
       updatedAt = { ...updatedAt, [id]: now };
       stamped = true;
     }

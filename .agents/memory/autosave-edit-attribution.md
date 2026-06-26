@@ -11,6 +11,18 @@ The web per-run autosave effect (`home.tsx`, the `[v]` effect on `const v = form
 
 **How to apply:** Keep the `deepEqual(loadRunValues(runId), v)` early-return at the top of that effect. The form is initialized from `loadRunValues(currentRunId)` so `v` starts correct (guard is safe at mount). Genuine writes (typing, fill-missing/voice/AI `setValue`, apply-profile, copy-run) differ from stored → still stamped/pushed. Pure loads/switches/sync echoes equal stored → skipped. Non-form pushes (run metadata, list changes, periodic/stale-repush) go through their own `schedulePush` and are unaffected.
 
-**Parity:** mobile was already correct — `diffStampRunEdits` (`context/sync/mapping.ts`) only stamps when a value differs from a primed baseline. This change closes the gap by making web match mobile's "stamp genuine changes only" model. No mobile code change needed; do not regress web back to unconditional stamping.
+**Parity:** mobile uses `diffStampRunEdits` (`context/sync/mapping.ts`) — stamps only when a value differs from a primed baseline.
 
-`deepEqual` semantics: objects key-order-insensitive, arrays compared by index (recipe-row order is meaningful). Worst case if it ever fails to match a true echo = one spurious stamp (current pre-fix behavior), so the guard is safe.
+`deepEqual` semantics: objects key-order-insensitive, arrays compared by index (recipe-row order is meaningful).
+
+## The deepEqual guard alone is NOT enough — empty-over-populated still clobbers
+
+The `deepEqual(loadRunValues(runId), v)` guard compares the live form against **localStorage**, which is the **wrong baseline**: a programmatic `form.reset(DEFAULT_VALUES)` (or a mount/init resolving the current run id to `""`) can leave the form transiently **empty while localStorage still holds the real values**. Then `v` (empty) ≠ stored (populated) → the guard does NOT skip → it saves+stamps the empty form with a **fresh** `markRunValuesUpdated(now)`, and that newest-stamped empty **wins** the per-run lost-update guard across every connected tab/device. This is a SHARED `daily_sync` row (one per (date,scope), no user_id), so the empty propagates to everyone.
+
+**Confirmed in prod (5th data-loss report):** refresh fired a burst of initial GETs, the client minted an empty stamp ~0.5s before them, then `PUT /api/sync/today` wrote the empty `runValues` (exactly `DEFAULT_VALUES`) over a populated run on the shared row. Six concurrent `/api/sync/events` SSE = heavy multi-tab, so one bad client poisons all.
+
+**Fix (the durable rule):** in the `[v]` effect, after the deepEqual early-return, add a SECOND semantic guard — **never save+stamp when `deepEqual(v, DEFAULT_VALUES) && !deepEqual(loadRunValues(runId), DEFAULT_VALUES)`.** A genuine user edit never reduces *every* field to its default at once; an all-default form is always a programmatic reset. Net effect: **web never stamps an all-DEFAULT form** (if stored==DEFAULT the first guard skips; if stored!=DEFAULT this guard skips). Cost: you can't reduce a run to *exactly* all-defaults via autosave (a meaningless run; identity lives in dayState), which is overwhelmingly worth it vs. catastrophic loss.
+
+**Mobile parity:** `diffStampRunEdits` gained an optional `emptyValString` param and **never stamps a run whose serialized value equals the empty/default** (`s === emptyValString`). Caller passes `stableStringify(runToFormValues(makeNewRun()))` (runToFormValues ignores the id, so deterministic). Mirrors web's "never stamp an all-DEFAULT value".
+
+Tests: `artifacts/run-calculator/src/runValuesEqual.test.ts` locks the predicate `deepEqual(v, DEFAULT) && !deepEqual(stored, DEFAULT)`. Do NOT regress either guard.

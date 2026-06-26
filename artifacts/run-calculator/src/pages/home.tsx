@@ -3664,6 +3664,18 @@ export default function Home() {
     // multi-device data loss). Mirrors mobile's primed-baseline diffStampRunEdits,
     // which only stamps genuine changes.
     if (deepEqual(loadRunValues(runId), v)) return;
+    // Safety net for the recurring "I entered cases-needed, waited, refreshed,
+    // and it all vanished" data loss on the shared day-state row. A genuine user
+    // edit never reduces EVERY field to its default at once — an all-default form
+    // is always a programmatic reset (mount/init race, daily rollover, or a
+    // sync-apply echo) re-emitting through form.watch() while localStorage still
+    // holds the real values. Saving + stamping it would mint a FRESH
+    // markRunValuesUpdated() time that then wins the per-run lost-update guard on
+    // every other connected tab/device and clobber the real run data. Never let
+    // an empty form overwrite a populated stored value. (Equality of stored ==
+    // DEFAULT is already short-circuited above, so this only blocks the
+    // populated→empty transition, never a legitimately blank run.)
+    if (deepEqual(v, DEFAULT_VALUES) && !deepEqual(loadRunValues(runId), DEFAULT_VALUES)) return;
     const now = Date.now();
     saveRunValues(runId, v);
     // Stamp this run's edit time so an in-flight stale remote can't clobber it
