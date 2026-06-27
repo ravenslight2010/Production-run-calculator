@@ -37,6 +37,19 @@ is stable, so additive protection applies. This mirrors the clients'
 `isReset = remoteResetAt > prev.resetAt` receive semantics. New-day rollovers
 write a NEW date row (empty existing → accept incoming) so they don't hit this.
 
+**resetAt baseline guard (critical):** the escape hatch MUST also require the
+STORED row to already have a real baseline — `exReset > 0 && inReset > exReset`.
+A missing/NULL stored resetAt defaults to 0, so without this guard EVERY normal
+same-day push (which carries the day's real, large, stable resetAt) compares
+`bigNumber > 0` → looks like a "newer reset" → wholesale-clobbers the shared row,
+bypassing ALL additive protection. This was the "a reset blanked everything I
+entered" report (production: the active day's row had resetAt = NULL while every
+other day had a number). **Why:** a missing baseline must never be treated as
+"older than every real reset." Falling through to additive merge preserves runs
+AND populates resetAt from incoming, so the next comparison is sound (a genuine
+reset on a legacy null-baseline row then clears on the SECOND push — acceptable
+vs. silent loss). The same null/0 trap applies to ANY future resetAt comparison.
+
 Lost runs' DATA is unrecoverable once gone from the row (values aren't stored);
 the fix only prevents FUTURE loss. Orphan stamps left by past loss are benign
 (payload builders key runValues to `dayState.runs`, so orphan stamps are ignored).

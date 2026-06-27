@@ -98,7 +98,20 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
   // A true daily reset bumps resetAt strictly forward and intends a fresh day:
   // adopt the incoming payload wholesale (matches the clients' reset semantics)
   // so its empty maps clear the stored day rather than being protected back in.
-  if (asNumber(inDay?.resetAt) > asNumber(exDay?.resetAt)) return incoming;
+  //
+  // GUARD: only honor this when the STORED row already carries a real reset
+  // baseline (exReset > 0). A missing / 0 stored resetAt (a legacy row, or a peer
+  // that pushed without one — seen in production as an active day's row with a
+  // NULL resetAt) must NOT make every normal same-day push — which carries the
+  // day's stable, REAL resetAt — look like a "strictly newer reset" and
+  // wholesale-clobber the shared day. That false positive bypassed all the
+  // additive protection below and re-opened the loss ("a reset blanked everything
+  // I entered"). With no stored baseline we fall through to the additive merge,
+  // which preserves the runs AND populates resetAt from the incoming payload so
+  // the next comparison is sound (a genuine reset then clears on the next push).
+  const exReset = asNumber(exDay?.resetAt);
+  const inReset = asNumber(inDay?.resetAt);
+  if (exReset > 0 && inReset > exReset) return incoming;
 
   const inVals = isPlainObject(incoming.runValues) ? incoming.runValues : {};
   const inUpd = isPlainObject(incoming.runValuesUpdatedAt) ? incoming.runValuesUpdatedAt : {};

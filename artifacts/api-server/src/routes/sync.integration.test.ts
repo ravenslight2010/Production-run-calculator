@@ -324,6 +324,36 @@ describe("/sync — additive run-list protection (whole-run loss guard)", () => 
     expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b"]);
   });
 
+  it("does NOT treat a normal push as a reset when the STORED row has no resetAt baseline", async () => {
+    // Production saw an active day's row carrying a NULL resetAt. The reset escape
+    // hatch defaulted a missing stored resetAt to 0, so a normal same-day push
+    // (which carries the day's real, large resetAt) looked like a "strictly newer
+    // reset" and wholesale-clobbered the shared runs. A missing stored baseline
+    // must fall through to the additive merge and preserve every run.
+    const D = "2030-06-03";
+    const putD = (senderId: string, payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId, payload }),
+      });
+    // Seed a populated row WITHOUT a resetAt (legacy / null-baseline row).
+    await putD("c1", {
+      dayState: { runs: [run("a"), run("b"), run("c")] },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 }, c: { casesNeeded: 30 } },
+      runValuesUpdatedAt: { a: 1, b: 1, c: 1 },
+    });
+    // A peer pushes a SHORTER list but WITH a real resetAt — must NOT wholesale-win.
+    await putD("c2", {
+      dayState: { runs: [run("a")], resetAt: Date.now() },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+    });
+    const res = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    const row = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
+    expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b", "c"]);
+  });
+
   it("a true daily reset (strictly-newer resetAt) adopts the incoming runs wholesale", async () => {
     await put({
       dayState: { runs: [run("a"), run("b"), run("c")], resetAt: 1000 },
