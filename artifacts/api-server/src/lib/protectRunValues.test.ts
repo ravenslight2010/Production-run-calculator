@@ -19,6 +19,76 @@ type Payload = {
 const EMPTY = {};
 const POP = { casesNeeded: 240 };
 
+// The EXACT all-default ("blank") run value a client emits for a run it has no
+// real data for (web loadRunValues returns DEFAULT_VALUES for an unknown id).
+// Must mirror BLANK_RUN_VALUE in protectRunValues.ts / DEFAULT_VALUES on the
+// clients. The server's empty-over-populated guard recognizes blank by EXACT
+// deep-equality, so these tests use the full shape rather than `{}`.
+const BLANK = {
+  casesNeeded: 0,
+  crustsPerCycle: 0,
+  cycleSpeed: 0,
+  speedAdjustment: 1.0,
+  approxLineSpeed: 0,
+  freezerTime: 0,
+  pizzasPerCase: 0,
+  casesPerSkid: 0,
+  casesPerLayer: 0,
+  doughballsPerTray: 0,
+  crustsPerStack: 0,
+  doughBatchYield: 0,
+  crustsPerCase: 0,
+  skidsCompleted: 0,
+  casesOnCurrentSkid: 0,
+  traysOnLine: 0,
+  batchesReady: 0,
+  carryOverDone: false,
+  sauceOzPerPizza: 0,
+  sauceBarrelLbs: 0,
+  app1OzPerPizza: 0,
+  app1BatchLbs: 0,
+  app2OzPerPizza: 0,
+  app2BatchLbs: 0,
+  app3OzPerPizza: 0,
+  app3BatchLbs: 0,
+  app4OzPerPizza: 0,
+  app4BatchLbs: 0,
+  pep1Sticks: 0,
+  pep1OzPerPizza: 0,
+  pep1BatchLbs: 25,
+  pep2Sticks: 0,
+  pep2OzPerPizza: 0,
+  pep2BatchLbs: 25,
+  app1Type: "",
+  app2Type: "",
+  app3Type: "",
+  app4Type: "",
+  pep1Type: "",
+  pep2Type: "",
+  dieType: "",
+  allergen: "none",
+  doughRecipeName: "",
+  targetDoughballWeight: 0,
+  doughRecipe: [],
+  app1CheeseRecipeName: "",
+  app1CheeseRecipe: [],
+  app2CheeseRecipeName: "",
+  app2CheeseRecipe: [],
+  app3CheeseRecipeName: "",
+  app3CheeseRecipe: [],
+  app4CheeseRecipeName: "",
+  app4CheeseRecipe: [],
+  frontlineRecipeName: "",
+  frontlineRecipe: [],
+  cartoned: "yes",
+  cartonsPerCase: 0,
+  circles: "none",
+  shipper: "",
+  skidStacking: "",
+  gripSheets: "none",
+  slipSheets: "no",
+};
+
 describe("protectRunValues", () => {
   it("keeps the populated stored value when an empty push arrives with an EQUAL stamp (the corruption)", () => {
     const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
@@ -26,6 +96,46 @@ describe("protectRunValues", () => {
     const out = protectRunValues(incoming, existing) as Payload;
     expect(out.runValues.r1).toEqual(POP);
     expect(out.runValuesUpdatedAt.r1).toBe(1000);
+  });
+
+  it("keeps the populated stored value when an all-default push arrives with a STRICTLY-NEWER stamp over an UNSTAMPED stored value (the production hole)", () => {
+    // Imports / daily-rollover adopt populated run values WITHOUT a stamp, so the
+    // stored stamp is 0. A stale-but-positive client stamp paired with an
+    // all-default value used to win here and wipe the real data. It must not.
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 0 } };
+    const incoming: Payload = { runValues: { r1: BLANK }, runValuesUpdatedAt: { r1: 1700000000000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual(POP);
+    // Stamp is advanced past the corrupt push so the surviving value strictly
+    // wins on every peer (and heals the offending client on its next read).
+    expect(out.runValuesUpdatedAt.r1).toBe(1700000000000);
+  });
+
+  it("keeps the populated stored value when an all-default push arrives with a strictly-newer stamp over a LOWER positive stamp", () => {
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = { runValues: { r1: BLANK }, runValuesUpdatedAt: { r1: 2000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual(POP);
+    expect(out.runValuesUpdatedAt.r1).toBe(2000);
+  });
+
+  it("still accepts an all-default value for a BRAND-NEW run (nothing populated to protect)", () => {
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 1000 } };
+    const incoming: Payload = {
+      runValues: { r1: POP, r2: BLANK },
+      runValuesUpdatedAt: { r1: 1000, r2: 1500 },
+    };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r2).toEqual(BLANK);
+    expect(out.runValuesUpdatedAt.r2).toBe(1500);
+  });
+
+  it("still accepts a strictly-newer POPULATED edit over an unstamped stored value (real edits win)", () => {
+    const existing: Payload = { runValues: { r1: POP }, runValuesUpdatedAt: { r1: 0 } };
+    const incoming: Payload = { runValues: { r1: { casesNeeded: 480 } }, runValuesUpdatedAt: { r1: 1700000000000 } };
+    const out = protectRunValues(incoming, existing) as Payload;
+    expect(out.runValues.r1).toEqual({ casesNeeded: 480 });
+    expect(out.runValuesUpdatedAt.r1).toBe(1700000000000);
   });
 
   it("keeps the stored value when an empty push arrives with an OLDER stamp", () => {
