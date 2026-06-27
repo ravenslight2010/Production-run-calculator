@@ -15,7 +15,7 @@
 // live form overwrite a populated stored value. This asserts that invariant.
 
 import { describe, it, expect } from "vitest";
-import { pickCurrentRunPushValue } from "./storage";
+import { pickCurrentRunPushValue, isEmptyOverPopulated } from "./storage";
 import { DEFAULT_VALUES, type FormValues } from "./types";
 
 const populated = (): FormValues => ({ ...DEFAULT_VALUES, casesNeeded: 240, dieType: "10in" });
@@ -45,5 +45,21 @@ describe("pickCurrentRunPushValue", () => {
     const live = populated();
     const stored = { ...DEFAULT_VALUES };
     expect(pickCurrentRunPushValue(live, stored)).toBe(live);
+  });
+});
+
+// isEmptyOverPopulated is the shared predicate behind BOTH the push guard and the
+// new RECEIVE guards (run-values merge loop + form.reset) that stop an incoming
+// all-default remote value from wiping good local data on every reconnect/refresh
+// — the bidirectional half of the same corruption.
+describe("isEmptyOverPopulated", () => {
+  it("flags an empty candidate against a populated fallback (the receive data-loss vector)", () => {
+    expect(isEmptyOverPopulated({ ...DEFAULT_VALUES }, populated())).toBe(true);
+  });
+  it("does not flag a populated candidate (a genuine remote edit is accepted)", () => {
+    expect(isEmptyOverPopulated(populated(), populated())).toBe(false);
+  });
+  it("does not flag empty-over-empty (a legitimately blank run, nothing to protect)", () => {
+    expect(isEmptyOverPopulated({ ...DEFAULT_VALUES }, { ...DEFAULT_VALUES })).toBe(false);
   });
 });

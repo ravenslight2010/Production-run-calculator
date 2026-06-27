@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { db, dailySyncTable } from "@workspace/db";
 import { and, eq, gt, asc } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
+import { protectRunValues } from "../lib/protectRunValues";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,33 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
   }
 }
 
+// Atomically upsert the day-state row with the per-run protective merge applied
+// (see protectRunValues). The read of the existing row and the write MUST happen
+// inside one transaction with a row lock (SELECT ... FOR UPDATE), otherwise two
+// concurrent PUTs could each merge against a stale snapshot and the later commit
+// would overwrite a newer per-run stamp with an older one — defeating the
+// strictly-newer-wins guarantee and re-opening the data-loss window. Mirrors the
+// FOR UPDATE pattern used by inventory drawdown. Returns the merged payload that
+// was actually written so callers broadcast the same state peers will read.
+async function upsertProtected(date: string, scope: Scope, payload: unknown): Promise<unknown> {
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(dailySyncTable)
+      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
+      .for("update");
+    const merged = protectRunValues(payload, existing?.data);
+    await tx
+      .insert(dailySyncTable)
+      .values({ date, scope, data: merged as any, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [dailySyncTable.date, dailySyncTable.scope],
+        set: { data: merged as any, updatedAt: new Date() },
+      });
+    return merged;
+  });
+}
+
 router.get("/sync/today", async (req: Request, res: Response): Promise<void> => {
   // "Today" is the CLIENT's local date (see clientToday). The server runs in UTC,
   // so a client behind UTC would otherwise read/write a different calendar row
@@ -54,14 +82,12 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const today = clientToday(req);
   const scope = currentScope();
-  await db
-    .insert(dailySyncTable)
-    .values({ date: today, scope, data: payload as any, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [dailySyncTable.date, dailySyncTable.scope],
-      set: { data: payload as any, updatedAt: new Date() },
-    });
-  broadcast(payload, senderId, scope, today);
+  // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
+  // populated stored run value (see upsertProtected / protectRunValues).
+  const merged = await upsertProtected(today, scope, payload);
+  // Broadcast the merged result (not the raw push) so peers converge on the same
+  // protected state the row was written with.
+  broadcast(merged, senderId, scope, today);
   res.json({ ok: true });
 });
 
@@ -150,17 +176,13 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const scope = currentScope();
-  await db
-    .insert(dailySyncTable)
-    .values({ date, scope, data: payload as any, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [dailySyncTable.date, dailySyncTable.scope],
-      set: { data: payload as any, updatedAt: new Date() },
-    });
+  // Atomic per-run protective merge (see /sync/today): an empty run value can't
+  // clobber a populated stored one on scheduled days either.
+  const merged = await upsertProtected(date, scope, payload);
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (date === clientToday(req)) {
-    broadcast(payload, senderId, scope, date);
+    broadcast(merged, senderId, scope, date);
   }
   res.json({ ok: true });
 });

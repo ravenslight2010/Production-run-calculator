@@ -77,6 +77,7 @@ import {
   markRunValuesUpdated,
   deepEqual,
   pickCurrentRunPushValue,
+  isEmptyOverPopulated,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3022,6 +3023,21 @@ export default function Home() {
         for (const [id, vals] of Object.entries(payload.runValues)) {
           const rTs = remoteUpd[id] ?? 0;
           const lTs = localUpd[id] ?? 0;
+          // Symmetric to the push guard (pickCurrentRunPushValue): NEVER accept an
+          // all-default remote value over a populated local one, regardless of
+          // stamp. The corruption pairs an empty value with a REAL, often EQUAL
+          // stamp, so the lTs/rTs guard below would otherwise fall through to
+          // saveRunValues(empty) and wipe good local data on every SSE reconnect /
+          // refresh (the recurring "I refreshed and it vanished" loss). Keep ours
+          // and BUMP our stamp to now so the heal re-push below strictly wins the
+          // per-run guard on the server and every peer — the corrupted shared row
+          // carries the run's real stamp, so a re-push at the same stamp couldn't
+          // overwrite it.
+          if (isEmptyOverPopulated(vals as FormValues, loadRunValues(id))) {
+            mergedUpd[id] = Date.now();
+            rejectedStale = true;
+            continue;
+          }
           if (lTs > rTs) {
             // Local edit is fresher than this remote — keep ours, re-push later.
             rejectedStale = true;
@@ -3136,7 +3152,11 @@ export default function Home() {
         // fall through to the prior time-quiet + push-ack behavior.
         const curLocalTs = currentId ? (localUpd[currentId] ?? 0) : 0;
         const curRemoteTs = currentId ? (remoteUpd[currentId] ?? 0) : 0;
-        if (currentId && payload.runValues[currentId] && curLocalTs <= curRemoteTs && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current) {
+        if (currentId && payload.runValues[currentId] && curLocalTs <= curRemoteTs && Date.now() - lastLocalEditRef.current > 2000 && pushAcknowledgedRef.current
+          // Never blank the live form by resetting it to an all-default remote
+          // value while our stored copy is still populated (the same
+          // empty-over-populated corruption guarded on the run-values loop above).
+          && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
           const merged = { ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) };
           form.reset(merged);
           resetFieldArrays(merged);

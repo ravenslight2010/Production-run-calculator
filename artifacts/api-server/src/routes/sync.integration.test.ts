@@ -190,6 +190,61 @@ describe("/sync/today — client-local-date keying", () => {
   });
 });
 
+describe("/sync — per-run protective merge (data-loss guard)", () => {
+  // The server is now a per-run last-writer-wins register keyed on each run's
+  // edit stamp (runValuesUpdatedAt), not a blind blob overwrite. An empty run
+  // value paired with an EQUAL-or-older stamp must never overwrite a populated
+  // stored value — that is the recurring "I entered it, refreshed, it vanished"
+  // corruption. Only a strictly-newer-stamped edit changes a run.
+  const DATE = "2030-05-01";
+  function put(payload: unknown) {
+    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+  }
+  async function readRow() {
+    const res = await fetch(`${baseUrl}/api/sync/${DATE}`, { headers: authHeaders() });
+    return (await res.json()) as {
+      runValues?: Record<string, { casesNeeded?: number }>;
+      runValuesUpdatedAt?: Record<string, number>;
+    } | null;
+  }
+  const meta = { dayState: { runs: [{ id: "r1", brand: "Acme", flavor: "Pep" }] } };
+
+  it("rejects an empty value with an EQUAL stamp over a populated stored value", async () => {
+    await put({ ...meta, runValues: { r1: { casesNeeded: 240 } }, runValuesUpdatedAt: { r1: 1000 } });
+    await put({ ...meta, runValues: { r1: {} }, runValuesUpdatedAt: { r1: 1000 } });
+    const row = await readRow();
+    expect(row?.runValues?.r1?.casesNeeded).toBe(240);
+    expect(row?.runValuesUpdatedAt?.r1).toBe(1000);
+  });
+
+  it("accepts a strictly-newer-stamped heal re-push (good value wins over corruption)", async () => {
+    await put({ ...meta, runValues: { r1: {} }, runValuesUpdatedAt: { r1: 1000 } });
+    await put({ ...meta, runValues: { r1: { casesNeeded: 99 } }, runValuesUpdatedAt: { r1: 5000 } });
+    const row = await readRow();
+    expect(row?.runValues?.r1?.casesNeeded).toBe(99);
+    expect(row?.runValuesUpdatedAt?.r1).toBe(5000);
+  });
+
+  it("keeps the newest-stamped value under CONCURRENT racing PUTs (atomic merge, order-independent)", async () => {
+    // Seed a populated run at stamp 2000. Then fire a stale empty@1000 and a
+    // genuine edit@3000 concurrently. With the FOR UPDATE transactional merge the
+    // outcome is deterministic regardless of which commits first: the empty stale
+    // push can never win, and the 3000 edit always does.
+    await put({ ...meta, runValues: { r1: { casesNeeded: 240 } }, runValuesUpdatedAt: { r1: 2000 } });
+    await Promise.all([
+      put({ ...meta, runValues: { r1: {} }, runValuesUpdatedAt: { r1: 1000 } }),
+      put({ ...meta, runValues: { r1: { casesNeeded: 777 } }, runValuesUpdatedAt: { r1: 3000 } }),
+    ]);
+    const row = await readRow();
+    expect(row?.runValues?.r1?.casesNeeded).toBe(777);
+    expect(row?.runValuesUpdatedAt?.r1).toBe(3000);
+  });
+});
+
 describe("/sync/events — date-scoped broadcasts", () => {
   // Two live watchers on the SAME scope but DIFFERENT local dates must not
   // receive each other's pushes, or a peer behind/ahead of UTC would clobber its

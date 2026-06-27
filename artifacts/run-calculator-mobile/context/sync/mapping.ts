@@ -464,6 +464,49 @@ function unionBrandFlavors(
   return out;
 }
 
+// Order-independent deep equality (objects compare by key, arrays by index).
+// Mirrors the web app's storage.deepEqual so the empty-value detection below
+// agrees across platforms.
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (a === null || b === null) return a === b;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i])) return false;
+    return true;
+  }
+  if (typeof a === "object" && typeof b === "object") {
+    const ak = Object.keys(a as object);
+    const bk = Object.keys(b as object);
+    if (ak.length !== bk.length) return false;
+    for (const k of ak) {
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+    }
+    return true;
+  }
+  return a === b;
+}
+
+// The canonical all-default run value (a fresh run carries no settings/progress).
+// runToFormValues ignores the id, so this is deterministic. Used to detect the
+// empty-value-with-real-stamp corruption on receive (web parity with
+// DEFAULT_VALUES / isEmptyOverPopulated).
+const EMPTY_FORM_VALUES: WebFormValues = runToFormValues({
+  id: "",
+  settings: DEFAULT_SETTINGS,
+  progress: DEFAULT_PROGRESS,
+  stoppages: [],
+  startedAt: undefined,
+  endedAt: undefined,
+  isRunning: false,
+});
+
+export function isEmptyFormValue(fv: WebFormValues | undefined): boolean {
+  return fv !== undefined && deepEqual(fv, EMPTY_FORM_VALUES);
+}
+
 // Translate an incoming payload into a patch for the mobile AppState. Master-data
 // lists are union-merged unconditionally (matches the web app's brand handling).
 // The day's runs/dayState are replaced only when the reset guard accepts them:
@@ -560,6 +603,23 @@ export function applyPayloadToState(
       const prevRun = prevById.get(meta.id);
       const lTs = localUpdatedAt[meta.id] ?? 0;
       const rTs = remoteUpdatedAt[meta.id] ?? 0;
+      // NEVER let an all-default/empty remote value overwrite a populated local
+      // run, regardless of stamp (web parity with isEmptyOverPopulated). The
+      // corruption pairs an empty value with a REAL, often EQUAL stamp, so the
+      // lTs/rTs guard below would otherwise adopt the empty remote and wipe good
+      // local data on every reconnect / reload. Keep ours and BUMP the stamp to
+      // now so the heal re-push strictly wins the per-run guard on the server and
+      // every peer (the corrupted shared row carries the run's real stamp, so a
+      // re-push at the same stamp couldn't overwrite it).
+      if (
+        prevRun &&
+        isEmptyFormValue(payload.runValues?.[meta.id]) &&
+        !isEmptyFormValue(runToFormValues(prevRun))
+      ) {
+        rejectedStale = true;
+        mergedUpdatedAt[meta.id] = Date.now();
+        return prevRun;
+      }
       // Local edit strictly newer than this remote — keep our run wholesale so a
       // stale remote can't clobber the just-made edit (web parity). Equal/absent
       // timestamps fall through to the prior accept-remote behavior.

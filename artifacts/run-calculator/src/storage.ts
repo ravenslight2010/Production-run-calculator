@@ -484,9 +484,24 @@ export function pickCurrentRunPushValue(
   live: FormValues,
   stored: FormValues,
 ): FormValues {
-  return deepEqual(live, DEFAULT_VALUES) && !deepEqual(stored, DEFAULT_VALUES)
-    ? stored
-    : live;
+  return isEmptyOverPopulated(live, stored) ? stored : live;
+}
+
+// True when `candidate` is an all-default/empty run value but `fallback` is a
+// populated one. This is the single predicate behind ALL the day-state
+// data-loss guards: the corruption pairs an empty run value with a REAL edit
+// stamp (the form is transiently all-default during mount / after any
+// programmatic form.reset() while localStorage still holds the real value AND
+// stamp), so the stamp-based lost-update guard would otherwise ACCEPT the empty
+// value and wipe real data on the shared sync row. Used on BOTH the push side
+// (candidate = live form, fallback = stored) and the RECEIVE side (candidate =
+// incoming remote value, fallback = local stored) so an empty value can never
+// overwrite a populated one in either direction, regardless of stamp.
+export function isEmptyOverPopulated(
+  candidate: FormValues,
+  fallback: FormValues,
+): boolean {
+  return deepEqual(candidate, DEFAULT_VALUES) && !deepEqual(fallback, DEFAULT_VALUES);
 }
 
 export function loadTemplates(): RunTemplate[] {
