@@ -245,6 +245,103 @@ describe("/sync — per-run protective merge (data-loss guard)", () => {
   });
 });
 
+describe("/sync — additive run-list protection (whole-run loss guard)", () => {
+  // A device that briefly holds a SHORTER run list (post-refresh / before it has
+  // seen a peer's runs) must not be able to drop everyone's runs by pushing that
+  // short dayState.runs. The server union-merges the run list by id; only an
+  // explicit tombstone (or a true daily reset) removes a run.
+  const DATE = "2030-06-01";
+  function put(payload: unknown) {
+    return fetch(`${baseUrl}/api/sync/today?today=${DATE}`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "c1", payload }),
+    });
+  }
+  async function readRow() {
+    const res = await fetch(`${baseUrl}/api/sync/${DATE}`, { headers: authHeaders() });
+    return (await res.json()) as {
+      dayState?: { runs?: Array<{ id: string }> };
+      runValues?: Record<string, { casesNeeded?: number }>;
+    } | null;
+  }
+  const run = (id: string) => ({ id, brand: "Acme", flavor: id });
+
+  it("preserves stored runs a same-day push omits (no whole-run loss)", async () => {
+    // Seed three runs at a stable resetAt.
+    await put({
+      dayState: { runs: [run("a"), run("b"), run("c")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 }, c: { casesNeeded: 30 } },
+      runValuesUpdatedAt: { a: 1, b: 1, c: 1 },
+    });
+    // A device with only run "a" pushes (same resetAt → not a reset).
+    await put({
+      dayState: { runs: [run("a")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+    });
+    const row = await readRow();
+    expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b", "c"]);
+    expect(row?.runValues?.b?.casesNeeded).toBe(20);
+    expect(row?.runValues?.c?.casesNeeded).toBe(30);
+  });
+
+  it("removes a run that was explicitly tombstoned (deletion still works)", async () => {
+    await put({
+      dayState: { runs: [run("a"), run("b")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 } },
+      runValuesUpdatedAt: { a: 1, b: 1 },
+    });
+    // Push deletes run "b" via a tombstone while omitting it from the run list.
+    await put({
+      dayState: { runs: [run("a")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 } },
+      runValuesUpdatedAt: { a: 1 },
+      deletedItems: { runs: ["b"] },
+    });
+    const row = await readRow();
+    expect((row?.dayState?.runs ?? []).map((r) => r.id)).toEqual(["a"]);
+    expect(row?.runValues?.b).toBeUndefined();
+  });
+
+  it("preserves both run lists under concurrent FIRST writes to a new date (no first-write clobber)", async () => {
+    // No row exists yet, so FOR UPDATE locks nothing: two concurrent first PUTs
+    // with different single-run lists must still converge to the union, not let
+    // the last writer clobber the other's run.
+    const D = "2030-06-02";
+    const putD = (payload: unknown) =>
+      fetch(`${baseUrl}/api/sync/today?today=${D}`, {
+        method: "PUT",
+        headers: { ...authHeaders(), "content-type": "application/json" },
+        body: JSON.stringify({ senderId: "c1", payload }),
+      });
+    await Promise.all([
+      putD({ dayState: { runs: [run("a")], resetAt: 1000 }, runValues: { a: { casesNeeded: 10 } }, runValuesUpdatedAt: { a: 1 } }),
+      putD({ dayState: { runs: [run("b")], resetAt: 1000 }, runValues: { b: { casesNeeded: 20 } }, runValuesUpdatedAt: { b: 1 } }),
+    ]);
+    const res = await fetch(`${baseUrl}/api/sync/${D}`, { headers: authHeaders() });
+    const row = (await res.json()) as { dayState?: { runs?: Array<{ id: string }> } } | null;
+    expect((row?.dayState?.runs ?? []).map((r) => r.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("a true daily reset (strictly-newer resetAt) adopts the incoming runs wholesale", async () => {
+    await put({
+      dayState: { runs: [run("a"), run("b"), run("c")], resetAt: 1000 },
+      runValues: { a: { casesNeeded: 10 }, b: { casesNeeded: 20 }, c: { casesNeeded: 30 } },
+      runValuesUpdatedAt: { a: 1, b: 1, c: 1 },
+    });
+    // New shift: resetAt jumps forward and the day starts fresh with one run.
+    await put({
+      dayState: { runs: [run("z")], resetAt: 2000 },
+      runValues: { z: { casesNeeded: 99 } },
+      runValuesUpdatedAt: { z: 5 },
+    });
+    const row = await readRow();
+    expect((row?.dayState?.runs ?? []).map((r) => r.id)).toEqual(["z"]);
+    expect(row?.runValues?.a).toBeUndefined();
+  });
+});
+
 describe("/sync/events — date-scoped broadcasts", () => {
   // Two live watchers on the SAME scope but DIFFERENT local dates must not
   // receive each other's pushes, or a peer behind/ahead of UTC would clobber its

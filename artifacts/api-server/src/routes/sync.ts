@@ -40,31 +40,62 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
   }
 }
 
-// Atomically upsert the day-state row with the per-run protective merge applied
-// (see protectRunValues). The read of the existing row and the write MUST happen
+// Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
+// the original pg error (carrying `.code`) is reachable via the `.cause` chain
+// rather than the top-level error — walk it.
+function isUniqueViolation(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let depth = 0; depth < 5 && cur && typeof cur === "object"; depth++) {
+    if ((cur as { code?: string }).code === "23505") return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+// Atomically upsert the day-state row with the protective merge applied (see
+// protectRunValues). The read of the existing row and the write MUST happen
 // inside one transaction with a row lock (SELECT ... FOR UPDATE), otherwise two
 // concurrent PUTs could each merge against a stale snapshot and the later commit
-// would overwrite a newer per-run stamp with an older one — defeating the
-// strictly-newer-wins guarantee and re-opening the data-loss window. Mirrors the
-// FOR UPDATE pattern used by inventory drawdown. Returns the merged payload that
-// was actually written so callers broadcast the same state peers will read.
+// would overwrite a newer per-run stamp (or a fuller run list) with an older one
+// — defeating the strictly-newer-wins guarantee and re-opening the data-loss
+// window. Mirrors the FOR UPDATE pattern used by inventory drawdown.
+//
+// FIRST-WRITE RACE: when no row exists yet (first push of a date) FOR UPDATE
+// locks nothing, so two concurrent first PUTs would each merge against "no
+// existing" and the later writer would clobber the earlier one's runs. We close
+// that window by doing a plain INSERT when no row exists: the losing writer hits
+// a unique-violation (23505) and we retry — the row now exists, FOR UPDATE locks
+// it, and we merge against it instead of overwriting. Returns the merged payload
+// that was actually written so callers broadcast the same state peers will read.
 async function upsertProtected(date: string, scope: Scope, payload: unknown): Promise<unknown> {
-  return db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select()
-      .from(dailySyncTable)
-      .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
-      .for("update");
-    const merged = protectRunValues(payload, existing?.data);
-    await tx
-      .insert(dailySyncTable)
-      .values({ date, scope, data: merged as any, updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: [dailySyncTable.date, dailySyncTable.scope],
-        set: { data: merged as any, updatedAt: new Date() },
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select()
+          .from(dailySyncTable)
+          .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
+          .for("update");
+        const merged = protectRunValues(payload, existing?.data);
+        if (existing) {
+          await tx
+            .update(dailySyncTable)
+            .set({ data: merged as any, updatedAt: new Date() })
+            .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)));
+        } else {
+          await tx
+            .insert(dailySyncTable)
+            .values({ date, scope, data: merged as any, updatedAt: new Date() });
+        }
+        return merged;
       });
-    return merged;
-  });
+    } catch (e) {
+      // A concurrent first writer created the row between our select and insert;
+      // retry so we merge against it rather than failing or clobbering.
+      if (isUniqueViolation(e) && attempt < 3) continue;
+      throw e;
+    }
+  }
 }
 
 router.get("/sync/today", async (req: Request, res: Response): Promise<void> => {
