@@ -107,9 +107,9 @@ args = "pnpm --filter @workspace/scheduled-recipe-check run test"
 isValidation = true
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
-integrations = ["github:1.0.0"]
+integrations = ["github:1.0.0", "javascript_openai_ai_integrations:2.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
