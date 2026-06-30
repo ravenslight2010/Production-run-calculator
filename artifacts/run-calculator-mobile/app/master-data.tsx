@@ -78,6 +78,13 @@ import {
   type SavedSpecSheet,
   type SpecReconcileResult,
 } from "@/context/savedSpecSheets";
+import {
+  reconcileSpecWithRecipes,
+  toReconcileRecipes,
+  type Discrepancy,
+  type ReconcileKind,
+  type ReconcileRecipe,
+} from "@workspace/spec-reconcile";
 import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 import { useQueryClient } from "@tanstack/react-query";
@@ -794,6 +801,53 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   );
 }
 
+type MobileSheetCoverage = {
+  sheetId: number;
+  sheetLabel: string;
+  discrepancies: Discrepancy[];
+};
+type MobileRecipeEntry = {
+  kind: ReconcileKind;
+  name: string;
+  inLibrary: boolean;
+  coverage: MobileSheetCoverage[];
+};
+function buildMobileCombinedView(
+  sheets: SavedSpecSheet[],
+  currentRecipes: ReconcileRecipe[],
+): MobileRecipeEntry[] {
+  const recipeMap = new Map<string, MobileRecipeEntry>();
+  for (const r of currentRecipes) {
+    const key = `${r.kind}\0${r.name.trim().toLowerCase()}`;
+    if (!recipeMap.has(key)) recipeMap.set(key, { kind: r.kind, name: r.name, inLibrary: true, coverage: [] });
+  }
+  for (const sheet of sheets) {
+    const specRecipes = toReconcileRecipes(sheet.data?.recipes);
+    const discrepancies = reconcileSpecWithRecipes({ specRecipes, currentRecipes });
+    const discsByKey = new Map<string, Discrepancy[]>();
+    for (const d of discrepancies) {
+      if (d.type === "missing-recipe") continue;
+      const key = `${d.kind}\0${d.recipeName.trim().toLowerCase()}`;
+      const arr = discsByKey.get(key) ?? [];
+      arr.push(d);
+      discsByKey.set(key, arr);
+    }
+    for (const sr of specRecipes) {
+      const key = `${sr.kind}\0${sr.name.trim().toLowerCase()}`;
+      const existing = recipeMap.get(key);
+      const discs = discsByKey.get(key) ?? [];
+      if (existing) {
+        existing.coverage.push({ sheetId: sheet.id, sheetLabel: sheet.label, discrepancies: discs });
+      } else {
+        recipeMap.set(key, { kind: sr.kind, name: sr.name, inLibrary: false, coverage: [{ sheetId: sheet.id, sheetLabel: sheet.label, discrepancies: [] }] });
+      }
+    }
+  }
+  return Array.from(recipeMap.values());
+}
+const MOBILE_KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
+const MOBILE_KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
+
 export default function MasterDataScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -959,6 +1013,8 @@ export default function MasterDataScreen() {
   const [sheetBusyId, setSheetBusyId] = useState<number | null>(null);
   const [reconResult, setReconResult] = useState<SpecReconcileResult | null>(null);
   const [reconError, setReconError] = useState<string | null>(null);
+  const [reconAllEntries, setReconAllEntries] = useState<MobileRecipeEntry[] | null>(null);
+  const [reconAllBusy, setReconAllBusy] = useState(false);
 
   const refreshSavedSheets = useCallback(async () => {
     setSheetsLoading(true);
@@ -990,6 +1046,25 @@ export default function MasterDataScreen() {
       setReconError("Couldn't cross-reference that spec sheet. Please try again.");
     } finally {
       setSheetBusyId(null);
+    }
+  }
+
+  function handleCheckAll() {
+    setReconAllBusy(true);
+    setReconAllEntries(null);
+    setReconResult(null);
+    setReconError(null);
+    try {
+      const currentRecipes = presetMapsToReconcileRecipes({
+        dough: doughRecipePresets,
+        sauce: frontlineRecipePresets,
+        cheese: cheeseRecipePresets,
+      });
+      setReconAllEntries(buildMobileCombinedView(savedSheets, currentRecipes));
+    } catch {
+      setReconError("Couldn't build cross-reference. Please try again.");
+    } finally {
+      setReconAllBusy(false);
     }
   }
 
@@ -1321,13 +1396,33 @@ export default function MasterDataScreen() {
         </CardSection>
 
         {/* Saved spec sheets: cross-reference against current recipes */}
-        <SectionHeader title="Saved Spec Sheets" />
+        <SectionHeader title="Spec Sheet Cross-Reference" />
         <CardSection>
           <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
-            Your two most recently imported spec sheets are saved here.
-            Cross-reference one against your current recipes to see whether the
-            recipes still match the spec.
+            Your two most recently imported spec sheets are saved here. Cross-reference
+            all at once to see which recipes match, or check a single sheet for an AI summary.
           </Text>
+
+          {/* Cross-reference all button */}
+          {!sheetsLoading && savedSheets.length > 0 && (
+            <Pressable
+              onPress={handleCheckAll}
+              disabled={reconAllBusy || sheetBusyId !== null}
+              style={({ pressed }) => [
+                styles.importBtn,
+                {
+                  backgroundColor: colors.primary,
+                  opacity: reconAllBusy || sheetBusyId !== null || pressed ? 0.7 : 1,
+                  marginBottom: 8,
+                },
+              ]}
+            >
+              <Text style={[styles.importBtnText, { color: colors.primaryForeground }]}>
+                {reconAllBusy ? "Checking…" : "Cross-reference all"}
+              </Text>
+            </Pressable>
+          )}
+
           {sheetsLoading ? (
             <ActivityIndicator color={colors.primary} />
           ) : savedSheets.length === 0 ? (
@@ -1356,30 +1451,32 @@ export default function MasterDataScreen() {
                 <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                   <Pressable
                     onPress={() => handleCheckSheet(s.id)}
-                    disabled={sheetBusyId !== null}
-                    style={({ pressed }) => [
-                      styles.importBtn,
-                      {
-                        backgroundColor: colors.primary,
-                        opacity: sheetBusyId !== null || pressed ? 0.7 : 1,
-                        flex: 1,
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.importBtnText, { color: colors.primaryForeground }]}>
-                      {sheetBusyId === s.id ? "Checking…" : "Check against recipes"}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => handleDeleteSheet(s.id)}
-                    disabled={sheetBusyId !== null}
+                    disabled={sheetBusyId !== null || reconAllBusy}
                     style={({ pressed }) => [
                       styles.importBtn,
                       {
                         backgroundColor: colors.secondary,
                         borderWidth: 1,
                         borderColor: colors.border,
-                        opacity: sheetBusyId !== null || pressed ? 0.7 : 1,
+                        opacity: sheetBusyId !== null || reconAllBusy || pressed ? 0.7 : 1,
+                        flex: 1,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                      {sheetBusyId === s.id ? "Checking…" : "AI summary"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => handleDeleteSheet(s.id)}
+                    disabled={sheetBusyId !== null || reconAllBusy}
+                    style={({ pressed }) => [
+                      styles.importBtn,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        opacity: sheetBusyId !== null || reconAllBusy || pressed ? 0.7 : 1,
                       },
                     ]}
                   >
@@ -1398,6 +1495,94 @@ export default function MasterDataScreen() {
             </Text>
           ) : null}
 
+          {/* Combined cross-reference view */}
+          {reconAllEntries ? (
+            <View style={{ gap: 12, marginTop: 4 }}>
+              {/* Summary badges */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {(() => {
+                  const covered = reconAllEntries.filter(r => r.inLibrary && r.coverage.length > 0).length;
+                  const issues = reconAllEntries.filter(r => r.coverage.some(c => c.discrepancies.length > 0)).length;
+                  const uncovered = reconAllEntries.filter(r => r.inLibrary && r.coverage.length === 0).length;
+                  const specOnly = reconAllEntries.filter(r => !r.inLibrary).length;
+                  return (
+                    <>
+                      <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: colors.muted }}>
+                        <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{covered} matched</Text>
+                      </View>
+                      {issues > 0 && (
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: "#7f1d1d40" }}>
+                          <Text style={{ fontSize: 11, color: "#f87171" }}>{issues} with issues</Text>
+                        </View>
+                      )}
+                      {uncovered > 0 && (
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+                          <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{uncovered} not in any spec</Text>
+                        </View>
+                      )}
+                      {specOnly > 0 && (
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1, borderColor: colors.border }}>
+                          <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{specOnly} spec-only</Text>
+                        </View>
+                      )}
+                      {issues === 0 && specOnly === 0 && uncovered === 0 && (
+                        <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: "#05301440" }}>
+                          <Text style={{ fontSize: 11, color: "#4ade80" }}>All recipes match</Text>
+                        </View>
+                      )}
+                    </>
+                  );
+                })()}
+              </View>
+
+              {/* Recipe-centric grouped list */}
+              {MOBILE_KIND_ORDER.map((kind) => {
+                const recipes = reconAllEntries.filter(r => r.kind === kind);
+                if (recipes.length === 0) return null;
+                return (
+                  <View key={kind}>
+                    <Text style={{ fontSize: 11, fontFamily: FONTS.semibold, color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>
+                      {MOBILE_KIND_LABELS[kind]}
+                    </Text>
+                    <View style={{ gap: 4 }}>
+                      {recipes.map((recipe) => {
+                        const allDiscs = recipe.coverage.flatMap(c => c.discrepancies);
+                        const status = !recipe.inLibrary ? "spec-only" : recipe.coverage.length === 0 ? "uncovered" : allDiscs.length > 0 ? "issues" : "match";
+                        const dotColor = status === "match" ? "#4ade80" : status === "issues" ? "#f59e0b" : status === "spec-only" ? "#60a5fa" : colors.mutedForeground;
+                        return (
+                          <View key={`${recipe.kind}\0${recipe.name}`} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 6, padding: 10, gap: 4 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
+                              <Text style={{ flex: 1, fontSize: 13, fontFamily: FONTS.medium, color: colors.foreground }}>{recipe.name}</Text>
+                              {status === "issues" && (
+                                <Text style={{ fontSize: 11, color: "#f87171" }}>{allDiscs.length} diff{allDiscs.length !== 1 ? "s" : ""}</Text>
+                              )}
+                              {status === "uncovered" && (
+                                <Text style={{ fontSize: 11, color: colors.mutedForeground }}>Not in any spec</Text>
+                              )}
+                              {status === "spec-only" && (
+                                <Text style={{ fontSize: 11, color: "#93c5fd" }}>Not in library</Text>
+                              )}
+                            </View>
+                            {status === "issues" && allDiscs.map((d, i) => (
+                              <Text key={i} style={{ fontSize: 11, color: colors.mutedForeground, paddingLeft: 16 }}>— {d.message}</Text>
+                            ))}
+                            {status === "spec-only" && (
+                              <Text style={{ fontSize: 11, color: colors.mutedForeground, paddingLeft: 16 }}>
+                                On the spec sheet but not in your recipe library.
+                              </Text>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {/* AI summary result for individual sheet */}
           {reconResult ? (
             <View
               style={{

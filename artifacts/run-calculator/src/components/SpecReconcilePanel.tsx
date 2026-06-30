@@ -1,20 +1,33 @@
 // Saved spec sheets cross-reference panel (web).
 //
-// Lists the up-to-two most-recently-imported spec sheets that were snapshotted
-// server-side. For each one the user can run a cross-reference against the
-// CURRENT recipe library ("does the recipe match the spec?") and see the
-// deterministic discrepancy list plus an advisory AI plain-language summary, or
-// delete the saved snapshot. Mirrors the mobile section in
-// artifacts/run-calculator-mobile/app/master-data.tsx (replit.md parity).
+// "Cross-reference all" runs the pure deterministic diff locally (no AI, instant)
+// against every saved spec sheet at once and renders a recipe-centric linked view:
+// which recipes match the spec, which have ingredient discrepancies, which are not
+// covered by any spec sheet, and which spec recipes aren't in the library.
+//
+// Individual "AI summary" per sheet still calls /api/ai/spec-reconcile for a
+// plain-language narrative on top of the deterministic diff.
+//
+// Mirrors the mobile section in artifacts/run-calculator-mobile/app/master-data.tsx
+// (replit.md parity).
 
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { CheckCircle2, AlertTriangle, MinusCircle, XCircle, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  reconcileSpecWithRecipes,
+  toReconcileRecipes,
+  type Discrepancy,
+  type ReconcileKind,
+  type ReconcileRecipe,
+} from "@workspace/spec-reconcile";
 import {
   fetchSavedSpecSheets,
   reconcileSpecSheet,
   deleteSpecSheet,
+  loadCurrentReconcileRecipes,
   type SavedSpecSheet,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
@@ -22,24 +35,82 @@ import {
 function fmtDate(ms: number): string {
   try {
     return new Date(ms).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
+      month: "short", day: "numeric", year: "numeric",
+      hour: "numeric", minute: "2-digit",
     });
   } catch {
     return "";
   }
 }
 
+type SheetCoverage = {
+  sheetId: number;
+  sheetLabel: string;
+  discrepancies: Discrepancy[];
+};
+
+type RecipeEntry = {
+  kind: ReconcileKind;
+  name: string;
+  inLibrary: boolean;
+  coverage: SheetCoverage[];
+};
+
+function buildCombinedView(sheets: SavedSpecSheet[], currentRecipes: ReconcileRecipe[]): RecipeEntry[] {
+  const recipeMap = new Map<string, RecipeEntry>();
+
+  for (const r of currentRecipes) {
+    const key = `${r.kind}\0${r.name.trim().toLowerCase()}`;
+    if (!recipeMap.has(key)) {
+      recipeMap.set(key, { kind: r.kind, name: r.name, inLibrary: true, coverage: [] });
+    }
+  }
+
+  for (const sheet of sheets) {
+    const specRecipes = toReconcileRecipes(sheet.data?.recipes);
+    const discrepancies = reconcileSpecWithRecipes({ specRecipes, currentRecipes });
+
+    const ingredientDiscsByKey = new Map<string, Discrepancy[]>();
+    for (const d of discrepancies) {
+      if (d.type === "missing-recipe") continue;
+      const key = `${d.kind}\0${d.recipeName.trim().toLowerCase()}`;
+      const arr = ingredientDiscsByKey.get(key) ?? [];
+      arr.push(d);
+      ingredientDiscsByKey.set(key, arr);
+    }
+
+    for (const sr of specRecipes) {
+      const key = `${sr.kind}\0${sr.name.trim().toLowerCase()}`;
+      const existing = recipeMap.get(key);
+      const discs = ingredientDiscsByKey.get(key) ?? [];
+      if (existing) {
+        existing.coverage.push({ sheetId: sheet.id, sheetLabel: sheet.label, discrepancies: discs });
+      } else {
+        recipeMap.set(key, {
+          kind: sr.kind, name: sr.name, inLibrary: false,
+          coverage: [{ sheetId: sheet.id, sheetLabel: sheet.label, discrepancies: [] }],
+        });
+      }
+    }
+  }
+
+  return Array.from(recipeMap.values());
+}
+
+const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
+const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
+
 export default function SpecReconcilePanel() {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
+  const [combined, setCombined] = useState<RecipeEntry[] | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [result, setResult] = useState<SpecReconcileResult | null>(null);
+  const [aiResult, setAiResult] = useState<SpecReconcileResult | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
 
   async function refresh() {
@@ -54,16 +125,31 @@ export default function SpecReconcilePanel() {
     }
   }
 
-  useEffect(() => {
-    void refresh();
-  }, []);
+  useEffect(() => { void refresh(); }, []);
 
-  async function handleCheck(id: number) {
+  function handleCheckAll() {
+    setCheckingAll(true);
+    setCombined(null);
+    setAiResult(null);
+    setResultError(null);
+    setExpandedKeys(new Set());
+    try {
+      const currentRecipes = loadCurrentReconcileRecipes();
+      setCombined(buildCombinedView(sheets, currentRecipes));
+    } catch {
+      setResultError("Couldn't build cross-reference. Please try again.");
+    } finally {
+      setCheckingAll(false);
+    }
+  }
+
+  async function handleAiCheck(id: number) {
     setBusyId(id);
-    setResult(null);
+    setAiResult(null);
+    setCombined(null);
     setResultError(null);
     try {
-      setResult(await reconcileSpecSheet(id));
+      setAiResult(await reconcileSpecSheet(id));
     } catch {
       setResultError("Couldn't cross-reference that spec sheet. Please try again.");
     } finally {
@@ -76,7 +162,8 @@ export default function SpecReconcilePanel() {
     try {
       const next = await deleteSpecSheet(id);
       setSheets(next);
-      if (result?.specSheetId === id) setResult(null);
+      if (aiResult?.specSheetId === id) setAiResult(null);
+      if (combined) setCombined(null);
     } catch {
       setResultError("Couldn't delete that spec sheet.");
     } finally {
@@ -84,15 +171,47 @@ export default function SpecReconcilePanel() {
     }
   }
 
+  function toggleExpand(key: string) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const summaryCounts = combined
+    ? {
+        total: combined.length,
+        covered: combined.filter((r) => r.inLibrary && r.coverage.length > 0).length,
+        issues: combined.filter((r) => r.coverage.some((c) => c.discrepancies.length > 0)).length,
+        uncovered: combined.filter((r) => r.inLibrary && r.coverage.length === 0).length,
+        specOnly: combined.filter((r) => !r.inLibrary).length,
+      }
+    : null;
+
   return (
     <Card data-testid="spec-reconcile-panel">
       <CardHeader>
-        <CardTitle className="text-base">Saved Spec Sheets</CardTitle>
+        <CardTitle className="text-base flex items-center justify-between gap-2 flex-wrap">
+          <span>Spec Sheet Cross-Reference</span>
+          {!loading && sheets.length > 0 && (
+            <Button
+              size="sm"
+              onClick={handleCheckAll}
+              disabled={checkingAll || busyId !== null}
+              data-testid="button-check-all-specs"
+            >
+              {checkingAll ? "Checking…" : "Cross-reference all"}
+            </Button>
+          )}
+        </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Your two most recently imported spec sheets are saved here. Cross-reference one
-          against your current recipes to see whether the recipes still match the spec.
+          Your two most recently imported spec sheets are saved here. Cross-reference
+          all at once to see which recipes match the spec, or check a single sheet for
+          an AI-written plain-language summary.
         </p>
 
         {loading ? (
@@ -120,17 +239,18 @@ export default function SpecReconcilePanel() {
                 <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
-                    onClick={() => handleCheck(s.id)}
-                    disabled={busyId !== null}
+                    variant="outline"
+                    onClick={() => handleAiCheck(s.id)}
+                    disabled={busyId !== null || checkingAll}
                     data-testid={`button-check-spec-${s.id}`}
                   >
-                    {busyId === s.id ? "Checking…" : "Check against current recipes"}
+                    {busyId === s.id ? "Checking…" : "AI summary"}
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleDelete(s.id)}
-                    disabled={busyId !== null}
+                    disabled={busyId !== null || checkingAll}
                     data-testid={`button-delete-spec-${s.id}`}
                   >
                     Delete
@@ -141,29 +261,169 @@ export default function SpecReconcilePanel() {
           </div>
         )}
 
-        {resultError ? <p className="text-sm text-destructive">{resultError}</p> : null}
+        {resultError && <p className="text-sm text-destructive">{resultError}</p>}
 
-        {result ? (
-          <div className="space-y-3 rounded-md border border-border bg-muted/30 p-3" data-testid="spec-reconcile-result">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">Cross-reference result</span>
-              {result.discrepancies.length === 0 ? (
-                <Badge variant="secondary">Everything matches</Badge>
-              ) : (
+        {combined && summaryCounts && (
+          <div className="space-y-4 mt-2" data-testid="spec-reconcile-result">
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary">
+                {sheets.length} spec sheet{sheets.length !== 1 ? "s" : ""}
+              </Badge>
+              <Badge variant="secondary">
+                {summaryCounts.covered} recipe{summaryCounts.covered !== 1 ? "s" : ""} matched
+              </Badge>
+              {summaryCounts.issues > 0 && (
                 <Badge variant="destructive">
-                  {result.discrepancies.length} difference
-                  {result.discrepancies.length === 1 ? "" : "s"}
+                  {summaryCounts.issues} with issue{summaryCounts.issues !== 1 ? "s" : ""}
+                </Badge>
+              )}
+              {summaryCounts.uncovered > 0 && (
+                <Badge variant="outline">
+                  {summaryCounts.uncovered} not in any spec
+                </Badge>
+              )}
+              {summaryCounts.specOnly > 0 && (
+                <Badge variant="outline">
+                  {summaryCounts.specOnly} spec-only
+                </Badge>
+              )}
+              {summaryCounts.issues === 0 && summaryCounts.specOnly === 0 && summaryCounts.uncovered === 0 && (
+                <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                  All recipes match
                 </Badge>
               )}
             </div>
 
-            {result.summary ? (
-              <p className="whitespace-pre-wrap text-sm">{result.summary}</p>
-            ) : null}
+            {KIND_ORDER.map((kind) => {
+              const recipes = combined.filter((r) => r.kind === kind);
+              if (recipes.length === 0) return null;
+              return (
+                <div key={kind}>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                    {KIND_LABELS[kind]}
+                  </h4>
+                  <div className="space-y-1">
+                    {recipes.map((recipe) => {
+                      const key = `${recipe.kind}\0${recipe.name}`;
+                      const expanded = expandedKeys.has(key);
+                      const allDiscs = recipe.coverage.flatMap((c) => c.discrepancies);
+                      const status: "match" | "issues" | "uncovered" | "spec-only" =
+                        !recipe.inLibrary
+                          ? "spec-only"
+                          : recipe.coverage.length === 0
+                            ? "uncovered"
+                            : allDiscs.length > 0
+                              ? "issues"
+                              : "match";
+                      const canExpand = allDiscs.length > 0 || !recipe.inLibrary;
 
-            {result.discrepancies.length > 0 ? (
+                      return (
+                        <div key={key} className="rounded border border-border bg-card/50 overflow-hidden">
+                          <button
+                            type="button"
+                            className={`w-full flex items-center gap-2 px-3 py-2 text-left ${canExpand ? "cursor-pointer hover:bg-muted/30 transition-colors" : "cursor-default"}`}
+                            onClick={() => canExpand && toggleExpand(key)}
+                          >
+                            {status === "match" && (
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                            )}
+                            {status === "issues" && (
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                            )}
+                            {status === "uncovered" && (
+                              <MinusCircle className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                            )}
+                            {status === "spec-only" && (
+                              <XCircle className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                            )}
+                            <span className="flex-1 text-sm font-medium truncate">{recipe.name}</span>
+                            {recipe.coverage.length > 0 && (
+                              <span className="text-xs text-muted-foreground shrink-0">
+                                {recipe.coverage.length} sheet{recipe.coverage.length !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {status === "uncovered" && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1.5 shrink-0">
+                                Not in any spec
+                              </Badge>
+                            )}
+                            {status === "spec-only" && (
+                              <Badge variant="outline" className="text-[10px] py-0 px-1.5 shrink-0">
+                                Not in library
+                              </Badge>
+                            )}
+                            {status === "issues" && (
+                              <Badge variant="destructive" className="text-[10px] py-0 px-1.5 shrink-0">
+                                {allDiscs.length} diff{allDiscs.length !== 1 ? "s" : ""}
+                              </Badge>
+                            )}
+                            {canExpand && (
+                              expanded
+                                ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                                : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                            )}
+                          </button>
+
+                          {expanded && (
+                            <div className="px-3 pb-3 border-t border-border pt-2 space-y-2">
+                              {!recipe.inLibrary ? (
+                                <p className="text-xs text-muted-foreground">
+                                  This recipe appears on the spec sheet but isn't in your current recipe library.
+                                </p>
+                              ) : (
+                                recipe.coverage
+                                  .filter((c) => c.discrepancies.length > 0)
+                                  .map((cov) => (
+                                    <div key={cov.sheetId}>
+                                      {sheets.length > 1 && (
+                                        <p className="text-xs font-medium text-muted-foreground mb-1">
+                                          {cov.sheetLabel}:
+                                        </p>
+                                      )}
+                                      <ul className="space-y-0.5">
+                                        {cov.discrepancies.map((d, i) => (
+                                          <li key={i} className="text-xs text-muted-foreground">
+                                            — {d.message}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {aiResult && (
+          <div
+            className="space-y-3 rounded-md border border-border bg-muted/30 p-3"
+            data-testid="spec-reconcile-result"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium">AI summary</span>
+              {aiResult.discrepancies.length === 0 ? (
+                <Badge variant="secondary">Everything matches</Badge>
+              ) : (
+                <Badge variant="destructive">
+                  {aiResult.discrepancies.length} difference
+                  {aiResult.discrepancies.length === 1 ? "" : "s"}
+                </Badge>
+              )}
+            </div>
+            {aiResult.summary ? (
+              <p className="whitespace-pre-wrap text-sm">{aiResult.summary}</p>
+            ) : null}
+            {aiResult.discrepancies.length > 0 ? (
               <ul className="space-y-1">
-                {result.discrepancies.map((d, i) => (
+                {aiResult.discrepancies.map((d, i) => (
                   <li key={i} className="text-sm text-muted-foreground">
                     <span className="font-medium text-foreground">
                       {d.kind} · {d.recipeName}
@@ -179,7 +439,7 @@ export default function SpecReconcilePanel() {
               </p>
             )}
           </div>
-        ) : null}
+        )}
       </CardContent>
     </Card>
   );
