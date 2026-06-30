@@ -301,6 +301,7 @@ import {
   Snowflake,
   Blend,
   ClipboardCheck,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/AuthContext";
 import * as XLSX from "xlsx";
@@ -8381,6 +8382,16 @@ export default function Home() {
                     <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
                   </DropdownMenuItem>
                 )}
+                {(canManageStaff || canApproveResets) && (
+                  <DropdownMenuItem onClick={() => setActiveTab("staff")}>
+                    <Users className="w-4 h-4 mr-2" /> Staff roster
+                    {pendingResetCount > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center leading-none">
+                        {pendingResetCount}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                )}
                 {isSupervisor && (
                   <DropdownMenuItem onClick={() => { fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {}); setScheduleView("list"); setScheduleDeleteConfirm(null); setShowScheduleDialog(true); }}>
                     <CalendarPlus className="w-4 h-4 mr-2" /> Schedule
@@ -10302,6 +10313,17 @@ export default function Home() {
 
               <TabsContent value="quality">
                 <QualityHistoryTab />
+              </TabsContent>
+
+              <TabsContent value="staff">
+                <div className="space-y-4 pb-24">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Users className="w-5 h-5 text-primary" />
+                    <h2 className="text-lg font-bold">Staff Roster</h2>
+                  </div>
+                  <StaffRolesCard />
+                  <RolesManager />
+                </div>
               </TabsContent>
 
               <TabsList className="fixed bottom-0 left-0 right-0 z-50 grid grid-cols-6 w-full rounded-none border-t border-border bg-background/95 backdrop-blur-sm print:hidden" style={{paddingBottom: "env(safe-area-inset-bottom)"}}>
