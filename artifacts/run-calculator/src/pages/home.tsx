@@ -2346,6 +2346,9 @@ export default function Home() {
   // Bumped after a recipe/spec import so an effect can auto-run the merge check
   // (imported recipe ingredients can duplicate standalone individual ones).
   const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
+  // Bumped after a spec sheet import so SpecReconcilePanel auto-runs the
+  // cross-reference against the newly saved sheet.
+  const [specReconcileSignal, setSpecReconcileSignal] = useState(0);
   // True when the merge review was opened automatically by an import, so we can
   // show a one-line explainer of why the user landed here.
   const [mergeFromImport, setMergeFromImport] = useState(false);
@@ -5083,6 +5086,8 @@ export default function Home() {
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
       // have re-rendered. Never blocks or fails the already-committed import.
       if (importedRecipes) setMergeCheckRequest((c) => c + 1);
+      // Auto-run spec cross-reference with the newly saved sheet.
+      setSpecReconcileSignal((c) => c + 1);
     } catch (err) {
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
@@ -10303,7 +10308,7 @@ export default function Home() {
                   }
                 />
                 <div className="mt-3">
-                  <SpecReconcilePanel />
+                  <SpecReconcilePanel autoCheckSignal={specReconcileSignal} />
                 </div>
               </TabsContent>
 

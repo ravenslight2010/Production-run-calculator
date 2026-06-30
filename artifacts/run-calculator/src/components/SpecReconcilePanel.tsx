@@ -11,7 +11,7 @@
 // Mirrors the mobile section in artifacts/run-calculator-mobile/app/master-data.tsx
 // (replit.md parity).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,7 +100,9 @@ function buildCombinedView(sheets: SavedSpecSheet[], currentRecipes: ReconcileRe
 const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
 const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
 
-export default function SpecReconcilePanel() {
+type Props = { autoCheckSignal?: number };
+
+export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -112,6 +114,8 @@ export default function SpecReconcilePanel() {
   const [busyId, setBusyId] = useState<number | null>(null);
   const [aiResult, setAiResult] = useState<SpecReconcileResult | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+
+  const prevSignalRef = useRef(-1);
 
   async function refresh() {
     setLoading(true);
@@ -126,6 +130,34 @@ export default function SpecReconcilePanel() {
   }
 
   useEffect(() => { void refresh(); }, []);
+
+  // Auto-run cross-reference when triggered externally (e.g. after a spec sheet
+  // or recipe import). Re-fetches the sheet list first so the newly saved sheet
+  // is included, then immediately runs the deterministic diff.
+  useEffect(() => {
+    if (autoCheckSignal === 0) return;
+    if (autoCheckSignal === prevSignalRef.current) return;
+    prevSignalRef.current = autoCheckSignal;
+    void (async () => {
+      setLoading(true);
+      setListError(null);
+      setResultError(null);
+      setAiResult(null);
+      try {
+        const latest = await fetchSavedSpecSheets();
+        setSheets(latest);
+        if (latest.length > 0) {
+          const currentRecipes = loadCurrentReconcileRecipes();
+          setCombined(buildCombinedView(latest, currentRecipes));
+          setExpandedKeys(new Set());
+        }
+      } catch {
+        setListError("Couldn't load saved spec sheets.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [autoCheckSignal]);
 
   function handleCheckAll() {
     setCheckingAll(true);

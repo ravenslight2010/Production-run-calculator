@@ -1015,6 +1015,9 @@ export default function MasterDataScreen() {
   const [reconError, setReconError] = useState<string | null>(null);
   const [reconAllEntries, setReconAllEntries] = useState<MobileRecipeEntry[] | null>(null);
   const [reconAllBusy, setReconAllBusy] = useState(false);
+  // Bumped after a spec sheet import to auto-run the cross-reference.
+  const [reconSignal, setReconSignal] = useState(0);
+  const prevReconSignalRef = useRef(0);
 
   const refreshSavedSheets = useCallback(async () => {
     setSheetsLoading(true);
@@ -1030,6 +1033,43 @@ export default function MasterDataScreen() {
   useEffect(() => {
     void refreshSavedSheets();
   }, [refreshSavedSheets]);
+
+  // Auto-run cross-reference when signal bumps (e.g. after spec sheet import).
+  // Re-fetches the sheet list first so the newly saved sheet is included.
+  useEffect(() => {
+    if (reconSignal === 0) return;
+    if (reconSignal === prevReconSignalRef.current) return;
+    prevReconSignalRef.current = reconSignal;
+    void (async () => {
+      setSheetsLoading(true);
+      try {
+        const latest = await fetchSavedSpecSheets();
+        setSavedSheets(latest);
+        if (latest.length > 0) {
+          setReconAllBusy(true);
+          setReconAllEntries(null);
+          setReconResult(null);
+          setReconError(null);
+          try {
+            const currentRecipes = presetMapsToReconcileRecipes({
+              dough: doughRecipePresets,
+              sauce: frontlineRecipePresets,
+              cheese: cheeseRecipePresets,
+            });
+            setReconAllEntries(buildMobileCombinedView(latest, currentRecipes));
+          } catch {
+            setReconError("Couldn't build cross-reference. Please try again.");
+          } finally {
+            setReconAllBusy(false);
+          }
+        }
+      } catch {
+        // best-effort; leave list as-is
+      } finally {
+        setSheetsLoading(false);
+      }
+    })();
+  }, [reconSignal, doughRecipePresets, frontlineRecipePresets, cheeseRecipePresets]);
 
   async function handleCheckSheet(id: number) {
     setSheetBusyId(id);
