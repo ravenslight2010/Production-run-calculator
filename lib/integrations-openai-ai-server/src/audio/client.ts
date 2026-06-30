@@ -6,22 +6,21 @@ import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+const apiKey =
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
+
+if (!apiKey) {
   throw new Error(
-    "AI_INTEGRATIONS_OPENAI_BASE_URL must be set. Did you forget to provision the OpenAI AI integration?",
+    "OPENAI_API_KEY must be set. Please add your OpenAI API key to Secrets.",
   );
 }
 
-if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
-  throw new Error(
-    "AI_INTEGRATIONS_OPENAI_API_KEY must be set. Did you forget to provision the OpenAI AI integration?",
-  );
+const _audioClientOptions: ConstructorParameters<typeof OpenAI>[0] = { apiKey };
+if (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
+  _audioClientOptions.baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
 }
 
-export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+export const openai = new OpenAI(_audioClientOptions);
 
 export type AudioFormat = "wav" | "mp3" | "webm" | "mp4" | "ogg" | "unknown";
 
