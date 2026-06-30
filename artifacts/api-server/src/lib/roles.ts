@@ -183,10 +183,20 @@ export type StaffMember = {
   sandboxStale: boolean;
 };
 
-// Whether anyone currently holds manage-staff. Used for the bootstrap rule
-// (first user becomes the admin) and for the last-admin guards.
+// Whether any NON-SANDBOX user currently holds manage-staff. Used for the
+// bootstrap rule (first real user becomes manager) and last-admin guards.
+// The sandbox account is always a manager but must never count as the
+// "already have an admin" signal — otherwise the first real user can never
+// become manager on a fresh database.
 async function manageStaffHolders(): Promise<string[]> {
-  return userIdsWithCapability("manage-staff");
+  const all = await userIdsWithCapability("manage-staff");
+  if (all.length === 0) return [];
+  const rows = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.sandbox, false));
+  const nonSandboxIds = new Set(rows.map((r) => r.id));
+  return all.filter((id) => nonSandboxIds.has(id));
 }
 
 // Resolve the current user's role, creating their row on first sight.
