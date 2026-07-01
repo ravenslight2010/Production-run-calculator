@@ -1,7 +1,22 @@
 ---
 name: AI model routing + chat streaming
-description: pickModel cost/latency routing, SSE streaming for chat AI routes, and the test-mock gotcha it introduced.
+description: pickModel cost/latency routing, the Google Gemini provider adapter, SSE streaming for chat AI routes, and the test-mock gotcha it introduced.
 ---
+
+# AI provider = Google Gemini via Replit AI Integration
+
+The AI provider is **Google Gemini** (Replit-managed AI Integration, no user API key), NOT OpenAI. `@workspace/integrations-openai-ai-server` keeps its historical name but its `openai` export is a thin **adapter** (`src/client.ts`) that preserves the `openai.chat.completions.create({model, messages, response_format, max_completion_tokens, stream?})` surface so the ~30 call sites stay unchanged, while calling `@google/genai` (`GoogleGenAI.models.generateContent` / `generateContentStream`) underneath.
+
+**Why:** OpenAI quota ran out; the user chose Gemini. modelfarm does **NOT** support the OpenAI-compatible `/chat/completions` path (returns 400 "not supported") — you must use the native `@google/genai` SDK.
+
+**How to apply (sharp edges):**
+- Construct: `new GoogleGenAI({ apiKey: AI_INTEGRATIONS_GEMINI_API_KEY, httpOptions: { apiVersion: "", baseUrl: AI_INTEGRATIONS_GEMINI_BASE_URL } })`. Both env vars are auto-provisioned by the integration (present in workflow/bash shells, NOT in the code_execution sandbox / viewEnvVars).
+- Adapter mapping lives in `src/client.ts` (read it before editing). Non-obvious bits: OpenAI `system` role → Gemini `config.systemInstruction` (Gemini has no system role in `contents`); `assistant` role → `model`; `response_format:{type:"json_object"}` → `config.responseMimeType="application/json"`; vision `image_url` must be a base64 **data URI** (mapped to `inlineData`), plain URLs are not fetched. Content can be `null` — return/normalize `resp.text ?? null` and skip null stream chunks.
+- **Thinking-token starvation:** Gemini "thinking" models draw thoughts from the SAME `maxOutputTokens` pool, so a small budget returns EMPTY visible text (early probes saw `undefined`). The adapter sets `thinkingConfig:{thinkingBudget:0}` on every call — disables thinking, guarantees output within any budget, lowers latency. Right call for this extraction/classification/advisory app; revisit only if a task needs deep reasoning.
+- **Build externalizes `@google/*`** (`artifacts/api-server/build.mjs`), so the bundled `dist/index.mjs` imports it at runtime. `@google/genai` MUST be a **direct dependency of `artifacts/api-server`** (not only the lib) or node fails with ERR_MODULE_NOT_FOUND. (The old `openai` pkg was bundled, not external, which is why it needed no such dep.)
+- Installing `@google/genai` briefly created a `gaxios_tmp_*` dir in the pnpm store; Metro's file watcher crashed on it mid-install (mobile expo workflow). Transient — a restart after install clears it.
+- Models: both tiers = `gemini-2.5-flash` (stable, reliably honors JSON mode + vision + streaming). Preview/pro models also work but need a larger budget and add a harmless `thoughtSignature` on parts.
+- Image gen (`generateImageBuffer`/`editImages`) is stubbed to throw (unused, not supported here); the `audio` submodule was deleted.
 
 # AI model routing (`pickModel`)
 

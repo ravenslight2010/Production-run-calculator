@@ -1,61 +1,23 @@
-import fs from "node:fs";
-import OpenAI, { toFile } from "openai";
-import { Buffer } from "node:buffer";
+import type { Buffer } from "node:buffer";
 
-const apiKey =
-  process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY;
-
-if (!apiKey) {
-  throw new Error(
-    "OPENAI_API_KEY must be set. Please add your OpenAI API key to Secrets.",
-  );
-}
-
-const _imageClientOptions: ConstructorParameters<typeof OpenAI>[0] = { apiKey };
-if (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL) {
-  _imageClientOptions.baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-}
-
-export const openai = new OpenAI(_imageClientOptions);
+// Image generation/editing is not wired to any route in this app and is not
+// supported through the Gemini AI integration used here. These stubs preserve
+// the export surface (so nothing that imports them fails to compile) while
+// failing loudly if they are ever actually called.
+const UNSUPPORTED =
+  "Image generation is not supported in this project (Gemini AI integration).";
 
 export async function generateImageBuffer(
-  prompt: string,
-  size: "1024x1024" | "512x512" | "256x256" = "1024x1024"
+  _prompt: string,
+  _size: "1024x1024" | "512x512" | "256x256" = "1024x1024",
 ): Promise<Buffer> {
-  const response = await openai.images.generate({
-    model: "gpt-image-1",
-    prompt,
-    size,
-  });
-  const base64 = response.data?.[0]?.b64_json ?? "";
-  return Buffer.from(base64, "base64");
+  throw new Error(UNSUPPORTED);
 }
 
 export async function editImages(
-  imageFiles: string[],
-  prompt: string,
-  outputPath?: string
+  _imageFiles: string[],
+  _prompt: string,
+  _outputPath?: string,
 ): Promise<Buffer> {
-  const images = await Promise.all(
-    imageFiles.map((file) =>
-      toFile(fs.createReadStream(file), file, {
-        type: "image/png",
-      })
-    )
-  );
-
-  const response = await openai.images.edit({
-    model: "gpt-image-1",
-    image: images,
-    prompt,
-  });
-
-  const imageBase64 = response.data?.[0]?.b64_json ?? "";
-  const imageBytes = Buffer.from(imageBase64, "base64");
-
-  if (outputPath) {
-    fs.writeFileSync(outputPath, imageBytes);
-  }
-
-  return imageBytes;
+  throw new Error(UNSUPPORTED);
 }
