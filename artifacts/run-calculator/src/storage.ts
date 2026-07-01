@@ -61,6 +61,12 @@ import {
   mergeRecipePresetMap,
 } from "./mergeIngredients";
 import {
+  type RecipeNameMergeCategory,
+  RECIPE_NAME_FIELDS_BY_CATEGORY,
+  mergeRecipeNameSettingsObject,
+  foldPresetKeys,
+} from "./mergeRecipeNames";
+import {
   SPEC_BRANDS,
   SPEC_BRAND_FLAVORS,
   SPEC_APP_TYPES,
@@ -753,6 +759,129 @@ export function applyIngredientMerge(map: MergeMap): void {
       }
     } catch {}
   }
+}
+
+// Per-category storage wiring for a RECIPE-NAME merge (see ./mergeRecipeNames).
+// Each category owns a name list, a deletion-tombstone namespace, and (except
+// mixes, whose presets are code-defined factory seeds) a recipe-preset map whose
+// KEYS are the recipe names.
+const RECIPE_NAME_MERGE_STORE: Record<
+  RecipeNameMergeCategory,
+  {
+    listKey: string;
+    namespace: string;
+    loadPresets?: () => Record<string, unknown>;
+    savePresets?: (p: Record<string, unknown>) => void;
+  }
+> = {
+  dough: {
+    listKey: DOUGH_RECIPE_NAMES_KEY,
+    namespace: "doughRecipeNames",
+    loadPresets: () => loadDoughRecipePresets() as unknown as Record<string, unknown>,
+    savePresets: (p) => saveDoughRecipePresets(p as unknown as Record<string, DoughRecipePreset>),
+  },
+  sauce: {
+    listKey: FRONTLINE_RECIPE_NAMES_KEY,
+    namespace: "frontlineRecipeNames",
+    loadPresets: () => loadFrontlineRecipePresets() as unknown as Record<string, unknown>,
+    savePresets: (p) => saveFrontlineRecipePresets(p as unknown as Record<string, RecipeRow[]>),
+  },
+  cheese: {
+    listKey: CHEESE_RECIPE_NAMES_KEY,
+    namespace: "cheeseRecipeNames",
+    loadPresets: () => loadCheeseRecipePresets() as unknown as Record<string, unknown>,
+    savePresets: (p) => saveCheeseRecipePresets(p as unknown as Record<string, RecipeRow[]>),
+  },
+  // Mixes have no editable preset store (factory MIX_SEED) and no per-run
+  // selection field, so a mix merge only folds the name list + tombstones.
+  mixes: { listKey: MIX_RECIPE_NAMES_KEY, namespace: "mixRecipeNames" },
+};
+
+// Persist a user-driven RECIPE-NAME merge across every localStorage surface:
+// the category's name list, its recipe-preset map keys, and the recipe-name
+// selection fields on per-run values, brand/crust profiles, templates, and
+// history. Deletion tombstones stop the additive live-sync union from
+// resurrecting the merged-away names. Pure rewriting lives in ./mergeRecipeNames;
+// this only wires it to storage. Callers refresh React state (refreshAfterMerge)
+// so the merged data shows immediately and the sync push carries it.
+// Returns the ids of the runs whose per-run values were actually changed, so the
+// caller can advance their `runValuesUpdatedAt` stamps — otherwise a stale remote
+// sync payload (carrying the pre-merge recipe-name selection at an equal/newer
+// stamp) could overwrite the merged value on the next pull.
+export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: MergeMap): string[] {
+  if (typeof localStorage === "undefined") return [];
+  if (Object.keys(map).length === 0) return [];
+  const store = RECIPE_NAME_MERGE_STORE[category];
+  const fields = RECIPE_NAME_FIELDS_BY_CATEGORY[category];
+  // Tombstone the merged-away source names (never a target that maps to itself)
+  // so the additive sync list-union can't bring them back from a stale peer.
+  const targets = new Set(Object.values(map).map((t) => t.trim().toLowerCase()));
+  const sources = Object.keys(map).filter((s) => !targets.has(s.trim().toLowerCase()));
+  for (const s of sources) tombstoneDeleted(store.namespace, s);
+  // ── Name list ──
+  if (localStorage.getItem(store.listKey) !== null) {
+    const merged = mergeListNames(loadList(store.listKey, []), map).sort((a, b) => a.localeCompare(b));
+    saveList(store.listKey, merged);
+  }
+  // ── Recipe presets (fold KEYS; target's rows win) ──
+  if (store.loadPresets && store.savePresets) {
+    try {
+      store.savePresets(foldPresetKeys(store.loadPresets(), map));
+    } catch {}
+  }
+  // Mixes have no selection field, so no settings-object rewriting is needed.
+  if (fields.length === 0) return [];
+  const rewrite = <T extends Record<string, unknown>>(obj: T) =>
+    mergeRecipeNameSettingsObject(obj, map, fields);
+  // ── Templates ──
+  try {
+    const templates = loadTemplates().map((t) =>
+      t.values ? { ...t, values: rewrite(t.values as unknown as Record<string, unknown>) as unknown as typeof t.values } : t,
+    );
+    saveTemplates(templates);
+  } catch {}
+  // ── History ──
+  try {
+    const history = loadHistory().map((day) => ({
+      ...day,
+      runValues: Object.fromEntries(
+        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
+          id,
+          rewrite(vals as unknown as Record<string, unknown>) as unknown as FormValues,
+        ]),
+      ),
+    }));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+  // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
+  const runPrefix = RUN_KEY("");
+  const keysToRewrite: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
+      keysToRewrite.push(k);
+    }
+  }
+  const affectedRunIds: string[] = [];
+  for (const k of keysToRewrite) {
+    try {
+      const raw = localStorage.getItem(k) ?? "null";
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") {
+        const next = JSON.stringify(rewrite(obj as Record<string, unknown>));
+        if (next !== raw) {
+          localStorage.setItem(k, next);
+          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+        }
+      }
+    } catch {}
+  }
+  return affectedRunIds;
 }
 
 // ── Master-data change history (local-only undo trail) ──────────────────────

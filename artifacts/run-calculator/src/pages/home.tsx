@@ -104,6 +104,7 @@ import {
   applySauceSpecsSeedIfNeeded,
   applyCheeseSpecsSeedIfNeeded,
   applyIngredientMerge,
+  applyRecipeNameMerge,
   loadMergedAway,
   saveMergedAway,
   dropMergedAway,
@@ -201,6 +202,11 @@ import {
   mapName,
   type MergeMap,
 } from "../mergeIngredients";
+import {
+  type RecipeNameMergeCategory,
+  RECIPE_NAME_FIELDS_BY_CATEGORY,
+  countRecipeNameReferences,
+} from "../mergeRecipeNames";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
   ALLERGENS,
@@ -2453,18 +2459,35 @@ export default function Home() {
   // flavors (flavors mode).
   const mergeUniverse = useMemo(() => {
     switch (mergeCategory) {
-      case "mixes": return dedupSorted(mixIngredients);
-      case "dough": return dedupSorted(doughIngredients);
-      case "sauce": return dedupSorted(frontlineIngredients);
-      case "cheese": return dedupSorted(cheeseIngredients);
+      // The four recipe categories merge that category's RECIPE NAMES (the
+      // picklist labels), not ingredient names. Mixes offers only user-added
+      // names as sources — factory-preset mix names can't be merged away (the
+      // seed would re-add them); a factory name is still a valid TARGET (typed
+      // or picked from the datalist, which unions in the presets below).
+      case "mixes": return dedupSorted(mixRecipeNames);
+      case "dough": return dedupSorted(doughRecipeNames);
+      case "sauce": return dedupSorted(frontlineRecipeNames);
+      case "cheese": return dedupSorted(cheeseRecipeNames);
       case "brandflavor":
         return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
       case "ingredients":
-      default:
-        return dedupSorted([...ingredientTypes, ...pepTypes]);
+      default: {
+        // Individual + pep ingredient names, MINUS any name that is a recipe
+        // name in another category (those are merged on their own tabs), so the
+        // Ingredients tab stays real-ingredient-only.
+        const recipeNameSet = new Set(
+          [...doughRecipeNames, ...frontlineRecipeNames, ...cheeseRecipeNames, ...allMixRecipeOptions]
+            .map((n) => n.toLowerCase()),
+        );
+        return dedupSorted([...ingredientTypes, ...pepTypes].filter((n) => !recipeNameSet.has(n.toLowerCase())));
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, mixIngredients, doughIngredients, frontlineIngredients, cheeseIngredients]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, cheeseRecipeNames, mixRecipeNames, allMixRecipeOptions]);
+
+  // Recipe categories are merged by recipe NAME (not ingredient name).
+  const isRecipeNameCategory =
+    mergeCategory === "dough" || mergeCategory === "sauce" || mergeCategory === "cheese" || mergeCategory === "mixes";
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -2482,6 +2505,15 @@ export default function Home() {
       .sort((a, b) => b.s - a.s || a.i - b.i)
       .map((x) => x.name);
   }, [mergeUniverse, mergeSources, mergeTarget]);
+
+  // Target picklist. For mixes it unions the factory-preset names so a user-added
+  // duplicate can be folded into a canonical factory recipe name; otherwise it's
+  // the ranked category universe.
+  const mergeTargetOptions = useMemo(
+    () => (mergeCategory === "mixes" ? dedupSorted(allMixRecipeOptions) : mergeUniverseRanked),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mergeCategory, allMixRecipeOptions, mergeUniverseRanked],
+  );
 
   // Gather every value surface a merge would touch, so the confirmation preview
   // can count affected references. Mirrors buildSyncPayload's localStorage scan.
@@ -2525,12 +2557,40 @@ export default function Home() {
     return { lists, settingsObjects, presetMaps };
   }
 
+  // Recipe-name preview surfaces: the category's name list, the settings objects
+  // (runs/profiles/templates/history) whose recipe-name selection fields get
+  // re-pointed, and the category's recipe-preset map (its KEYS get folded).
+  function collectRecipeNameSurfaces(category: RecipeNameMergeCategory) {
+    const listMap: Record<RecipeNameMergeCategory, string[]> = {
+      dough: doughRecipeNames,
+      sauce: frontlineRecipeNames,
+      cheese: cheeseRecipeNames,
+      mixes: mixRecipeNames,
+    };
+    const { settingsObjects } = collectMergeSurfaces();
+    const presetKeyMaps: Record<string, unknown>[] =
+      category === "dough" ? [loadDoughRecipePresets()]
+      : category === "sauce" ? [loadFrontlineRecipePresets()]
+      : category === "cheese" ? [loadCheeseRecipePresets()]
+      : [];
+    return { lists: [listMap[category]], settingsObjects, presetKeyMaps };
+  }
+
   const mergeMap: MergeMap = buildMergeMap(mergeSources, mergeTarget);
   const mergePreviewCount = useMemo(() => {
     if (Object.keys(mergeMap).length === 0) return 0;
-    try { return countMergeReferences(mergeMap, collectMergeSurfaces()); } catch { return 0; }
+    try {
+      if (isRecipeNameCategory) {
+        return countRecipeNameReferences(
+          mergeMap,
+          RECIPE_NAME_FIELDS_BY_CATEGORY[mergeCategory as RecipeNameMergeCategory],
+          collectRecipeNameSurfaces(mergeCategory as RecipeNameMergeCategory),
+        );
+      }
+      return countMergeReferences(mergeMap, collectMergeSurfaces());
+    } catch { return 0; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeSources, mergeTarget]);
+  }, [mergeSources, mergeTarget, mergeCategory]);
 
   function toggleMergeSource(name: string) {
     setMergeError("");
@@ -2899,9 +2959,81 @@ export default function Home() {
     }
   }
 
+  // Merge one or more source RECIPE NAMES into a target within a single category
+  // (dough/sauce/cheese/mixes). Unlike an ingredient merge this touches no
+  // inventory — it only re-points recipe-name selection fields, folds the name
+  // list + recipe presets, and tombstones the merged-away names. Mirrors
+  // handleApplyMerge's snapshot → rewrite → refresh → push → note flow.
+  async function handleApplyRecipeNameMerge(category: RecipeNameMergeCategory): Promise<boolean> {
+    // Guardrail: on the Mixes tab only user-added names are mergeable away —
+    // factory-preset mix names would be re-seeded, so silently drop them.
+    const rawSources = category === "mixes"
+      ? mergeSources.filter((s) => mixRecipeNames.includes(s))
+      : mergeSources;
+    const map = buildMergeMap(rawSources, mergeTarget);
+    if (Object.keys(map).length === 0) {
+      setMergeError(
+        category === "mixes" && mergeSources.length > 0
+          ? "Factory mix recipes can't be merged away — pick a user-added recipe as the source."
+          : "Pick at least one source and a different target.",
+      );
+      return false;
+    }
+    setMergeBusy(true);
+    setMergeError("");
+    const before = captureMasterDataSnapshot();
+    try {
+      // Rewrite every localStorage surface, then refresh React state in place so
+      // the merged data shows immediately and the sync push carries it.
+      const affectedRunIds = applyRecipeNameMerge(category, map);
+      // Advance the edit stamp on every run the merge re-pointed, so the push
+      // below strictly wins the per-run lost-update guard on the server and every
+      // peer. Without this, a stale remote payload carrying the pre-merge recipe
+      // name at an equal/older stamp (common for unedited/imported runs at ts 0)
+      // could overwrite the merged selection on the next sync pull.
+      if (affectedRunIds.length > 0) {
+        const stamp = Date.now();
+        const upd = loadRunValuesUpdated();
+        for (const id of affectedRunIds) upd[id] = stamp;
+        saveRunValuesUpdated(upd);
+      }
+      refreshAfterMerge();
+      // Push the merged payload (with its deletion tombstones) immediately so an
+      // incoming sync-pull's additive union can't re-add the merged-away names.
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {
+        // Non-fatal: tombstones are persisted locally.
+      }
+      resetMergeForm();
+      const label =
+        category === "mixes" ? "mix" : category === "sauce" ? "sauce" : category;
+      noteChange(
+        "merge",
+        `Merged ${label} recipe ${Object.keys(map).map((s) => `"${s}"`).join(", ")} into "${mergeTarget.trim()}"`,
+        before,
+      );
+      setMergeBusy(false);
+      return true;
+    } catch (e) {
+      setMergeBusy(false);
+      setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+      return false;
+    }
+  }
+
   // Route the confirm button to the right merge path for the active category.
   function handleConfirmMerge(): Promise<boolean> {
-    return mergeCategory === "brandflavor" ? handleApplyBrandFlavorMerge() : handleApplyMerge();
+    if (mergeCategory === "brandflavor") return handleApplyBrandFlavorMerge();
+    if (isRecipeNameCategory) return handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory);
+    return handleApplyMerge();
   }
 
   // Switch the merge category, clearing the picker + any open AI suggestions so
@@ -3513,17 +3645,28 @@ export default function Home() {
       mergeList(CHEESE_RECIPE_NAMES_KEY, [], payload.cheeseRecipeNames, setCheeseRecipeNames, "cheeseRecipeNames");
 
       // ── Recipe presets (remote wins for same name, local-only kept) ──
+      // Presets are keyed by recipe name, so a recipe-name merge folds keys away
+      // and tombstones them under the category namespace. Drop any key tombstoned
+      // there before/after the union, or a stale remote payload resurrects the
+      // folded-away recipe-name preset key (mirrors the list dropDeleted guard).
+      const dropTombstonedPresetKeys = <V,>(obj: Record<string, V>, namespace: string): Record<string, V> => {
+        const kept = dropDeleted(Object.keys(obj), deletedMap, namespace);
+        const keptSet = new Set(kept);
+        const out: Record<string, V> = {};
+        for (const [k, v] of Object.entries(obj)) if (keptSet.has(k)) out[k] = v;
+        return out;
+      };
       if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
         const merged = { ...loadDoughRecipePresets(), ...payload.doughRecipePresets };
-        saveDoughRecipePresets(merged);
+        saveDoughRecipePresets(dropTombstonedPresetKeys(merged, "doughRecipeNames"));
       }
       if (payload.frontlineRecipePresets && Object.keys(payload.frontlineRecipePresets).length > 0) {
         const merged = { ...loadFrontlineRecipePresets(), ...payload.frontlineRecipePresets };
-        saveFrontlineRecipePresets(merged);
+        saveFrontlineRecipePresets(dropTombstonedPresetKeys(merged, "frontlineRecipeNames"));
       }
       if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
         const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
-        saveCheeseRecipePresets(merged);
+        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, "cheeseRecipeNames"));
       }
 
       // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
@@ -7677,13 +7820,16 @@ export default function Home() {
                         ? (mergeBfMode === "brands"
                           ? "Combine duplicate brands into one. Pick the brand(s) to merge away, then the one to keep — their flavors are folded together and today's runs are re-pointed. This can't be undone."
                           : "Combine duplicate flavors within a brand. Pick the flavor(s) to merge away, then the one to keep — today's runs are re-pointed. This can't be undone.")
+                        : isRecipeNameCategory
+                        ? "Combine duplicate recipe names in this category into one. Pick the recipe name(s) to merge away (sources), then the one to keep (target). Their recipe presets are folded and today's runs are re-pointed to the kept recipe. This can't be undone."
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
                     </p>
 
                     {/* AI + learned-memory suggestions: scan the whole (cross-
-                        category) list for duplicate groups. Hidden on the
-                        brand/flavor tab, which has no learned-alias path. */}
-                    {mergeCategory !== "brandflavor" && mergeFullUniverse.length > 0 && (
+                        category) ingredient list for duplicate groups. Only shown
+                        on the Ingredients tab — the recipe-name and brand/flavor
+                        tabs merge different data with no learned-alias path. */}
+                    {mergeCategory === "ingredients" && mergeFullUniverse.length > 0 && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -7760,10 +7906,10 @@ export default function Home() {
                           ? (mergeBfMode === "brands"
                             ? "No brands to merge yet."
                             : (mergeBfBrand ? `No flavors for ${mergeBfBrand} to merge yet.` : "Pick a brand to see its flavors."))
-                          : mergeCategory === "mixes" ? "No mix ingredients to merge yet."
-                          : mergeCategory === "dough" ? "No dough ingredients to merge yet."
-                          : mergeCategory === "sauce" ? "No sauce ingredients to merge yet."
-                          : mergeCategory === "cheese" ? "No cheese-mix ingredients to merge yet."
+                          : mergeCategory === "mixes" ? "No user-added mix recipe names to merge yet."
+                          : mergeCategory === "dough" ? "No dough recipe names to merge yet."
+                          : mergeCategory === "sauce" ? "No sauce recipe names to merge yet."
+                          : mergeCategory === "cheese" ? "No cheese recipe names to merge yet."
                           : "No ingredients to merge yet."}
                       </p>
                     ) : (
@@ -7802,11 +7948,11 @@ export default function Home() {
                             value={mergeTarget}
                             disabled={mergeBusy}
                             onChange={e => { setMergeTarget(e.target.value); setMergeConfirming(false); setMergeError(""); }}
-                            placeholder="Type or pick the ingredient to keep…"
+                            placeholder={isRecipeNameCategory ? "Type or pick the recipe name to keep…" : "Type or pick the ingredient to keep…"}
                             className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                           />
                           <datalist id="merge-target-options">
-                            {mergeUniverseRanked.map(name => <option key={name} value={name} />)}
+                            {mergeTargetOptions.map(name => <option key={name} value={name} />)}
                           </datalist>
                         </div>
 
@@ -7828,6 +7974,8 @@ export default function Home() {
                                 ? (mergeBfMode === "brands"
                                   ? "Their flavors are folded together and today's runs are re-pointed to the kept brand."
                                   : "Today's runs are re-pointed to the kept flavor.")
+                                : isRecipeNameCategory
+                                ? `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Recipe presets are folded into the kept recipe name.`
                                 : `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Inventory stock for merged items folds into the target.`}
                             </p>
                           </div>

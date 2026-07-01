@@ -8,6 +8,30 @@ description: The Merge section's 6-tab category selector (web+mobile) — scopin
 The Merge manager offers 6 category tabs — Ingredients, Mixes, Dough, Sauce,
 Cheese mixes, Brand/Flavor — so a manual merge stays within one master-data group.
 
+## WEB: category tabs merge RECIPE NAMES, Ingredients tab merges ingredients
+(Web-only during the parity pause; see `.local/parity-pause-log.md`. Mobile still
+merges ingredient names on every tab.)
+- **Mixes/Dough/Sauce/Cheese** tabs merge that category's **recipe NAMES** (the
+  named recipe presets), NOT ingredient names. **Ingredients** tab merges only real
+  ingredients, EXCLUDING any name that is a recipe name in another category.
+- Recipe-name merge path is separate from the ingredient path: pure logic in
+  `src/mergeRecipeNames.ts` (`RECIPE_NAME_FIELDS_BY_CATEGORY`: dough→`doughRecipeName`,
+  sauce→`frontlineRecipeName`, cheese→`app1-4CheeseRecipeName`, mixes→none;
+  `foldPresetKeys` folds preset map KEYS with target's rows winning); storage glue in
+  `applyRecipeNameMerge` (tombstones + list/preset fold + re-points selection fields);
+  dispatch `handleConfirmMerge` → `handleApplyRecipeNameMerge`. NO inventory fold, NO
+  alias/correction learning (unlike the ingredient path). Mixes = list+tombstone only.
+- **Mixes guardrail:** only user-added mix recipe names are mergeable away (factory
+  MIX_SEED names would be re-seeded); `handleApplyRecipeNameMerge` filters sources.
+- **Sync-race guards (the two easy-to-miss ones):** (1) `applyRecipeNameMerge` returns
+  the ids of runs it re-pointed; the caller MUST bump `runValuesUpdatedAt` for exactly
+  those before the sync push, or a stale remote at an equal/older stamp overwrites the
+  merge. (2) The dough/frontline/cheese preset union on sync-receive MUST filter
+  tombstoned keys (`dropTombstonedPresetKeys`), or a stale peer resurrects the
+  folded-away recipe-name preset. Selection-field re-pointing alone is not enough.
+- **AI "Suggested merges"** shown only on the Ingredients tab (recipe-name tabs have
+  no learned-alias path).
+
 ## Two universes, don't conflate them
 - **Full universe** (`mergeFullUniverse` web / `fullUniverse` mobile): every
   mergeable ingredient list unioned. Used by the AI "Suggested merges" scan, the
