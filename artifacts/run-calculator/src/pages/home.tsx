@@ -2477,10 +2477,18 @@ export default function Home() {
       default: {
         // Individual + pep ingredient names, MINUS any name that is a recipe
         // name in another category (those are merged on their own tabs), so the
-        // Ingredients tab stays real-ingredient-only.
+        // Ingredients tab stays real-ingredient-only. The mix set must be the
+        // FULL mix-name universe (every factory MIX_SEED name + user-added),
+        // NOT `allMixRecipeOptions` — that one is scoped to the current run's
+        // brand/flavor, so mix names for other brands/flavors would leak in.
         const recipeNameSet = new Set(
-          [...doughRecipeNames, ...frontlineRecipeNames, ...cheeseRecipeNames, ...allMixRecipeOptions]
-            .map((n) => n.toLowerCase()),
+          [
+            ...doughRecipeNames,
+            ...frontlineRecipeNames,
+            ...cheeseRecipeNames,
+            ...MIX_SEED.mixRecipeNames,
+            ...mixRecipeNames,
+          ].map((n) => n.toLowerCase()),
         );
         return dedupSorted([...ingredientTypes, ...pepTypes].filter((n) => !recipeNameSet.has(n.toLowerCase())));
       }
