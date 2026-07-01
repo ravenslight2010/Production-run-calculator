@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   validateMatchImportBody,
   sanitizeMatchImport,
+  conflictingProductLine,
   type MatchImportInput,
 } from "./aiMatchImport";
 
@@ -104,5 +105,95 @@ describe("sanitizeMatchImport extra-domain canonicalization", () => {
     );
     expect(out.appTypeMatches).toEqual([]);
     expect(out.pepTypeMatches).toEqual([]);
+  });
+});
+
+describe("conflictingProductLine", () => {
+  it("treats two different product-line qualifiers as a conflict", () => {
+    expect(
+      conflictingProductLine("Basha's Ultra Thin Crust Pizzas", "Basha's Original Pizzas"),
+    ).toBe(true);
+  });
+
+  it("treats a qualified brand vs a bare company brand as a conflict", () => {
+    expect(conflictingProductLine("Basha's Original", "Basha")).toBe(true);
+    expect(conflictingProductLine("Basha's Ultra Thin Crust", "Basha")).toBe(true);
+  });
+
+  it("allows typo/case/word-order variants of the SAME product line", () => {
+    expect(conflictingProductLine("Bashas Original Pizzas", "Basha's Original Pizzas")).toBe(false);
+    expect(conflictingProductLine("BASHA", "Basha")).toBe(false);
+  });
+
+  // The lexicon can't list every qualifier; the structural check must still catch
+  // distinct sibling lines that use words not in PRODUCT_LINE_QUALIFIERS.
+  it("catches unlisted qualifiers via the structural (dictionary-free) check", () => {
+    expect(conflictingProductLine("Basha's Stone Fired", "Basha's Artisan")).toBe(true);
+    expect(conflictingProductLine("Basha's Cauliflower Crust", "Basha")).toBe(true);
+  });
+
+  it("ignores generic suffix words (Pizzas / Foods / Co) when comparing", () => {
+    expect(conflictingProductLine("Basha Foods", "Basha")).toBe(false);
+    expect(conflictingProductLine("Basha Pizzas", "Basha Co")).toBe(false);
+  });
+
+  it("does not flag a company-name typo (differing FIRST token) as a line split", () => {
+    expect(conflictingProductLine("Bashas Stone Fired", "Basha Stone Fired")).toBe(false);
+  });
+});
+
+describe("sanitizeMatchImport brand product-line guard", () => {
+  // The reported bug: a second spec sheet ("Ultra Thin Crust") folded onto the
+  // saved "Original" brand, so both product lines collapsed into one.
+  it("drops a brand fold across different product lines", () => {
+    const out = sanitizeMatchImport(
+      {
+        brandMatches: [
+          {
+            candidate: "Basha's Ultra Thin Crust Pizzas",
+            match: "Basha's Original Pizzas",
+          },
+        ],
+      },
+      input({
+        brands: ["Basha's Original Pizzas"],
+        brandFlavors: {},
+        unmatchedBrands: ["Basha's Ultra Thin Crust Pizzas"],
+        unmatchedFlavors: [],
+      }),
+    );
+    expect(out.brandMatches).toEqual([]);
+  });
+
+  it("drops a fold of a qualified brand onto a bare company brand", () => {
+    const out = sanitizeMatchImport(
+      { brandMatches: [{ candidate: "Basha's Original", match: "Basha" }] },
+      input({
+        brands: ["Basha"],
+        brandFlavors: {},
+        unmatchedBrands: ["Basha's Original"],
+        unmatchedFlavors: [],
+      }),
+    );
+    expect(out.brandMatches).toEqual([]);
+  });
+
+  it("keeps a genuine typo match within the same product line", () => {
+    const out = sanitizeMatchImport(
+      {
+        brandMatches: [
+          { candidate: "Bashas Original Pizzas", match: "Basha's Original Pizzas" },
+        ],
+      },
+      input({
+        brands: ["Basha's Original Pizzas"],
+        brandFlavors: {},
+        unmatchedBrands: ["Bashas Original Pizzas"],
+        unmatchedFlavors: [],
+      }),
+    );
+    expect(out.brandMatches).toEqual([
+      { candidate: "Bashas Original Pizzas", match: "Basha's Original Pizzas" },
+    ]);
   });
 });

@@ -108,6 +108,24 @@ Any change to one app's order/logic must land in the other verbatim.
   candidate wasn't asked OR whose match isn't a real saved target (via
   `findCanonical`), so a hallucinated name can never rename to a non-existent
   target. Reviewer runs over all 5 domains.
+- **INVARIANT: the match step must NEVER fold two different product-line siblings
+  together — enforce it in the sanitizer, treat the prompt as advisory only.**
+  The parse prompt keeps qualified siblings apart, but the match AI folds imported
+  brands onto EXISTING saved brands — so a stale/earlier saved brand
+  (`Basha's Original`, or a bare `Basha`) becomes a magnet and re-collapses a new
+  `Basha's Ultra Thin Crust` sheet even with a clean parse. The guard drops any
+  conflicting brandMatch server-side (applies to both clients via contract-first).
+  Two complementary, deterministic conflict signals: (1) a KNOWN qualifier lexicon
+  (Original/Ultra Thin/Deep Dish/…), and (2) a dictionary-free STRUCTURAL check —
+  a shared leading company stem then divergent distinguishing tokens (so unlisted
+  qualifiers like "Stone Fired" vs "Artisan" still conflict). Identical
+  distinguishing-token sets (typos/word-order/generic suffix) are NOT a conflict.
+  **Why lexicon alone is insufficient:** it under-blocks when both siblings use
+  qualifiers not in the list; the structural check closes that gap.
+  **Tradeoff (chosen deliberately):** a suffix-typo/abbreviation on a multi-word
+  brand (`Basha Orig` → `Basha's Original`) is also blocked and becomes a new brand
+  for review — separate over silently-wrong merge, matching the user's stated
+  preference. Code pointer: `conflictingProductLine` in `aiMatchImport.ts`.
 - **GOTCHA: `knownIngredients` in the match-import body is a RECORD keyed by
   recipe kind (`{dough,sauce,cheese: string[]}`), NOT a flattened `{kind,name}[]`.**
   Only `unmatchedIngredients` is the `{kind,name}[]` array. The hand-written

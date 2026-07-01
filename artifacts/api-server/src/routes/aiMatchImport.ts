@@ -144,6 +144,109 @@ function findCanonical(value: string, options: readonly string[]): string | null
   return options.find((o) => o.trim().toLowerCase() === v) ?? null;
 }
 
+// Product-line qualifiers that make two same-company brands DIFFERENT products
+// (e.g. "Basha's Original" vs "Basha's Ultra Thin Crust"). Multi-word phrases are
+// listed before their single-word substrings so the longest phrase wins and its
+// substring isn't double-counted from the same span.
+const PRODUCT_LINE_QUALIFIERS = [
+  "ultra thin crust",
+  "ultra thin",
+  "thin crust",
+  "deep dish",
+  "gluten free",
+  "hand tossed",
+  "stuffed crust",
+  "brick oven",
+  "wood fired",
+  "new york style",
+  "original",
+  "classic",
+  "traditional",
+  "thin",
+  "pan",
+] as const;
+
+function normalizeBrandText(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function productLineQualifiers(name: string): Set<string> {
+  let text = ` ${normalizeBrandText(name)} `;
+  const found = new Set<string>();
+  for (const q of PRODUCT_LINE_QUALIFIERS) {
+    const needle = ` ${q} `;
+    if (text.includes(needle)) {
+      found.add(q);
+      // Blank out the matched span so a shorter substring qualifier (e.g. "thin")
+      // isn't also counted from inside a longer one (e.g. "ultra thin crust").
+      text = text.split(needle).join("  ");
+    }
+  }
+  return found;
+}
+
+// Generic words carrying no brand identity — dropped before the structural
+// comparison so "Basha Pizzas" == "Basha" and "Basha Foods" == "Basha".
+const GENERIC_BRAND_WORDS = new Set([
+  "pizza",
+  "pizzas",
+  "recipe",
+  "recipes",
+  "spec",
+  "specs",
+  "co",
+  "inc",
+  "llc",
+  "ltd",
+  "company",
+  "foods",
+  "brand",
+  "brands",
+  "the",
+]);
+
+// Distinguishing tokens of a brand: normalized, generic/noise words removed.
+function brandTokens(name: string): string[] {
+  return normalizeBrandText(name)
+    .split(" ")
+    .filter((t) => t.length > 1 && !GENERIC_BRAND_WORDS.has(t));
+}
+
+// Two brand names refer to DIFFERENT product lines and the match AI must NOT fold
+// them together (or their identical flavor names overwrite each other). This is a
+// deterministic safety net so the guarantee does not depend on the model obeying
+// the prompt. Two complementary signals, EITHER of which flags a conflict:
+//   1. Lexicon: their known product-line qualifier sets differ (Original / Ultra
+//      Thin / Deep Dish / …), including qualified-vs-bare. Catches sibling lines
+//      even when the company stem itself is typo'd apart.
+//   2. Structural (dictionary-free): after a shared leading company stem, the
+//      names diverge into distinct distinguishing tokens (e.g. "Basha Stone
+//      Fired" vs "Basha Artisan", or a qualified extension of a bare sibling).
+//      Catches product-line qualifiers not in the lexicon.
+// Identical distinguishing-token sets (typos/word-order/generic-suffix only) are
+// NOT a conflict, so genuine typo matches still go through.
+export function conflictingProductLine(a: string, b: string): boolean {
+  const qa = productLineQualifiers(a);
+  const qb = productLineQualifiers(b);
+  if (qa.size !== qb.size) return true;
+  for (const q of qa) if (!qb.has(q)) return true;
+
+  const ta = brandTokens(a);
+  const tb = brandTokens(b);
+  if (!ta.length || !tb.length) return false;
+
+  const sa = new Set(ta);
+  const sb = new Set(tb);
+  if (sa.size === sb.size && [...sa].every((t) => sb.has(t))) return false;
+
+  // Diverge only after a shared company stem; a differing FIRST token is treated
+  // as a company-name typo (let the AI/fuzzy layers decide), not a line split.
+  let i = 0;
+  while (i < ta.length && i < tb.length && ta[i] === tb[i]) i++;
+  if (i === 0) return false;
+  return ta.length > i || tb.length > i;
+}
+
 export function sanitizeMatchImport(
   raw: unknown,
   input: MatchImportInput,
@@ -189,6 +292,10 @@ export function sanitizeMatchImport(
     if (!candidate || seenBrand.has(candKey) || !askedBrands.has(candKey)) continue;
     const match = findCanonical(parsed.data.match ?? "", input.brands);
     if (!match) continue; // hallucinated / not a real saved brand
+    // Never fold a qualified product-line sibling onto a differently-qualified
+    // (or bare) saved brand — e.g. "Basha's Ultra Thin Crust" must not merge into
+    // "Basha's Original" or "Basha", or their shared flavor names collide.
+    if (conflictingProductLine(candidate, match)) continue;
     seenBrand.add(candKey);
     brandMatches.push({ candidate, match });
     if (brandMatches.length >= input.unmatchedBrands.length) break;
@@ -290,7 +397,11 @@ export function buildMatchImportPrompt(input: MatchImportInput): {
     "that clearly refers to the same thing. Only return a match when you are " +
     "confident it is the same thing — if nothing clearly fits, omit it (do NOT " +
     "guess). NEVER invent a name: every match must be copied verbatim " +
-    "from the provided saved lists. A flavor match must come from the flavors of " +
+    "from the provided saved lists. NEVER fold a brand that carries a product-line " +
+    "qualifier (Original, Ultra Thin, Thin Crust, Deep Dish, Gluten Free, etc.) " +
+    "onto a saved brand with a DIFFERENT qualifier or none at all — 'Basha's Ultra " +
+    "Thin Crust' is NOT 'Basha's Original' and NOT a bare 'Basha'; leave it " +
+    "unmatched so it stays a separate brand. A flavor match must come from the flavors of " +
     "the brand it is listed under, and an ingredient match must come from the " +
     "saved ingredients of the same recipe kind. These are suggestions only — the user reviews them.";
 
