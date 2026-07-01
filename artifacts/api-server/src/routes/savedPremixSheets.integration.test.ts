@@ -129,11 +129,12 @@ async function save(
   label: string,
   data: unknown,
   scope: TestScope = "live",
+  sourceKey?: string,
 ): Promise<ApiPremixSheet[]> {
   const res = await fetch(`${baseUrl}/api/premix-sheets`, {
     method: "POST",
     headers: headers(scope),
-    body: JSON.stringify({ label, data }),
+    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { premixSheets: ApiPremixSheet[] }).premixSheets;
@@ -166,6 +167,32 @@ describe("saved-premix-sheets routes", () => {
     expect(sheets).toHaveLength(1);
     expect(sheets[0]?.label).toBe("Tony's Pepperoni");
     expect(sheets[0]?.data).toEqual(premixData("Cheese blend"));
+  });
+
+  it("keeps the two most recent versions PER distinct sourceKey", async () => {
+    await save("cheese v1", premixData("a"), "live", "cheese-mix");
+    await save("cheese v2", premixData("b"), "live", "cheese-mix");
+    await save("cheese v3", premixData("c"), "live", "cheese-mix");
+    await save("sauce v1", premixData("d"), "live", "sauce-mix");
+    await save("sauce v2", premixData("e"), "live", "sauce-mix");
+    await save("sauce v3", premixData("f"), "live", "sauce-mix");
+    const labels = (await list()).map((s) => s.label);
+    expect(labels).toContain("cheese v3");
+    expect(labels).toContain("cheese v2");
+    expect(labels).toContain("sauce v3");
+    expect(labels).toContain("sauce v2");
+    expect(labels).not.toContain("cheese v1");
+    expect(labels).not.toContain("sauce v1");
+    expect(labels).toHaveLength(4);
+  });
+
+  it("round-trips sourceKey and buckets keyless snapshots separately", async () => {
+    const saved = await save("keyed", premixData("a"), "live", "my-mix");
+    expect(saved.find((s) => s.label === "keyed")?.sourceKey).toBe("my-mix");
+    await save("legacy", premixData("b"));
+    const labels = (await list()).map((s) => s.label);
+    expect(labels).toContain("keyed");
+    expect(labels).toContain("legacy");
   });
 
   it("keeps only the two most recent snapshots (newest first), pruning older ones", async () => {

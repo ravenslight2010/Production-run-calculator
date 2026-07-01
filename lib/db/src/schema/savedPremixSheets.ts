@@ -11,6 +11,10 @@ export const savedPremixSheetsTable = pgTable("saved_premix_sheets", {
   id: serial("id").primaryKey(),
   scope: text("scope").notNull().default("live"),
   label: text("label").notNull(),
+  // Stable per-file identity (normalized uploaded filename) so retention keeps the
+  // two most recent versions of EACH distinct premix workbook, not just two overall.
+  // Nullable: older/mobile clients that don't send one share a single legacy bucket.
+  sourceKey: text("source_key"),
   // The Mix[] snapshot captured at import time.
   data: jsonb("data").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -129,11 +129,12 @@ async function save(
   label: string,
   data: unknown,
   scope: TestScope = "live",
+  sourceKey?: string,
 ): Promise<ApiSpecSheet[]> {
   const res = await fetch(`${baseUrl}/api/spec-sheets`, {
     method: "POST",
     headers: headers(scope),
-    body: JSON.stringify({ label, data }),
+    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
   });
   expect(res.status).toBe(200);
   return ((await res.json()) as { specSheets: ApiSpecSheet[] }).specSheets;
@@ -162,6 +163,35 @@ describe("saved-spec-sheets routes", () => {
     await save("third", specData("c"));
     const sheets = await list();
     expect(sheets.map((s) => s.label)).toEqual(["third", "second"]);
+  });
+
+  it("keeps the two most recent versions PER distinct sourceKey", async () => {
+    // Two distinct files, three uploads each — each file keeps its newest two.
+    await save("dough v1", specData("a"), "live", "dough-sheet");
+    await save("dough v2", specData("b"), "live", "dough-sheet");
+    await save("dough v3", specData("c"), "live", "dough-sheet");
+    await save("sauce v1", specData("d"), "live", "sauce-sheet");
+    await save("sauce v2", specData("e"), "live", "sauce-sheet");
+    await save("sauce v3", specData("f"), "live", "sauce-sheet");
+    const labels = (await list()).map((s) => s.label);
+    // Both files retained (not pruned to two overall), each down to its newest two.
+    expect(labels).toContain("dough v3");
+    expect(labels).toContain("dough v2");
+    expect(labels).toContain("sauce v3");
+    expect(labels).toContain("sauce v2");
+    expect(labels).not.toContain("dough v1");
+    expect(labels).not.toContain("sauce v1");
+    expect(labels).toHaveLength(4);
+  });
+
+  it("round-trips sourceKey and buckets keyless snapshots separately", async () => {
+    const saved = await save("keyed", specData("a"), "live", "my-file");
+    expect(saved.find((s) => s.label === "keyed")?.sourceKey).toBe("my-file");
+    // A keyless (legacy) upload is its own bucket, independent of keyed ones.
+    await save("legacy", specData("b"));
+    const labels = (await list()).map((s) => s.label);
+    expect(labels).toContain("keyed");
+    expect(labels).toContain("legacy");
   });
 
   it("DELETE removes a snapshot by id", async () => {

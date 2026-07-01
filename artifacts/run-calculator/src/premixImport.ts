@@ -39,7 +39,7 @@ import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAlias
 import { fetchMixes, saveMixes } from "./mixes";
 import { requestMatchPremix } from "./premixMatch";
 import { saveAiCorrections } from "./aiCorrections";
-import { savePremixSheet, buildPremixSheetLabel } from "./savedPremixSheets";
+import { savePremixSheet, buildPremixSheetLabel, deriveSourceKey } from "./savedPremixSheets";
 
 export type PremixImportPrepared = {
   /** Ready-to-apply mixes (grounded, AI-matched, deterministic ids). */
@@ -55,6 +55,8 @@ export type PremixImportPrepared = {
   flavorsByBrand: Record<string, string[]>;
   /** Ids of mixes already saved, so a re-match can recompute new-vs-update. */
   existingIds: string[];
+  /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
+  sourceNames?: string[];
   note?: string;
 };
 
@@ -211,7 +213,12 @@ export async function commitPremixImport(
   // reconcile the current mixes against this premix sheet (new/drifted mixes).
   // Best-effort: the import already applied; the snapshot is a monitoring bonus.
   try {
-    await savePremixSheet(buildPremixSheetLabel(mixesToApply), [...mixesToApply]);
+    const names = prepared.sourceNames ?? [];
+    await savePremixSheet(
+      buildPremixSheetLabel(mixesToApply, names),
+      [...mixesToApply],
+      deriveSourceKey(names),
+    );
   } catch {
     // ignore — monitoring snapshot is non-critical
   }

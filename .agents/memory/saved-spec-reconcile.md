@@ -1,14 +1,37 @@
 ---
 name: Saved spec sheets + AI cross-reference
-description: Server-saved (max 2) imported spec sheets cross-referenced against the CURRENT recipe library AND profile library; deterministic diff in a shared lib, AI only narrates.
+description: Server-saved imported spec/premix sheets (2 most recent PER distinct file) cross-referenced against the CURRENT recipe/profile library; deterministic diff in a shared lib, AI only narrates.
 ---
 
 # Saved spec sheets + AI reconcile
 
-Keep up to the **2 most recently imported** spec sheets server-side so they can
-later be cross-referenced against the *current* recipe library ("does the recipe
-still match the spec?"). The discrepancy list is always deterministic; the AI
-only writes a plain-language summary of an already-computed diff.
+Keep the imported spec sheets server-side so they can later be cross-referenced
+against the *current* recipe library ("does the recipe still match the spec?").
+The discrepancy list is always deterministic; the AI only writes a plain-language
+summary of an already-computed diff.
+
+## Retention: 2 most recent PER DISTINCT FILE (not 2 overall)
+- Both saved spec sheets AND saved premix sheets keep the **2 most recent versions
+  of EACH distinct uploaded file**, keyed by a nullable `sourceKey` column
+  (normalized filename). The prune groups by `(scope, sourceKey)` and keeps
+  `MAX_SAVED=2` per group. **Why:** the user has ~20 distinct spec sheets and wants
+  the last 2 versions of each; a single 2-overall bucket destroyed older files on
+  every new import.
+- `sourceKey` derivation (`deriveSourceKey`, web `savedSpecSheets.ts`, re-exported
+  by `savedPremixSheets.ts`): lowercase → strip extension → collapse whitespace →
+  sort → dedupe → join `"|"`. Multi-file imports share one key. Identity is the
+  UPLOADED FILENAME, threaded from the `File` objects through
+  `SpecImportPrepared.sourceNames` / `PremixImportPrepared.sourceNames` into the
+  commit fns. Missing/empty → `undefined` (server buckets it as the legacy `""`).
+- **Legacy / keyless rows** (null sourceKey — anything saved before this, plus any
+  mobile-created snapshot while parity is paused) all share the `""` bucket, so they
+  behave like the OLD 2-overall rule among themselves. `latestSourceKeyIds` treats
+  each null-key row as its OWN group (id-based) for the UI badge so none are hidden.
+- **Newest = default:** `latestSourceKeyIds(sheets)` (shared, web) returns the ids
+  that are newest within their sourceKey group; the reconcile panels badge those
+  "Latest" and older ones "Previous version". Lists already sort desc(createdAt).
+- `sourceKey` is OPTIONAL everywhere in the contract (additive); the DB column is
+  nullable + additive (pushed via `db push-force`). Clients that omit it keep working.
 
 ## Layering (keep both apps thin)
 - Pure diff lives in `@workspace/spec-reconcile`: `reconcileSpecWithRecipes` →

@@ -1064,6 +1064,8 @@ export interface SavedSpecSheetData {
 export interface SavedSpecSheet {
   id: number;
   label: string;
+  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
   data: SavedSpecSheetData;
@@ -1075,6 +1077,8 @@ export interface SavedSpecSheetList {
 
 export interface SaveSpecSheetInput {
   label: string;
+  /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket). */
+  sourceKey?: string;
   data: SavedSpecSheetData;
 }
 
@@ -1180,6 +1184,8 @@ export type SavedPremixSheetData = SavedMix[];
 export interface SavedPremixSheet {
   id: number;
   label: string;
+  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
   data: SavedPremixSheetData;
@@ -1191,6 +1197,8 @@ export interface SavedPremixSheetList {
 
 export interface SavePremixSheetInput {
   label: string;
+  /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket). */
+  sourceKey?: string;
   data: SavedPremixSheetData;
 }
 

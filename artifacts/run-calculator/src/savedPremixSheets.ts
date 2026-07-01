@@ -13,10 +13,15 @@
 
 import type { Mix } from "@workspace/mixes";
 import { inventoryClientId } from "./inventoryShared";
+import { deriveSourceKey } from "./savedSpecSheets";
+
+export { deriveSourceKey };
 
 export type SavedPremixSheet = {
   id: number;
   label: string;
+  /** Stable per-file identity (normalized filename); null for legacy snapshots. */
+  sourceKey?: string | null;
   createdAt: number;
   data: Mix[];
 };
@@ -37,11 +42,12 @@ export async function fetchSavedPremixSheets(): Promise<SavedPremixSheet[]> {
 export async function savePremixSheet(
   label: string,
   data: Mix[],
+  sourceKey?: string,
 ): Promise<SavedPremixSheet[]> {
   const res = await fetch("/api/premix-sheets", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({ label, data }),
+    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
   });
   if (!res.ok) throw new Error(`Save premix sheet failed (${res.status})`);
   const out = (await res.json()) as { premixSheets: SavedPremixSheet[] };
@@ -58,13 +64,26 @@ export async function deletePremixSheet(id: number): Promise<SavedPremixSheet[]>
   return out.premixSheets ?? [];
 }
 
-/** Build a short, human-friendly label for an auto-saved premix snapshot. */
-export function buildPremixSheetLabel(mixes: ReadonlyArray<Mix>): string {
+/**
+ * Build a short, human-friendly label for an auto-saved premix snapshot. When the
+ * uploaded filename(s) are known they lead the label so distinct workbooks (each
+ * kept to its two most recent versions) are easy to tell apart.
+ */
+export function buildPremixSheetLabel(
+  mixes: ReadonlyArray<Mix>,
+  sourceNames?: ReadonlyArray<string>,
+): string {
   const n = mixes.length;
   const when = new Date().toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
-  return `${n} mix${n === 1 ? "" : "es"} — ${when}`;
+  const fileLabel = (sourceNames ?? [])
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  const summary = `${n} mix${n === 1 ? "" : "es"}`;
+  const head = fileLabel ? `${fileLabel} · ${summary}` : summary;
+  return `${head} — ${when}`;
 }

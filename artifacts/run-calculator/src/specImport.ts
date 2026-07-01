@@ -46,7 +46,12 @@ import {
   applySpecImport,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
-import { saveSpecSheet, buildSpecSheetLabel, loadCurrentReconcileRecipes } from "./savedSpecSheets";
+import {
+  saveSpecSheet,
+  buildSpecSheetLabel,
+  deriveSourceKey,
+  loadCurrentReconcileRecipes,
+} from "./savedSpecSheets";
 import { requestParseSpecSheet } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
@@ -68,6 +73,8 @@ export type SpecImportPrepared = {
    * AI involved.
    */
   discrepancies: Discrepancy[];
+  /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
+  sourceNames?: string[];
   note?: string;
 };
 
@@ -517,7 +524,12 @@ export async function commitSpecImport(prepared: SpecImportPrepared): Promise<vo
   // a failed snapshot must never surface as an import error.
   if ((prepared.parsed.recipes?.length ?? 0) > 0) {
     try {
-      await saveSpecSheet(buildSpecSheetLabel(prepared.parsed), prepared.parsed);
+      const names = prepared.sourceNames ?? [];
+      await saveSpecSheet(
+        buildSpecSheetLabel(prepared.parsed, names),
+        prepared.parsed,
+        deriveSourceKey(names),
+      );
     } catch {
       // best-effort
     }

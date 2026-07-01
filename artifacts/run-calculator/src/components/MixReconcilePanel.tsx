@@ -22,6 +22,7 @@ import {
 } from "@/savedPremixSheets";
 import {
   fetchSavedSpecSheets,
+  latestSourceKeyIds,
   type SavedSpecSheet,
 } from "@/savedSpecSheets";
 import {
@@ -50,6 +51,9 @@ export default function MixReconcilePanel({ isManager }: { isManager: boolean })
   const qc = useQueryClient();
   const [premixSheets, setPremixSheets] = useState<SavedPremixSheet[]>([]);
   const [specSheets, setSpecSheets] = useState<SavedSpecSheet[]>([]);
+
+  const latestPremixIds = latestSourceKeyIds(premixSheets);
+  const latestSpecIds = latestSourceKeyIds(specSheets);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -165,7 +169,16 @@ export default function MixReconcilePanel({ isManager }: { isManager: boolean })
                     data-testid={`premix-sheet-${s.id}`}
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{s.label}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="truncate text-sm font-medium">{s.label}</div>
+                        {latestPremixIds.has(s.id) ? (
+                          <Badge variant="secondary">Latest</Badge>
+                        ) : (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            Previous version
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         Imported {fmtDate(s.createdAt)}
                       </div>
@@ -213,7 +226,16 @@ export default function MixReconcilePanel({ isManager }: { isManager: boolean })
                     data-testid={`mix-spec-sheet-${s.id}`}
                   >
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{s.label}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="truncate text-sm font-medium">{s.label}</div>
+                        {latestSpecIds.has(s.id) ? (
+                          <Badge variant="secondary">Latest</Badge>
+                        ) : (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            Previous version
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         Imported {fmtDate(s.createdAt)}
                       </div>

@@ -15,9 +15,12 @@ const router: IRouter = Router();
 const MAX_SAVED = 2;
 const MAX_LABEL_LEN = 200;
 
+const MAX_SOURCE_KEY_LEN = 300;
+
 type ApiPremixSheet = {
   id: number;
   label: string;
+  sourceKey: string | null;
   createdAt: number;
   data: unknown;
 };
@@ -26,6 +29,7 @@ function toApi(row: SavedPremixSheetRow): ApiPremixSheet {
   return {
     id: row.id,
     label: row.label,
+    sourceKey: row.sourceKey ?? null,
     createdAt: row.createdAt.getTime(),
     data: row.data,
   };
@@ -57,22 +61,33 @@ router.post("/premix-sheets", async (req: Request, res: Response) => {
     return;
   }
   const label = (parsed.data.label ?? "").trim().slice(0, MAX_LABEL_LEN) || "Premix sheet";
+  const sourceKey = (parsed.data.sourceKey ?? "").trim().slice(0, MAX_SOURCE_KEY_LEN) || null;
 
   try {
     await db.insert(savedPremixSheetsTable).values({
       scope: currentScope(),
       label,
+      sourceKey,
       data: parsed.data.data,
     });
 
-    // Keep only the two most recent snapshots in this scope. Re-read ids newest
-    // first and delete everything past the cap.
+    // Keep only the two most recent snapshots PER distinct file (sourceKey), not
+    // two overall — the factory has many distinct premix workbooks and wants the
+    // last two versions of each. Rows without a sourceKey (older/mobile clients)
+    // share a single legacy bucket. Newest first, delete past the per-key cap.
     const rows = await db
-      .select({ id: savedPremixSheetsTable.id })
+      .select({ id: savedPremixSheetsTable.id, sourceKey: savedPremixSheetsTable.sourceKey })
       .from(savedPremixSheetsTable)
       .where(eq(savedPremixSheetsTable.scope, currentScope()))
       .orderBy(desc(savedPremixSheetsTable.createdAt), desc(savedPremixSheetsTable.id));
-    const stale = rows.slice(MAX_SAVED).map((r) => r.id);
+    const perKeyCount = new Map<string, number>();
+    const stale: number[] = [];
+    for (const r of rows) {
+      const key = r.sourceKey ?? "";
+      const n = (perKeyCount.get(key) ?? 0) + 1;
+      perKeyCount.set(key, n);
+      if (n > MAX_SAVED) stale.push(r.id);
+    }
     for (const id of stale) {
       await db
         .delete(savedPremixSheetsTable)

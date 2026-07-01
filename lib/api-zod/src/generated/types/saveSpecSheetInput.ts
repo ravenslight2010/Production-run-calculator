@@ -9,5 +9,7 @@ import type { SavedSpecSheetData } from './savedSpecSheetData';
 
 export interface SaveSpecSheetInput {
   label: string;
+  /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older/mobile clients (they share a legacy bucket). */
+  sourceKey?: string;
   data: SavedSpecSheetData;
 }

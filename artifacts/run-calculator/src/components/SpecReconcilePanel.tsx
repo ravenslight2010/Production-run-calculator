@@ -33,6 +33,7 @@ import {
   loadCurrentReconcileRecipes,
   loadCurrentReconcileProfiles,
   currentReconcileProfile,
+  latestSourceKeyIds,
   type SavedSpecSheet,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
@@ -164,6 +165,7 @@ type Props = { autoCheckSignal?: number };
 
 export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   const [sheets, setSheets] = useState<SavedSpecSheet[]>([]);
+  const latestSpecIds = latestSourceKeyIds(sheets);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -307,9 +309,9 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Your two most recently imported spec sheets are saved here. Cross-reference
-          all at once to see which recipes match the spec, or check a single sheet for
-          an AI-written plain-language summary.
+          The two most recent versions of each imported spec sheet are saved here, with
+          the newest marked "Latest". Cross-reference all at once to see which recipes
+          match the spec, or check a single sheet for an AI-written plain-language summary.
         </p>
 
         {loading ? (
@@ -329,7 +331,16 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                 data-testid={`spec-sheet-${s.id}`}
               >
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{s.label}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="truncate text-sm font-medium">{s.label}</div>
+                    {latestSpecIds.has(s.id) ? (
+                      <Badge variant="secondary">Latest</Badge>
+                    ) : (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        Previous version
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">
                     Imported {fmtDate(s.createdAt)}
                   </div>

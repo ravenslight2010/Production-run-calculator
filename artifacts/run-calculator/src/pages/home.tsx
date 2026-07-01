@@ -5461,6 +5461,9 @@ export default function Home() {
           : await prepareSpecImportMulti(buffers, (done, total) =>
               setSpecImportProgress({ done, total }),
             );
+      // Remember which file(s) this came from so each distinct spec sheet keeps
+      // its own two most recent versions (per-file retention, newest = default).
+      prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setSpecImportPrepared(prepared);
     } catch (err) {
       setSpecImportError(
@@ -5525,6 +5528,9 @@ export default function Home() {
       const prepared = await preparePremixImport(buffers, (done, total) =>
         setPremixImportProgress(total > 1 ? { done, total } : null),
       );
+      // Remember which file(s) this came from so each distinct premix workbook
+      // keeps its own two most recent versions (per-file retention).
+      prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setPremixImportPrepared(prepared);
     } catch (err) {
       setPremixImportError(

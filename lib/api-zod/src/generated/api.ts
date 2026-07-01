@@ -2425,6 +2425,7 @@ export const ListSpecSheetsResponse = zod.object({
   "specSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
@@ -2448,6 +2449,7 @@ export const ListSpecSheetsResponse = zod.object({
  */
 export const SaveSpecSheetBody = zod.object({
   "label": zod.string(),
+  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct spec sheet. Omitted by older\/mobile clients (they share a legacy bucket).'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   "recipes": zod.array(zod.object({
@@ -2466,6 +2468,7 @@ export const SaveSpecSheetResponse = zod.object({
   "specSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
@@ -2494,6 +2497,7 @@ export const DeleteSpecSheetResponse = zod.object({
   "specSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.object({
   "profiles": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
@@ -2519,6 +2523,7 @@ export const ListPremixSheetsResponse = zod.object({
   "premixSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.array(zod.object({
   "id": zod.string(),
@@ -2546,6 +2551,7 @@ export const ListPremixSheetsResponse = zod.object({
  */
 export const SavePremixSheetBody = zod.object({
   "label": zod.string(),
+  "sourceKey": zod.string().optional().describe('Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older\/mobile clients (they share a legacy bucket).'),
   "data": zod.array(zod.object({
   "id": zod.string(),
   "scope": zod.string().optional(),
@@ -2568,6 +2574,7 @@ export const SavePremixSheetResponse = zod.object({
   "premixSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.array(zod.object({
   "id": zod.string(),
@@ -2600,6 +2607,7 @@ export const DeletePremixSheetResponse = zod.object({
   "premixSheets": zod.array(zod.object({
   "id": zod.number(),
   "label": zod.string(),
+  "sourceKey": zod.string().nullish().describe('Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots.'),
   "createdAt": zod.number().describe('Epoch milliseconds the snapshot was saved'),
   "data": zod.array(zod.object({
   "id": zod.string(),

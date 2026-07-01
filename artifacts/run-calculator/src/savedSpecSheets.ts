@@ -24,9 +24,50 @@ import {
 export type SavedSpecSheet = {
   id: number;
   label: string;
+  /** Stable per-file identity (normalized filename); null for legacy snapshots. */
+  sourceKey?: string | null;
   createdAt: number;
   data: ParsedSpecImport;
 };
+
+/**
+ * Normalize one or more uploaded filenames into a stable per-file identity so
+ * retention keeps the two most recent versions of each distinct spec sheet.
+ * Lowercased, extension-stripped, whitespace-collapsed; multi-file imports join
+ * their sorted names. Returns undefined when no usable name is available.
+ */
+export function deriveSourceKey(names: ReadonlyArray<string>): string | undefined {
+  const norm = names
+    .map((n) => (n ?? "").trim().toLowerCase().replace(/\.[a-z0-9]+$/i, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .sort();
+  const key = [...new Set(norm)].join("|");
+  return key || undefined;
+}
+
+/**
+ * Given saved snapshots, return the ids that are the NEWEST version within their
+ * distinct file (sourceKey) — i.e. the default source to use. Legacy snapshots
+ * WITHOUT a sourceKey share one bucket, matching the server's `null -> ""`
+ * retention grouping, so only the newest legacy snapshot is "latest". Works for
+ * both spec and premix snapshots (same id/sourceKey shape). Tie-break by id desc
+ * mirrors the server's newest-first ordering.
+ */
+export function latestSourceKeyIds(
+  sheets: ReadonlyArray<{ id: number; sourceKey?: string | null; createdAt: number }>,
+): Set<number> {
+  const sorted = [...sheets].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+  const seen = new Set<string>();
+  const latest = new Set<number>();
+  for (const s of sorted) {
+    const key = s.sourceKey && s.sourceKey.trim() ? s.sourceKey : "";
+    if (!seen.has(key)) {
+      seen.add(key);
+      latest.add(s.id);
+    }
+  }
+  return latest;
+}
 
 export type SpecReconcileResult = {
   specSheetId: number;
@@ -51,11 +92,12 @@ export async function fetchSavedSpecSheets(): Promise<SavedSpecSheet[]> {
 export async function saveSpecSheet(
   label: string,
   data: ParsedSpecImport,
+  sourceKey?: string,
 ): Promise<SavedSpecSheet[]> {
   const res = await fetch("/api/spec-sheets", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({ label, data }),
+    body: JSON.stringify({ label, data, ...(sourceKey ? { sourceKey } : {}) }),
   });
   if (!res.ok) throw new Error(`Save spec sheet failed (${res.status})`);
   const out = (await res.json()) as { specSheets: SavedSpecSheet[] };
@@ -177,8 +219,15 @@ export async function reconcileSpecSheet(sheet: SavedSpecSheet): Promise<SpecRec
   return (await res.json()) as SpecReconcileResult;
 }
 
-/** Build a short, human-friendly label for an auto-saved import snapshot. */
-export function buildSpecSheetLabel(parsed: ParsedSpecImport): string {
+/**
+ * Build a short, human-friendly label for an auto-saved import snapshot. When the
+ * uploaded filename(s) are known they lead the label so distinct files (each kept
+ * to its two most recent versions) are easy to tell apart.
+ */
+export function buildSpecSheetLabel(
+  parsed: ParsedSpecImport,
+  sourceNames?: ReadonlyArray<string>,
+): string {
   const recipes = parsed.recipes?.length ?? 0;
   const profiles = parsed.profiles?.length ?? 0;
   const parts: string[] = [];
@@ -189,5 +238,11 @@ export function buildSpecSheetLabel(parsed: ParsedSpecImport): string {
     day: "numeric",
     year: "numeric",
   });
-  return `${parts.join(", ") || "Spec sheet"} — ${when}`;
+  const fileLabel = (sourceNames ?? [])
+    .map((n) => (n ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+  const summary = parts.join(", ") || "Spec sheet";
+  const head = fileLabel ? `${fileLabel} · ${summary}` : summary;
+  return `${head} — ${when}`;
 }

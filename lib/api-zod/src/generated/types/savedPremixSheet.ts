@@ -10,6 +10,8 @@ import type { SavedPremixSheetData } from './savedPremixSheetData';
 export interface SavedPremixSheet {
   id: number;
   label: string;
+  /** Stable per-file identity (normalized uploaded filename). Retention keeps the two most recent snapshots per sourceKey. Null for legacy snapshots. */
+  sourceKey?: string | null;
   /** Epoch milliseconds the snapshot was saved */
   createdAt: number;
   data: SavedPremixSheetData;

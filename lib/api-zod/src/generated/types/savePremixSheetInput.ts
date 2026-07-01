@@ -9,5 +9,7 @@ import type { SavedPremixSheetData } from './savedPremixSheetData';
 
 export interface SavePremixSheetInput {
   label: string;
+  /** Optional stable per-file identity (normalized uploaded filename) so retention keeps the two most recent versions of each distinct premix workbook. Omitted by older/mobile clients (they share a legacy bucket). */
+  sourceKey?: string;
   data: SavedPremixSheetData;
 }
