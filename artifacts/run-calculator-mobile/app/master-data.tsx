@@ -3,7 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { Stack } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -1272,6 +1272,8 @@ export default function MasterDataScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Fire-and-forget: tells MergeManager to scan the updated lists once.
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
+      // Auto-run spec cross-reference with the newly saved sheet.
+      setReconSignal((c) => c + 1);
     } catch (e) {
       setSpecError(
         e instanceof Error ? e.message : "Could not apply the import. Please retry.",
