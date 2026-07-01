@@ -193,6 +193,28 @@ Any change to one app's order/logic must land in the other verbatim.
   cover both; mobile `SpecImportModal` + `context/specImport.ts` prepare still need
   the tombstone filter + editable review when parity resumes.
 
+## Import profile-tombstone must use deletedItems ONLY, never the flat mergedAway set
+- **Symptom:** "I import the spec sheet and nothing ever shows up." A parsed
+  profile is routed through `importProfileIsTombstoned`; a true result silently
+  drops it into the (unchecked) "skipped/merged away" review bucket → Apply
+  disabled → nothing applies.
+- **Root cause:** `importProfileIsTombstoned` fed the FLAT `mergedAway` set into
+  `profileKeyIsTombstoned`, which returns true if `tombSet.has(brandLc) ||
+  tombSet.has(flavorLc)`. The flat set is written ONLY by ingredient/app/pep type
+  merges (`applyIngredientMerge`; `MERGE_NAME_FIELDS` = app/pep only). Genuine
+  brand/flavor merges/deletes (`mergeBrands`/`mergeFlavors`/`removeBrand`/
+  `removeFlavor`) record in the STRUCTURED `deletedItems` map ("brands" /
+  "flavor:<brand>"), never the flat set. So the flat check could ONLY misfire —
+  common flavor names (PEPPERONI, CHEESE, SUPREME) collide with a merged-away
+  ingredient/pep name.
+- **Fix:** `importProfileIsTombstoned` passes an EMPTY flat set; a profile is
+  suppressed on import ONLY by a real brand/flavor tombstone in `deletedItems`.
+- **How to apply:** for PROFILES, brand/flavor tombstones live exclusively in
+  `deletedItems`; do NOT gate a profile on the flat `mergedAway` set. The flat set
+  is for ingredient/app/pep/recipe NAMES only. (The sync-receive
+  `profileKeyIsTombstoned` in home.tsx still takes a `tombSet` param — its
+  regression test simulates it — but no real brand/flavor path populates it.)
+
 ## Targetless-recipe silent miss (review-side backstop)
 - **A recipe with rows + a name but NO target/brand passes every apply-issue check
   yet attaches to ZERO profiles** — `recipeApplyTargets(r, profiles)` returns `[]`

@@ -1622,14 +1622,24 @@ export function recipeExistsForImport(kind: ParsedRecipe["kind"], name: string):
 }
 
 /**
- * True when a brand+flavor was previously merged or deleted away (so an import
- * must NOT resurrect it — mirrors the sync-receive guard). Combines the flat
- * merged-away set with the per-namespace deletion tombstones.
+ * True when a brand+flavor was previously merged or deleted away as a
+ * brand/flavor (so an import must NOT resurrect it). Uses ONLY the per-namespace
+ * deletion tombstones ("brands" / "flavor:<brand>"), which is where every real
+ * brand/flavor delete and merge is recorded — deliberately NOT the flat
+ * merged-away set (that holds ingredient/app/pep merge sources whose names
+ * collide with common flavor names).
  */
 export function importProfileIsTombstoned(brand: string, flavor: string): boolean {
   const key = `${brand.trim().toLowerCase()}__${flavor.trim().toLowerCase()}`;
-  const tombSet = new Set(loadMergedAway().map((s) => s.trim().toLowerCase()));
-  return profileKeyIsTombstoned(key, loadDeletedItems(), tombSet);
+  // Only a GENUINE brand/flavor deletion or merge should suppress an imported
+  // profile. Those are recorded in the structured deletedItems map (namespaces
+  // "brands" and "flavor:<brand>" — see mergeBrands/mergeFlavors/removeBrand/
+  // removeFlavor). The flat mergedAway set is fed ONLY by ingredient/app/pep
+  // type merges (applyIngredientMerge), whose source names routinely collide
+  // with common flavor names ("PEPPERONI", "CHEESE", "SUPREME"). Consulting it
+  // here silently dropped freshly-imported profiles to the "merged away" bucket
+  // ("nothing shows up"), so it's deliberately excluded (empty flat set).
+  return profileKeyIsTombstoned(key, loadDeletedItems(), new Set());
 }
 
 // The deletion-tombstone namespace for each recipe kind's name list (matches the
