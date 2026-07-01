@@ -497,6 +497,7 @@ export const MAX_SPEC_IMPORT_FILES = 10;
 export async function prepareSpecImportMulti(
   buffers: ArrayBuffer[],
   onProgress?: (done: number, total: number) => void,
+  names?: string[],
 ): Promise<SpecImportPrepared> {
   const { known, aliases } = await loadSpecImportContext();
 
@@ -504,27 +505,31 @@ export async function prepareSpecImportMulti(
   const allResolved: ParseCore["resolved"] = [];
   const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
+  const failedNames: string[] = [];
   let totalDropped = 0;
 
-  let done = 0;
-  for (const buf of buffers) {
+  for (let i = 0; i < buffers.length; i++) {
+    // Name each file so a failure can say WHICH file was skipped (fall back to a
+    // positional label when the caller didn't pass filenames).
+    const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
-      const grids = await readWorkbookGrids(buf);
+      const grids = await readWorkbookGrids(buffers[i]);
       const core = await parseWorkbookCore(grids, known, aliases);
       parsedList.push(core.parsed);
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
       totalDropped += core.droppedRows;
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : "Could not read a file.");
+      const msg = err instanceof Error ? err.message : "could not be read";
+      failedNames.push(label);
+      errors.push(`${label}: ${msg}`);
     } finally {
-      done += 1;
-      onProgress?.(done, buffers.length);
+      onProgress?.(i + 1, buffers.length);
     }
   }
 
   if (parsedList.length === 0) {
-    throw new Error(errors[0] ?? "Nothing to import.");
+    throw new Error(errors.length ? errors.join("\n") : "Nothing to import.");
   }
 
   const merged = mergeParsedSpecImports(parsedList);
@@ -545,8 +550,9 @@ export async function prepareSpecImportMulti(
   const noteParts: string[] = [];
   if (parsed.note) noteParts.push(parsed.note);
   if (errors.length) {
+    const list = failedNames.length ? `: ${failedNames.join(", ")}` : "";
     noteParts.push(
-      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
+      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped${list}.`,
     );
   }
   const note = appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped);

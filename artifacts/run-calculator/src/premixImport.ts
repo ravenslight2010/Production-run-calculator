@@ -102,31 +102,37 @@ export const MAX_PREMIX_IMPORT_FILES = 10;
 export async function preparePremixImport(
   buffers: ArrayBuffer[],
   onProgress?: (done: number, total: number) => void,
+  names?: string[],
 ): Promise<PremixImportPrepared> {
   const { known, aliases, existing } = await loadPremixContext();
 
   const parsed: ParsedPremix[] = [];
   const errors: string[] = [];
-  let done = 0;
-  for (const buf of buffers) {
+  const failedNames: string[] = [];
+  for (let i = 0; i < buffers.length; i++) {
+    // Name each file so a failure can say WHICH file was skipped (fall back to a
+    // positional label when the caller didn't pass filenames).
+    const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
-      const grids = await readWorkbookGrids(buf);
+      const grids = await readWorkbookGrids(buffers[i]);
       const blocks = parsePremixWorkbook(grids);
       if (blocks.length === 0) {
-        errors.push("A workbook had no recognizable premix blocks.");
+        failedNames.push(label);
+        errors.push(`${label}: no recognizable premix blocks.`);
       } else {
         parsed.push(...blocks);
       }
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : "Could not read a file.");
+      const msg = err instanceof Error ? err.message : "could not be read";
+      failedNames.push(label);
+      errors.push(`${label}: ${msg}`);
     } finally {
-      done += 1;
-      onProgress?.(done, buffers.length);
+      onProgress?.(i + 1, buffers.length);
     }
   }
 
   if (parsed.length === 0) {
-    throw new Error(errors[0] ?? "Nothing recognizable was found to import.");
+    throw new Error(errors.length ? errors.join("\n") : "Nothing recognizable was found to import.");
   }
 
   // Deterministic grounding first (alias → exact → fuzzy → new).
@@ -175,8 +181,9 @@ export async function preparePremixImport(
 
   const noteParts: string[] = [];
   if (errors.length) {
+    const list = failedNames.length ? `: ${failedNames.join(", ")}` : "";
     noteParts.push(
-      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
+      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped${list}.`,
     );
   }
   const note = noteParts.length ? noteParts.join("\n") : undefined;
