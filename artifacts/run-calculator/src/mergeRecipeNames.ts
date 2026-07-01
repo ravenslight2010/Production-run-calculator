@@ -85,3 +85,21 @@ export function countRecipeNameReferences(
   }
   return count;
 }
+
+/**
+ * True when a name is a stray recipe/mix name that has leaked into the
+ * standalone-ingredient list and should NOT appear in the Ingredients merge
+ * tab. Historically many mix / cheese-mix RECIPE names (e.g. "4Hands Club Mix",
+ * "Aldo's Cheese Mix", "Red Hot Cheese Mix Monterey Jack ...", "Club Mix (With
+ * Chicken)") were imported into `ingredientTypes` with spellings that don't
+ * exactly match any recipe-name list, so exact-match exclusion misses them.
+ * Anything containing the standalone word "mix" (as a whole token, so "mixed"
+ * and "premix" are NOT matched) is treated as a recipe name, EXCEPT genuine
+ * ingredients that legitimately contain "mix" (e.g. the jarred "Hot Giardiniera
+ * Mix") — those are passed in via `realIngredients` (compared by full name).
+ */
+export function isStrayMixName(name: string, realIngredients: Set<string>): boolean {
+  const t = name.trim().toLowerCase();
+  if (realIngredients.has(t)) return false;
+  return /\bmix\b/.test(t);
+}

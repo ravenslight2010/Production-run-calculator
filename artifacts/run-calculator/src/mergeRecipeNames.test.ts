@@ -5,6 +5,7 @@ import {
   mergeRecipeNameSettingsObject,
   foldPresetKeys,
   countRecipeNameReferences,
+  isStrayMixName,
 } from "./mergeRecipeNames";
 
 describe("mergeRecipeNameSettingsObject", () => {
@@ -107,5 +108,34 @@ describe("countRecipeNameReferences", () => {
       presetKeyMaps: [{ a: [] }],
     });
     expect(count).toBe(0);
+  });
+});
+
+describe("isStrayMixName", () => {
+  const real = new Set(["hot giardiniera mix", "cheese", "pepperoni"]);
+
+  it("flags names ending in the word 'mix'", () => {
+    expect(isStrayMixName("4Hands Club Mix", real)).toBe(true);
+    expect(isStrayMixName("Aldo's Cheese Mix", real)).toBe(true);
+    expect(isStrayMixName("Mix", real)).toBe(true);
+    expect(isStrayMixName("  club mix  ", real)).toBe(true);
+  });
+
+  it("flags variant forms where 'mix' is a mid-string or punctuated token", () => {
+    expect(isStrayMixName("Red Hot Cheese Mix Monterey Jack 5.0", real)).toBe(true);
+    expect(isStrayMixName("Club Mix (With Chicken)", real)).toBe(true);
+    expect(isStrayMixName("Club Mix, Extra", real)).toBe(true);
+    expect(isStrayMixName("Club Mix - Alt", real)).toBe(true);
+  });
+
+  it("does not flag genuine ingredients (allowlisted, even if they contain mix)", () => {
+    expect(isStrayMixName("Hot Giardiniera Mix", real)).toBe(false);
+    expect(isStrayMixName("Cheese", real)).toBe(false);
+    expect(isStrayMixName("Pepperoni", real)).toBe(false);
+  });
+
+  it("does not flag names where 'mix' is only part of a larger word", () => {
+    expect(isStrayMixName("Mixed Berries", real)).toBe(false);
+    expect(isStrayMixName("Premix Base", real)).toBe(false);
   });
 });

@@ -31,6 +31,13 @@ merges ingredient names on every tab.)
   folded-away recipe-name preset. Selection-field re-pointing alone is not enough.
 - **AI "Suggested merges"** shown only on the Ingredients tab (recipe-name tabs have
   no learned-alias path).
+- **Stray mix names in `ingredientTypes`:** real user data has recipe/mix NAMES (mostly
+  ending in "Mix") dumped into `ingredientTypes` with spellings that match NO recipe-name
+  list, so exact-match exclusion can't hide them. The web Ingredients tab also drops any
+  name ending in the word "mix" via `isStrayMixName` (mergeRecipeNames.ts), allowlisting
+  genuine ingredients (`DEFAULT_INGREDIENT_TYPES` + `MIX_SEED.frontlineIngredients` +
+  `pepTypes`, e.g. "Hot Giardiniera Mix"). **Why:** name-based classification only — the
+  data model can't otherwise tell a stray mix name from a real ingredient.
 
 ## Two universes, don't conflate them
 - **Full universe** (`mergeFullUniverse` web / `fullUniverse` mobile): every

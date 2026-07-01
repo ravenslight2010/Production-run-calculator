@@ -209,6 +209,7 @@ import {
   type RecipeNameMergeCategory,
   RECIPE_NAME_FIELDS_BY_CATEGORY,
   countRecipeNameReferences,
+  isStrayMixName,
 } from "../mergeRecipeNames";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
@@ -2490,7 +2491,22 @@ export default function Home() {
             ...mixRecipeNames,
           ].map((n) => n.toLowerCase()),
         );
-        return dedupSorted([...ingredientTypes, ...pepTypes].filter((n) => !recipeNameSet.has(n.toLowerCase())));
+        // Stray mix/cheese-recipe names (often ending in "Mix") get imported
+        // into `ingredientTypes` with spellings that don't exactly match any
+        // recipe list, so the exact-match set above misses them. Treat any name
+        // ending in "mix" as a recipe name too, EXCEPT genuine ingredients that
+        // legitimately end in "mix" (allowlisted below, e.g. "Hot Giardiniera
+        // Mix"). See `.local/parity-pause-log.md`.
+        const realIngredientAllowlist = new Set(
+          [...DEFAULT_INGREDIENT_TYPES, ...MIX_SEED.frontlineIngredients, ...pepTypes].map((n) =>
+            n.toLowerCase(),
+          ),
+        );
+        return dedupSorted(
+          [...ingredientTypes, ...pepTypes].filter(
+            (n) => !recipeNameSet.has(n.toLowerCase()) && !isStrayMixName(n, realIngredientAllowlist),
+          ),
+        );
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
