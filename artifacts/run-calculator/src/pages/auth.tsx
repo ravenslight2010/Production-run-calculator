@@ -241,7 +241,7 @@ function AuthForm({ mode }: { mode: Mode }) {
   }
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 py-12">
+    <div className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground px-6 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <img
@@ -452,7 +452,7 @@ function ForgotPasswordForm() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-background px-6 py-12">
+    <div className="dark flex min-h-[100dvh] items-center justify-center bg-background text-foreground px-6 py-12">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <img

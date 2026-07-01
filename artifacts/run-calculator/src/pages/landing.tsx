@@ -6,7 +6,7 @@ export default function Landing() {
   const logoUrl = `${import.meta.env.BASE_URL}logo.svg`;
 
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-6 py-12 text-center">
+    <div className="dark flex min-h-[100dvh] flex-col items-center justify-center bg-background text-foreground px-6 py-12 text-center">
       <div className="w-full max-w-md">
         <img
           src={logoUrl}
