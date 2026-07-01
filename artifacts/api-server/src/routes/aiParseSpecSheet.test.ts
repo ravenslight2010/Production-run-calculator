@@ -11,25 +11,38 @@ function input(overrides: Partial<ParseSpecSheetInput> = {}): ParseSpecSheetInpu
   } as ParseSpecSheetInput;
 }
 
-// Regression guard for the spec-sheet importer: when one brand's sheet covers
-// several SIZE variants (7in / 11in), the model must fold the size into the
-// BRAND name (brand "Lowes 7in"), never leave it dangling in the flavor
-// ("7in Pepperoni"). The instruction lives in the system prompt; this test
-// pins it so the rule can't be silently dropped from the prompt.
-describe("buildParseSpecSheetPrompt size→brand rule", () => {
-  it("instructs the model to fold size into the brand, not the flavor", () => {
+// Regression guard for the spec-sheet importer BRAND rule. The primary
+// differentiator is the product-line header (e.g. "Basha's Original" vs
+// "Basha's Ultra Thin Crust"): those must stay separate brands and never
+// collapse to a bare company name, or their identical flavor names overwrite
+// each other. Folding SIZE into the brand ("Lowes 7in") is only the fallback
+// when a sheet has no product-line qualifier. The instructions live in the
+// system prompt; these tests pin them so they can't be silently dropped.
+describe("buildParseSpecSheetPrompt brand rule", () => {
+  it("keeps the full product-line brand and never collapses to a bare company name", () => {
     const { system } = buildParseSpecSheetPrompt(input());
-    // Size is folded INTO the brand name.
-    expect(system).toContain("fold the size INTO");
-    expect(system).toContain("THE BRAND");
-    // Concrete worked example: brand carries the size, flavor stays clean.
+    // Distinguishing product-line qualifiers are kept in the brand.
+    expect(system).toContain("product-line");
+    expect(system).toContain("Ultra Thin");
+    // Worked example: two product lines from one company are distinct brands.
+    expect(system).toContain("brand='Basha's Original'");
+    expect(system).toContain("brand='Basha's Ultra Thin Crust'");
+    // The explicit anti-pattern it must avoid.
+    expect(system).toContain("never");
+    expect(system).toContain("bare company name");
+    // And it must not re-collapse via a shorter KNOWN brand match.
+    expect(system).toContain("Do NOT match a qualified");
+  });
+
+  it("still folds SIZE into the brand as the fallback (never into the flavor)", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("size INTO THE BRAND");
     expect(system).toContain("brand='Lowes 7in'");
     expect(system).toContain("flavor='Pepperoni'");
-    // And the explicit anti-pattern it must avoid.
     expect(system).toContain("NOT brand='Lowes', flavor='7in Pepperoni'");
   });
 
-  it("applies the same size→brand rule to recipes and targets", () => {
+  it("applies the same brand rule to recipes and targets", () => {
     const { system } = buildParseSpecSheetPrompt(input());
     expect(system).toContain("recipe brand/flavor and `targets` the same way");
   });

@@ -56,14 +56,33 @@ applying (no per-item prompts).
 - **`summarizeSpecImport` intentionally counts by recipe (so a multi-target import
   is 1 recipe, not N)** — do not "fix" it to count targets.
 
-## Size variants fold into the BRAND, not the flavor
-When one brand's spec sheet has multiple SIZE variants (e.g. Lowes 7in vs 11in),
-the AI prompt instructs that the size become part of the BRAND name
-(`Lowes 7in`, `Lowes 11in`) — flavor stays just the flavor (`Pepperoni`). NOT
-brand `Lowes` + flavor `7in Pepperoni`. **Why:** each size is a distinct profile
-with its own die/applicators; sizes differ by ~0.5 levenshtein ratio so they
-won't fuzzy-collapse into the base brand. Instruction lives ONLY in the
-server prompt (`buildParseSpecSheetPrompt`); clients are thin, no parity edit.
+## Brand = full product-line header; SIZE fold is only a fallback
+The BRAND is the product-line name from a block's HEADER cell, kept in full
+INCLUDING distinguishing qualifiers (`Original`, `Ultra Thin`, `Thin Crust`,
+`Deep Dish`, `Gluten Free`, …); drop only generic trailing words
+(`Pizzas`/`Pizza`/`Recipe`/`Specs`). Two sheets from the same company but
+different product lines are DIFFERENT brands (`Basha's Original` vs `Basha's Ultra
+Thin Crust`) and must NOT collapse to the bare company name, or their identical
+flavor names (Cheese, Pepperoni, …) overwrite each other. The prompt also tells
+the model NOT to match a qualified product-line brand to a shorter KNOWN brand
+that merely lacks the qualifier (else it re-collapses via the "reuse KNOWN name"
+rule; the lib's levenshtein fuzzy is safe here — ratio ≫0.34).
+- **Only when a sheet has NO product-line qualifier and differs purely by SIZE**
+  (e.g. Lowes 7in vs 11in) does the size fold INTO the brand (`Lowes 7in`,
+  `Lowes 11in`) — never the flavor. Size is the fallback, product line wins.
+- **Why the original folding rule caused a bug:** the prompt used to fold SIZE into
+  the brand with no mention of product lines, so `Basha's Original Pizzas` /
+  `Basha's Ultra Thin Crust Pizzas` both flattened to `Basha` and their flavors
+  merged. A user "merge" then wrote a learned brand alias `Basha 11in → Basha`
+  (plus mis-confirmed `Basha's … Mix → Lowe's/Lucia's … Mix` item aliases) that
+  kept re-collapsing every future import. **Learned aliases/corrections persist in
+  `spec_import_aliases` + `ai_corrections` and are re-sent to the AI each import —
+  a bad confirm poisons all later imports until the rows are deleted.**
+- Instruction lives ONLY in the server prompt (`buildParseSpecSheetPrompt`);
+  clients are thin, no parity edit. Pinned by `aiParseSpecSheet.test.ts`.
+- **NOTE:** profiles/runs are still keyed by `brand|flavor` only (no size/line
+  field) — `PROFILE_KEY`, `mergeParsedSpecImports`, `mergeImportRuns`. Separation
+  works ONLY because the distinguishing text lives in the brand string itself.
 
 ## Mobile summary parity
 - Mobile `buildSpecStore().profileExists` must mirror web `profileObjHasRealData`:
