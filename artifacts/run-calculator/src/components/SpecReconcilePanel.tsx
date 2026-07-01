@@ -31,6 +31,7 @@ import {
   type SavedSpecSheet,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 
 function fmtDate(ms: number): string {
   try {
@@ -278,15 +279,20 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                   >
                     {busyId === s.id ? "Checking…" : "AI summary"}
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleDelete(s.id)}
-                    disabled={busyId !== null || checkingAll}
-                    data-testid={`button-delete-spec-${s.id}`}
+                  <ConfirmDeleteButton
+                    onConfirm={() => handleDelete(s.id)}
+                    title="Delete this saved spec sheet?"
+                    description="This removes the saved spec sheet. This can't be undone."
                   >
-                    Delete
-                  </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busyId !== null || checkingAll}
+                      data-testid={`button-delete-spec-${s.id}`}
+                    >
+                      Delete
+                    </Button>
+                  </ConfirmDeleteButton>
                 </div>
               </div>
             ))}

@@ -10,6 +10,7 @@ import {
 } from "@workspace/mixes";
 import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 
 function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -232,15 +233,20 @@ function MixEditor({
           />
           On
         </label>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={disabled}
-          title="Delete mix"
-          className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+        <ConfirmDeleteButton
+          onConfirm={onDelete}
+          title="Delete this mix?"
+          description="This removes the mix for everyone. This can't be undone."
         >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+          <button
+            type="button"
+            disabled={disabled}
+            title="Delete mix"
+            className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </ConfirmDeleteButton>
       </div>
 
       {/* Product match: brand + flavor */}

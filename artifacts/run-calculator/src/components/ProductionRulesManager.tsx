@@ -25,6 +25,7 @@ import {
 } from "@workspace/production-rules";
 import { useProductionRules } from "../hooks/useProductionRules";
 import { saveProductionRules, deleteProductionRules } from "../productionRules";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 
 const TYPE_LABELS: Record<RuleType, string> = {
   "required-field": "Required field",
@@ -213,15 +214,20 @@ function RuleEditor({
           />
           On
         </label>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={disabled}
-          title="Delete rule"
-          className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+        <ConfirmDeleteButton
+          onConfirm={onDelete}
+          title="Delete this rule?"
+          description="This removes the production rule for everyone. This can't be undone."
         >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+          <button
+            type="button"
+            disabled={disabled}
+            title="Delete rule"
+            className="p-1 rounded-md text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </ConfirmDeleteButton>
       </div>
 
       {rule.type === "required-field" && (

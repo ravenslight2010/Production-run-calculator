@@ -30,6 +30,7 @@ import {
   applyMixReconcileItem,
   type MixReconcileView,
 } from "@/mixReconcile";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 
 function fmtDate(ms: number): string {
   try {
@@ -178,15 +179,20 @@ export default function MixReconcilePanel({ isManager }: { isManager: boolean })
                       >
                         {busyKey === `premix-${s.id}` ? "Checking…" : "Check mixes"}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDeletePremix(s.id)}
-                        disabled={busyKey !== null}
-                        data-testid={`button-delete-premix-${s.id}`}
+                      <ConfirmDeleteButton
+                        onConfirm={() => handleDeletePremix(s.id)}
+                        title="Delete this saved mix sheet?"
+                        description="This removes the saved mix sheet. This can't be undone."
                       >
-                        Delete
-                      </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busyKey !== null}
+                          data-testid={`button-delete-premix-${s.id}`}
+                        >
+                          Delete
+                        </Button>
+                      </ConfirmDeleteButton>
                     </div>
                   </div>
                 ))

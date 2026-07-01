@@ -327,6 +327,7 @@ import {
 } from "@/utils/runExcel";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
+import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -7463,7 +7464,7 @@ export default function Home() {
                           : <div className="flex items-center gap-1 shrink-0">
                               {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
                               {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
-                              <button type="button" onClick={() => onRemove(item)} className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
+                              <ConfirmDeleteButton onConfirm={() => onRemove(item)} title={`Remove "${item}"?`} description="This removes it from your saved list. You can undo master-data changes from Change History." confirmLabel="Remove"><button type="button" title="Remove" className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button></ConfirmDeleteButton>
                             </div>}
                       </li>
                     );
@@ -13797,13 +13798,19 @@ export default function Home() {
                         >
                           Apply
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => deleteTemplate(t.id)}
-                          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition-colors"
+                        <ConfirmDeleteButton
+                          onConfirm={() => deleteTemplate(t.id)}
+                          title="Delete this template?"
+                          description="This removes the saved template. This can't be undone."
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                          <button
+                            type="button"
+                            title="Delete template"
+                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </ConfirmDeleteButton>
                       </div>
                     </div>
                   ))}
