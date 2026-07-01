@@ -32,6 +32,23 @@ list set (that gate is only for `mergedAway`) — re-adding any item, including 
 brand, clears its deletion tombstone. Re-adding a flavor also clears the brand
 tombstone so the brand resurrects alongside it.
 
+**Deleting a brand/flavor must ALSO purge its saved profile(s), not just
+tombstone.** The tombstone stops the additive union from resurrecting the *name*,
+but the per-profile localStorage/AsyncStorage entries
+(`run-calc-profile-<brand>__<flavor>`, `run-calc-crust-profile-*`) are separate.
+If left behind they orphan: the push-payload builder re-scans ALL profile keys, so
+a deleted brand keeps re-appearing in the DB `brandProfiles`, and the stale
+profile data (wrong die/recipes) resurrects the moment a tombstone is cleared by a
+re-import. Symptom this caused: two product lines (Basha's Original 12" vs Ultra
+Thin 11") looked "merged" after import even though the import code no longer folds
+them. Fix = delete the profile entries on brand/flavor removal + a one-time
+marker-guarded migration to purge profiles whose brand is no longer in the Brands
+list (guard: defer while the Brands list is empty so a transient empty list can't
+wipe everything). Sync-receive already skips tombstoned profile keys, so orphans
+stranded in the DB blob for a tombstoned brand never return — purging locally just
+stops re-pushing them. **Why:** deletion completeness is a separate axis from
+tombstoning; a name tombstone without a data purge is a slow resurrection loop.
+
 **How to apply:** keep web and mobile in lockstep across add/remove handlers,
 sync-apply union/strip, every payload builder (incl. import builders), and the
 shared payload type. Server sync is opaque passthrough — no server change.

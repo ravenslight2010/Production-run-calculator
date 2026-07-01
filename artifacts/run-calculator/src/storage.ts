@@ -1311,6 +1311,84 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
   } catch {}
 }
 
+/**
+ * Delete every saved profile (dough + crust) for a brand. Called on brand
+ * deletion: dropping the brand from the Brands list and tombstoning it is not
+ * enough — the per-profile localStorage entries (`run-calc-profile-<brand>__*`
+ * and `run-calc-crust-profile-<brand>__*`) used to linger. Those orphans were
+ * re-broadcast on every sync (buildPushPayload scans ALL profile keys) and
+ * resurrected stale/scrambled profile data (wrong die size, wrong recipes)
+ * whenever the brand's deletion tombstone was later cleared by a re-add or
+ * re-import. Purge them so a deleted brand fully disappears.
+ */
+export function deleteProfilesForBrand(brand: string): void {
+  if (typeof localStorage === "undefined") return;
+  const brandLc = brand.toLowerCase().trim();
+  if (!brandLc) return;
+  const doughPrefix = `run-calc-profile-${brandLc}__`;
+  const crustPrefix = `run-calc-crust-profile-${brandLc}__`;
+  const toRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith(doughPrefix) || k.startsWith(crustPrefix)) toRemove.push(k);
+  }
+  for (const k of toRemove) {
+    try { localStorage.removeItem(k); } catch {}
+  }
+}
+
+/**
+ * Delete the saved profile (dough + crust) for a single brand+flavor. Called on
+ * flavor deletion for the same reason as deleteProfilesForBrand: without it the
+ * profile entry orphans and can resurrect stale data on a later re-import.
+ */
+export function deleteProfileEntry(brand: string, flavor: string): void {
+  if (typeof localStorage === "undefined") return;
+  try { localStorage.removeItem(PROFILE_KEY(brand, flavor)); } catch {}
+  try { localStorage.removeItem(CRUST_PROFILE_KEY(brand, flavor)); } catch {}
+}
+
+const PURGE_ORPHANED_PROFILES_KEY = "run-calc-purge-orphaned-profiles-v1";
+
+/**
+ * One-time cleanup: remove saved brand/flavor profiles (dough + crust) whose
+ * brand is no longer in the Brands list. Deleting a brand used to leave its
+ * per-profile localStorage entries behind (see deleteProfilesForBrand); those
+ * orphans were re-broadcast on every sync and could resurrect stale/scrambled
+ * data. This heals installs that already accumulated orphans before the deletion
+ * fix landed. Guarded by a version marker AND only runs once the Brands list is
+ * populated, so a transient empty list (e.g. before seeds/sync) can't nuke every
+ * profile. If the list is still empty the marker is left unset so it retries on
+ * a later load.
+ */
+export function purgeOrphanedProfilesIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(PURGE_ORPHANED_PROFILES_KEY)) return;
+  try {
+    const brands = loadList(BRANDS_KEY, []);
+    if (brands.length === 0) return; // defer until brands are seeded/loaded
+    const known = new Set(brands.map((b) => b.toLowerCase().trim()));
+    const orphans: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      let rest: string | null = null;
+      if (k.startsWith("run-calc-profile-")) rest = k.slice("run-calc-profile-".length);
+      else if (k.startsWith("run-calc-crust-profile-")) rest = k.slice("run-calc-crust-profile-".length);
+      if (rest === null) continue;
+      const sep = rest.indexOf("__");
+      if (sep < 0) continue;
+      const brandLc = rest.slice(0, sep);
+      if (!known.has(brandLc)) orphans.push(k);
+    }
+    for (const k of orphans) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+    localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
+  } catch {}
+}
+
 const DIE_TYPES_SEED_KEY = "run-calc-die-types-v3";
 
 /**

@@ -103,6 +103,9 @@ import {
   applyIngredientDedupeMigrationIfNeeded,
   applySpecProfilesSeedIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
+  purgeOrphanedProfilesIfNeeded,
+  deleteProfilesForBrand,
+  deleteProfileEntry,
   applyDieTypesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
   applySauceSpecsSeedIfNeeded,
@@ -365,6 +368,7 @@ applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
 applyCheeseSpecsSeedIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
+purgeOrphanedProfilesIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
 
@@ -4321,6 +4325,11 @@ export default function Home() {
       setBrandFlavors(next);
       saveBrandFlavors(next);
     }
+    // Also purge the brand's saved profiles (dough + crust). Tombstoning alone
+    // left the per-profile localStorage entries orphaned — they got re-pushed on
+    // every sync and resurrected stale data if the tombstone was later cleared by
+    // a re-import (root cause of the "two brands merged back" bug).
+    deleteProfilesForBrand(name);
     schedulePush(dayStateRef.current);
   }
 
@@ -4371,6 +4380,9 @@ export default function Home() {
     saveBrandFlavors(next);
     // Tombstone so live-sync's additive union can't resurrect it from a stale peer.
     tombstoneDeleted(flavorNamespace(b), name);
+    // Also purge the flavor's saved profile so it can't orphan + resurrect on a
+    // later re-import (see deleteProfilesForBrand / the merge-back bug).
+    deleteProfileEntry(b, name);
     schedulePush(dayStateRef.current);
   }
 
