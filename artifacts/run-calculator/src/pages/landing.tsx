@@ -21,22 +21,25 @@ export default function Landing() {
           staff. Sign in to get started.
         </p>
 
-        <div className="mt-8 flex flex-col gap-3">
-          <Button
-            size="lg"
-            className="w-full"
-            onClick={() => setLocation("/sign-in")}
-          >
-            Sign in
-          </Button>
-          <Button
-            size="lg"
-            variant="outline"
-            className="w-full"
-            onClick={() => setLocation("/sign-up")}
-          >
-            Create staff account
-          </Button>
+        <div className="mt-8 overflow-hidden rounded-2xl border border-border/50 bg-card/50 shadow-md">
+          <div className="h-1 w-full bg-amber-500/70" />
+          <div className="flex flex-col gap-3 p-6">
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={() => setLocation("/sign-in")}
+            >
+              Sign in
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="w-full"
+              onClick={() => setLocation("/sign-up")}
+            >
+              Create staff account
+            </Button>
+          </div>
         </div>
 
         <p className="mt-8 text-xs text-muted-foreground">

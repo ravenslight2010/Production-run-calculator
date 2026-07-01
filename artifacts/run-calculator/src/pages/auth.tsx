@@ -259,8 +259,10 @@ function AuthForm({ mode }: { mode: Mode }) {
 
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-card-border bg-card p-6 shadow-xl"
+          className="overflow-hidden rounded-2xl border border-border/50 bg-card/50 shadow-md"
         >
+          <div className="h-1 w-full bg-amber-500/70" />
+          <div className="p-6">
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="username" className="text-foreground">
@@ -377,6 +379,7 @@ function AuthForm({ mode }: { mode: Mode }) {
               </>
             )}
           </p>
+          </div>
         </form>
       </div>
     </div>
@@ -469,7 +472,9 @@ function ForgotPasswordForm() {
           </p>
         </div>
 
-        <div className="rounded-2xl border border-card-border bg-card p-6 shadow-xl">
+        <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/50 shadow-md">
+          <div className="h-1 w-full bg-amber-500/70" />
+          <div className="p-6">
           {step === "request" && (
             <form onSubmit={handleRequest} className="space-y-4">
               <div className="space-y-1.5">
@@ -589,6 +594,7 @@ function ForgotPasswordForm() {
               </button>
             </p>
           )}
+          </div>
         </div>
       </div>
     </div>
