@@ -49,6 +49,25 @@ stranded in the DB blob for a tombstoned brand never return — purging locally 
 stops re-pushing them. **Why:** deletion completeness is a separate axis from
 tombstoning; a name tombstone without a data purge is a slow resurrection loop.
 
+**Deletion protects RESYNC, not RE-IMPORT.** A deletion tombstone exists only to
+stop live-sync's additive union from resurrecting a name from a stale peer. It must
+NOT block a deliberate spec-import re-import — the user explicitly asking for those
+profiles/recipes back is a signal to bring them, and `applySpecImport` clears the
+tombstone as it re-applies. So the spec-import predicates ignore deletion tombstones
+entirely — both `importProfileIsTombstoned` and `recipeNameIsTombstoned` return false
+(blank name aside). For profiles AND recipes, merge is indistinguishable from delete
+(both live only in the structured `deletedItems` namespaces). The flat `mergedAway`
+is written ONLY by ingredient/app/pep merges, so consulting it for a profile/recipe
+catches zero real merges and only FALSE-suppresses a name that collides with a merged
+ingredient (e.g. "Pepperoni"). Honoring the "merged items must be checked" half for
+profiles/recipes would need a NEW distinct merge tombstone (separate from delete) — a
+potential follow-up, not built. **Why:** a re-import that silently drops deleted names
+looks like a broken/scrambled import (the Basha two-product-line case).
+Because the server stores `deletedItems` wholesale from the client push, the
+re-import + local clear is what actually cleans the server's deleted memory — a
+DB-only clear is futile (the client re-pushes its local tombstones). Cross-peer
+union can still re-add a name another device still has tombstoned — accepted.
+
 **How to apply:** keep web and mobile in lockstep across add/remove handlers,
 sync-apply union/strip, every payload builder (incl. import builders), and the
 shared payload type. Server sync is opaque passthrough — no server change.

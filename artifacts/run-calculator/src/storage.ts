@@ -1700,24 +1700,26 @@ export function recipeExistsForImport(kind: ParsedRecipe["kind"], name: string):
 }
 
 /**
- * True when a brand+flavor was previously merged or deleted away as a
- * brand/flavor (so an import must NOT resurrect it). Uses ONLY the per-namespace
- * deletion tombstones ("brands" / "flavor:<brand>"), which is where every real
- * brand/flavor delete and merge is recorded — deliberately NOT the flat
- * merged-away set (that holds ingredient/app/pep merge sources whose names
- * collide with common flavor names).
+ * Whether a spec-import must SKIP a brand+flavor profile. Always false: a prior
+ * delete/merge only protects against live-sync resurrection, never against a
+ * deliberate re-import (see body). Kept as a predicate so partitionTombstonedParse
+ * keeps a stable signature; deleted brand/flavors now simply re-import.
  */
-export function importProfileIsTombstoned(brand: string, flavor: string): boolean {
-  const key = `${brand.trim().toLowerCase()}__${flavor.trim().toLowerCase()}`;
-  // Only a GENUINE brand/flavor deletion or merge should suppress an imported
-  // profile. Those are recorded in the structured deletedItems map (namespaces
-  // "brands" and "flavor:<brand>" — see mergeBrands/mergeFlavors/removeBrand/
-  // removeFlavor). The flat mergedAway set is fed ONLY by ingredient/app/pep
-  // type merges (applyIngredientMerge), whose source names routinely collide
-  // with common flavor names ("PEPPERONI", "CHEESE", "SUPREME"). Consulting it
-  // here silently dropped freshly-imported profiles to the "merged away" bucket
-  // ("nothing shows up"), so it's deliberately excluded (empty flat set).
-  return profileKeyIsTombstoned(key, loadDeletedItems(), new Set());
+export function importProfileIsTombstoned(_brand: string, _flavor: string): boolean {
+  // A prior brand/flavor DELETION must NOT suppress a deliberate re-import.
+  //
+  // Deletion tombstones (the structured deletedItems map, namespaces "brands" /
+  // "flavor:<brand>") exist to stop live-sync's additive union from RESURRECTING
+  // a name a user removed on another device — i.e. they protect against RESYNC,
+  // not against a fresh RE-IMPORT. When the user re-imports a spec sheet they are
+  // explicitly asking for those profiles back, and applySpecImport clears the
+  // tombstone as it re-applies each profile so the reintroduction sticks.
+  //
+  // Brand/flavor MERGES land in the SAME deletedItems namespaces (never the flat
+  // mergedAway set, which holds only ingredient/app/pep merges), so there is no
+  // separate "merged brand/flavor" signal to distinguish and check here. An
+  // imported profile is therefore never skipped — deleted ones simply come back.
+  return false;
 }
 
 // The deletion-tombstone namespace for each recipe kind's name list (matches the
@@ -1729,18 +1731,22 @@ const RECIPE_KIND_DELETE_NAMESPACE: Record<ParsedRecipe["kind"], string> = {
 };
 
 /**
- * True when a dough/sauce/cheese recipe NAME was previously merged or deleted
- * away, so an import must skip it rather than recreate the tombstoned recipe.
+ * Whether a spec-import must SKIP a dough/sauce/cheese recipe NAME. Always false
+ * (except a blank name, trivially): a prior delete/merge only protects against
+ * live-sync resurrection, never a deliberate re-import (see body). Kept as a
+ * predicate so partitionTombstonedParse keeps a stable signature.
  */
-export function recipeNameIsTombstoned(kind: ParsedRecipe["kind"], name: string): boolean {
-  const lower = name.trim().toLowerCase();
-  if (!lower) return false;
-  const ns = RECIPE_KIND_DELETE_NAMESPACE[kind];
-  const deleted = loadDeletedItems()[ns] ?? [];
-  if (deleted.some((n) => n.trim().toLowerCase() === lower)) return true;
-  // Recipe-name merges also drop the source through the flat merged-away set in
-  // some paths; honor that too.
-  return loadMergedAway().some((n) => n.trim().toLowerCase() === lower);
+export function recipeNameIsTombstoned(_kind: ParsedRecipe["kind"], name: string): boolean {
+  if (!name.trim()) return false;
+  // A prior recipe DELETE must NOT block a re-import (the deletion tombstone
+  // protects live-sync resurrection only, and applySpecImport clears it as the
+  // recipe re-applies). Recipe MERGES are indistinguishable from deletes — both
+  // land in the per-kind deletion namespace, NOT the flat mergedAway set (which
+  // is written ONLY by ingredient/app/pep merges, see applyIngredientMerge). So
+  // there is no reliable recipe-merge signal to check, and consulting mergedAway
+  // would only FALSE-suppress a recipe whose name collides with a merged
+  // ingredient (e.g. "Pepperoni"). An imported recipe is therefore never skipped.
+  return false;
 }
 
 function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaults: string[] } {
