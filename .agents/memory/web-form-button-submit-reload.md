@@ -65,13 +65,30 @@ and later re-reaches the server, the client calls `location.reload()` **on every
 reconnect** — so each flaky-socket cycle = one full page reload, which aborts any in-flight
 request (e.g. `POST /api/ai/parse-spec-sheet` shows `request aborted`).
 
-**Why the socket was flaky:** the preview is served through Replit's HTTPS proxy (port 443)
-inside an iframe, but Vite's HMR client defaults to opening its websocket against the
-*internal* dev port, which the proxy routes unreliably.
+**Why the socket was flaky:** the preview is served through Replit's HTTPS proxy inside an
+iframe, and the HMR websocket simply cannot stay connected through it — it drops every
+~45-150s regardless of client port.
 
-**Fix (applied):** `server.hmr.clientPort = 443` in `artifacts/run-calculator/vite.config.ts`
-pins the HMR socket to the proxied HTTPS port so it stays connected → no reconnect-reloads.
-It's a dev-only config change (no app-logic/parity impact; mobile uses Metro). If drops
-persist (e.g. iframe throttling), the fallback is `server.hmr: false` — the user is *using*
-the preview, not developing it, so losing hot-reload is an acceptable trade to stop the
-interruptions (restart the workflow to see code changes).
+**Two config fixes that did NOT work (don't retry them):**
+- `server.hmr.clientPort = 443` — 443 is already the default for an https origin, so the
+  socketHost is unchanged; the proxy still drops the socket. User confirmed "still did it."
+- `server.hmr = false` — in Vite 7 this does NOT stop the injected `@vite/client` from
+  connecting a websocket and calling `location.reload()` on reconnect. Verified by curling
+  `/@vite/client` after a confirmed-fresh restart: it still contained the connect + reload
+  logic (`hmrPort = null`, `waitForSuccessfulPing().then(() => location.reload())`).
+
+**Fix that WORKED (applied):** a dev-only Vite plugin `suppressViteClientReload` (gated on
+`process.env.REPL_ID`, `apply:"serve"`) in `artifacts/run-calculator/vite.config.ts`. Its
+`configureServer` middleware intercepts the `/@vite/client` response and string-replaces
+every `location.reload()` with a `console.debug(...)` no-op (also forces a 200 by dropping
+`if-none-match`, sets `Content-Length`/`Cache-Control:no-store`, removes ETag). Result: the
+socket may still drop/reconnect (harmless console noise) but the page never full-reloads, so
+in-flight imports (`POST /api/ai/parse-spec-sheet`) are no longer aborted. HMR module updates
+still apply while the socket is up.
+
+**Verify server-side (no user round-trip needed):** `curl localhost:$PORT/@vite/client` and
+confirm `grep -c "location.reload()"` is 0 and the suppressed-debug line appears 3×.
+
+**Why not just serve a production build:** `vite preview` would also remove the client, but it
+kills hot-reload for ongoing dev and needs a rebuild per change — the plugin keeps dev
+ergonomics while stopping the disruptive reloads. Dev-only, no parity impact (mobile = Metro).

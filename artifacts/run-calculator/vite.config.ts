@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
@@ -27,9 +27,58 @@ if (!basePath) {
   );
 }
 
+// Dev-only (Replit). The preview runs inside an HTTPS-proxied iframe where
+// Vite's HMR websocket can't stay connected — it drops every so often, and
+// Vite's injected `@vite/client` calls `location.reload()` on every reconnect,
+// full-reloading the page and aborting whatever the user was doing (e.g. a
+// spec/Excel import that takes longer than the drop interval). We can't keep the
+// socket alive (that's the proxy's behavior) and `server.hmr: false` does NOT
+// remove the client's reconnect-reload in Vite 7, so we patch the served client
+// to turn its `location.reload()` calls into no-ops. HMR module updates still
+// apply while the socket is up; only the disruptive full-page reloads are gone.
+function suppressViteClientReload(): Plugin {
+  return {
+    name: "replit-suppress-vite-client-reload",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const reqPath = (req.url ?? "").split("?")[0];
+        if (!reqPath.endsWith("/@vite/client")) return next();
+        // Force a full 200 body (no conditional 304) so we can rewrite it.
+        delete req.headers["if-none-match"];
+        const chunks: Buffer[] = [];
+        const origEnd = res.end.bind(res);
+        res.write = ((chunk: unknown) => {
+          if (chunk)
+            chunks.push(
+              Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string),
+            );
+          return true;
+        }) as typeof res.write;
+        res.end = ((chunk?: unknown) => {
+          if (chunk)
+            chunks.push(
+              Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string),
+            );
+          const body = Buffer.concat(chunks)
+            .toString("utf8")
+            .split("location.reload()")
+            .join('console.debug("[vite] full page reload suppressed (Replit preview)")');
+          res.setHeader("Content-Length", Buffer.byteLength(body));
+          res.setHeader("Cache-Control", "no-store");
+          res.removeHeader("ETag");
+          return origEnd(body);
+        }) as typeof res.end;
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: basePath,
   plugins: [
+    ...(process.env.REPL_ID ? [suppressViteClientReload()] : []),
     react(),
     tailwindcss({ optimize: false }),
     runtimeErrorOverlay(),
@@ -136,15 +185,6 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
-    // On Replit the preview is served through an HTTPS proxy (port 443) inside
-    // an iframe. By default Vite's HMR client tries to open its websocket
-    // against the internal dev port, which the proxy routes unreliably — the
-    // socket drops every so often, and Vite calls location.reload() on every
-    // reconnect, which yanks the page out from under the user (e.g. aborting an
-    // in-progress spec/Excel import). Pinning the HMR client to the proxied
-    // HTTPS port keeps the websocket stable so those spurious reloads stop.
-    // Scoped to Replit so plain local dev (localhost over HTTP) is untouched.
-    hmr: process.env.REPL_ID ? { clientPort: 443 } : undefined,
     fs: {
       strict: true,
     },
