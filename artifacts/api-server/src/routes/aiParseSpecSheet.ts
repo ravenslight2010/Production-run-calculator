@@ -117,6 +117,14 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "SAUCE, even if it sits near the sauce section; only a tomato-based blend is " +
     "SAUCE. Use the section heading and the ingredient names together — do not " +
     "assume position alone. " +
+    "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
+    "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
+    "in its correct field and NEVER swap units: `ozPerPizza`/`sauceOzPerPizza` are " +
+    "ounces PER PIZZA and `lbs` are recipe pounds — do not put a per-pizza ounce " +
+    "figure into a recipe's `lbs` or vice-versa, and do not convert between them. " +
+    "`sticks` is a whole-pepperoni-stick count, separate from its oz/pizza. Match " +
+    "each value to the correct brand/flavor/ingredient row it sits on; if a cell is " +
+    "blank or unreadable, omit that field rather than borrowing a neighbor's number. " +
     "Never invent data that is not in the workbook. Omit fields you cannot find. " +
     "This is read-only; the user reviews and can edit a summary before anything is saved.";
 

@@ -192,3 +192,24 @@ Any change to one app's order/logic must land in the other verbatim.
 - **MOBILE parity DEFERRED (parity paused):** shared lib + server prompt already
   cover both; mobile `SpecImportModal` + `context/specImport.ts` prepare still need
   the tombstone filter + editable review when parity resumes.
+
+## Targetless-recipe silent miss (review-side backstop)
+- **A recipe with rows + a name but NO target/brand passes every apply-issue check
+  yet attaches to ZERO profiles** — `recipeApplyTargets(r, profiles)` returns `[]`
+  (no explicit targets, no same-brand fallback anchor). At apply the recipe NAME
+  still registers in the library, but no run/profile uses it, so the user sees "the
+  recipe didn't import." This is distinct from the `attentionCount` apply-issues.
+- **Web dialog backstop (`SpecImportDialog`):** each RecipeRow computes
+  `recipeApplyTargets(candidate, edited.profiles)`. An included, issue-free recipe
+  with 0 targets shows a SOFT amber "Won't show on any product yet" warning + Brand
+  + Flavor assign inputs (datalists) that set the recipe's `brand`/`flavor`.
+  `RecipeItem` carries editable `brand`/`flavor` (init from `orig`), always flowed
+  into the emitted `edited` recipe. Deliberately NOT part of the hard Apply-block —
+  the recipe still saves to the library either way; this only helps it ATTACH.
+- **Attach preview:** attaching recipes show "Attaches to: Brand — Flavor (+N more)"
+  so the user can confirm the tie before applying.
+- **Parse visibility:** read-only "Read: …" summaries per row (profile: die/sauce/
+  applicators/peps; recipe: ingredient·lbs preview) let users catch a numeric
+  misparse. Numeric EDITING was intentionally left out of scope.
+- **When parity resumes:** mirror the attach-target warning + assign inputs and the
+  read-only summaries in the mobile `SpecImportModal`.

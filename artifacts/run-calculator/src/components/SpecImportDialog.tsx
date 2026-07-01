@@ -3,8 +3,10 @@ import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide
 import {
   recipeApplyIssue,
   profileApplyIssue,
+  recipeApplyTargets,
   type ParsedProfile,
   type ParsedRecipe,
+  type ParsedRecipeTarget,
   type ParsedSpecImport,
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
@@ -40,11 +42,15 @@ type ProfileItem = {
 
 // One editable recipe row. `orig` keeps rows/targets/doughballOz/app; name + kind
 // + include are editable (fixes "no name" and "cheese read as sauce").
+// `brand`/`flavor` let the user attach a recipe that the AI left tied to no
+// product (fixes the silent "recipe imported but shows up on nothing" miss).
 type RecipeItem = {
   key: string;
   orig: ParsedRecipe;
   name: string;
   kind: ParsedRecipe["kind"];
+  brand: string;
+  flavor: string;
   include: boolean;
   tombstoned: boolean;
 };
@@ -77,6 +83,8 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
     orig: r,
     name: r.name ?? "",
     kind: r.kind,
+    brand: r.brand ?? "",
+    flavor: r.flavor ?? "",
     include: true,
     tombstoned: false,
   }));
@@ -85,10 +93,35 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
     orig: r,
     name: r.name ?? "",
     kind: r.kind,
+    brand: r.brand ?? "",
+    flavor: r.flavor ?? "",
     include: false,
     tombstoned: true,
   }));
   return [...kept, ...skipped];
+}
+
+// Compact one-line summary of the numbers the parser read for a profile, so the
+// user can spot a misparse (wrong die/oz) at a glance and uncheck or re-upload.
+function profileSummary(p: ParsedProfile): string {
+  const parts: string[] = [];
+  if (p.dieType) parts.push(`Die ${p.dieType}`);
+  if (p.sauceOzPerPizza != null) parts.push(`Sauce ${p.sauceOzPerPizza} oz`);
+  for (const a of p.applicators ?? []) {
+    if (a.type) parts.push(`${a.type} ${a.ozPerPizza} oz`);
+  }
+  for (const pp of p.pepperonis ?? []) {
+    if (pp.type) parts.push(`${pp.type} ${pp.sticks} stk · ${pp.ozPerPizza} oz`);
+  }
+  return parts.join(" · ");
+}
+
+// Preview of the ingredient rows a recipe parsed to (first few + overflow count).
+function recipeRowsPreview(r: ParsedRecipe): string {
+  const rows = r.rows ?? [];
+  const shown = rows.slice(0, 4).map((row) => `${row.ingredient} ${row.lbs} lb`);
+  const extra = rows.length - shown.length;
+  return shown.join(" · ") + (extra > 0 ? ` · +${extra} more` : "");
 }
 
 // Editable review/summary screen for the Excel spec-sheet importer. The manager
@@ -136,7 +169,16 @@ export default function SpecImportDialog({
       .map((p): ParsedProfile => ({ ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() }));
     const outRecipes = recipes
       .filter((r) => r.include)
-      .map((r): ParsedRecipe => ({ ...r.orig, name: r.name.trim(), kind: r.kind }));
+      .map((r): ParsedRecipe => {
+        const out: ParsedRecipe = { ...r.orig, name: r.name.trim(), kind: r.kind };
+        const b = r.brand.trim();
+        const f = r.flavor.trim();
+        if (b) out.brand = b;
+        else delete out.brand;
+        if (f) out.flavor = f;
+        else delete out.flavor;
+        return out;
+      });
     const out: ParsedSpecImport = { profiles: outProfiles, recipes: outRecipes };
     if (prepared?.parsed.note) out.note = prepared.parsed.note;
     return out;
@@ -276,9 +318,14 @@ export default function SpecImportDialog({
                       <RecipeRow
                         key={r.key}
                         item={r}
+                        editedProfiles={edited.profiles}
+                        brands={brands}
+                        flavorsByBrand={flavorsByBrand}
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
                         onKind={(kind) => setRecipe(r.key, { kind })}
+                        onBrand={(brand) => setRecipe(r.key, { brand })}
+                        onFlavor={(flavor) => setRecipe(r.key, { flavor })}
                       />
                     ))}
                   </ul>
@@ -430,6 +477,7 @@ function ProfileRow({
   );
   const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
   const flavorListId = `spec-flavors-${item.key}`;
+  const summary = profileSummary(item.orig);
 
   return (
     <li
@@ -480,6 +528,12 @@ function ProfileRow({
             />
           </div>
 
+          {summary && (
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Read: {summary}
+            </div>
+          )}
+
           {item.include && issue && (
             <div className="mt-1 text-xs text-amber-600">
               {issue === "missing-brand"
@@ -498,22 +552,56 @@ function ProfileRow({
   );
 }
 
+function formatTargets(targets: ParsedRecipeTarget[]): string {
+  const shown = targets.slice(0, 3).map((t) => `${t.brand} — ${t.flavor}`);
+  const extra = targets.length - shown.length;
+  return shown.join(", ") + (extra > 0 ? `, +${extra} more` : "");
+}
+
 function RecipeRow({
   item,
+  editedProfiles,
+  brands,
+  flavorsByBrand,
   onToggle,
   onName,
   onKind,
+  onBrand,
+  onFlavor,
 }: {
   item: RecipeItem;
+  editedProfiles: ParsedProfile[];
+  brands: string[];
+  flavorsByBrand: Record<string, string[]>;
   onToggle: () => void;
   onName: (v: string) => void;
   onKind: (v: ParsedRecipe["kind"]) => void;
+  onBrand: (v: string) => void;
+  onFlavor: (v: string) => void;
 }) {
   const name = item.name.trim();
-  const candidate: ParsedRecipe = { ...item.orig, name, kind: item.kind };
+  const brand = item.brand.trim();
+  const flavor = item.flavor.trim();
+  const candidate: ParsedRecipe = {
+    ...item.orig,
+    name,
+    kind: item.kind,
+    ...(brand ? { brand } : {}),
+    ...(flavor ? { flavor } : {}),
+  };
   const issue = recipeApplyIssue(candidate);
   const isNew = !name || !recipeExistsForImport(item.kind, name);
-  const rowCount = item.orig.rows?.length ?? 0;
+  const rowsPreview = recipeRowsPreview(item.orig);
+  // Which products this recipe will actually attach to when applied. If empty,
+  // the recipe name lands in the library but shows up on NO run — the silent
+  // "it didn't import" miss the user reported.
+  const targets = recipeApplyTargets(candidate, editedProfiles);
+  const attachesToNothing = item.include && !issue && targets.length === 0;
+  const flavorMatch = Object.keys(flavorsByBrand).find(
+    (b) => b.trim().toLowerCase() === brand.toLowerCase(),
+  );
+  const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
+  const flavorListId = `spec-recipe-flavors-${item.key}`;
 
   return (
     <li
@@ -561,9 +649,17 @@ function RecipeRow({
             </select>
           </div>
 
-          <div className="mt-1 text-xs text-muted-foreground">
-            {rowCount} ingredient{rowCount === 1 ? "" : "s"}
-          </div>
+          {rowsPreview && (
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Read: {rowsPreview}
+            </div>
+          )}
+
+          {item.include && !issue && targets.length > 0 && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Attaches to: {formatTargets(targets)}
+            </div>
+          )}
 
           {item.include && issue === "missing-name" && (
             <div className="mt-1 text-xs text-amber-600">
@@ -575,6 +671,44 @@ function RecipeRow({
               No ingredients were read — it won't be saved.
             </div>
           )}
+
+          {attachesToNothing && (
+            <div className="mt-2 rounded-md border border-amber-400/60 bg-amber-500/10 p-2">
+              <div className="text-xs font-medium text-amber-700">
+                Won't show on any product yet — set the brand & flavor it belongs to.
+              </div>
+              <datalist id={flavorListId}>
+                {flavorOpts.map((f) => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <input
+                  value={item.brand}
+                  onChange={(e) => onBrand(e.target.value)}
+                  list="spec-import-brands"
+                  placeholder="Brand"
+                  aria-label={`Attach recipe ${item.orig.name || "(unnamed)"} to brand`}
+                  data-testid={`spec-recipe-brand-${item.key}`}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                />
+                <input
+                  value={item.flavor}
+                  onChange={(e) => onFlavor(e.target.value)}
+                  list={flavorListId}
+                  placeholder="Flavor"
+                  aria-label={`Attach recipe ${item.orig.name || "(unnamed)"} to flavor`}
+                  data-testid={`spec-recipe-flavor-${item.key}`}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-amber-700/80">
+                Enter both, or set just a brand to attach to every matching product in
+                this import. The recipe is still saved to your library either way.
+              </p>
+            </div>
+          )}
+
           {item.tombstoned && (
             <div className="mt-1 text-xs text-amber-600">
               You merged/removed this before — check the box only if you want it back.

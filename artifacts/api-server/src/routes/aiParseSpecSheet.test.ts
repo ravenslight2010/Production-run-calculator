@@ -47,3 +47,16 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
     expect(system).toContain("recipe brand/flavor and `targets` the same way");
   });
 });
+
+// Regression guard for the numeric-accuracy rule: the model must copy numbers
+// verbatim and never swap per-pizza ounces with recipe pounds. Pinned here so
+// the instruction can't be silently dropped from the prompt.
+describe("buildParseSpecSheetPrompt numeric accuracy", () => {
+  it("tells the model to read numbers exactly and never swap oz/lbs units", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("READ NUMBERS EXACTLY");
+    expect(system).toContain("never round");
+    expect(system).toContain("NEVER swap units");
+    expect(system).toContain("per-pizza ounce");
+  });
+});
