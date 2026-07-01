@@ -4,7 +4,11 @@ import {
   toReconcileRecipes,
   formatDiscrepanciesForPrompt,
   fmtLbs,
+  reconcileSpecProfiles,
+  toReconcileProfiles,
+  formatProfileDiscrepanciesForPrompt,
   type ReconcileRecipe,
+  type ReconcileProfile,
 } from "./index";
 
 const dough = (name: string, rows: [string, number][]): ReconcileRecipe => ({
@@ -149,5 +153,146 @@ describe("formatDiscrepanciesForPrompt / fmtLbs", () => {
     expect(fmtLbs(50)).toBe("50");
     expect(fmtLbs(50.5)).toBe("50.5");
     expect(fmtLbs(50.0005)).toBe("50.001");
+  });
+});
+
+const prof = (over: Partial<ReconcileProfile> = {}): ReconcileProfile => ({
+  brand: "Basha",
+  flavor: "Original",
+  dieType: "10 inch",
+  sauceOzPerPizza: 4,
+  applicators: [{ type: "Mozzarella", ozPerPizza: 4 }],
+  pepperonis: [{ type: "Pepperoni", sticks: 2, ozPerPizza: 1.5 }],
+  ...over,
+});
+
+describe("reconcileSpecProfiles", () => {
+  it("reports no discrepancies when profiles match exactly", () => {
+    const p = prof();
+    expect(reconcileSpecProfiles({ specProfiles: [p], currentProfiles: [p] })).toEqual([]);
+  });
+
+  it("flags a profile the current library is missing", () => {
+    const out = reconcileSpecProfiles({ specProfiles: [prof()], currentProfiles: [] });
+    expect(out).toHaveLength(1);
+    expect(out[0].type).toBe("missing-profile");
+  });
+
+  it("matches profiles case-insensitively by brand+flavor", () => {
+    const spec = prof({ brand: "Basha", flavor: "Original" });
+    const cur = prof({ brand: "basha", flavor: "ORIGINAL" });
+    expect(reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [cur] })).toEqual([]);
+  });
+
+  it("flags die and sauce mismatches", () => {
+    const spec = prof({ dieType: "10 inch", sauceOzPerPizza: 4 });
+    const cur = prof({ dieType: "12 inch", sauceOzPerPizza: 5 });
+    const out = reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [cur] });
+    const types = out.map((d) => d.type).sort();
+    expect(types).toEqual(["die-mismatch", "sauce-mismatch"]);
+  });
+
+  it("ignores die/sauce when the spec sheet does not specify them", () => {
+    const spec = prof({ dieType: undefined, sauceOzPerPizza: undefined });
+    const cur = prof({ dieType: "anything", sauceOzPerPizza: 99 });
+    expect(reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [cur] })).toEqual([]);
+  });
+
+  it("compares applicators by slot: type mismatch and amount mismatch", () => {
+    const spec = prof({
+      applicators: [
+        { type: "Mozzarella", ozPerPizza: 4 },
+        { type: "Cheddar", ozPerPizza: 2 },
+      ],
+    });
+    const curType = prof({
+      applicators: [
+        { type: "Provolone", ozPerPizza: 4 },
+        { type: "Cheddar", ozPerPizza: 2 },
+      ],
+    });
+    const t = reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [curType] });
+    expect(t).toHaveLength(1);
+    expect(t[0].type).toBe("applicator-type-mismatch");
+    expect(t[0].field).toBe("applicator 1");
+
+    const curOz = prof({
+      applicators: [
+        { type: "Mozzarella", ozPerPizza: 6 },
+        { type: "Cheddar", ozPerPizza: 2 },
+      ],
+    });
+    const a = reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [curOz] });
+    expect(a).toHaveLength(1);
+    expect(a[0].type).toBe("applicator-amount-mismatch");
+  });
+
+  it("only checks applicator slots the spec sheet fills", () => {
+    const spec = prof({ applicators: [{ type: "Mozzarella", ozPerPizza: 4 }] });
+    const cur = prof({
+      applicators: [
+        { type: "Mozzarella", ozPerPizza: 4 },
+        { type: "Extra Cheese", ozPerPizza: 3 },
+      ],
+    });
+    expect(reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [cur] })).toEqual([]);
+  });
+
+  it("compares pepperonis by slot for type and amount", () => {
+    const spec = prof({ pepperonis: [{ type: "Pepperoni", sticks: 2, ozPerPizza: 1.5 }] });
+    const curType = prof({ pepperonis: [{ type: "Sausage", sticks: 2, ozPerPizza: 1.5 }] });
+    const t = reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [curType] });
+    expect(t).toHaveLength(1);
+    expect(t[0].type).toBe("pepperoni-type-mismatch");
+
+    const curAmt = prof({ pepperonis: [{ type: "Pepperoni", sticks: 3, ozPerPizza: 2 }] });
+    const a = reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [curAmt] });
+    expect(a).toHaveLength(1);
+    expect(a[0].type).toBe("pepperoni-amount-mismatch");
+  });
+
+  it("respects the numeric tolerance for floating-point noise", () => {
+    const spec = prof({ sauceOzPerPizza: 4 });
+    const cur = prof({ sauceOzPerPizza: 4.0005 });
+    expect(reconcileSpecProfiles({ specProfiles: [spec], currentProfiles: [cur] })).toEqual([]);
+  });
+});
+
+describe("toReconcileProfiles", () => {
+  it("normalizes a saved spec sheet's profile array and drops malformed entries", () => {
+    const out = toReconcileProfiles([
+      {
+        brand: "Basha",
+        flavor: "Original",
+        dieType: "10 inch",
+        sauceOzPerPizza: 4,
+        applicators: [{ type: "Mozzarella", ozPerPizza: 4 }],
+        pepperonis: [{ type: "Pepperoni", sticks: 2, ozPerPizza: 1.5 }],
+        extra: "ignored",
+      },
+      { brand: "", flavor: "Nope", applicators: [], pepperonis: [] },
+      { flavor: "NoBrand", applicators: [], pepperonis: [] },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].brand).toBe("Basha");
+    expect(out[0].applicators).toEqual([{ type: "Mozzarella", ozPerPizza: 4 }]);
+    expect(out[0].dieType).toBe("10 inch");
+  });
+
+  it("omits die/sauce when absent and returns [] for non-array input", () => {
+    const out = toReconcileProfiles([{ brand: "B", flavor: "F", applicators: [], pepperonis: [] }]);
+    expect(out[0].dieType).toBeUndefined();
+    expect(out[0].sauceOzPerPizza).toBeUndefined();
+    expect(toReconcileProfiles(null)).toEqual([]);
+    expect(toReconcileProfiles({})).toEqual([]);
+  });
+});
+
+describe("formatProfileDiscrepanciesForPrompt", () => {
+  it("renders one line per profile discrepancy", () => {
+    const out = reconcileSpecProfiles({ specProfiles: [prof()], currentProfiles: [] });
+    expect(formatProfileDiscrepanciesForPrompt(out)).toBe(
+      '- [profile] The profile "Basha Original" is on the spec sheet but isn\'t set up in your current profiles.',
+    );
   });
 });

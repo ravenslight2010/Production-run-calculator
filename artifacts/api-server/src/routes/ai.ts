@@ -12,6 +12,8 @@ import {
 import {
   reconcileSpecWithRecipes,
   toReconcileRecipes,
+  reconcileSpecProfiles,
+  toReconcileProfiles,
 } from "@workspace/spec-reconcile";
 import {
   buildMixReconcilePrompt,
@@ -106,6 +108,7 @@ import {
   buildSpecReconcilePrompt,
   sanitizeSpecReconcileSummary,
   toCurrentReconcileRecipes,
+  toCurrentReconcileProfiles,
   validateSpecReconcileBody,
 } from "./aiSpecReconcile";
 import {
@@ -769,6 +772,7 @@ router.post(
 
     // Load the saved spec sheet in the caller's scope.
     let dataRecipesRaw: unknown;
+    let dataProfilesRaw: unknown;
     let label = "Spec sheet";
     try {
       const rows = await db
@@ -787,8 +791,9 @@ router.post(
         return;
       }
       label = row.label;
-      const data = (row.data ?? {}) as { recipes?: unknown };
+      const data = (row.data ?? {}) as { recipes?: unknown; profiles?: unknown };
       dataRecipesRaw = data.recipes;
+      dataProfilesRaw = data.profiles;
     } catch (err) {
       req.log.error({ err }, "ai-spec-reconcile failed to load saved spec sheet");
       res.status(500).json({ error: "Failed to load saved spec sheet" });
@@ -801,11 +806,25 @@ router.post(
       currentRecipes: toCurrentReconcileRecipes(validation.data),
     });
 
+    // Deterministic profile diff: saved spec sheet's brand+flavor profile specs
+    // (die/sauce/applicators/pepperonis) vs the current profiles the client sent.
+    // Gate strictly on PRESENCE of currentProfiles: older clients (e.g. mobile)
+    // omit the field entirely, and we must skip profiles for them rather than
+    // treat an absent snapshot as "every profile is missing". A client that
+    // genuinely has no matching profiles sends an explicit (empty) array.
+    const profileDiscrepancies =
+      validation.data.currentProfiles === undefined
+        ? []
+        : reconcileSpecProfiles({
+            specProfiles: toReconcileProfiles(dataProfilesRaw),
+            currentProfiles: toCurrentReconcileProfiles(validation.data),
+          });
+
     // Advisory plain-language summary. Fail-safe: any AI error still returns the
     // deterministic discrepancies (with an empty summary) rather than a 502.
     let summary = "";
     try {
-      const { system, user } = buildSpecReconcilePrompt(label, discrepancies);
+      const { system, user } = buildSpecReconcilePrompt(label, discrepancies, profileDiscrepancies);
       const grounded = await groundPromptWithMemory(req.log, user, {
         facilityDomains: ["ingredient", "general"],
       });

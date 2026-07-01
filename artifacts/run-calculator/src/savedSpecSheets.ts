@@ -12,12 +12,13 @@
 // artifacts/run-calculator-mobile/context/savedSpecSheets.ts (replit.md parity).
 
 import type { ParsedSpecImport } from "@workspace/spec-import";
-import type { Discrepancy, ReconcileRecipe } from "@workspace/spec-reconcile";
+import type { Discrepancy, ReconcileRecipe, ReconcileProfile } from "@workspace/spec-reconcile";
 import { inventoryClientId } from "./inventoryShared";
 import {
   loadDoughRecipePresets,
   loadFrontlineRecipePresets,
   loadCheeseRecipePresets,
+  loadProfile,
 } from "./storage";
 
 export type SavedSpecSheet = {
@@ -99,15 +100,78 @@ export function loadCurrentReconcileRecipes(): ReconcileRecipe[] {
 }
 
 /**
- * Cross-reference one saved spec sheet against the current recipe library. The
- * server runs the deterministic diff and adds an advisory plain-language
- * summary; the discrepancy list is always returned even if the AI is down.
+ * Snapshot the current profile (run-setup spec fields) for one brand+flavor so
+ * the reconcile can compare die type, sauce oz/pizza, and applicator/pepperoni
+ * slots. Returns null when no profile is stored for that brand+flavor.
  */
-export async function reconcileSpecSheet(specSheetId: number): Promise<SpecReconcileResult> {
+export function currentReconcileProfile(brand: string, flavor: string): ReconcileProfile | null {
+  const v = loadProfile(brand, flavor);
+  if (!v) return null;
+  const rec = v as Record<string, unknown>;
+  const num = (key: string): number => {
+    const n = Number(rec[key]);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const str = (key: string): string => String(rec[key] ?? "").trim();
+  const applicators = [1, 2, 3, 4].map((slot) => ({
+    type: str(`app${slot}Type`),
+    ozPerPizza: num(`app${slot}OzPerPizza`),
+  }));
+  const pepperonis = [1, 2].map((slot) => ({
+    type: str(`pep${slot}Type`),
+    sticks: num(`pep${slot}Sticks`),
+    ozPerPizza: num(`pep${slot}OzPerPizza`),
+  }));
+  const dieType = str("dieType");
+  return {
+    brand,
+    flavor,
+    ...(dieType ? { dieType } : {}),
+    sauceOzPerPizza: num("sauceOzPerPizza"),
+    applicators,
+    pepperonis,
+  };
+}
+
+/**
+ * Snapshot the current profiles for the brand+flavors referenced by the given
+ * spec-sheet profiles (deduped, only those that exist locally). Sent to the
+ * server so the AI summary can also narrate profile discrepancies.
+ */
+export function loadCurrentReconcileProfiles(
+  specProfiles: ReadonlyArray<{ brand: string; flavor: string }>,
+): ReconcileProfile[] {
+  const out: ReconcileProfile[] = [];
+  const seen = new Set<string>();
+  for (const p of specProfiles) {
+    const brand = (p?.brand ?? "").trim();
+    const flavor = (p?.flavor ?? "").trim();
+    if (!brand || !flavor) continue;
+    const key = `${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const cur = currentReconcileProfile(brand, flavor);
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+/**
+ * Cross-reference one saved spec sheet against the current recipe library and
+ * profiles. The server runs the deterministic diff and adds an advisory
+ * plain-language summary; the discrepancy list is always returned even if the
+ * AI is down. Current profiles are sent for the brand+flavors this sheet covers.
+ */
+export async function reconcileSpecSheet(sheet: SavedSpecSheet): Promise<SpecReconcileResult> {
+  const specProfiles = Array.isArray(sheet.data?.profiles) ? sheet.data.profiles : [];
   const res = await fetch("/api/ai/spec-reconcile", {
     method: "POST",
     headers: authHeaders(true),
-    body: JSON.stringify({ specSheetId, currentRecipes: loadCurrentReconcileRecipes() }),
+    body: JSON.stringify({
+      specSheetId: sheet.id,
+      currentRecipes: loadCurrentReconcileRecipes(),
+      currentProfiles: loadCurrentReconcileProfiles(specProfiles),
+    }),
   });
   if (!res.ok) throw new Error(`Spec cross-reference failed (${res.status})`);
   return (await res.json()) as SpecReconcileResult;

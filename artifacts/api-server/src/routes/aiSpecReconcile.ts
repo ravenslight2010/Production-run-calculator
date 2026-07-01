@@ -2,8 +2,11 @@ import { AiSpecReconcileBody } from "@workspace/api-zod";
 import * as z from "zod";
 import {
   type Discrepancy,
+  type ProfileDiscrepancy,
   type ReconcileRecipe,
+  type ReconcileProfile,
   formatDiscrepanciesForPrompt,
+  formatProfileDiscrepanciesForPrompt,
 } from "@workspace/spec-reconcile";
 
 // Bounds for the spec-reconcile AI summary, in the same spirit as the other AI
@@ -11,6 +14,7 @@ import {
 // a single request can't blow up cost/latency.
 export const MAX_CURRENT_RECIPES = 400;
 export const MAX_ROWS_PER_RECIPE = 200;
+export const MAX_CURRENT_PROFILES = 400;
 export const MAX_SUMMARY_CHARS = 1500;
 export const MAX_DISCREPANCIES_IN_PROMPT = 200;
 
@@ -43,6 +47,9 @@ export function validateSpecReconcileBody(body: unknown): SpecReconcileValidatio
       };
     }
   }
+  if ((parsed.data.currentProfiles?.length ?? 0) > MAX_CURRENT_PROFILES) {
+    return { ok: false, status: 400, error: `Too many profiles (max ${MAX_CURRENT_PROFILES})` };
+  }
   return { ok: true, data: parsed.data };
 }
 
@@ -58,6 +65,24 @@ export function toCurrentReconcileRecipes(input: SpecReconcileInput): ReconcileR
   }));
 }
 
+// Map the generated body's optional profiles down to the pure lib's
+// ReconcileProfile shape. Absent (older clients) → empty list, so the profile
+// diff simply reports nothing and only recipes are compared.
+export function toCurrentReconcileProfiles(input: SpecReconcileInput): ReconcileProfile[] {
+  return (input.currentProfiles ?? []).map((p) => ({
+    brand: p.brand,
+    flavor: p.flavor,
+    dieType: p.dieType,
+    sauceOzPerPizza: p.sauceOzPerPizza,
+    applicators: (p.applicators ?? []).map((a) => ({ type: a.type, ozPerPizza: a.ozPerPizza })),
+    pepperonis: (p.pepperonis ?? []).map((pp) => ({
+      type: pp.type,
+      sticks: pp.sticks,
+      ozPerPizza: pp.ozPerPizza,
+    })),
+  }));
+}
+
 function clamp(s: string, max: number): string {
   const t = s.trim();
   return t.length > max ? t.slice(0, max).trimEnd() : t;
@@ -69,37 +94,50 @@ function clamp(s: string, max: number): string {
 export function buildSpecReconcilePrompt(
   label: string,
   discrepancies: ReadonlyArray<Discrepancy>,
+  profileDiscrepancies: ReadonlyArray<ProfileDiscrepancy> = [],
 ): { system: string; user: string } {
   const system =
     "You are a helpful assistant for floor staff at a frozen-pizza factory. " +
     "A saved spec sheet has been compared, in code, against the factory's " +
-    "current saved recipes. You are given the EXACT list of discrepancies that " +
+    "current saved recipes AND profiles (die type, sauce oz/pizza, applicator " +
+    "and pepperoni settings). You are given the EXACT list of discrepancies that " +
     "comparison found. Write a short, plain-language summary for a worker: say " +
-    "whether the current recipes match the spec sheet, and if not, group and " +
+    "whether the current setup matches the spec sheet, and if not, group and " +
     "explain the differences clearly (missing recipes, missing or extra " +
-    "ingredients, and pound mismatches). Be concrete and quantitative using ONLY " +
+    "ingredients, pound mismatches, and profile differences like die type, sauce, " +
+    "applicators, and pepperonis). Be concrete and quantitative using ONLY " +
     "the discrepancies listed — never invent, guess, or add a discrepancy that " +
     "isn't in the list, and never claim something matches when a discrepancy is " +
     "listed for it. You are ADVISORY ONLY: never claim to have changed, fixed, " +
     "or applied anything — you only explain what differs so the worker can " +
     "decide what to do.";
 
+  const total = discrepancies.length + profileDiscrepancies.length;
   const lines: string[] = [];
   lines.push(`SPEC SHEET: "${label}"`);
   lines.push("");
-  if (discrepancies.length === 0) {
+  if (total === 0) {
     lines.push(
-      "DISCREPANCIES: none. Every recipe on this spec sheet matches the current " +
-        "saved recipes exactly (same ingredients, same pounds).",
+      "DISCREPANCIES: none. Every recipe and profile on this spec sheet matches " +
+        "the current saved recipes and profiles exactly.",
     );
     lines.push("");
     lines.push(
       "Confirm to the worker, in one or two short sentences, that the current " +
-        "recipes fully match this spec sheet.",
+        "recipes and profiles fully match this spec sheet.",
     );
   } else {
-    lines.push(`DISCREPANCIES (${discrepancies.length} found — the only facts you may use):`);
-    lines.push(formatDiscrepanciesForPrompt(discrepancies.slice(0, MAX_DISCREPANCIES_IN_PROMPT)));
+    lines.push(`DISCREPANCIES (${total} found — the only facts you may use):`);
+    // One shared budget across recipe + profile lines so a paid AI route can't be
+    // pushed to ~2× the intended cap by having both lists near the limit.
+    const recipeSlice = discrepancies.slice(0, MAX_DISCREPANCIES_IN_PROMPT);
+    const profileBudget = Math.max(0, MAX_DISCREPANCIES_IN_PROMPT - recipeSlice.length);
+    const recipeLines = formatDiscrepanciesForPrompt(recipeSlice);
+    if (recipeLines) lines.push(recipeLines);
+    const profileLines = formatProfileDiscrepanciesForPrompt(
+      profileDiscrepancies.slice(0, profileBudget),
+    );
+    if (profileLines) lines.push(profileLines);
     lines.push("");
     lines.push(
       'Return ONLY JSON of the exact shape {"summary":string}. Put a short, ' +

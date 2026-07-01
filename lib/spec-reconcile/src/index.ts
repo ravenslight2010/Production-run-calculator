@@ -199,3 +199,277 @@ export function reconcileSpecWithRecipes(input: SpecReconcileInput): Discrepancy
 export function formatDiscrepanciesForPrompt(discrepancies: ReadonlyArray<Discrepancy>): string {
   return discrepancies.map((d) => `- [${d.kind}] ${d.message}`).join("\n");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile reconcile — cross-reference the spec sheet's brand+flavor PROFILE specs
+// (die type, sauce oz/pizza, applicator types & oz per slot, pepperoni types /
+// sticks / oz per slot) against the current profile library. This is the "include
+// all things" layer on top of the recipe reconcile above: recipes cover the
+// dough/sauce/cheese ingredient lists, profiles cover the run-setup spec numbers.
+//
+// Applicators and pepperonis are compared BY SLOT (position), because that is how
+// the apps store them (app1..app4, pep1..pep2) and how a spec sheet is imported —
+// the Nth applicator on the sheet becomes applicator slot N. Only slots the spec
+// sheet actually fills are checked; a current profile carrying extra applicators
+// the sheet doesn't mention is not a discrepancy. Pure and deterministic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ReconcileApplicator = { type: string; ozPerPizza: number };
+export type ReconcilePepperoni = { type: string; sticks: number; ozPerPizza: number };
+
+export type ReconcileProfile = {
+  brand: string;
+  flavor: string;
+  dieType?: string;
+  sauceOzPerPizza?: number;
+  /** Applicator slots in order (index 0 === applicator 1). */
+  applicators: ReconcileApplicator[];
+  /** Pepperoni slots in order (index 0 === pepperoni 1). */
+  pepperonis: ReconcilePepperoni[];
+};
+
+export type ProfileDiscrepancyType =
+  // The spec sheet defines this brand+flavor profile but the current library has none.
+  | "missing-profile"
+  // The die type differs from the spec sheet.
+  | "die-mismatch"
+  // The sauce oz/pizza differs from the spec sheet beyond tolerance.
+  | "sauce-mismatch"
+  // An applicator slot's type differs (or is missing) from the spec sheet.
+  | "applicator-type-mismatch"
+  // An applicator slot's oz/pizza differs from the spec sheet beyond tolerance.
+  | "applicator-amount-mismatch"
+  // A pepperoni slot's type differs (or is missing) from the spec sheet.
+  | "pepperoni-type-mismatch"
+  // A pepperoni slot's sticks or oz/pizza differ from the spec sheet beyond tolerance.
+  | "pepperoni-amount-mismatch";
+
+export type ProfileDiscrepancy = {
+  brand: string;
+  flavor: string;
+  type: ProfileDiscrepancyType;
+  /** Human field label, e.g. "die type", "sauce oz/pizza", "applicator 2". */
+  field?: string;
+  /** What the spec sheet calls for (display string). */
+  specValue?: string;
+  /** What the current profile has (display string). */
+  currentValue?: string;
+  /** Plain-language, app-consistent description of the discrepancy. */
+  message: string;
+};
+
+export type SpecProfileReconcileInput = {
+  /** Profiles from the saved spec sheet. */
+  specProfiles: ReconcileProfile[];
+  /** Profiles currently in the app's library. */
+  currentProfiles: ReconcileProfile[];
+  /**
+   * Absolute oz/stick difference at or below which a number is treated as a
+   * match. Defaults to 0.001 so floating-point noise never registers.
+   */
+  numericTolerance?: number;
+};
+
+function profileKey(brand: string, flavor: string): string {
+  return `${brand.trim().toLowerCase()}\u0000${flavor.trim().toLowerCase()}`;
+}
+
+function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * Normalize a loosely-typed profile list (e.g. a saved spec sheet's `profiles`,
+ * which carries extra fields) into the minimal ReconcileProfile shape. Drops
+ * malformed entries and blank-named applicator/pepperoni slots; never throws.
+ * Shared so server and clients normalize the same way.
+ */
+export function toReconcileProfiles(raw: unknown): ReconcileProfile[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ReconcileProfile[] = [];
+  for (const p of raw) {
+    if (!p || typeof p !== "object") continue;
+    const o = p as Record<string, unknown>;
+    const brand = String(o.brand ?? "").trim();
+    const flavor = String(o.flavor ?? "").trim();
+    if (!brand || !flavor) continue;
+
+    const applicators: ReconcileApplicator[] = [];
+    const rawApps = Array.isArray(o.applicators) ? o.applicators : [];
+    for (const a of rawApps) {
+      if (!a || typeof a !== "object") continue;
+      const ao = a as Record<string, unknown>;
+      const type = String(ao.type ?? "").trim();
+      const oz = Number(ao.ozPerPizza);
+      applicators.push({ type, ozPerPizza: Number.isFinite(oz) ? oz : 0 });
+    }
+
+    const pepperonis: ReconcilePepperoni[] = [];
+    const rawPeps = Array.isArray(o.pepperonis) ? o.pepperonis : [];
+    for (const pp of rawPeps) {
+      if (!pp || typeof pp !== "object") continue;
+      const po = pp as Record<string, unknown>;
+      const type = String(po.type ?? "").trim();
+      const sticks = Number(po.sticks);
+      const oz = Number(po.ozPerPizza);
+      pepperonis.push({
+        type,
+        sticks: Number.isFinite(sticks) ? sticks : 0,
+        ozPerPizza: Number.isFinite(oz) ? oz : 0,
+      });
+    }
+
+    const profile: ReconcileProfile = { brand, flavor, applicators, pepperonis };
+    const die = String(o.dieType ?? "").trim();
+    if (die) profile.dieType = die;
+    const sauce = Number(o.sauceOzPerPizza);
+    if (o.sauceOzPerPizza != null && Number.isFinite(sauce)) profile.sauceOzPerPizza = sauce;
+    out.push(profile);
+  }
+  return out;
+}
+
+/**
+ * Cross-reference the saved spec sheet's profiles against the current profile
+ * library and return every discrepancy. Only profiles that appear ON the spec
+ * sheet are checked; only the specific spec-sheet fields that are set are
+ * compared (a blank spec field is "not specified", not a discrepancy).
+ * Deterministic and pure.
+ */
+export function reconcileSpecProfiles(input: SpecProfileReconcileInput): ProfileDiscrepancy[] {
+  const tol =
+    input.numericTolerance != null && input.numericTolerance >= 0 ? input.numericTolerance : 0.001;
+  const out: ProfileDiscrepancy[] = [];
+
+  const currentByKey = new Map<string, ReconcileProfile>();
+  for (const p of input.currentProfiles) currentByKey.set(profileKey(p.brand, p.flavor), p);
+
+  for (const spec of input.specProfiles) {
+    const who = `${spec.brand} ${spec.flavor}`.trim();
+    const current = currentByKey.get(profileKey(spec.brand, spec.flavor));
+    if (!current) {
+      out.push({
+        brand: spec.brand,
+        flavor: spec.flavor,
+        type: "missing-profile",
+        message: `The profile "${who}" is on the spec sheet but isn't set up in your current profiles.`,
+      });
+      continue;
+    }
+
+    // Die type (string, case-insensitive) — only when the sheet specifies one.
+    const specDie = (spec.dieType ?? "").trim();
+    if (specDie) {
+      const curDie = (current.dieType ?? "").trim();
+      if (!sameName(specDie, curDie)) {
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "die-mismatch",
+          field: "die type",
+          specValue: specDie,
+          currentValue: curDie || "(none)",
+          message: `"${who}" die type is ${curDie ? `"${curDie}"` : "not set"} but the spec sheet calls for "${specDie}".`,
+        });
+      }
+    }
+
+    // Sauce oz/pizza (numeric) — only when the sheet specifies one.
+    if (spec.sauceOzPerPizza != null) {
+      const curSauce = current.sauceOzPerPizza ?? 0;
+      if (Math.abs(curSauce - spec.sauceOzPerPizza) > tol) {
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "sauce-mismatch",
+          field: "sauce oz/pizza",
+          specValue: fmtLbs(spec.sauceOzPerPizza),
+          currentValue: fmtLbs(curSauce),
+          message: `"${who}" sauce is ${fmtLbs(curSauce)} oz/pizza but the spec sheet calls for ${fmtLbs(spec.sauceOzPerPizza)} oz/pizza.`,
+        });
+      }
+    }
+
+    // Applicators — compared by slot; only slots the sheet fills (non-blank type).
+    spec.applicators.forEach((sa, i) => {
+      const specType = (sa.type ?? "").trim();
+      if (!specType) return;
+      const slot = i + 1;
+      const ca = current.applicators[i];
+      const curType = (ca?.type ?? "").trim();
+      if (!sameName(specType, curType)) {
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "applicator-type-mismatch",
+          field: `applicator ${slot}`,
+          specValue: specType,
+          currentValue: curType || "(none)",
+          message: `"${who}" applicator ${slot} is ${curType ? `"${curType}"` : "not set"} but the spec sheet calls for "${specType}".`,
+        });
+        return;
+      }
+      const curOz = ca?.ozPerPizza ?? 0;
+      if (Math.abs(curOz - sa.ozPerPizza) > tol) {
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "applicator-amount-mismatch",
+          field: `applicator ${slot} (${specType})`,
+          specValue: fmtLbs(sa.ozPerPizza),
+          currentValue: fmtLbs(curOz),
+          message: `"${who}" applicator ${slot} "${specType}" is ${fmtLbs(curOz)} oz/pizza but the spec sheet calls for ${fmtLbs(sa.ozPerPizza)} oz/pizza.`,
+        });
+      }
+    });
+
+    // Pepperonis — compared by slot; only slots the sheet fills (non-blank type).
+    spec.pepperonis.forEach((sp, i) => {
+      const specType = (sp.type ?? "").trim();
+      if (!specType) return;
+      const slot = i + 1;
+      const cp = current.pepperonis[i];
+      const curType = (cp?.type ?? "").trim();
+      if (!sameName(specType, curType)) {
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "pepperoni-type-mismatch",
+          field: `pepperoni ${slot}`,
+          specValue: specType,
+          currentValue: curType || "(none)",
+          message: `"${who}" pepperoni ${slot} is ${curType ? `"${curType}"` : "not set"} but the spec sheet calls for "${specType}".`,
+        });
+        return;
+      }
+      const curSticks = cp?.sticks ?? 0;
+      const curOz = cp?.ozPerPizza ?? 0;
+      const stickDiff = Math.abs(curSticks - sp.sticks) > tol;
+      const ozDiff = Math.abs(curOz - sp.ozPerPizza) > tol;
+      if (stickDiff || ozDiff) {
+        const parts: string[] = [];
+        if (stickDiff) parts.push(`${fmtLbs(curSticks)} sticks (spec ${fmtLbs(sp.sticks)})`);
+        if (ozDiff) parts.push(`${fmtLbs(curOz)} oz/pizza (spec ${fmtLbs(sp.ozPerPizza)})`);
+        out.push({
+          brand: spec.brand,
+          flavor: spec.flavor,
+          type: "pepperoni-amount-mismatch",
+          field: `pepperoni ${slot} (${specType})`,
+          message: `"${who}" pepperoni ${slot} "${specType}" has ${parts.join(" and ")} — doesn't match the spec sheet.`,
+        });
+      }
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Compact one-line-per-discrepancy text block for grounding an AI summary with
+ * profile discrepancies. Pure; bounded by the caller. Returns "" when empty.
+ */
+export function formatProfileDiscrepanciesForPrompt(
+  discrepancies: ReadonlyArray<ProfileDiscrepancy>,
+): string {
+  return discrepancies.map((d) => `- [profile] ${d.message}`).join("\n");
+}

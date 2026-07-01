@@ -1078,11 +1078,37 @@ export interface SaveSpecSheetInput {
   data: SavedSpecSheetData;
 }
 
+export interface SpecReconcileApplicator {
+  type: string;
+  ozPerPizza: number;
+}
+
+export interface SpecReconcilePepperoni {
+  type: string;
+  sticks: number;
+  ozPerPizza: number;
+}
+
+/**
+ * A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.
+ */
+export interface SpecReconcileProfile {
+  brand: string;
+  flavor: string;
+  dieType?: string;
+  sauceOzPerPizza?: number;
+  applicators: SpecReconcileApplicator[];
+  pepperonis: SpecReconcilePepperoni[];
+  [key: string]: unknown;
+ }
+
 export interface SpecReconcileInput {
   /** The id of the saved spec sheet to check against */
   specSheetId: number;
   /** The app's current recipe library (dough/sauce/cheese) */
   currentRecipes: SpecReconcileRecipe[];
+  /** The app's current brand+flavor profiles, so the diff can also compare profile spec fields (die/sauce/applicators/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared. */
+  currentProfiles?: SpecReconcileProfile[];
 }
 
 export type ReconcileDiscrepancyKind = typeof ReconcileDiscrepancyKind[keyof typeof ReconcileDiscrepancyKind];

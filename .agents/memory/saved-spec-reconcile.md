@@ -1,6 +1,6 @@
 ---
 name: Saved spec sheets + AI cross-reference
-description: Server-saved (max 2) imported spec sheets cross-referenced against the CURRENT recipe library; deterministic diff in a shared lib, AI only narrates.
+description: Server-saved (max 2) imported spec sheets cross-referenced against the CURRENT recipe library AND profile library; deterministic diff in a shared lib, AI only narrates.
 ---
 
 # Saved spec sheets + AI reconcile
@@ -15,7 +15,29 @@ only writes a plain-language summary of an already-computed diff.
   discrepancy list of kinds `missing-recipe` / `missing-ingredient` /
   `extra-ingredient` / `amount-mismatch`. Match by kind+name case-insensitively;
   compare ingredient sets + lbs with tolerance. Same lib runs on server AND both
-  clients. 15 unit tests, workflow `test:spec-reconcile`.
+  clients. Workflow `test:spec-reconcile`.
+
+## Profile cross-reference (die/sauce/applicators/pepperonis)
+- The cross-reference also checks each sheet's brand+flavor PROFILE specs (die,
+  sauce oz/pizza, applicator & pepperoni slots), not just recipe ingredient lists.
+  Kept additive in `@workspace/spec-reconcile` so mobile (which imports only the
+  recipe exports) still compiles. Applicator/pepperoni are compared **BY SLOT** and
+  **only for spec-filled slots**; die/sauce only when the spec sets them.
+- **Absence vs empty is load-bearing.** `currentProfiles` is OPTIONAL on the
+  request. The server MUST skip profile reconciliation when the field is *absent*
+  (older/mobile clients) — treating an omitted snapshot as `[]` makes every spec
+  profile a false "missing-profile". A client with no matching profiles sends an
+  explicit empty array (genuinely missing → correct). **Why:** a review caught the
+  server unconditionally diffing, so absent-vs-empty must be distinguished at the route.
+- **Response `discrepancies` stays recipe-only**; profile diffs live only in the AI
+  `summary` text. The deterministic web panel renders profiles from its OWN
+  client-side reconcile, not from the response — so don't widen the response shape.
+  Because of this split, the single-sheet AI badge counts RECIPE diffs only (label
+  it "recipe difference(s)"/"Recipes match", never a global "everything matches").
+- **One shared prompt budget** across recipe + profile discrepancy lines (not a
+  separate cap each), or a paid AI route can be pushed to ~2× the intended cap.
+- **Mobile still TODO** (parity paused): send `currentProfiles` + add the Profiles
+  UI. Until then it correctly gets recipe-only results. See `.local/parity-pause-log.md`.
 - DB: `saved_spec_sheets` (id, scope, label, data jsonb=ParsedSpecImport,
   createdAt). Scope-isolated like `spec_import_aliases`. Prune-to-2 on save.
 - Server: `savedSpecSheets.ts` CRUD (`GET/POST /spec-sheets`,

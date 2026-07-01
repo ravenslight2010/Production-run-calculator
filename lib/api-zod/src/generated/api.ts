@@ -1057,7 +1057,22 @@ export const AiSpecReconcileBody = zod.object({
   "ingredient": zod.string(),
   "lbs": zod.number()
 }))
-}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough\/sauce\/cheese)')
+}).describe('A single recipe (dough\/sauce\/cheese) reduced to the fields the reconcile diff needs. Extra fields are allowed so a saved spec sheet\'s richer recipe objects pass through unchanged.')).describe('The app\'s current recipe library (dough\/sauce\/cheese)'),
+  "currentProfiles": zod.array(zod.object({
+  "brand": zod.string(),
+  "flavor": zod.string(),
+  "dieType": zod.string().optional(),
+  "sauceOzPerPizza": zod.number().optional(),
+  "applicators": zod.array(zod.object({
+  "type": zod.string(),
+  "ozPerPizza": zod.number()
+})),
+  "pepperonis": zod.array(zod.object({
+  "type": zod.string(),
+  "sticks": zod.number(),
+  "ozPerPizza": zod.number()
+}))
+}).describe('A brand+flavor profile reduced to the run-setup spec fields the reconcile diff needs (die type, sauce oz\/pizza, applicator and pepperoni slots). Extra fields are allowed so a richer profile object passes through.')).optional().describe('The app\'s current brand+flavor profiles, so the diff can also compare profile spec fields (die\/sauce\/applicators\/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared.')
 })
 
 export const AiSpecReconcileResponse = zod.object({

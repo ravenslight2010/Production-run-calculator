@@ -4483,6 +4483,61 @@ components:
         data:
           $ref: "#/components/schemas/SavedSpecSheetData"
 
+    SpecReconcileApplicator:
+      type: object
+      required:
+        - type
+        - ozPerPizza
+      properties:
+        type:
+          type: string
+        ozPerPizza:
+          type: number
+
+    SpecReconcilePepperoni:
+      type: object
+      required:
+        - type
+        - sticks
+        - ozPerPizza
+      properties:
+        type:
+          type: string
+        sticks:
+          type: number
+        ozPerPizza:
+          type: number
+
+    SpecReconcileProfile:
+      type: object
+      description: >-
+        A brand+flavor profile reduced to the run-setup spec fields the reconcile
+        diff needs (die type, sauce oz/pizza, applicator and pepperoni slots).
+        Extra fields are allowed so a richer profile object passes through.
+      required:
+        - brand
+        - flavor
+        - applicators
+        - pepperonis
+      additionalProperties: true
+      properties:
+        brand:
+          type: string
+        flavor:
+          type: string
+        dieType:
+          type: string
+        sauceOzPerPizza:
+          type: number
+        applicators:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecReconcileApplicator"
+        pepperonis:
+          type: array
+          items:
+            $ref: "#/components/schemas/SpecReconcilePepperoni"
+
     SpecReconcileInput:
       type: object
       required:
@@ -4497,6 +4552,14 @@ components:
           description: The app's current recipe library (dough/sauce/cheese)
           items:
             $ref: "#/components/schemas/SpecReconcileRecipe"
+        currentProfiles:
+          type: array
+          description: >-
+            The app's current brand+flavor profiles, so the diff can also compare
+            profile spec fields (die/sauce/applicators/pepperonis). Optional for
+            backward compatibility; when omitted, only recipes are compared.
+          items:
+            $ref: "#/components/schemas/SpecReconcileProfile"
 
     ReconcileDiscrepancy:
       type: object

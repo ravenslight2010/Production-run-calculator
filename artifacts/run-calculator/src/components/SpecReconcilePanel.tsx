@@ -19,7 +19,10 @@ import { CheckCircle2, AlertTriangle, MinusCircle, XCircle, ChevronDown, Chevron
 import {
   reconcileSpecWithRecipes,
   toReconcileRecipes,
+  reconcileSpecProfiles,
+  toReconcileProfiles,
   type Discrepancy,
+  type ProfileDiscrepancy,
   type ReconcileKind,
   type ReconcileRecipe,
 } from "@workspace/spec-reconcile";
@@ -28,6 +31,8 @@ import {
   reconcileSpecSheet,
   deleteSpecSheet,
   loadCurrentReconcileRecipes,
+  loadCurrentReconcileProfiles,
+  currentReconcileProfile,
   type SavedSpecSheet,
   type SpecReconcileResult,
 } from "@/savedSpecSheets";
@@ -98,6 +103,60 @@ function buildCombinedView(sheets: SavedSpecSheet[], currentRecipes: ReconcileRe
   return Array.from(recipeMap.values());
 }
 
+type ProfileCoverage = {
+  sheetId: number;
+  sheetLabel: string;
+  discrepancies: ProfileDiscrepancy[];
+};
+
+type ProfileEntry = {
+  brand: string;
+  flavor: string;
+  inLibrary: boolean;
+  coverage: ProfileCoverage[];
+};
+
+// Cross-reference every saved sheet's PROFILE specs (die/sauce/applicators/
+// pepperonis) against the current profile library, grouped per brand+flavor. A
+// spec profile the library lacks is "spec-only"; a matched profile with field
+// differences shows them. Sheets with no profiles simply contribute nothing.
+function buildProfileView(sheets: SavedSpecSheet[]): ProfileEntry[] {
+  const map = new Map<string, ProfileEntry>();
+
+  for (const sheet of sheets) {
+    const specProfiles = toReconcileProfiles(sheet.data?.profiles);
+    if (specProfiles.length === 0) continue;
+    const currentProfiles = loadCurrentReconcileProfiles(specProfiles);
+    const discrepancies = reconcileSpecProfiles({ specProfiles, currentProfiles });
+
+    const discsByKey = new Map<string, ProfileDiscrepancy[]>();
+    for (const d of discrepancies) {
+      if (d.type === "missing-profile") continue;
+      const key = `${d.brand.trim().toLowerCase()}\0${d.flavor.trim().toLowerCase()}`;
+      const arr = discsByKey.get(key) ?? [];
+      arr.push(d);
+      discsByKey.set(key, arr);
+    }
+
+    for (const sp of specProfiles) {
+      const key = `${sp.brand.trim().toLowerCase()}\0${sp.flavor.trim().toLowerCase()}`;
+      const inLibrary = currentReconcileProfile(sp.brand, sp.flavor) != null;
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { brand: sp.brand, flavor: sp.flavor, inLibrary, coverage: [] };
+        map.set(key, entry);
+      }
+      entry.coverage.push({
+        sheetId: sheet.id,
+        sheetLabel: sheet.label,
+        discrepancies: discsByKey.get(key) ?? [],
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
 const KIND_ORDER: ReconcileKind[] = ["dough", "sauce", "cheese"];
 const KIND_LABELS: Record<ReconcileKind, string> = { dough: "Dough", sauce: "Sauce", cheese: "Cheese" };
 
@@ -109,6 +168,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   const [listError, setListError] = useState<string | null>(null);
 
   const [combined, setCombined] = useState<RecipeEntry[] | null>(null);
+  const [profileView, setProfileView] = useState<ProfileEntry[] | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
@@ -150,6 +210,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
         if (latest.length > 0) {
           const currentRecipes = loadCurrentReconcileRecipes();
           setCombined(buildCombinedView(latest, currentRecipes));
+          setProfileView(buildProfileView(latest));
           setExpandedKeys(new Set());
         }
       } catch {
@@ -163,12 +224,14 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
   function handleCheckAll() {
     setCheckingAll(true);
     setCombined(null);
+    setProfileView(null);
     setAiResult(null);
     setResultError(null);
     setExpandedKeys(new Set());
     try {
       const currentRecipes = loadCurrentReconcileRecipes();
       setCombined(buildCombinedView(sheets, currentRecipes));
+      setProfileView(buildProfileView(sheets));
     } catch {
       setResultError("Couldn't build cross-reference. Please try again.");
     } finally {
@@ -176,13 +239,14 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
     }
   }
 
-  async function handleAiCheck(id: number) {
-    setBusyId(id);
+  async function handleAiCheck(sheet: SavedSpecSheet) {
+    setBusyId(sheet.id);
     setAiResult(null);
     setCombined(null);
+    setProfileView(null);
     setResultError(null);
     try {
-      setAiResult(await reconcileSpecSheet(id));
+      setAiResult(await reconcileSpecSheet(sheet));
     } catch {
       setResultError("Couldn't cross-reference that spec sheet. Please try again.");
     } finally {
@@ -197,6 +261,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
       setSheets(next);
       if (aiResult?.specSheetId === id) setAiResult(null);
       if (combined) setCombined(null);
+      if (profileView) setProfileView(null);
     } catch {
       setResultError("Couldn't delete that spec sheet.");
     } finally {
@@ -273,7 +338,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleAiCheck(s.id)}
+                    onClick={() => handleAiCheck(s)}
                     disabled={busyId !== null || checkingAll}
                     data-testid={`button-check-spec-${s.id}`}
                   >
@@ -325,11 +390,26 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                   {summaryCounts.specOnly} spec-only
                 </Badge>
               )}
-              {summaryCounts.issues === 0 && summaryCounts.specOnly === 0 && summaryCounts.uncovered === 0 && (
-                <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
-                  All recipes match
+              {profileView && profileView.some((p) => p.coverage.some((c) => c.discrepancies.length > 0)) && (
+                <Badge variant="destructive">
+                  {profileView.filter((p) => p.coverage.some((c) => c.discrepancies.length > 0)).length} profile
+                  {profileView.filter((p) => p.coverage.some((c) => c.discrepancies.length > 0)).length !== 1 ? "s" : ""} with issues
                 </Badge>
               )}
+              {profileView && profileView.some((p) => !p.inLibrary) && (
+                <Badge variant="outline">
+                  {profileView.filter((p) => !p.inLibrary).length} profile
+                  {profileView.filter((p) => !p.inLibrary).length !== 1 ? "s" : ""} not in library
+                </Badge>
+              )}
+              {summaryCounts.issues === 0 &&
+                summaryCounts.specOnly === 0 &&
+                summaryCounts.uncovered === 0 &&
+                (!profileView || profileView.every((p) => p.inLibrary && p.coverage.every((c) => c.discrepancies.length === 0))) && (
+                  <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+                    Everything matches
+                  </Badge>
+                )}
             </div>
 
             {KIND_ORDER.map((kind) => {
@@ -437,6 +517,99 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                 </div>
               );
             })}
+
+            {profileView && profileView.length > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  Profiles
+                </h4>
+                <div className="space-y-1">
+                  {profileView.map((p) => {
+                    const key = `profile\0${p.brand}\0${p.flavor}`;
+                    const expanded = expandedKeys.has(key);
+                    const allDiscs = p.coverage.flatMap((c) => c.discrepancies);
+                    const status: "match" | "issues" | "spec-only" = !p.inLibrary
+                      ? "spec-only"
+                      : allDiscs.length > 0
+                        ? "issues"
+                        : "match";
+                    const canExpand = allDiscs.length > 0 || !p.inLibrary;
+
+                    return (
+                      <div key={key} className="rounded border border-border bg-card/50 overflow-hidden">
+                        <button
+                          type="button"
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-left ${canExpand ? "cursor-pointer hover:bg-muted/30 transition-colors" : "cursor-default"}`}
+                          onClick={() => canExpand && toggleExpand(key)}
+                        >
+                          {status === "match" && (
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+                          )}
+                          {status === "issues" && (
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                          )}
+                          {status === "spec-only" && (
+                            <XCircle className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                          )}
+                          <span className="flex-1 text-sm font-medium truncate">
+                            {p.brand} — {p.flavor}
+                          </span>
+                          {p.coverage.length > 0 && (
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              {p.coverage.length} sheet{p.coverage.length !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {status === "spec-only" && (
+                            <Badge variant="outline" className="text-[10px] py-0 px-1.5 shrink-0">
+                              Not in library
+                            </Badge>
+                          )}
+                          {status === "issues" && (
+                            <Badge variant="destructive" className="text-[10px] py-0 px-1.5 shrink-0">
+                              {allDiscs.length} diff{allDiscs.length !== 1 ? "s" : ""}
+                            </Badge>
+                          )}
+                          {canExpand && (
+                            expanded
+                              ? <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                              : <ChevronRight className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                          )}
+                        </button>
+
+                        {expanded && (
+                          <div className="px-3 pb-3 border-t border-border pt-2 space-y-2">
+                            {!p.inLibrary ? (
+                              <p className="text-xs text-muted-foreground">
+                                This profile appears on the spec sheet but isn't set up in your current profiles.
+                              </p>
+                            ) : (
+                              p.coverage
+                                .filter((c) => c.discrepancies.length > 0)
+                                .map((cov) => (
+                                  <div key={cov.sheetId}>
+                                    {sheets.length > 1 && (
+                                      <p className="text-xs font-medium text-muted-foreground mb-1">
+                                        {cov.sheetLabel}:
+                                      </p>
+                                    )}
+                                    <ul className="space-y-0.5">
+                                      {cov.discrepancies.map((d, i) => (
+                                        <li key={i} className="text-xs text-muted-foreground">
+                                          — {d.message}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -448,10 +621,10 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium">AI summary</span>
               {aiResult.discrepancies.length === 0 ? (
-                <Badge variant="secondary">Everything matches</Badge>
+                <Badge variant="secondary">Recipes match</Badge>
               ) : (
                 <Badge variant="destructive">
-                  {aiResult.discrepancies.length} difference
+                  {aiResult.discrepancies.length} recipe difference
                   {aiResult.discrepancies.length === 1 ? "" : "s"}
                 </Badge>
               )}

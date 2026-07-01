@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SpecReconcileProfile } from './specReconcileProfile';
 import type { SpecReconcileRecipe } from './specReconcileRecipe';
 
 export interface SpecReconcileInput {
@@ -12,4 +13,6 @@ export interface SpecReconcileInput {
   specSheetId: number;
   /** The app's current recipe library (dough/sauce/cheese) */
   currentRecipes: SpecReconcileRecipe[];
+  /** The app's current brand+flavor profiles, so the diff can also compare profile spec fields (die/sauce/applicators/pepperonis). Optional for backward compatibility; when omitted, only recipes are compared. */
+  currentProfiles?: SpecReconcileProfile[];
 }
