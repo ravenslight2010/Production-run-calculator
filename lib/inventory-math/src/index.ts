@@ -60,6 +60,19 @@ export interface SummaryStatsInput {
   pep2Sticks: number;
   pep2BatchLbs: number;
   pep2Type: string;
+  // Web-only "combine applicator 1 & 2" flag + optional additional pep type per
+  // applicator. All optional so mobile (which never sets them) is unaffected:
+  // combined is treated as false unless STRICTLY true, and B slots are ignored
+  // unless their type is non-empty.
+  pep1Combined?: boolean;
+  pep1TypeB?: string;
+  pep1OzPerPizzaB?: number;
+  pep1SticksB?: number;
+  pep1BatchLbsB?: number;
+  pep2TypeB?: string;
+  pep2OzPerPizzaB?: number;
+  pep2SticksB?: number;
+  pep2BatchLbsB?: number;
   crustsPerCycle: number;
   cycleSpeed: number;
   speedAdjustment: number;
@@ -110,15 +123,40 @@ export function computeSummaryStats(
   const app4IsMix = vals.app4Type.trim().toLowerCase().includes("mix");
   const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : vals.app4BatchLbs;
   const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-  const pep1Lbs = (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks;
+  // Applicator 1 & 2 combined: one pep type runs through both physical
+  // applicators, so applicator 1's stick buffer is doubled and applicator 2 is
+  // suppressed. STRICT === true so mobile (never sets the flag) is unaffected.
+  const pepCombined = vals.pep1Combined === true;
+  const pepStickMult = pepCombined ? 2 : 1;
+  const pep1Lbs = (totalPizzasForSauce * vals.pep1OzPerPizza) / 16 + vals.pep1Sticks * pepStickMult;
   const pep1Batches =
     !defaultPepTypes.includes(vals.pep1Type ?? "") && vals.pep1BatchLbs > 0
       ? pep1Lbs / vals.pep1BatchLbs
       : 0;
-  const pep2Lbs = (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
+  // Additional pep type on applicator 1 (only when its type is set). Its stick
+  // buffer also doubles when combined (both physical applicators run it too).
+  const pep1TypeBTrim = (vals.pep1TypeB ?? "").trim();
+  const pep1LbsB = pep1TypeBTrim
+    ? (totalPizzasForSauce * (vals.pep1OzPerPizzaB ?? 0)) / 16 + (vals.pep1SticksB ?? 0) * pepStickMult
+    : 0;
+  const pep1BatchesB =
+    pep1TypeBTrim && !defaultPepTypes.includes(pep1TypeBTrim) && (vals.pep1BatchLbsB ?? 0) > 0
+      ? pep1LbsB / (vals.pep1BatchLbsB ?? 1)
+      : 0;
+  // Applicator 2 (and its additional type) are suppressed entirely when combined.
+  const pep2Lbs = pepCombined ? 0 : (totalPizzasForSauce * vals.pep2OzPerPizza) / 16 + vals.pep2Sticks;
   const pep2Batches =
-    !defaultPepTypes.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
+    !pepCombined && !defaultPepTypes.includes(vals.pep2Type ?? "") && vals.pep2BatchLbs > 0
       ? pep2Lbs / vals.pep2BatchLbs
+      : 0;
+  const pep2TypeBTrim = (vals.pep2TypeB ?? "").trim();
+  const pep2LbsB =
+    !pepCombined && pep2TypeBTrim
+      ? (totalPizzasForSauce * (vals.pep2OzPerPizzaB ?? 0)) / 16 + (vals.pep2SticksB ?? 0)
+      : 0;
+  const pep2BatchesB =
+    !pepCombined && pep2TypeBTrim && !defaultPepTypes.includes(pep2TypeBTrim) && (vals.pep2BatchLbsB ?? 0) > 0
+      ? pep2LbsB / (vals.pep2BatchLbsB ?? 1)
       : 0;
   const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
   const estimatedTimeSec = ppm > 0 ? (totalPizzas * 60) / ppm : 0;
@@ -134,6 +172,8 @@ export function computeSummaryStats(
     app4Lbs, app4Batches, app4Type: vals.app4Type,
     pep1Lbs, pep1Batches, pep1Type: vals.pep1Type ?? "",
     pep2Lbs, pep2Batches, pep2Type: vals.pep2Type ?? "",
+    pep1LbsB, pep1BatchesB, pep1TypeB: vals.pep1TypeB ?? "",
+    pep2LbsB, pep2BatchesB, pep2TypeB: vals.pep2TypeB ?? "",
   };
 }
 
@@ -199,6 +239,21 @@ export function computeRunLines(
     const std = defaultPepTypes.includes(pep2Type);
     if (std) add(`ingredient:${pep2Type}:lbs`, "ingredient", pep2Type, "lbs", s.pep2Lbs);
     else add(`ingredient:${pep2Type}:batches`, "ingredient", pep2Type, "batches", s.pep2Batches);
+  }
+  // Additional pep type per applicator — same keys as the primary types so a
+  // repeated pep name folds into one inventory line. Suppressed automatically
+  // when combined (s.pep2LbsB is 0 in that case).
+  const pep1TypeB = (s.pep1TypeB ?? "").trim();
+  if (pep1TypeB && s.pep1LbsB > 0) {
+    const std = defaultPepTypes.includes(pep1TypeB);
+    if (std) add(`ingredient:${pep1TypeB}:lbs`, "ingredient", pep1TypeB, "lbs", s.pep1LbsB);
+    else add(`ingredient:${pep1TypeB}:batches`, "ingredient", pep1TypeB, "batches", s.pep1BatchesB);
+  }
+  const pep2TypeB = (s.pep2TypeB ?? "").trim();
+  if (pep2TypeB && s.pep2LbsB > 0) {
+    const std = defaultPepTypes.includes(pep2TypeB);
+    if (std) add(`ingredient:${pep2TypeB}:lbs`, "ingredient", pep2TypeB, "lbs", s.pep2LbsB);
+    else add(`ingredient:${pep2TypeB}:batches`, "ingredient", pep2TypeB, "batches", s.pep2BatchesB);
   }
 
   // Packaging — only cartoned runs consume packaging

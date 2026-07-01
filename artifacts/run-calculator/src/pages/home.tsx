@@ -82,6 +82,7 @@ import {
   saveTemplates,
   loadProfile,
   saveProfile,
+  resolvePep1Combined,
   loadBrandFlavors,
   saveBrandFlavors,
   loadList,
@@ -398,9 +399,17 @@ function buildNeedRows(vals: FormValues): {
     const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
     pep.push({ label: s.pep1Type, value: isPepStd ? fmtNum(s.pep1Lbs, 1) : fmtNum(s.pep1Batches, 2), sub: isPepStd ? "lbs" : "batches" });
   }
+  if (s.pep1TypeB && s.pep1LbsB > 0) {
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
+    pep.push({ label: s.pep1TypeB, value: isPepStd ? fmtNum(s.pep1LbsB, 1) : fmtNum(s.pep1BatchesB, 2), sub: isPepStd ? "lbs" : "batches" });
+  }
   if (s.pep2Type && s.pep2Lbs > 0) {
     const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
     pep.push({ label: s.pep2Type, value: isPepStd ? fmtNum(s.pep2Lbs, 1) : fmtNum(s.pep2Batches, 2), sub: isPepStd ? "lbs" : "batches" });
+  }
+  if (s.pep2TypeB && s.pep2LbsB > 0) {
+    const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
+    pep.push({ label: s.pep2TypeB, value: isPepStd ? fmtNum(s.pep2LbsB, 1) : fmtNum(s.pep2BatchesB, 2), sub: isPepStd ? "lbs" : "batches" });
   }
   return { dough, sauce, applicators, pep, all: [...dough, ...sauce, ...applicators, ...pep] };
 }
@@ -460,10 +469,20 @@ function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
       if (isPepStd) add(s.pep1Type, s.pep1Lbs, "lbs");
       else add(s.pep1Type, s.pep1Batches, "batches");
     }
+    if (s.pep1TypeB && s.pep1LbsB > 0) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
+      if (isPepStd) add(s.pep1TypeB, s.pep1LbsB, "lbs");
+      else add(s.pep1TypeB, s.pep1BatchesB, "batches");
+    }
     if (s.pep2Type && s.pep2Lbs > 0) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
       if (isPepStd) add(s.pep2Type, s.pep2Lbs, "lbs");
       else add(s.pep2Type, s.pep2Batches, "batches");
+    }
+    if (s.pep2TypeB && s.pep2LbsB > 0) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
+      if (isPepStd) add(s.pep2TypeB, s.pep2LbsB, "lbs");
+      else add(s.pep2TypeB, s.pep2BatchesB, "batches");
     }
   }
   return [...map.entries()]
@@ -1610,6 +1629,19 @@ function fmtSandboxCopiedAt(iso: string): string {
   });
 }
 
+// Merge a raw (possibly legacy) run-value record over DEFAULT_VALUES while
+// correctly resolving `pep1Combined`. A blind DEFAULT merge would wrongly
+// combine a legacy run that lacked the flag but already used two pep types,
+// so we must infer the flag from the RAW record before it is masked by the
+// default `true`. Use this for any raw payload/storage record (NOT for values
+// already read through loadRunValues, which normalizes on read).
+function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues {
+  const rawHadFlag = typeof (raw as Record<string, unknown> | undefined)?.pep1Combined === "boolean";
+  const merged = { ...DEFAULT_VALUES, ...(raw ?? {}) } as FormValues;
+  resolvePep1Combined(merged as unknown as Record<string, unknown>, rawHadFlag);
+  return merged;
+}
+
 export default function Home() {
   const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen, markTourCompleted } =
     useAuth();
@@ -2268,6 +2300,10 @@ export default function Home() {
   });
   const [editingStop, setEditingStop] = useState<Stoppage | null>(null);
   const [showManualStopDialog, setShowManualStopDialog] = useState(false);
+  // "+ Add pep type" reveal toggles for the optional additional pep type on each
+  // applicator (web-only Pep Applicators 1 & 2 feature).
+  const [pep1ShowB, setPep1ShowB] = useState(false);
+  const [pep2ShowB, setPep2ShowB] = useState(false);
   const [showEditReasonsDialog, setShowEditReasonsDialog] = useState(false);
   const [newReasonInput, setNewReasonInput] = useState("");
   const [manualStopType, setManualStopType] = useState<"stop" | "pause">("stop");
@@ -3353,7 +3389,7 @@ export default function Home() {
           // value while our stored copy is still populated (the same
           // empty-over-populated corruption guarded on the run-values loop above).
           && !isEmptyOverPopulated(payload.runValues[currentId] as FormValues, loadRunValues(currentId))) {
-          const merged = { ...DEFAULT_VALUES, ...(payload.runValues[currentId] as FormValues) };
+          const merged = mergeRunDefaults(payload.runValues[currentId] as FormValues);
           form.reset(merged);
           resetFieldArrays(merged);
         }
@@ -3700,13 +3736,13 @@ export default function Home() {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, mergeRunDefaults(vals as FormValues));
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
-              const firstVals = firstId ? { ...DEFAULT_VALUES, ...((payload.runValues ?? {})[firstId] as FormValues ?? {}) } : DEFAULT_VALUES;
+              const firstVals = firstId ? mergeRunDefaults((payload.runValues ?? {})[firstId] as FormValues) : DEFAULT_VALUES;
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
@@ -5649,13 +5685,13 @@ export default function Home() {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, { ...DEFAULT_VALUES, ...(vals as FormValues) });
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, mergeRunDefaults(vals as FormValues));
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
-              const firstVals = firstId ? { ...DEFAULT_VALUES, ...((payload.runValues ?? {})[firstId] as FormValues ?? {}) } : DEFAULT_VALUES;
+              const firstVals = firstId ? mergeRunDefaults((payload.runValues ?? {})[firstId] as FormValues) : DEFAULT_VALUES;
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
@@ -5844,15 +5880,36 @@ export default function Home() {
     const app4IsMix = v.app4Type.trim().toLowerCase().includes("mix");
     const app4EffBatch = app4RecipeLbs > 0 ? app4RecipeLbs : v.app4BatchLbs;
     const app4Batches = !app4IsMix && app4EffBatch > 0 ? app4Lbs / app4EffBatch : 0;
-    const pep1Lbs = (totalPizzasForSauce * v.pep1OzPerPizza) / 16 + v.pep1Sticks;
+    // Applicator 1 & 2 combined: double applicator 1's stick buffer and suppress
+    // applicator 2. Mirrors computeSummaryStats in @workspace/inventory-math.
+    const pepCombined = v.pep1Combined === true;
+    const pepStickMult = pepCombined ? 2 : 1;
+    const pep1Lbs = (totalPizzasForSauce * v.pep1OzPerPizza) / 16 + v.pep1Sticks * pepStickMult;
     const pep1Batches =
       !DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") && v.pep1BatchLbs > 0
         ? pep1Lbs / v.pep1BatchLbs
         : 0;
-    const pep2Lbs = (totalPizzasForSauce * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
+    const pep1TypeBTrim = (v.pep1TypeB ?? "").trim();
+    const pep1LbsB = pep1TypeBTrim
+      ? (totalPizzasForSauce * (v.pep1OzPerPizzaB ?? 0)) / 16 + (v.pep1SticksB ?? 0) * pepStickMult
+      : 0;
+    const pep1BatchesB =
+      pep1TypeBTrim && !DEFAULT_PEP_TYPES.includes(pep1TypeBTrim) && (v.pep1BatchLbsB ?? 0) > 0
+        ? pep1LbsB / (v.pep1BatchLbsB ?? 1)
+        : 0;
+    const pep2Lbs = pepCombined ? 0 : (totalPizzasForSauce * v.pep2OzPerPizza) / 16 + v.pep2Sticks;
     const pep2Batches =
-      !DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
+      !pepCombined && !DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") && v.pep2BatchLbs > 0
         ? pep2Lbs / v.pep2BatchLbs
+        : 0;
+    const pep2TypeBTrim = (v.pep2TypeB ?? "").trim();
+    const pep2LbsB =
+      !pepCombined && pep2TypeBTrim
+        ? (totalPizzasForSauce * (v.pep2OzPerPizzaB ?? 0)) / 16 + (v.pep2SticksB ?? 0)
+        : 0;
+    const pep2BatchesB =
+      !pepCombined && pep2TypeBTrim && !DEFAULT_PEP_TYPES.includes(pep2TypeBTrim) && (v.pep2BatchLbsB ?? 0) > 0
+        ? pep2LbsB / (v.pep2BatchLbsB ?? 1)
         : 0;
 
     // ── Pace gauge ──────────────────────────────────────────────────────────
@@ -5937,6 +5994,10 @@ export default function Home() {
       pep1Batches,
       pep2Lbs,
       pep2Batches,
+      pep1LbsB,
+      pep1BatchesB,
+      pep2LbsB,
+      pep2BatchesB,
       casesCompleted,
       paceStatus,
       paceDelta,
@@ -6226,15 +6287,26 @@ export default function Home() {
       if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0)
         items.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches", sub: isMix ? undefined : fmtNum(s.app4Lbs, 1) + " lbs total" });
     }
+    const pep1Label = v.pep1Combined === true ? "Pep 1 & 2" : "Pep 1";
     if (s.pep1Type) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1Type);
       if ((isPepStd ? s.pep1Lbs : s.pep1Batches) > 0)
-        items.push({ label: `Pep 1 — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+        items.push({ label: `${pep1Label} — ${s.pep1Type}`, value: isPepStd ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+    }
+    if (s.pep1TypeB) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep1TypeB);
+      if ((isPepStd ? s.pep1LbsB : s.pep1BatchesB) > 0)
+        items.push({ label: `${pep1Label} — ${s.pep1TypeB}`, value: isPepStd ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
     }
     if (s.pep2Type) {
       const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2Type);
       if ((isPepStd ? s.pep2Lbs : s.pep2Batches) > 0)
         items.push({ label: `Pep 2 — ${s.pep2Type}`, value: isPepStd ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+    }
+    if (s.pep2TypeB) {
+      const isPepStd = DEFAULT_PEP_TYPES.includes(s.pep2TypeB);
+      if ((isPepStd ? s.pep2LbsB : s.pep2BatchesB) > 0)
+        items.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: isPepStd ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
     }
     const cheeseRecipes: { label: string; rows: { ingredient: string; lbs: number }[] }[] = [];
     if ((v.app1CheeseRecipe ?? []).length > 0) cheeseRecipes.push({ label: `App 1 Cheese Recipe`, rows: v.app1CheeseRecipe.filter(r => r.ingredient && Number(r.lbs) > 0).map(r => ({ ingredient: r.ingredient, lbs: Number(r.lbs) })) });
@@ -9947,17 +10019,41 @@ export default function Home() {
                     />
                     <Separator className="my-3 opacity-30" />
                     <StatRow
-                      label={v.pep1Type ? `Pep 1 — ${v.pep1Type}` : "Pep Applicator 1"}
+                      label={
+                        v.pep1Type
+                          ? `Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1Type}`
+                          : `Pep Applicator ${v.pep1Combined === true ? "1 & 2" : "1"}`
+                      }
                       value={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? fmtNum(calc.pep1Lbs, 2) + " lbs" : fmtNum(calc.pep1Batches, 2) + " batches"}
                       testId="output-pep1-batches"
                       highlight={DEFAULT_PEP_TYPES.includes(v.pep1Type ?? "") ? calc.pep1Lbs > 0 : calc.pep1Batches > 0}
                     />
-                    <StatRow
-                      label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
-                      value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
-                      testId="output-pep2-batches"
-                      highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
-                    />
+                    {(v.pep1TypeB ?? "").trim() && (
+                      <StatRow
+                        label={`Pep ${v.pep1Combined === true ? "1 & 2" : "1"} — ${v.pep1TypeB}`}
+                        value={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? fmtNum(calc.pep1LbsB, 2) + " lbs" : fmtNum(calc.pep1BatchesB, 2) + " batches"}
+                        testId="output-pep1b-batches"
+                        highlight={DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? calc.pep1LbsB > 0 : calc.pep1BatchesB > 0}
+                      />
+                    )}
+                    {v.pep1Combined !== true && (
+                      <>
+                        <StatRow
+                          label={v.pep2Type ? `Pep 2 — ${v.pep2Type}` : "Pep Applicator 2"}
+                          value={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? fmtNum(calc.pep2Lbs, 2) + " lbs" : fmtNum(calc.pep2Batches, 2) + " batches"}
+                          testId="output-pep2-batches"
+                          highlight={DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? calc.pep2Lbs > 0 : calc.pep2Batches > 0}
+                        />
+                        {(v.pep2TypeB ?? "").trim() && (
+                          <StatRow
+                            label={`Pep 2 — ${v.pep2TypeB}`}
+                            value={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? fmtNum(calc.pep2LbsB, 2) + " lbs" : fmtNum(calc.pep2BatchesB, 2) + " batches"}
+                            testId="output-pep2b-batches"
+                            highlight={DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? calc.pep2LbsB > 0 : calc.pep2BatchesB > 0}
+                          />
+                        )}
+                      </>
+                    )}
                   </CardContent>
                 </Card>
                 {[
@@ -11431,7 +11527,7 @@ export default function Home() {
                       )}
 
                       <TypeDropdown
-                        label="Pep Applicator 1"
+                        label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
                         value={v.pep1Type}
                         onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
@@ -11439,6 +11535,15 @@ export default function Home() {
                         onRemoveOption={removePepType}
                         allowClear
                       />
+                      <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={v.pep1Combined === true}
+                          onChange={e => form.setValue("pep1Combined", e.target.checked, { shouldDirty: true })}
+                          className="accent-primary"
+                        />
+                        <span>Run this pep through both applicators 1 &amp; 2 (doubles stick buffer)</span>
+                      </label>
                       {(v.pep1Type ?? "").trim() && (
                         <>
                           <NumField
@@ -11469,41 +11574,131 @@ export default function Home() {
                         </>
                       )}
 
-                      <TypeDropdown
-                        label="Pep Applicator 2"
-                        value={v.pep2Type}
-                        onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
-                        options={pepTypes}
-                        onAddOption={addPepType}
-                        onRemoveOption={removePepType}
-                        allowClear
-                      />
-                      {(v.pep2Type ?? "").trim() && (
-                        <>
-                          <NumField
-                            control={form.control}
-                            name="pep2Sticks"
-                            label="Number of Sticks"
+                      {/* Optional additional pep type on applicator 1 */}
+                      {(pep1ShowB || (v.pep1TypeB ?? "").trim()) ? (
+                        <div className="rounded-md border border-border/50 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold text-muted-foreground">Additional Pep Type (Applicator 1)</span>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+                              onClick={() => { setPep1ShowB(false); form.setValue("pep1TypeB", "", { shouldDirty: true }); form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); }}
+                              aria-label="Remove additional pep type"
+                            >×</button>
+                          </div>
+                          <TypeDropdown
+                            label="Pep Type"
+                            value={v.pep1TypeB ?? ""}
+                            onChange={val => { form.setValue("pep1TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); } }}
+                            options={pepTypes}
+                            onAddOption={addPepType}
+                            onRemoveOption={removePepType}
+                            allowClear
                           />
-                          {DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? (
-                            <NumField
-                              control={form.control}
-                              name="pep2OzPerPizza"
-                              label="Oz Per Pizza"
-                            />
-                          ) : (
-                            <div className="grid grid-cols-2 gap-3">
+                          {(v.pep1TypeB ?? "").trim() && (
+                            <>
+                              <NumField control={form.control} name="pep1SticksB" label="Number of Sticks" />
+                              {DEFAULT_PEP_TYPES.includes(v.pep1TypeB ?? "") ? (
+                                <NumField control={form.control} name="pep1OzPerPizzaB" label="Oz Per Pizza" />
+                              ) : (
+                                <div className="grid grid-cols-2 gap-3">
+                                  <NumField control={form.control} name="pep1OzPerPizzaB" label="Oz Per Pizza" />
+                                  <NumField control={form.control} name="pep1BatchLbsB" label="Batch Weight (lbs)" />
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-sm text-primary hover:underline self-start"
+                          onClick={() => setPep1ShowB(true)}
+                        >+ Add pep type</button>
+                      )}
+
+                      {v.pep1Combined !== true && (
+                        <>
+                          <TypeDropdown
+                            label="Pep Applicator 2"
+                            value={v.pep2Type}
+                            onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
+                            options={pepTypes}
+                            onAddOption={addPepType}
+                            onRemoveOption={removePepType}
+                            allowClear
+                          />
+                          {(v.pep2Type ?? "").trim() && (
+                            <>
                               <NumField
                                 control={form.control}
-                                name="pep2OzPerPizza"
-                                label="Oz Per Pizza"
+                                name="pep2Sticks"
+                                label="Number of Sticks"
                               />
-                              <NumField
-                                control={form.control}
-                                name="pep2BatchLbs"
-                                label="Batch Weight (lbs)"
+                              {DEFAULT_PEP_TYPES.includes(v.pep2Type ?? "") ? (
+                                <NumField
+                                  control={form.control}
+                                  name="pep2OzPerPizza"
+                                  label="Oz Per Pizza"
+                                />
+                              ) : (
+                                <div className="grid grid-cols-2 gap-3">
+                                  <NumField
+                                    control={form.control}
+                                    name="pep2OzPerPizza"
+                                    label="Oz Per Pizza"
+                                  />
+                                  <NumField
+                                    control={form.control}
+                                    name="pep2BatchLbs"
+                                    label="Batch Weight (lbs)"
+                                  />
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {/* Optional additional pep type on applicator 2 */}
+                          {(pep2ShowB || (v.pep2TypeB ?? "").trim()) ? (
+                            <div className="rounded-md border border-border/50 p-3 space-y-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-semibold text-muted-foreground">Additional Pep Type (Applicator 2)</span>
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground text-lg leading-none px-1"
+                                  onClick={() => { setPep2ShowB(false); form.setValue("pep2TypeB", "", { shouldDirty: true }); form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); }}
+                                  aria-label="Remove additional pep type"
+                                >×</button>
+                              </div>
+                              <TypeDropdown
+                                label="Pep Type"
+                                value={v.pep2TypeB ?? ""}
+                                onChange={val => { form.setValue("pep2TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); } }}
+                                options={pepTypes}
+                                onAddOption={addPepType}
+                                onRemoveOption={removePepType}
+                                allowClear
                               />
+                              {(v.pep2TypeB ?? "").trim() && (
+                                <>
+                                  <NumField control={form.control} name="pep2SticksB" label="Number of Sticks" />
+                                  {DEFAULT_PEP_TYPES.includes(v.pep2TypeB ?? "") ? (
+                                    <NumField control={form.control} name="pep2OzPerPizzaB" label="Oz Per Pizza" />
+                                  ) : (
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <NumField control={form.control} name="pep2OzPerPizzaB" label="Oz Per Pizza" />
+                                      <NumField control={form.control} name="pep2BatchLbsB" label="Batch Weight (lbs)" />
+                                    </div>
+                                  )}
+                                </>
+                              )}
                             </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-sm text-primary hover:underline self-start"
+                              onClick={() => setPep2ShowB(true)}
+                            >+ Add pep type</button>
                           )}
                         </>
                       )}
@@ -11770,8 +11965,11 @@ export default function Home() {
                     if (s.app2Type) { const isMix = s.app2Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app2Lbs > 0 : s.app2Batches > 0) frontlineItems.push({ label: `App 2 — ${s.app2Type}`, value: isMix ? fmtNum(s.app2Lbs, 1) + " lbs" : fmtNum(s.app2Batches, 2) + " batches" }); }
                     if (s.app3Type) { const isMix = s.app3Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app3Lbs > 0 : s.app3Batches > 0) frontlineItems.push({ label: `App 3 — ${s.app3Type}`, value: isMix ? fmtNum(s.app3Lbs, 1) + " lbs" : fmtNum(s.app3Batches, 2) + " batches" }); }
                     if (s.app4Type) { const isMix = s.app4Type.trim().toLowerCase().includes("mix"); if (isMix ? s.app4Lbs > 0 : s.app4Batches > 0) frontlineItems.push({ label: `App 4 — ${s.app4Type}`, value: isMix ? fmtNum(s.app4Lbs, 1) + " lbs" : fmtNum(s.app4Batches, 2) + " batches" }); }
-                    if (s.pep1Type) frontlineItems.push({ label: `Pep 1 — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
-                    if (s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+                    const pepCombinedLbl = vals.pep1Combined === true ? "1 & 2" : "1";
+                    if (s.pep1Type) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep1Type) ? fmtNum(s.pep1Lbs, 2) + " lbs" : fmtNum(s.pep1Batches, 2) + " batches" });
+                    if (s.pep1TypeB) frontlineItems.push({ label: `Pep ${pepCombinedLbl} — ${s.pep1TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep1TypeB) ? fmtNum(s.pep1LbsB, 2) + " lbs" : fmtNum(s.pep1BatchesB, 2) + " batches" });
+                    if (vals.pep1Combined !== true && s.pep2Type) frontlineItems.push({ label: `Pep 2 — ${s.pep2Type}`, value: DEFAULT_PEP_TYPES.includes(s.pep2Type) ? fmtNum(s.pep2Lbs, 2) + " lbs" : fmtNum(s.pep2Batches, 2) + " batches" });
+                    if (vals.pep1Combined !== true && s.pep2TypeB) frontlineItems.push({ label: `Pep 2 — ${s.pep2TypeB}`, value: DEFAULT_PEP_TYPES.includes(s.pep2TypeB) ? fmtNum(s.pep2LbsB, 2) + " lbs" : fmtNum(s.pep2BatchesB, 2) + " batches" });
                     const canEdit = !readOnly && (isSupervisor || isCurrent);
                     const caseDelta = run.actualCases != null ? run.actualCases - s.totalCases : null;
 
@@ -12017,7 +12215,9 @@ export default function Home() {
                     }
                     // Pep
                     if (s.pep1Type && s.pep1Lbs > 0) shopAdd(`Pep — ${s.pep1Type}`, s.pep1Lbs, "lbs");
+                    if (s.pep1TypeB && s.pep1LbsB > 0) shopAdd(`Pep — ${s.pep1TypeB}`, s.pep1LbsB, "lbs");
                     if (s.pep2Type && s.pep2Lbs > 0) shopAdd(`Pep — ${s.pep2Type}`, s.pep2Lbs, "lbs");
+                    if (s.pep2TypeB && s.pep2LbsB > 0) shopAdd(`Pep — ${s.pep2TypeB}`, s.pep2LbsB, "lbs");
                   }
                   const shopList = [...shopMap.values()].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -12042,6 +12242,9 @@ export default function Home() {
                               }
                               if (s.app1Type) lines.push(`  ${s.app1Type}: ${fmtNum(s.app1Lbs, 1)} lbs`);
                               if (s.pep1Type) lines.push(`  Pep: ${fmtNum(s.pep1Lbs, 1)} lbs`);
+                              if (s.pep1TypeB && s.pep1LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep1LbsB, 1)} lbs`);
+                              if (s.pep2Type && s.pep2Lbs > 0) lines.push(`  Pep: ${fmtNum(s.pep2Lbs, 1)} lbs`);
+                              if (s.pep2TypeB && s.pep2LbsB > 0) lines.push(`  Pep: ${fmtNum(s.pep2LbsB, 1)} lbs`);
                               if (run.notes) lines.push(`  Notes: ${run.notes}`);
                               lines.push("");
                             }

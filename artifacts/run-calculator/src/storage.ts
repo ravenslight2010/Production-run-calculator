@@ -222,6 +222,18 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
   return o;
 }
 
+// Resolve the "combine applicators 1 & 2" flag when loading a run/profile that
+// was saved before the flag existed. DEFAULT_VALUES.pep1Combined is `true`, so a
+// blind merge would wrongly combine a legacy run that already used TWO pep types
+// (which must stay split). If the raw record did not explicitly set the flag,
+// infer it: a run with a second pep type is NOT combined; a single-pep run is.
+// `rawHadFlag` must be computed from the raw record(s) BEFORE the DEFAULT merge.
+export function resolvePep1Combined(result: Record<string, unknown>, rawHadFlag: boolean): void {
+  if (rawHadFlag) return;
+  const pep2 = typeof result.pep2Type === "string" ? result.pep2Type.trim() : "";
+  result.pep1Combined = !pep2;
+}
+
 const RECIPE_FIELDS = [
   "doughRecipe",
   "app1CheeseRecipe",
@@ -268,6 +280,9 @@ export function loadProfile(brand: string, flavor: string): FormValues | null {
     const result = { ...DEFAULT_VALUES, ...doughVals, ...crustVals };
     // Strip per-run fields even if they were saved in an old profile
     PER_RUN_FIELDS.forEach((f) => { (result as Record<string, unknown>)[f] = DEFAULT_VALUES[f]; });
+    const rawHadCombined = typeof (doughVals as Record<string, unknown>).pep1Combined === "boolean"
+      || typeof (crustVals as Record<string, unknown>).pep1Combined === "boolean";
+    resolvePep1Combined(result as unknown as Record<string, unknown>, rawHadCombined);
     return normalizePepFields(result as unknown as Record<string, unknown>) as unknown as FormValues;
   } catch {}
   return null;
@@ -379,7 +394,9 @@ export function loadHistory(): HistoryDay[] {
       const history = JSON.parse(raw) as HistoryDay[];
       for (const day of history) {
         for (const vals of Object.values(day.runValues ?? {})) {
-          normalizePepFields(vals as unknown as Record<string, unknown>);
+          const o = vals as unknown as Record<string, unknown>;
+          resolvePep1Combined(o, typeof o.pep1Combined === "boolean");
+          normalizePepFields(o);
         }
       }
       return history;
@@ -405,7 +422,12 @@ export function archiveDayToHistory(ds: DayState, date: string): void {
 export function loadRunValues(id: string): FormValues {
   try {
     const raw = localStorage.getItem(RUN_KEY(id));
-    if (raw) return normalizePepFields({ ...DEFAULT_VALUES, ...JSON.parse(raw) } as unknown as Record<string, unknown>) as unknown as FormValues;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const result = { ...DEFAULT_VALUES, ...parsed } as unknown as Record<string, unknown>;
+      resolvePep1Combined(result, typeof parsed.pep1Combined === "boolean");
+      return normalizePepFields(result) as unknown as FormValues;
+    }
   } catch {}
   return DEFAULT_VALUES;
 }
@@ -1434,15 +1456,19 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
       (values as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
       newAppTypes.push(type);
     });
-    p.pepperonis.slice(0, 2).forEach((pp, i) => {
+    const namedPeps = p.pepperonis.slice(0, 2).filter(pp => pp.type.trim());
+    namedPeps.forEach((pp, i) => {
       const slot = i + 1;
       const type = pp.type.trim();
-      if (!type) return;
       (values as Record<string, unknown>)[`pep${slot}Type`] = type;
       (values as Record<string, unknown>)[`pep${slot}Sticks`] = pp.sticks;
       (values as Record<string, unknown>)[`pep${slot}OzPerPizza`] = pp.ozPerPizza;
       newPepTypes.push(type);
     });
+    // A spec sheet with 2+ distinct pep types means the two applicators run
+    // different peps, so they can't be combined; a single pep defaults to
+    // combined (checkbox checked).
+    (values as Record<string, unknown>).pep1Combined = namedPeps.length >= 2 ? false : true;
     saveProfile(brand, flavor, values);
   }
 
