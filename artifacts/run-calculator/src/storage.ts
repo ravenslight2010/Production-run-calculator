@@ -684,9 +684,9 @@ export function applyIngredientMerge(map: MergeMap): void {
   const targets = new Set(Object.values(map).map((t) => t.trim().toLowerCase()));
   const sources = Object.keys(map).filter((s) => !targets.has(s.trim().toLowerCase()));
   if (sources.length > 0) saveMergedAway([...loadMergedAway(), ...sources]);
-  // ── Flat master-data option lists. dieTypes is included so a merged die-type
-  // name is removed from the selectable list (the dieType field is rewritten via
-  // MERGE_NAME_FIELDS in mergeSettingsObject). ──
+  // ── Flat master-data option lists. Die types are intentionally EXCLUDED from
+  // merge (not in the merge universe, and dieType is not in MERGE_NAME_FIELDS),
+  // so DIE_TYPES_KEY is deliberately NOT rewritten here. ──
   const listKeys = [
     INGREDIENT_TYPES_KEY,
     PEP_TYPES_KEY,
@@ -694,7 +694,6 @@ export function applyIngredientMerge(map: MergeMap): void {
     DOUGH_INGREDIENTS_KEY,
     FRONTLINE_INGREDIENTS_KEY,
     MIX_INGREDIENTS_KEY,
-    DIE_TYPES_KEY,
   ];
   for (const key of listKeys) {
     if (localStorage.getItem(key) === null) continue;

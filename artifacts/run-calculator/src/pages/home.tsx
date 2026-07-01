@@ -2428,11 +2428,12 @@ export default function Home() {
   };
 
   // The full mergeable universe: every master-data list whose values get
-  // rewritten by an ingredient merge — ingredient names plus die types (the
-  // `dieType` selection field is rewritten too). Used by the AI "Suggested
-  // merges" scan and the import auto-check, which look for duplicates ACROSS
-  // categories (an imported recipe ingredient can duplicate a standalone one).
-  // Brands/flavors are excluded (they have their own merge path).
+  // rewritten by an ingredient merge. Die types are intentionally EXCLUDED —
+  // they are a distinct physical-tooling list (not an ingredient-name pool) and
+  // the `dieType` selection field is no longer rewritten by a merge. Used by the
+  // AI "Suggested merges" scan and the import auto-check, which look for
+  // duplicates ACROSS categories (an imported recipe ingredient can duplicate a
+  // standalone one). Brands/flavors are excluded (they have their own merge path).
   const mergeFullUniverse = useMemo(
     () => dedupSorted([
       ...ingredientTypes,
@@ -2441,9 +2442,8 @@ export default function Home() {
       ...frontlineIngredients,
       ...mixIngredients,
       ...pepTypes,
-      ...dieTypes,
     ]),
-    [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes, dieTypes],
+    [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes],
   );
 
   // The names the manual source/target pickers offer, scoped to the selected
@@ -2461,10 +2461,10 @@ export default function Home() {
         return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
       case "ingredients":
       default:
-        return dedupSorted([...ingredientTypes, ...pepTypes, ...dieTypes]);
+        return dedupSorted([...ingredientTypes, ...pepTypes]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, dieTypes, mixIngredients, doughIngredients, frontlineIngredients, cheeseIngredients]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, mixIngredients, doughIngredients, frontlineIngredients, cheeseIngredients]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -2486,6 +2486,7 @@ export default function Home() {
   // Gather every value surface a merge would touch, so the confirmation preview
   // can count affected references. Mirrors buildSyncPayload's localStorage scan.
   function collectMergeSurfaces() {
+    // Die types are intentionally excluded — they don't participate in merges.
     const lists = [
       ingredientTypes,
       cheeseIngredients,
@@ -2493,7 +2494,6 @@ export default function Home() {
       frontlineIngredients,
       mixIngredients,
       pepTypes,
-      dieTypes,
     ];
     const settingsObjects: Record<string, unknown>[] = [];
     for (const run of dayStateRef.current.runs) {
@@ -3460,15 +3460,22 @@ export default function Home() {
       // Skip the setState (and the re-render it triggers) when the merged result is
       // identical to what's already stored. Sync runs on every SSE message (~10s),
       // so unconditional setState caused a re-render storm that reset menu scroll.
-      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void, namespace: string) {
+      // `applyMergedAway` defaults to true for mergeable lists. Die types are
+      // excluded from merge, so their sync must NOT consult the global (non-
+      // namespaced) `mergedAway` tombstone set — an ingredient merge whose source
+      // name happens to match a die type would otherwise delete that die type.
+      // Their own per-namespace deletion tombstones (`dropDeleted`) still apply.
+      function mergeList(key: string, defaults: string[], remote: string[] | undefined, setter: (v: string[]) => void, namespace: string, applyMergedAway = true) {
         if (!remote || remote.length === 0) return;
-        const local = dropMergedAway(loadList(key, defaults), tombSet);
+        const stored = loadList(key, defaults);
+        const local = applyMergedAway ? dropMergedAway(stored, tombSet) : stored;
+        const union = [...new Set([...local, ...remote])];
         const merged = dropDeleted(
-          dropMergedAway([...new Set([...local, ...remote])], tombSet),
+          applyMergedAway ? dropMergedAway(union, tombSet) : union,
           deletedMap,
           namespace,
         ).sort((a, b) => a.localeCompare(b));
-        if (arraysEqual(merged, loadList(key, defaults))) return;
+        if (arraysEqual(merged, stored)) return;
         saveList(key, merged);
         setter(merged);
       }
@@ -3478,7 +3485,7 @@ export default function Home() {
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
-      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes, "dieTypes");
+      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes, "dieTypes", false);
       const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
       mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
