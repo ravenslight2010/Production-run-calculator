@@ -60,6 +60,33 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Brand-anchored amber ramp — 500 = brand #FF9500 (hsl 35 100% 50%).
+     Both `amber-*` and `orange-*` are mapped to this single ramp so the
+     entire app renders one consistent brand palette. */
+  --color-amber-50: hsl(38 100% 96%);
+  --color-amber-100: hsl(38 100% 90%);
+  --color-amber-200: hsl(37 100% 82%);
+  --color-amber-300: hsl(36 100% 72%);
+  --color-amber-400: hsl(36 100% 62%);
+  --color-amber-500: hsl(35 100% 50%);
+  --color-amber-600: hsl(33 96% 45%);
+  --color-amber-700: hsl(30 92% 38%);
+  --color-amber-800: hsl(28 88% 30%);
+  --color-amber-900: hsl(26 84% 22%);
+  --color-amber-950: hsl(24 88% 13%);
+
+  --color-orange-50: hsl(38 100% 96%);
+  --color-orange-100: hsl(38 100% 90%);
+  --color-orange-200: hsl(37 100% 82%);
+  --color-orange-300: hsl(36 100% 72%);
+  --color-orange-400: hsl(36 100% 62%);
+  --color-orange-500: hsl(35 100% 50%);
+  --color-orange-600: hsl(33 96% 45%);
+  --color-orange-700: hsl(30 92% 38%);
+  --color-orange-800: hsl(28 88% 30%);
+  --color-orange-900: hsl(26 84% 22%);
+  --color-orange-950: hsl(24 88% 13%);
 }
 
 :root {

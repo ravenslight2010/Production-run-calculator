@@ -98,7 +98,7 @@ export default defineConfig({
         name: "Production Run Calculator",
         short_name: "Run Calc",
         description: "Pizza production line planning and schedule estimation.",
-        theme_color: "#FF3C00",
+        theme_color: "#FF9500",
         background_color: "#0f1117",
         display: "standalone",
         orientation: "portrait",
