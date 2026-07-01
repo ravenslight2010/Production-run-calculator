@@ -33,3 +33,24 @@ the in-session case.
 **How to apply:** any effect that reloads/relaunches based on `me`/`sandboxStale` must
 be gated to run once per app open, not react to background `["me"]` refetches. Keep
 web + mobile identical.
+
+## Second, unrelated cause: Vite dev-server full-reloads (NOT app logic)
+
+A separate "reloads during import" report turned out to be the **Vite dev server**, not
+app code. Tells that rule out app logic: no `/sandbox/reset` in API logs, the in-flight
+import request (`/api/ai/parse-spec-sheet`) shows `request aborted` / `statusCode null`
+(page navigated away mid-fetch), the browser console has **only** `[vite] server
+connection lost … / connecting… / connected.` lines and **zero JS errors/crashes**, and
+`/api/me` reappears ~1/sec (fresh full loads, empty cache — not focus refetch which is
+deduped by the 60s staleTime).
+
+**Why:** `home.tsx` is ~500KB (Babel logs "deoptimised … exceeds max of 500KB"), so React
+Fast Refresh can't hot-swap it — every HMR event becomes a full page reload. CPU-heavy
+work in the same container (e.g. `tsc` typechecks) can also starve the dev server, drop
+the HMR websocket, and Vite full-reloads on reconnect. Editing `home.tsx` mid-session
+therefore reloads the preview.
+
+**How to apply:** before hunting app code for a preview "reload", confirm it's not the dev
+server: check for the vite connection-lost/reconnect console pattern + absence of app
+reload endpoints + aborted in-flight requests. It does NOT happen in the published build
+(no HMR in prod). Restarting the web workflow clears the churn.
