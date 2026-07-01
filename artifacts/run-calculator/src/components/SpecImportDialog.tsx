@@ -49,6 +49,7 @@ export default function SpecImportDialog({
             <h2 className="text-base font-semibold text-foreground">Import Spec Sheet</h2>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             aria-label="Close"
@@ -167,6 +168,7 @@ export default function SpecImportDialog({
 
         <div className="flex items-center justify-end gap-2 border-t border-border p-4">
           <button
+            type="button"
             onClick={onClose}
             disabled={applying}
             className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
@@ -174,6 +176,7 @@ export default function SpecImportDialog({
             Cancel
           </button>
           <button
+            type="button"
             onClick={onConfirm}
             disabled={loading || applying || !!error || !prepared || nothing}
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
