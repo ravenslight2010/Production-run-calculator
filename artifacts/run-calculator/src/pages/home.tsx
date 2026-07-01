@@ -80,6 +80,7 @@ import {
   isEmptyOverPopulated,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
+  profileKeyIsTombstoned,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3668,19 +3669,9 @@ export default function Home() {
       // Profiles are keyed `${brandLc}__${flavorLc}`. Like every other synced list
       // they must honor the deletion/merge tombstones, or a profile for a deleted
       // brand/flavor lingers in the blob and can resurrect (or seed) ghost data.
-      const profileKeyIsTombstoned = (k: string): boolean => {
-        const sep = k.indexOf("__");
-        if (sep < 0) return false;
-        const brandLc = k.slice(0, sep);
-        const flavorLc = k.slice(sep + 2);
-        if (deletedBrandSet.has(brandLc)) return true;
-        if ((deletedMap[`flavor:${brandLc}`] ?? []).includes(flavorLc)) return true;
-        if (tombSet.has(brandLc) || tombSet.has(flavorLc)) return true;
-        return false;
-      };
       if (payload.brandProfiles) {
         for (const [k, v] of Object.entries(payload.brandProfiles)) {
-          if (profileKeyIsTombstoned(k)) continue;
+          if (profileKeyIsTombstoned(k, deletedMap, tombSet)) continue;
           try {
             // Strip mix recipe names from the sauce fields before saving
             const cleaned = { ...v };
@@ -3694,7 +3685,7 @@ export default function Home() {
       }
       if (payload.crustProfiles) {
         for (const [k, v] of Object.entries(payload.crustProfiles)) {
-          if (profileKeyIsTombstoned(k)) continue;
+          if (profileKeyIsTombstoned(k, deletedMap, tombSet)) continue;
           try { localStorage.setItem(`run-calc-crust-profile-${k}`, JSON.stringify(v)); } catch {}
         }
       }

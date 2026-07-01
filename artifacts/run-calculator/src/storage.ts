@@ -570,6 +570,31 @@ export function dropTombstonedPresetKeys<V>(
   return out;
 }
 
+// Whether a brand+flavor profile key (`${brandLc}__${flavorLc}`) is tombstoned
+// by a brand/flavor deletion or merge. Brand+flavor profiles are keyed by the
+// lowercased brand/flavor combo; on sync-receive they must honor the deletion
+// (`deletedMap`) and merge (`tombSet`) tombstones or a stale peer's payload
+// resurrects (or seeds) a profile for a brand/flavor the user deleted/merged.
+// `deletedMap` uses the "brands" namespace for whole-brand deletes and the
+// `flavor:<brandLc>` namespace (see flavorNamespace) for per-flavor deletes;
+// `tombSet` is the flat merged-away set (lowercased). Mirrors the inline guard
+// in the home.tsx sync-receive handler.
+export function profileKeyIsTombstoned(
+  key: string,
+  deletedMap: Record<string, string[]>,
+  tombSet: Set<string>,
+): boolean {
+  const sep = key.indexOf("__");
+  if (sep < 0) return false;
+  const brandLc = key.slice(0, sep);
+  const flavorLc = key.slice(sep + 2);
+  const deletedBrandSet = new Set((deletedMap["brands"] ?? []).map((b) => b.trim().toLowerCase()));
+  if (deletedBrandSet.has(brandLc)) return true;
+  if ((deletedMap[`flavor:${brandLc}`] ?? []).includes(flavorLc)) return true;
+  if (tombSet.has(brandLc) || tombSet.has(flavorLc)) return true;
+  return false;
+}
+
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);
