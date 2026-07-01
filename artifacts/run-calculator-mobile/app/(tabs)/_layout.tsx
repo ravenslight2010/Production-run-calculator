@@ -161,17 +161,21 @@ export default function TabLayout() {
   // (older than its cutoff, or never copied), re-copy live → sandbox and relaunch
   // — the same flow as the manual "Reset" action, minus the confirm. Keeps the
   // demo/training space trustworthy without anyone remembering to reset it.
-  // Guarded so it fires at most once per mount, and only for the sandbox account
-  // (sandboxStale is always false otherwise).
+  // Decided ONCE per app open: wait for the identity to load, fire the reset at
+  // most once, and do NOT re-run on later ["me"] refetches. Staleness flipping
+  // mid-session (e.g. a focus/AppState refetch) would otherwise relaunch the app
+  // out from under the user. Latching on the first identity keeps this a
+  // launch-time-only concern. Mirrors web.
   const autoSandboxResetRef = useRef(false);
   useEffect(() => {
-    if (!me?.sandbox || !me.sandboxStale || autoSandboxResetRef.current) return;
+    if (autoSandboxResetRef.current || !me) return;
     autoSandboxResetRef.current = true;
+    if (!me.sandbox || !me.sandboxStale) return;
     void runSandboxReset();
     // runSandboxReset is stable enough for this one-shot guard; deps track the
-    // staleness signal only.
+    // identity only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.sandbox, me?.sandboxStale]);
+  }, [me]);
 
   if (!isLoading && !isAuthenticated) {
     return <Redirect href="/(auth)/sign-in" />;

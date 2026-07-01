@@ -1617,20 +1617,26 @@ export default function Home() {
   // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
   // the same flow as the manual "Reset sandbox" button, minus the confirm. This
   // keeps the demo/training space trustworthy without anyone remembering to reset
-  // it. Guarded so it fires at most once per mount, and only for the sandbox
-  // account (sandboxStale is always false otherwise).
+  // it. Decided ONCE per app open: we wait for the identity to load, make the
+  // reset call at most once, and deliberately do NOT re-run on later ["me"]
+  // refetches. React Query's refetch-on-window-focus fires whenever the browser
+  // regains focus — e.g. when the OS file picker closes during a spec/Excel
+  // import — and if the server reports the sandbox stale at that instant, a
+  // reactive effect would reload the whole page out from under the user right as
+  // they select files. Latching on the first identity makes this a load-time-only
+  // concern, so an in-session refetch can never relaunch the app.
   const autoSandboxResetRef = useRef(false);
   useEffect(() => {
-    if (!me?.sandbox || !me.sandboxStale || autoSandboxResetRef.current) return;
+    if (autoSandboxResetRef.current || !me) return;
     autoSandboxResetRef.current = true;
+    if (!me.sandbox || !me.sandboxStale) return;
     resetSandboxRequest()
       .then(() => window.location.reload())
       .catch(() => {
         // Best-effort; if the re-copy fails we leave the stale data in place and
-        // let the next load (or a manual reset) try again.
-        autoSandboxResetRef.current = false;
+        // let the NEXT app load (or a manual reset) try again — never mid-session.
       });
-  }, [me?.sandbox, me?.sandboxStale]);
+  }, [me]);
   const [dayState, setDayState] = useState<DayState>(() => loadDayState());
   const currentRun = dayState.runs[dayState.currentIndex] ?? dayState.runs[0];
   const currentRunId = currentRun?.id ?? "";
