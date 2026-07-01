@@ -65,6 +65,7 @@ import {
   RECIPE_NAME_FIELDS_BY_CATEGORY,
   mergeRecipeNameSettingsObject,
   foldPresetKeys,
+  isStrayMixName,
 } from "./mergeRecipeNames";
 import {
   SPEC_BRANDS,
@@ -1242,6 +1243,71 @@ export function applySpecProfilesSeedIfNeeded(): void {
     }
 
     localStorage.setItem(SPEC_PROFILES_SEED_KEY, "1");
+  } catch {}
+}
+
+const RECAT_STRAY_MIX_KEY = "run-calc-recat-stray-mix-v1";
+
+/**
+ * One-time cleanup: mix / cheese-mix RECIPE names (e.g. "4Hands Club Mix",
+ * "Aldo's Cheese Mix", "Red Hot Cheese Mix Monterey Jack ...") that were
+ * imported into the standalone-ingredient list (`ingredientTypes`) are really
+ * recipe names, so they belong in the Mixes / Cheese recipe-name lists — that's
+ * where the Merge tool's Mixes/Cheese tabs read from, and where they can be
+ * merged/managed. Move each stray "...mix" name OUT of `ingredientTypes` and
+ * INTO `mixRecipeNames`, or `cheeseRecipeNames` when the name mentions cheese.
+ * Genuine ingredients that legitimately contain "mix" (allowlisted, e.g. the
+ * jarred "Hot Giardiniera Mix") are left alone. Each removed ingredient entry is
+ * tombstoned so the additive live-sync union can't resurrect it, and the
+ * destination tombstone (if any) is cleared so the moved name sticks. Runs once,
+ * guarded by a version marker.
+ */
+export function applyStrayMixRecategorizeIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(RECAT_STRAY_MIX_KEY)) return;
+  try {
+    const ingredients = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+    const allowlist = new Set(
+      [
+        ...DEFAULT_INGREDIENT_TYPES,
+        ...MIX_SEED.frontlineIngredients,
+        ...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+      ].map((n) => n.toLowerCase()),
+    );
+    const stray = ingredients.filter((n) => isStrayMixName(n, allowlist));
+    if (stray.length === 0) {
+      localStorage.setItem(RECAT_STRAY_MIX_KEY, "1");
+      return;
+    }
+    const cheeseAdds = stray.filter((n) => /cheese/i.test(n));
+    const mixAdds = stray.filter((n) => !/cheese/i.test(n));
+
+    saveList(
+      INGREDIENT_TYPES_KEY,
+      ingredients.filter((n) => !stray.includes(n)).sort((a, b) => a.localeCompare(b)),
+    );
+    if (cheeseAdds.length) {
+      saveList(
+        CHEESE_RECIPE_NAMES_KEY,
+        mergeListInsensitive(loadList(CHEESE_RECIPE_NAMES_KEY, []), cheeseAdds).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      );
+    }
+    if (mixAdds.length) {
+      saveList(
+        MIX_RECIPE_NAMES_KEY,
+        mergeListInsensitive(loadList(MIX_RECIPE_NAMES_KEY, []), mixAdds).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      );
+    }
+
+    for (const n of stray) tombstoneDeleted("ingredientTypes", n);
+    for (const n of cheeseAdds) clearDeleted("cheeseRecipeNames", n);
+    for (const n of mixAdds) clearDeleted("mixRecipeNames", n);
+
+    localStorage.setItem(RECAT_STRAY_MIX_KEY, "1");
   } catch {}
 }
 

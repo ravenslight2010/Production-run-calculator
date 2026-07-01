@@ -102,6 +102,7 @@ import {
   applyPepTaxonomyMigrationIfNeeded,
   applyIngredientDedupeMigrationIfNeeded,
   applySpecProfilesSeedIfNeeded,
+  applyStrayMixRecategorizeIfNeeded,
   applyDieTypesSeedIfNeeded,
   applyDoughSpecsSeedIfNeeded,
   applySauceSpecsSeedIfNeeded,
@@ -361,6 +362,7 @@ applyDieTypesSeedIfNeeded();
 applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
 applyCheeseSpecsSeedIfNeeded();
+applyStrayMixRecategorizeIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
 

@@ -31,13 +31,20 @@ merges ingredient names on every tab.)
   folded-away recipe-name preset. Selection-field re-pointing alone is not enough.
 - **AI "Suggested merges"** shown only on the Ingredients tab (recipe-name tabs have
   no learned-alias path).
-- **Stray mix names in `ingredientTypes`:** real user data has recipe/mix NAMES (mostly
-  ending in "Mix") dumped into `ingredientTypes` with spellings that match NO recipe-name
-  list, so exact-match exclusion can't hide them. The web Ingredients tab also drops any
-  name ending in the word "mix" via `isStrayMixName` (mergeRecipeNames.ts), allowlisting
-  genuine ingredients (`DEFAULT_INGREDIENT_TYPES` + `MIX_SEED.frontlineIngredients` +
-  `pepTypes`, e.g. "Hot Giardiniera Mix"). **Why:** name-based classification only — the
-  data model can't otherwise tell a stray mix name from a real ingredient.
+- **Stray mix names in `ingredientTypes`:** real user data has recipe/mix NAMES (containing
+  the word "mix") dumped into `ingredientTypes` with spellings that match NO recipe-name
+  list, so exact-match exclusion can't hide them. `isStrayMixName` (mergeRecipeNames.ts)
+  flags a whole-word `\bmix\b` ("mixed"/"premix" excluded), allowlisting genuine ingredients
+  (`DEFAULT_INGREDIENT_TYPES` + `MIX_SEED.frontlineIngredients` + `pepTypes`, e.g. "Hot
+  Giardiniera Mix"). Used both to hide them from the Ingredients tab AND by a one-time
+  marker-guarded migration that RE-CATEGORIZES them: cheese-named → `cheeseRecipeNames`,
+  else `mixRecipeNames`. **Why:** name-based classification only — the data model can't tell
+  a stray mix name from a real ingredient.
+  **Cross-device convergence:** the migration only needs to run on ONE device (the polluted
+  one). It tombstones removed names under `deletedItems["ingredientTypes"]` and adds to the
+  cheese/mix lists; both are in the synced payload, so every peer's sync-receive drops the
+  strays (`dropDeleted`) and unions the moves in. Do NOT make such a migration rerunnable —
+  it would auto-relocate any legitimately user-added "…mix" ingredient on every load.
 
 ## Two universes, don't conflate them
 - **Full universe** (`mergeFullUniverse` web / `fullUniverse` mobile): every
