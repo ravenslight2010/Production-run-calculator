@@ -2359,6 +2359,15 @@ export default function Home() {
   // True when the merge review was opened automatically by an import, so we can
   // show a one-line explainer of why the user landed here.
   const [mergeFromImport, setMergeFromImport] = useState(false);
+  // Which category the merge picker is scoped to. The first five scope the
+  // manual source/target lists to one master-data group so merges stay within a
+  // category; "brandflavor" swaps in a separate brand/flavor merge path.
+  type MergeCategory = "ingredients" | "mixes" | "dough" | "sauce" | "cheese" | "brandflavor";
+  const [mergeCategory, setMergeCategory] = useState<MergeCategory>("ingredients");
+  // Brand/flavor sub-mode: merge whole brands (folding their flavors together)
+  // or merge flavors within one chosen brand.
+  const [mergeBfMode, setMergeBfMode] = useState<"brands" | "flavors">("brands");
+  const [mergeBfBrand, setMergeBfBrand] = useState("");
 
   // Local (per-device) master-data change history for the undo trail.
   const [changeHistory, setChangeHistory] = useState<MasterDataChange[]>(() => loadChangeHistory());
@@ -2372,19 +2381,7 @@ export default function Home() {
     [],
   );
 
-  // The mergeable universe: every master-data list whose values get rewritten by
-  // a merge — ingredient names plus die types (the `dieType` selection field is
-  // rewritten too). Brands/flavors are excluded (they have their own rename path).
-  const mergeUniverse = useMemo(() => {
-    const all = [
-      ...ingredientTypes,
-      ...cheeseIngredients,
-      ...doughIngredients,
-      ...frontlineIngredients,
-      ...mixIngredients,
-      ...pepTypes,
-      ...dieTypes,
-    ];
+  const dedupSorted = (all: string[]) => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const n of all) {
@@ -2392,7 +2389,46 @@ export default function Home() {
       if (!seen.has(key)) { seen.add(key); out.push(n); }
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes, dieTypes]);
+  };
+
+  // The full mergeable universe: every master-data list whose values get
+  // rewritten by an ingredient merge — ingredient names plus die types (the
+  // `dieType` selection field is rewritten too). Used by the AI "Suggested
+  // merges" scan and the import auto-check, which look for duplicates ACROSS
+  // categories (an imported recipe ingredient can duplicate a standalone one).
+  // Brands/flavors are excluded (they have their own merge path).
+  const mergeFullUniverse = useMemo(
+    () => dedupSorted([
+      ...ingredientTypes,
+      ...cheeseIngredients,
+      ...doughIngredients,
+      ...frontlineIngredients,
+      ...mixIngredients,
+      ...pepTypes,
+      ...dieTypes,
+    ]),
+    [ingredientTypes, cheeseIngredients, doughIngredients, frontlineIngredients, mixIngredients, pepTypes, dieTypes],
+  );
+
+  // The names the manual source/target pickers offer, scoped to the selected
+  // merge category so a merge stays within its own group. The merge engine is
+  // still name-based and global — the tab only narrows what's pickable. On the
+  // brand/flavor tab the universe is the brand list (brands mode) or one brand's
+  // flavors (flavors mode).
+  const mergeUniverse = useMemo(() => {
+    switch (mergeCategory) {
+      case "mixes": return dedupSorted(mixIngredients);
+      case "dough": return dedupSorted(doughIngredients);
+      case "sauce": return dedupSorted(frontlineIngredients);
+      case "cheese": return dedupSorted(cheeseIngredients);
+      case "brandflavor":
+        return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
+      case "ingredients":
+      default:
+        return dedupSorted([...ingredientTypes, ...pepTypes, ...dieTypes]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, dieTypes, mixIngredients, doughIngredients, frontlineIngredients, cheeseIngredients]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
@@ -2487,7 +2523,7 @@ export default function Home() {
     setMergeSuggestNote("");
     setMergeSuggestRan(true);
     try {
-      const { suggestions, usedAi, error } = await suggestMerges(mergeUniverse);
+      const { suggestions, usedAi, error } = await suggestMerges(mergeFullUniverse);
       setMergeSuggestions(suggestions);
       if (!usedAi && error) {
         setMergeSuggestError(
@@ -2514,6 +2550,8 @@ export default function Home() {
     if (mergeCheckRequest === 0) return;
     setActiveTab("setup");
     setManageCategory("merge");
+    // Land on the Ingredients tab, where the cross-category AI suggestions show.
+    setMergeCategory("ingredients");
     setMergeFromImport(true);
     void handleSuggestMerges(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2528,8 +2566,12 @@ export default function Home() {
     setMergeError("");
     setMergeConfirming(false);
     setMergeFromImport(false);
+    // AI suggestions span every category, so snap against the FULL universe (not
+    // the current tab's scoped list) and drop the picker onto Ingredients so the
+    // loaded rows are visible.
+    setMergeCategory("ingredients");
     const canon = (n: string) =>
-      mergeUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+      mergeFullUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
     const tgt = canon(s.target);
     const seen = new Set<string>();
     const srcs: string[] = [];
@@ -2695,6 +2737,149 @@ export default function Home() {
       setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
       return false;
     }
+  }
+
+  // Fold one or more source brands into a target brand: union their flavors into
+  // the target, drop the source brands (tombstoned so the additive sync union
+  // can't resurrect them), and re-point today's runs from a merged-away brand to
+  // the target. Mirrors renameBrand's surface coverage (master lists + open
+  // runs); brands carry no inventory, so nothing is folded there. State writes
+  // are synchronous to localStorage so the caller's immediate sync push ships the
+  // merged data.
+  function mergeBrands(sources: string[], target: string) {
+    const tgt = target.trim();
+    if (!tgt) return;
+    const srcSet = new Set(
+      sources.map((s) => s.trim().toLowerCase()).filter((s) => s && s !== tgt.toLowerCase()),
+    );
+    if (srcSet.size === 0) return;
+    // Union every merged-away brand's flavors into the target brand.
+    const nextFlavors = { ...brandFlavors };
+    const targetFlavors = new Set(nextFlavors[tgt] ?? []);
+    for (const b of Object.keys(nextFlavors)) {
+      if (srcSet.has(b.toLowerCase())) {
+        for (const f of nextFlavors[b] ?? []) targetFlavors.add(f);
+        delete nextFlavors[b];
+      }
+    }
+    nextFlavors[tgt] = [...targetFlavors].sort((a, b) => a.localeCompare(b));
+    setBrandFlavors(nextFlavors);
+    saveBrandFlavors(nextFlavors);
+    // Brand list: drop sources, keep the target, sort.
+    let nextBrands = brands.filter((b) => !srcSet.has(b.toLowerCase()));
+    if (!nextBrands.some((b) => b.toLowerCase() === tgt.toLowerCase())) nextBrands = [...nextBrands, tgt];
+    nextBrands = nextBrands.sort((a, b) => a.localeCompare(b));
+    setBrands(nextBrands);
+    saveList(BRANDS_KEY, nextBrands);
+    // Tombstone the merged-away brand names (flavors moved to the target, so their
+    // source-brand flavor namespaces need no tombstones).
+    for (const b of brands) if (srcSet.has(b.toLowerCase())) tombstoneDeleted("brands", b);
+    // Re-point today's runs from a merged-away brand to the target.
+    const ds = dayStateRef.current;
+    const updatedRuns = ds.runs.map((r) =>
+      srcSet.has((r.brand ?? "").toLowerCase()) ? { ...r, brand: tgt } : r,
+    );
+    const newDs = { ...ds, runs: updatedRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+  }
+
+  // Fold one or more source flavors into a target flavor WITHIN a single brand:
+  // rewrite that brand's flavor list (sources tombstoned) and re-point today's
+  // runs for that brand from a merged-away flavor to the target.
+  function mergeFlavors(brand: string, sources: string[], target: string) {
+    const b = brand.trim();
+    const tgt = target.trim();
+    if (!b || !tgt) return;
+    const current = brandFlavors[b] ?? [];
+    const srcSet = new Set(
+      sources.map((s) => s.trim().toLowerCase()).filter((s) => s && s !== tgt.toLowerCase()),
+    );
+    if (srcSet.size === 0) return;
+    let nextList = current.filter((f) => !srcSet.has(f.toLowerCase()));
+    if (!nextList.some((f) => f.toLowerCase() === tgt.toLowerCase())) nextList = [...nextList, tgt];
+    nextList = nextList.sort((a, b) => a.localeCompare(b));
+    const nextFlavors = { ...brandFlavors, [b]: nextList };
+    setBrandFlavors(nextFlavors);
+    saveBrandFlavors(nextFlavors);
+    const ns = flavorNamespace(b);
+    for (const f of current) if (srcSet.has(f.toLowerCase())) tombstoneDeleted(ns, f);
+    const ds = dayStateRef.current;
+    const updatedRuns = ds.runs.map((r) =>
+      r.brand === b && srcSet.has((r.flavor ?? "").toLowerCase()) ? { ...r, flavor: tgt } : r,
+    );
+    const newDs = { ...ds, runs: updatedRuns };
+    setDayState(newDs);
+    saveDayState(newDs);
+  }
+
+  // Apply a brand or flavor merge from the manual picker, then push the merged
+  // payload (with its tombstones) immediately so an incoming sync-pull can't
+  // re-add the merged-away names via the additive union — mirrors handleApplyMerge.
+  async function handleApplyBrandFlavorMerge(): Promise<boolean> {
+    const map = buildMergeMap(mergeSources, mergeTarget);
+    const srcs = Object.keys(map);
+    const tgt = mergeTarget.trim();
+    if (srcs.length === 0) {
+      setMergeError("Pick at least one source and a different target.");
+      return false;
+    }
+    if (mergeBfMode === "flavors" && !mergeBfBrand.trim()) {
+      setMergeError("Pick a brand first.");
+      return false;
+    }
+    setMergeBusy(true);
+    setMergeError("");
+    const before = captureMasterDataSnapshot();
+    try {
+      if (mergeBfMode === "brands") mergeBrands(srcs, tgt);
+      else mergeFlavors(mergeBfBrand, srcs, tgt);
+      try {
+        await fetch(`/api/sync/today?today=${todayStr()}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderId: clientId.current,
+            payload: buildSyncPayload(loadDayState()),
+          }),
+        });
+      } catch {
+        // Non-fatal: tombstones are persisted locally.
+      }
+      resetMergeForm();
+      const label = mergeBfMode === "brands" ? "brand" : "flavor";
+      noteChange(
+        "merge",
+        `Merged ${label}s ${srcs.map((s) => `"${s}"`).join(", ")} into "${tgt}"` +
+          (mergeBfMode === "flavors" ? ` (${mergeBfBrand})` : ""),
+        before,
+      );
+      setMergeBusy(false);
+      return true;
+    } catch (e) {
+      setMergeBusy(false);
+      setMergeError(e instanceof Error ? e.message : "Merge failed. Please try again.");
+      return false;
+    }
+  }
+
+  // Route the confirm button to the right merge path for the active category.
+  function handleConfirmMerge(): Promise<boolean> {
+    return mergeCategory === "brandflavor" ? handleApplyBrandFlavorMerge() : handleApplyMerge();
+  }
+
+  // Switch the merge category, clearing the picker + any open AI suggestions so
+  // nothing leaks across categories.
+  function switchMergeCategory(cat: MergeCategory) {
+    if (cat === mergeCategory) return;
+    setMergeCategory(cat);
+    resetMergeForm();
+    setMergeSuggestions([]);
+    setMergeSuggestRan(false);
+    setMergeSuggestError("");
+    setMergeSuggestNote("");
+    setMergeFromImport(false);
+    if (cat === "brandflavor" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
   }
 
   // Undo a master-data change (and every change made after it). Restores the
@@ -7352,16 +7537,74 @@ export default function Home() {
                         </p>
                       </div>
                     )}
+                    {/* Category selector: scope the manual merge to one group. */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {([
+                        ["ingredients", "Ingredients"],
+                        ["mixes", "Mixes"],
+                        ["dough", "Dough"],
+                        ["sauce", "Sauce"],
+                        ["cheese", "Cheese mixes"],
+                        ["brandflavor", "Brand/Flavor"],
+                      ] as [MergeCategory, string][]).map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          disabled={mergeBusy}
+                          onClick={() => switchMergeCategory(key)}
+                          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeCategory === key ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
+                        >{label}</button>
+                      ))}
+                    </div>
+
+                    {/* Brand/Flavor sub-mode: merge whole brands, or flavors within one brand. */}
+                    {mergeCategory === "brandflavor" && (
+                      <div className="space-y-2">
+                        <div className="flex gap-1.5">
+                          {([["brands", "Brands"], ["flavors", "Flavors"]] as ["brands" | "flavors", string][]).map(([m, label]) => (
+                            <button
+                              key={m}
+                              type="button"
+                              disabled={mergeBusy}
+                              onClick={() => {
+                                if (m === mergeBfMode) return;
+                                setMergeBfMode(m);
+                                resetMergeForm();
+                                if (m === "flavors" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
+                              }}
+                              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeBfMode === m ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                        {mergeBfMode === "flavors" && (
+                          <div className="space-y-1.5">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Brand</p>
+                            <select
+                              value={mergeBfBrand}
+                              disabled={mergeBusy}
+                              onChange={e => { setMergeBfBrand(e.target.value); resetMergeForm(); }}
+                              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                            >
+                              <option value="">Select a brand…</option>
+                              {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <p className="text-xs text-muted-foreground">
-                      Combine duplicate or similar ingredients into one. Pick the ingredient(s)
-                      to merge away (sources), then the one to keep (target). Every recipe,
-                      list, preset, profile, run, template and history entry is updated, and
-                      inventory stock is folded into the target. This can't be undone.
+                      {mergeCategory === "brandflavor"
+                        ? (mergeBfMode === "brands"
+                          ? "Combine duplicate brands into one. Pick the brand(s) to merge away, then the one to keep — their flavors are folded together and today's runs are re-pointed. This can't be undone."
+                          : "Combine duplicate flavors within a brand. Pick the flavor(s) to merge away, then the one to keep — today's runs are re-pointed. This can't be undone.")
+                        : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
                     </p>
 
-                    {/* AI + learned-memory suggestions: scan the whole list for
-                        duplicate groups and let the user review before merging. */}
-                    {mergeUniverse.length > 0 && (
+                    {/* AI + learned-memory suggestions: scan the whole (cross-
+                        category) list for duplicate groups. Hidden on the
+                        brand/flavor tab, which has no learned-alias path. */}
+                    {mergeCategory !== "brandflavor" && mergeFullUniverse.length > 0 && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
@@ -7433,7 +7676,17 @@ export default function Home() {
                     )}
 
                     {mergeUniverse.length === 0 ? (
-                      <p className="text-xs text-muted-foreground text-center py-4">No ingredients to merge yet.</p>
+                      <p className="text-xs text-muted-foreground text-center py-4">
+                        {mergeCategory === "brandflavor"
+                          ? (mergeBfMode === "brands"
+                            ? "No brands to merge yet."
+                            : (mergeBfBrand ? `No flavors for ${mergeBfBrand} to merge yet.` : "Pick a brand to see its flavors."))
+                          : mergeCategory === "mixes" ? "No mix ingredients to merge yet."
+                          : mergeCategory === "dough" ? "No dough ingredients to merge yet."
+                          : mergeCategory === "sauce" ? "No sauce ingredients to merge yet."
+                          : mergeCategory === "cheese" ? "No cheese-mix ingredients to merge yet."
+                          : "No ingredients to merge yet."}
+                      </p>
                     ) : (
                       <div ref={mergeFormRef} className="space-y-4 scroll-mt-2">
                         {/* Sources */}
@@ -7492,8 +7745,11 @@ export default function Home() {
                               <span className="font-semibold text-primary">{mergeTarget.trim()}</span>
                             </p>
                             <p className="text-[11px] text-muted-foreground">
-                              {mergePreviewCount} reference{mergePreviewCount === 1 ? "" : "s"} will be updated.
-                              Inventory stock for merged items folds into the target.
+                              {mergeCategory === "brandflavor"
+                                ? (mergeBfMode === "brands"
+                                  ? "Their flavors are folded together and today's runs are re-pointed to the kept brand."
+                                  : "Today's runs are re-pointed to the kept flavor.")
+                                : `${mergePreviewCount} reference${mergePreviewCount === 1 ? "" : "s"} will be updated. Inventory stock for merged items folds into the target.`}
                             </p>
                           </div>
                         )}
@@ -7516,7 +7772,7 @@ export default function Home() {
                             <button
                               type="button"
                               disabled={mergeBusy}
-                              onClick={() => handleApplyMerge()}
+                              onClick={() => handleConfirmMerge()}
                               className="flex-1 px-4 py-2 rounded-md bg-destructive text-destructive-foreground text-sm font-semibold hover:bg-destructive/90 transition-colors disabled:opacity-50"
                             >{mergeBusy ? "Merging…" : "Confirm merge"}</button>
                           )}

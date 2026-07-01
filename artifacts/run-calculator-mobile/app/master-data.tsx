@@ -261,6 +261,10 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     frontlineRecipePresets,
     mixRecipePresets,
     mergeIngredients,
+    brands,
+    brandFlavors,
+    mergeBrands,
+    mergeFlavors,
   } = useRun();
 
   const [sources, setSources] = useState<string[]>([]);
@@ -268,6 +272,14 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Which category the manual merge picker is scoped to. The first five scope the
+  // source/target lists to one master-data group; "brandflavor" swaps in the
+  // brand/flavor merge path. (Mobile has no mix-ingredient list, so the Mixes tab
+  // shows a graceful empty state — kept for structural parity with web.)
+  type MergeCategory = "ingredients" | "mixes" | "dough" | "sauce" | "cheese" | "brandflavor";
+  const [category, setCategory] = useState<MergeCategory>("ingredients");
+  const [bfMode, setBfMode] = useState<"brands" | "flavors">("brands");
+  const [bfBrand, setBfBrand] = useState("");
   // AI + learned-memory merge suggestions (reviewed before applying).
   const [suggestions, setSuggestions] = useState<ReviewedMergeSuggestion[]>([]);
   const [suggestBusy, setSuggestBusy] = useState(false);
@@ -278,18 +290,7 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   // can explain to the user why suggestions appeared.
   const [fromImport, setFromImport] = useState(false);
 
-  // The mergeable universe: master-data lists whose values a merge rewrites —
-  // ingredient names plus die types (the `dieType` selection field is rewritten
-  // too). Brands/flavors are excluded (separate rename path). (Mobile has no
-  // separate ingredientTypes/mixIngredients lists.)
-  const universe = React.useMemo(() => {
-    const all = [
-      ...pepTypes,
-      ...cheeseIngredients,
-      ...doughIngredients,
-      ...frontlineIngredients,
-      ...dieTypes,
-    ];
+  const dedupSorted = (all: string[]) => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const n of all) {
@@ -300,7 +301,47 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
       }
     }
     return out.sort((a, b) => a.localeCompare(b));
-  }, [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients, dieTypes]);
+  };
+
+  // The full mergeable universe: every master-data list whose values a merge
+  // rewrites — ingredient names plus die types (the `dieType` selection field is
+  // rewritten too). Used by the AI "Suggested merges" scan + import auto-check,
+  // which look for duplicates ACROSS categories. Brands/flavors excluded (they
+  // have their own merge path). (Mobile has no ingredientTypes/mixIngredients.)
+  const fullUniverse = React.useMemo(
+    () => dedupSorted([
+      ...pepTypes,
+      ...cheeseIngredients,
+      ...doughIngredients,
+      ...frontlineIngredients,
+      ...dieTypes,
+    ]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pepTypes, cheeseIngredients, doughIngredients, frontlineIngredients, dieTypes],
+  );
+
+  // The names the manual source/target pickers offer, scoped to the selected
+  // category so a merge stays within its own group. On the brand/flavor tab the
+  // universe is the brand list (brands mode) or one brand's flavors (flavors
+  // mode). Mixes is always empty on mobile (no mix-ingredient list).
+  const universe = React.useMemo(() => {
+    switch (category) {
+      case "mixes":
+        return [];
+      case "dough":
+        return dedupSorted(doughIngredients);
+      case "sauce":
+        return dedupSorted(frontlineIngredients);
+      case "cheese":
+        return dedupSorted(cheeseIngredients);
+      case "brandflavor":
+        return dedupSorted(bfMode === "brands" ? brands : (brandFlavors[bfBrand] ?? []));
+      case "ingredients":
+      default:
+        return dedupSorted([...pepTypes, ...dieTypes]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, bfMode, bfBrand, brands, brandFlavors, pepTypes, dieTypes, doughIngredients, frontlineIngredients, cheeseIngredients]);
 
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. Rank by best similarity to any selected source (or the typed target);
@@ -372,7 +413,7 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setSuggestNote("");
     setSuggestRan(true);
     try {
-      const { suggestions: out, usedAi, error: err } = await suggestMerges(universe);
+      const { suggestions: out, usedAi, error: err } = await suggestMerges(fullUniverse);
       setSuggestions(out);
       if (!usedAi && err) {
         setSuggestError(`AI unavailable (${err}). Showing previously-merged suggestions only.`);
@@ -392,19 +433,36 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   // — suggest() handles its own errors and never throws.
   React.useEffect(() => {
     if (autoSuggest === 0) return;
+    // Land on the Ingredients tab, where the cross-category AI suggestions show.
+    setCategory("ingredients");
     setFromImport(true);
     void suggest(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSuggest]);
 
+  // Switch the merge category, clearing the picker + any open AI suggestions so
+  // nothing leaks across categories. Mirrors web `switchMergeCategory`.
+  const switchCategory = (c: MergeCategory) => {
+    if (c === category) return;
+    setCategory(c);
+    reset();
+    setSuggestions([]);
+    setSuggestRan(false);
+    setSuggestError("");
+    setSuggestNote("");
+    setFromImport(false);
+    if (c === "brandflavor" && !bfBrand && brands.length > 0) setBfBrand(brands[0]);
+  };
+
   const loadSuggestion = (s: ReviewedMergeSuggestion) => {
     setError("");
     setConfirming(false);
     setFromImport(false);
-    // Snap names to the universe's exact spelling so the source rows actually
-    // select (AI/learned suggestion names can differ in case). Mirrors web.
+    // AI suggestions span every category, so snap against the FULL universe and
+    // drop onto Ingredients so the loaded rows are visible. Mirrors web.
+    setCategory("ingredients");
     const canon = (n: string) =>
-      universe.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+      fullUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
     const tgt = canon(s.target);
     const seen = new Set<string>();
     const srcs: string[] = [];
@@ -458,10 +516,19 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
       setError("Pick at least one source and a different target.");
       return;
     }
+    if (category === "brandflavor" && bfMode === "flavors" && !bfBrand.trim()) {
+      setError("Pick a brand first.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await mergeIngredients(sources, target);
+      if (category === "brandflavor") {
+        if (bfMode === "brands") mergeBrands(sources, target);
+        else mergeFlavors(bfBrand, sources, target);
+      } else {
+        await mergeIngredients(sources, target);
+      }
       reset();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
@@ -470,13 +537,31 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     }
   };
 
-  if (universe.length === 0) {
-    return (
-      <Text style={[styles.empty, { color: colors.mutedForeground }]}>
-        No ingredients to merge yet.
-      </Text>
-    );
-  }
+  const emptyMessage =
+    category === "brandflavor"
+      ? bfMode === "brands"
+        ? "No brands to merge yet."
+        : bfBrand
+          ? `No flavors for ${bfBrand} to merge yet.`
+          : "Pick a brand to see its flavors."
+      : category === "mixes"
+        ? "No mix ingredients to merge here."
+        : category === "dough"
+          ? "No dough ingredients to merge yet."
+          : category === "sauce"
+            ? "No sauce ingredients to merge yet."
+            : category === "cheese"
+              ? "No cheese-mix ingredients to merge yet."
+              : "No ingredients to merge yet.";
+
+  const MERGE_TABS: [MergeCategory, string][] = [
+    ["ingredients", "Ingredients"],
+    ["mixes", "Mixes"],
+    ["dough", "Dough"],
+    ["sauce", "Sauce"],
+    ["cheese", "Cheese mixes"],
+    ["brandflavor", "Brand/Flavor"],
+  ];
 
   return (
     <View style={{ gap: 12 }}>
@@ -499,15 +584,132 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
         </View>
       ) : null}
 
+      {/* Category selector: scope the manual merge to one group. */}
+      <View style={styles.chipWrap}>
+        {MERGE_TABS.map(([key, label]) => {
+          const active = category === key;
+          return (
+            <Pressable
+              key={key}
+              disabled={busy}
+              onPress={() => switchCategory(key)}
+              style={({ pressed }) => [
+                styles.catTab,
+                {
+                  borderColor: active ? colors.primary : colors.border,
+                  backgroundColor: active ? colors.primary : "transparent",
+                  opacity: busy ? 0.5 : pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.catTabText,
+                  { color: active ? colors.primaryForeground : colors.mutedForeground },
+                ]}
+              >
+                {label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Brand/Flavor sub-mode: merge whole brands, or flavors within one brand. */}
+      {category === "brandflavor" ? (
+        <View style={{ gap: 8 }}>
+          <View style={styles.addRow}>
+            {(["brands", "flavors"] as const).map((m) => {
+              const active = bfMode === m;
+              return (
+                <Pressable
+                  key={m}
+                  disabled={busy}
+                  onPress={() => {
+                    if (m === bfMode) return;
+                    setBfMode(m);
+                    reset();
+                    if (m === "flavors" && !bfBrand && brands.length > 0) setBfBrand(brands[0]);
+                  }}
+                  style={({ pressed }) => [
+                    styles.catTab,
+                    {
+                      flex: 1,
+                      alignItems: "center",
+                      borderColor: active ? colors.primary : colors.border,
+                      backgroundColor: active ? colors.primary : "transparent",
+                      opacity: busy ? 0.5 : pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.catTabText,
+                      { color: active ? colors.primaryForeground : colors.mutedForeground },
+                    ]}
+                  >
+                    {m === "brands" ? "Brands" : "Flavors"}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          {bfMode === "flavors" ? (
+            <View style={{ gap: 6 }}>
+              <Text style={[styles.mergeLabel, { color: colors.mutedForeground }]}>BRAND</Text>
+              {brands.length === 0 ? (
+                <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
+                  No brands yet.
+                </Text>
+              ) : (
+                <View style={styles.chipWrap}>
+                  {brands.map((b) => {
+                    const active = b === bfBrand;
+                    return (
+                      <Pressable
+                        key={b}
+                        disabled={busy}
+                        onPress={() => {
+                          setBfBrand(b);
+                          reset();
+                        }}
+                        style={[
+                          styles.targetChip,
+                          {
+                            borderColor: active ? colors.primary : colors.border,
+                            backgroundColor: active ? colors.primary : "transparent",
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.targetChipText,
+                            { color: active ? colors.primaryForeground : colors.mutedForeground },
+                          ]}
+                        >
+                          {b}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       <Text style={[styles.pinHint, { color: colors.mutedForeground, marginBottom: 0 }]}>
-        Combine duplicate or similar ingredients into one. Pick the ingredient(s) to
-        merge away, then the one to keep. Every recipe, list, preset, profile, run,
-        template and history entry is updated, and inventory stock is folded into the
-        target. This can&apos;t be undone.
+        {category === "brandflavor"
+          ? bfMode === "brands"
+            ? "Combine duplicate brands into one. Pick the brand(s) to merge away, then the one to keep — their flavors are folded together and today's runs are re-pointed. This can't be undone."
+            : "Combine duplicate flavors within a brand. Pick the flavor(s) to merge away, then the one to keep — today's runs are re-pointed. This can't be undone."
+          : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away, then the one to keep. Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
       </Text>
 
-      {/* AI + learned-memory suggestions: scan for duplicate groups, review
-          before merging. */}
+      {/* AI + learned-memory suggestions: scan the whole (cross-category) list for
+          duplicate groups. Hidden on the brand/flavor tab (no learned-alias path). */}
+      {category !== "brandflavor" && fullUniverse.length > 0 ? (
       <View
         style={[
           styles.suggestBox,
@@ -631,7 +833,12 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
           );
         })}
       </View>
+      ) : null}
 
+      {universe.length === 0 ? (
+        <Text style={[styles.empty, { color: colors.mutedForeground }]}>{emptyMessage}</Text>
+      ) : (
+        <>
       <Text style={[styles.mergeLabel, { color: colors.mutedForeground }]}>
         MERGE THESE (SOURCES)
       </Text>
@@ -742,8 +949,11 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
             </Text>
           </Text>
           <Text style={[styles.previewSub, { color: colors.mutedForeground }]}>
-            {previewCount} reference{previewCount === 1 ? "" : "s"} will be updated.
-            Inventory stock for merged items folds into the target.
+            {category === "brandflavor"
+              ? bfMode === "brands"
+                ? "Their flavors are folded together and today's runs are re-pointed to the kept brand."
+                : "Today's runs are re-pointed to the kept flavor."
+              : `${previewCount} reference${previewCount === 1 ? "" : "s"} will be updated. Inventory stock for merged items folds into the target.`}
           </Text>
         </View>
       ) : null}
@@ -797,6 +1007,8 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
           </Pressable>
         )}
       </View>
+        </>
+      )}
     </View>
   );
 }
@@ -2199,6 +2411,13 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   targetChipText: { fontSize: 12, fontFamily: FONTS.medium },
+  catTab: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  catTabText: { fontSize: 12, fontFamily: FONTS.medium },
   mergeError: { fontSize: 12, fontFamily: FONTS.medium },
   previewBox: {
     borderWidth: 1,

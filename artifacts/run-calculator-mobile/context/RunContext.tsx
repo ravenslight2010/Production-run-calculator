@@ -1536,6 +1536,8 @@ interface RunContextValue {
   renameFlavor: (brand: string, oldFlavor: string, newFlavor: string) => void;
   // Merge ingredient names into one canonical target across all surfaces.
   mergeIngredients: (sources: string[], target: string) => Promise<void>;
+  mergeBrands: (sources: string[], target: string) => void;
+  mergeFlavors: (brand: string, sources: string[], target: string) => void;
   // Local-only master-data edit history + per-entry undo (rolls back to point).
   changeHistory: MasterDataChange[];
   undoMasterDataChange: (id: string) => void;
@@ -3559,6 +3561,98 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persistNow],
   );
 
+  // Fold one or more source brands into a target brand: union their flavors into
+  // the target, drop the source brands (tombstoned so the additive sync union
+  // can't resurrect them), and re-point today's runs from a merged-away brand to
+  // the target. Brands carry no inventory (nothing to fold) and, matching the web
+  // path, per-flavor profiles keyed to a merged-away brand are left as-is rather
+  // than re-keyed. persistNow pushes immediately so the tombstones propagate
+  // before any incoming pull. Web parity with home.tsx `mergeBrands`.
+  const mergeBrands = useCallback(
+    (sources: string[], target: string) => {
+      const tgt = target.trim();
+      if (!tgt) return;
+      setAppState((prev) => {
+        const srcSet = new Set(
+          sources.map((s) => s.trim().toLowerCase()).filter((s) => s && s !== tgt.toLowerCase()),
+        );
+        if (srcSet.size === 0) return prev;
+        const brandFlavors = { ...prev.brandFlavors };
+        const targetFlavors = new Set(brandFlavors[tgt] ?? []);
+        for (const b of Object.keys(brandFlavors)) {
+          if (srcSet.has(b.toLowerCase())) {
+            for (const f of brandFlavors[b] ?? []) targetFlavors.add(f);
+            delete brandFlavors[b];
+          }
+        }
+        brandFlavors[tgt] = [...targetFlavors].sort((a, b) => a.localeCompare(b));
+        let brands = prev.brands.filter((b) => !srcSet.has(b.toLowerCase()));
+        if (!brands.some((b) => b.toLowerCase() === tgt.toLowerCase())) brands = [...brands, tgt];
+        brands = brands.sort((a, b) => a.localeCompare(b));
+        let deletedItems = prev.deletedItems;
+        for (const b of prev.brands) {
+          if (srcSet.has(b.toLowerCase())) deletedItems = tombstoneDeletedItemNs(deletedItems, "brands", b);
+        }
+        const runs = prev.runs.map((r) =>
+          srcSet.has((r.settings.brand ?? "").toLowerCase())
+            ? { ...r, settings: { ...r.settings, brand: tgt } }
+            : r,
+        );
+        const next = withChangeRecord(
+          prev,
+          { ...prev, brands, brandFlavors, deletedItems, runs },
+          "merge",
+          `Merged brands ${sources.map((s) => `"${s}"`).join(", ")} into "${tgt}"`,
+        );
+        persistNow(next);
+        return next;
+      });
+    },
+    [persistNow],
+  );
+
+  // Fold one or more source flavors into a target flavor WITHIN a single brand:
+  // rewrite that brand's flavor list (sources tombstoned) and re-point today's
+  // runs for that brand from a merged-away flavor to the target. Web parity with
+  // home.tsx `mergeFlavors`.
+  const mergeFlavors = useCallback(
+    (brand: string, sources: string[], target: string) => {
+      const b = brand.trim();
+      const tgt = target.trim();
+      if (!b || !tgt) return;
+      setAppState((prev) => {
+        const current = prev.brandFlavors[b] ?? [];
+        const srcSet = new Set(
+          sources.map((s) => s.trim().toLowerCase()).filter((s) => s && s !== tgt.toLowerCase()),
+        );
+        if (srcSet.size === 0) return prev;
+        let list = current.filter((f) => !srcSet.has(f.toLowerCase()));
+        if (!list.some((f) => f.toLowerCase() === tgt.toLowerCase())) list = [...list, tgt];
+        list = list.sort((a, b) => a.localeCompare(b));
+        const brandFlavors = { ...prev.brandFlavors, [b]: list };
+        let deletedItems = prev.deletedItems;
+        const ns = flavorNamespace(b);
+        for (const f of current) {
+          if (srcSet.has(f.toLowerCase())) deletedItems = tombstoneDeletedItemNs(deletedItems, ns, f);
+        }
+        const runs = prev.runs.map((r) =>
+          r.settings.brand === b && srcSet.has((r.settings.flavor ?? "").toLowerCase())
+            ? { ...r, settings: { ...r.settings, flavor: tgt } }
+            : r,
+        );
+        const next = withChangeRecord(
+          prev,
+          { ...prev, brandFlavors, deletedItems, runs },
+          "merge",
+          `Merged flavors ${sources.map((s) => `"${s}"`).join(", ")} into "${tgt}" (${b})`,
+        );
+        persistNow(next);
+        return next;
+      });
+    },
+    [persistNow],
+  );
+
   // Roll back to the point just before the given entry: restore that entry's
   // pre-edit snapshot and discard it plus every newer entry (the list is newest-
   // first, so we keep only entries older than the undone one). No-op when the
@@ -3983,6 +4077,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         renameBrand,
         renameFlavor,
         mergeIngredients,
+        mergeBrands,
+        mergeFlavors,
         changeHistory: appState.changeHistory,
         undoMasterDataChange,
         scheduled: appState.scheduled,
