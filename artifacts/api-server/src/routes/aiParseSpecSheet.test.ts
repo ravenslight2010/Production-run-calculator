@@ -65,6 +65,27 @@ describe("buildParseSpecSheetPrompt standalone procedure rule", () => {
     // But an explicit per-flavor cheese-tab mapping still populates targets.
     expect(system).toContain("EXPLICITLY maps a recipe to");
   });
+
+  it("distinguishes a customer/product-line title from a sauce/dough TYPE title", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    // A recipe-TYPE title (no customer) must not become a junk brand.
+    expect(system).toContain("distinguish a CUSTOMER/product-line name from a SAUCE/DOUGH");
+    expect(system).toContain("is NOT a brand");
+    expect(system).toContain("LEAVE `brand` EMPTY");
+    // A body note naming customers routes to targets, not a guessed brand.
+    expect(system).toContain("This recipe used for Hannaford and Lucia");
+  });
+
+  it("forbids inventing a flavor for a shared procedure (whole-brand empty precedence)", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    // Shared-procedure customer notes must never fabricate a specific flavor.
+    expect(system).toContain("NEVER invent or guess a specific flavor");
+    expect(system).toContain("do not turn 'Masa' into 'Masala'");
+    // The older no-known-flavors fallback must also leave the flavor empty, not
+    // guess a "best reading" flavor (older contradictory wording removed).
+    expect(system).toContain("add ONE whole-brand target with the `flavor` LEFT EMPTY");
+    expect(system).not.toContain("best reading of its brand and flavor");
+  });
 });
 
 // Regression guard: the prompt must NOT hand the model incoherent (cyclic/

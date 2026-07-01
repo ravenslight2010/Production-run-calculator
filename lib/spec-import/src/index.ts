@@ -42,6 +42,15 @@ export type ParsedRecipe = {
    * the recipe per brand/flavor. Unioned with the singular brand/flavor above.
    */
   targets?: ParsedRecipeTarget[];
+  /**
+   * Brands this recipe covers "all flavors of" (a catch-all/whole-brand target the
+   * sanitizer lifted out of `targets[]` — e.g. a dough sheet noting "used for
+   * Hannaford and Lucia" or a cheese tab labelled "All Varieties"). Unlike the
+   * singular `brand`, this holds MULTIPLE brands so a shared recipe used across
+   * several customers fans to every real flavor of EACH at apply time instead of
+   * collapsing to one. recipeApplyTargets() resolves these against the pool.
+   */
+  brandAnchors?: string[];
   /** Dough only: target doughball weight in oz. */
   doughballOz?: number;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
@@ -135,24 +144,36 @@ export function recipeApplyTargets(
   profiles: ReadonlyArray<ParsedProfile>,
 ): ParsedRecipeTarget[] {
   const explicit = recipeTargets(r);
-  if (explicit.length) return explicit;
-  // No explicit target. A brand without a flavor is the only safe anchor:
-  // link to every same-brand profile in this import.
+  const out: ParsedRecipeTarget[] = [...explicit];
+  const seen = new Set(
+    out.map((t) => `${t.brand.toLowerCase()}\u0000${t.flavor.toLowerCase()}`),
+  );
+  // Fan one brand out to every same-brand profile in the pool, appending only
+  // profiles not already covered by an explicit (or prior-anchor) target.
+  const fanBrand = (brand: string): void => {
+    const wantBrand = brand.trim().toLowerCase();
+    if (!wantBrand) return;
+    for (const p of profiles) {
+      const pb = p.brand.trim();
+      const pf = p.flavor.trim();
+      if (!pb || !pf) continue;
+      if (pb.toLowerCase() !== wantBrand) continue;
+      const key = `${pb.toLowerCase()}\u0000${pf.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ brand: pb, flavor: pf });
+    }
+  };
+  // Fan every catch-all brand anchor the sanitizer captured (may be MANY brands,
+  // e.g. a dough "used for Hannaford and Lucia"). These add to any explicit
+  // per-flavor targets rather than replacing them.
+  for (const b of r.brandAnchors ?? []) fanBrand(b);
+  if (out.length) return out;
+  // No explicit target and no anchors. A singular brand without a flavor is the
+  // only remaining safe anchor: link to every same-brand profile in the pool.
   const brand = (r.brand ?? "").trim();
   if (!brand) return [];
-  const wantBrand = brand.toLowerCase();
-  const out: ParsedRecipeTarget[] = [];
-  const seen = new Set<string>();
-  for (const p of profiles) {
-    const pb = p.brand.trim();
-    const pf = p.flavor.trim();
-    if (!pb || !pf) continue;
-    if (pb.toLowerCase() !== wantBrand) continue;
-    const key = `${pb.toLowerCase()}\u0000${pf.toLowerCase()}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ brand: pb, flavor: pf });
-  }
+  fanBrand(brand);
   return out;
 }
 
@@ -719,8 +740,12 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
       // A target whose flavor is a whole-brand scope word ("All Varieties") or the
       // recipe's own kind ("Dough") is not a real profile — keep it as a brand-wide
       // anchor instead of a junk brand/"All Varieties" profile. recipeApplyTargets()
-      // then fans the recipe out to every real flavor of that brand.
-      let catchAllBrand = "";
+      // then fans the recipe out to every real flavor of each such brand. A shared
+      // recipe can carry SEVERAL catch-all brands (e.g. a dough "used for Hannaford
+      // and Lucia"), so collect them ALL — collapsing to one would silently drop the
+      // rest.
+      const anchors: string[] = [];
+      const anchorSeen = new Set<string>();
       for (const t of rawTargets.slice(0, lim.maxProfiles)) {
         if (!t || typeof t !== "object") continue;
         const to = t as Record<string, unknown>;
@@ -728,15 +753,24 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
         const tf = clampName(to.flavor, lim.maxNameChars);
         if (!tb) continue;
         if (isCatchAllFlavor(tf, kind)) {
-          if (!catchAllBrand) catchAllBrand = tb;
+          const key = tb.toLowerCase();
+          if (!anchorSeen.has(key)) {
+            anchorSeen.add(key);
+            anchors.push(tb);
+          }
           continue;
         }
         targets.push({ brand: tb, flavor: tf });
       }
       if (targets.length) recipe.targets = targets;
-      // Preserve the brand anchor when the only target(s) were catch-alls and the
-      // recipe carried no singular brand of its own.
-      if (!recipe.brand && catchAllBrand) recipe.brand = catchAllBrand;
+      if (anchors.length) {
+        recipe.brandAnchors = anchors;
+        // Back-compat single-brand display: when the recipe had no singular brand
+        // and exactly one catch-all brand, expose it as `brand` too. With several
+        // anchors, leave `brand` empty (no single brand is representative) and rely
+        // on brandAnchors for the fan-out.
+        if (!recipe.brand && anchors.length === 1) recipe.brand = anchors[0];
+      }
     }
     if (kind === "dough") {
       const oz = num(o.doughballOz);

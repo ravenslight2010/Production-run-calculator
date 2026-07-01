@@ -98,8 +98,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "recipe whose `targets` array lists every {brand, flavor} it covers; do NOT " +
     "emit a separate duplicate recipe per brand/flavor. Expand a 'Brand: All' (or " +
     "flavor-less) header to each KNOWN flavor of that brand from the flavors-by-" +
-    "brand list; if that brand has no known flavors, add one target with your best " +
-    "reading of its brand and flavor and mention the uncertainty in `note`. Use the " +
+    "brand list; if that brand has no known flavors, add ONE whole-brand target with " +
+    "the `flavor` LEFT EMPTY (never invent a specific flavor) and mention the " +
+    "uncertainty in `note`. Use the " +
     "singular `brand`/`flavor` fields only when a recipe ties to exactly one profile. " +
     "Be AGGRESSIVE about populating `targets`: whenever a recipe could reasonably " +
     "serve more than one brand+flavor (any header listing several names, a shared " +
@@ -118,7 +119,19 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "brand and no flavor already applies to EVERY flavor of that brand, which is " +
     "exactly what a shared sauce, dough, or standard-cheese procedure means. Do NOT " +
     "invent a placeholder flavor like 'Dough' and do NOT fold the size into the " +
-    "brand here. ONLY populate `targets` when the sheet EXPLICITLY maps a recipe to " +
+    "brand here. BUT distinguish a CUSTOMER/product-line name from a SAUCE/DOUGH " +
+    "TYPE name: a title like 'Lucia', 'Medulla', 'Aldo', \"Lowe's\", \"Member's " +
+    "Selection\" is a customer -> use it as `brand`; a title that is only a recipe " +
+    "TYPE with no customer -- e.g. 'Garlic Alfredo Sauce', 'Gravy Sauce', 'Masa " +
+    "Dough', 'Malted Barley Dough', 'Margherita Dough' -- is NOT a brand: set the " +
+    "recipe `name` to that type and LEAVE `brand` EMPTY so it imports as a shared " +
+    "library recipe for manual assignment. If the sheet BODY names the customers it " +
+    "is used for (e.g. a note 'This recipe used for Hannaford and Lucia'), put EACH " +
+    "of those in `targets` — one entry per brand with the `flavor` LEFT EMPTY " +
+    "(whole-brand). NEVER invent or guess a specific flavor for such a shared " +
+    "procedure (do not turn 'Masa' into 'Masala', etc.); an empty flavor already " +
+    "means every flavor of that brand. " +
+    "ONLY populate `targets` when the sheet EXPLICITLY maps a recipe to " +
     "specific flavors (e.g. a cheese tab listing 'Pepperoni: X Mix', 'Hawaiian: Y " +
     "Mix' — then target those brand+flavor pairs); an 'All Varieties' or 'Standard' " +
     "mix stays brand-level with an empty flavor. " +

@@ -368,6 +368,74 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.recipes[0].targets).toEqual([{ brand: "Aldo's", flavor: "Cheese" }]);
   });
 
+  it("keeps EVERY distinct catch-all brand as a brand anchor (multi-brand shared recipe)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Masa Dough",
+          // "This recipe used for Hannaford and Lucia" — two whole-brand targets.
+          targets: [
+            { brand: "Hannaford", flavor: "All" },
+            { brand: "Lucia", flavor: "All" },
+          ],
+          rows: [{ ingredient: "ADM Wheat Flour", lbs: 200 }],
+        },
+      ],
+    });
+    const r = out.recipes[0];
+    expect(r.targets).toBeUndefined();
+    expect(r.brandAnchors).toEqual(["Hannaford", "Lucia"]);
+    // No single brand is representative of two customers, so `brand` stays empty.
+    expect(r.brand).toBeUndefined();
+  });
+
+  it("keeps a real per-flavor target AND records a different brand's catch-all as an anchor", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Shared Blend",
+          // One explicit per-flavor mapping plus a whole-brand catch-all for a
+          // different customer — the explicit target must survive untouched while
+          // the catch-all brand is lifted to an anchor.
+          targets: [
+            { brand: "DiGiorno", flavor: "Supreme" },
+            { brand: "Lowes", flavor: "All Varieties" },
+          ],
+          rows: [{ ingredient: "Mozzarella", lbs: 50 }],
+        },
+      ],
+    });
+    const r = out.recipes[0];
+    expect(r.targets).toEqual([{ brand: "DiGiorno", flavor: "Supreme" }]);
+    expect(r.brandAnchors).toEqual(["Lowes"]);
+    // Exactly one catch-all anchor + no singular brand → back-compat `brand`.
+    expect(r.brand).toBe("Lowes");
+  });
+
+  it("de-dupes repeated catch-all brands case-insensitively into anchors", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "sauce",
+          name: "Shared Sauce",
+          targets: [
+            { brand: "Aldo's", flavor: "All Varieties" },
+            { brand: "aldo's", flavor: "Sauce" },
+          ],
+          rows: [{ ingredient: "Tomato Paste", lbs: 100 }],
+        },
+      ],
+    });
+    const r = out.recipes[0];
+    expect(r.brandAnchors).toEqual(["Aldo's"]);
+    expect(r.brand).toBe("Aldo's");
+  });
+
   it("drops a dough target whose flavor is just the recipe kind ('Dough')", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
@@ -466,6 +534,37 @@ describe("recipeApplyTargets", () => {
     expect(
       recipeApplyTargets({ kind: "dough", name: "D", rows: [], brand: "lowes" }, profiles),
     ).toEqual([
+      { brand: "Lowes", flavor: "Pepperoni" },
+      { brand: "Lowes", flavor: "Cheese" },
+    ]);
+  });
+
+  it("fans EVERY brandAnchor to its same-brand profiles (multi-brand shared recipe)", () => {
+    expect(
+      recipeApplyTargets(
+        { kind: "dough", name: "Masa Dough", rows: [], brandAnchors: ["Lowes", "DiGiorno"] },
+        profiles,
+      ),
+    ).toEqual([
+      { brand: "Lowes", flavor: "Pepperoni" },
+      { brand: "Lowes", flavor: "Cheese" },
+      { brand: "DiGiorno", flavor: "Supreme" },
+    ]);
+  });
+
+  it("appends brandAnchor fan-out to explicit per-flavor targets, de-duped", () => {
+    expect(
+      recipeApplyTargets(
+        {
+          kind: "cheese",
+          name: "Mix",
+          targets: [{ brand: "DiGiorno", flavor: "Supreme" }],
+          brandAnchors: ["Lowes"],
+        },
+        profiles,
+      ),
+    ).toEqual([
+      { brand: "DiGiorno", flavor: "Supreme" },
       { brand: "Lowes", flavor: "Pepperoni" },
       { brand: "Lowes", flavor: "Cheese" },
     ]);

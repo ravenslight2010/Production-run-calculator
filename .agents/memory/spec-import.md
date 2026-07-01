@@ -281,3 +281,26 @@ Any change to one app's order/logic must land in the other verbatim.
   brand-only recipe attaches to EXISTING same-brand flavors, not just profiles in the
   same import. **WEB-ONLY glue** (parity paused) — mobile apply path still needs the
   same pool build when parity resumes.
+- **Multi-brand shared recipe → `ParsedRecipe.brandAnchors: string[]` (not a single
+  `recipe.brand`).** A shared procedure can name SEVERAL customers ("Masa Dough — used
+  for Hannaford and Lucia"), emitting multiple whole-brand catch-all targets. The
+  sanitizer collects ALL distinct catch-all brands (ci) into `brandAnchors`;
+  `recipeApplyTargets` fans EVERY anchor to its same-brand profiles (added to explicit
+  per-flavor targets, de-duped). Single-anchor + no singular brand still ALSO sets
+  `recipe.brand` for back-compat/display. **Why:** the earlier scrub kept only the
+  first catch-all brand as `recipe.brand`, silently dropping the rest (data loss).
+  SHARED lib → both clients. Tests in `specImport.test.ts`.
+- **Standalone-title brand rule now splits CUSTOMER vs TYPE titles.** A title that is
+  a customer/product-line (Lucia, Medulla, Lowe's, Member's Selection) → use as
+  `brand`; a title that is only a sauce/dough TYPE (Garlic Alfredo, Gravy, Masa Dough,
+  Malted Barley, Margherita) → leave `brand` EMPTY (imports as a shared library recipe
+  for manual assignment). A body note naming customers ("used for Hannaford and
+  Lucia") routes to per-brand whole-brand `targets` (flavor LEFT EMPTY) — prompt
+  explicitly forbids inventing a flavor (guards a "Masa"→"Masala" phonetic
+  hallucination seen under empty grounding). Prompt-only, pinned by
+  `aiParseSpecSheet.test.ts`. **Why:** the batch-1 "brand from title" rule mislabeled
+  type-named procedures as junk brands (brand="GARLIC ALFREDO").
+- **Meat & Veggie topping-mix file = same shape as the cheese-mix file** (per-customer
+  tabs, each with one or more named topping mixes). These are CHEESE-kind recipes
+  (topping blends), mapped to specific flavors by mix name — the existing cheese-tab
+  handling + catch-all scrub covers them; no new code path needed.
