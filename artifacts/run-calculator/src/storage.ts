@@ -532,6 +532,44 @@ export function isEmptyOverPopulated(
   return deepEqual(candidate, DEFAULT_VALUES) && !deepEqual(fallback, DEFAULT_VALUES);
 }
 
+// ── Sync-receive merge-survival helpers ─────────────────────────────────────
+// Extracted from the home.tsx sync-receive handler so the recipe-name-merge
+// survival guarantees are importable and regression-tested end-to-end (a merge
+// followed by a stale incoming sync payload). See recipeMergeSyncReceive.test.ts.
+
+// Per-run lost-update decision for the sync-receive run-values loop. Returns
+// true when the incoming remote value should overwrite the local one; false to
+// keep local. Keep local when the remote is all-default over a populated local
+// (empty-over-populated corruption, regardless of stamp) OR when our local edit
+// stamp is strictly newer than the remote's. This is what makes a recipe-name
+// merge stick across a stale peer: the merge advances the re-pointed runs' edit
+// stamps, so localTs > remoteTs here and the stale pre-merge selection is
+// rejected instead of overwriting the merged one.
+export function acceptRemoteRunValueOnSync(
+  remoteVals: FormValues,
+  localVals: FormValues,
+  remoteTs: number,
+  localTs: number,
+): boolean {
+  if (isEmptyOverPopulated(remoteVals, localVals)) return false;
+  return !(localTs > remoteTs);
+}
+
+// Drop recipe-preset keys tombstoned under `namespace` from a preset map. A
+// recipe-name merge folds the merged-away name's preset KEY and tombstones it;
+// the additive preset union on sync-receive would otherwise resurrect that
+// folded-away key from a stale peer. Mirrors the list dropDeleted guard.
+export function dropTombstonedPresetKeys<V>(
+  obj: Record<string, V>,
+  deletedMap: Record<string, string[]>,
+  namespace: string,
+): Record<string, V> {
+  const keptSet = new Set(dropDeleted(Object.keys(obj), deletedMap, namespace));
+  const out: Record<string, V> = {};
+  for (const [k, v] of Object.entries(obj)) if (keptSet.has(k)) out[k] = v;
+  return out;
+}
+
 export function loadTemplates(): RunTemplate[] {
   try {
     const raw = localStorage.getItem(TEMPLATES_KEY);

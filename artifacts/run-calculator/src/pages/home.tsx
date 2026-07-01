@@ -78,6 +78,8 @@ import {
   deepEqual,
   pickCurrentRunPushValue,
   isEmptyOverPopulated,
+  acceptRemoteRunValueOnSync,
+  dropTombstonedPresetKeys,
   loadTemplates,
   saveTemplates,
   loadProfile,
@@ -3397,18 +3399,18 @@ export default function Home() {
           // per-run guard on the server and every peer — the corrupted shared row
           // carries the run's real stamp, so a re-push at the same stamp couldn't
           // overwrite it.
-          if (isEmptyOverPopulated(vals as FormValues, loadRunValues(id))) {
-            mergedUpd[id] = Date.now();
+          const localVals = loadRunValues(id);
+          if (!acceptRemoteRunValueOnSync(vals as FormValues, localVals, rTs, lTs)) {
+            // Rejected: keep ours and re-push later. When the reject is the
+            // empty-over-populated corruption, advance our stamp so the heal
+            // re-push strictly wins; a genuinely-fresher local edit keeps its
+            // stamp as-is (the merge already bumped re-pointed runs' stamps).
+            if (isEmptyOverPopulated(vals as FormValues, localVals)) mergedUpd[id] = Date.now();
             rejectedStale = true;
             continue;
           }
-          if (lTs > rTs) {
-            // Local edit is fresher than this remote — keep ours, re-push later.
-            rejectedStale = true;
-          } else {
-            saveRunValues(id, vals as FormValues);
-            if (rTs > lTs) mergedUpd[id] = rTs;
-          }
+          saveRunValues(id, vals as FormValues);
+          if (rTs > lTs) mergedUpd[id] = rTs;
         }
         saveRunValuesUpdated(mergedUpd);
       }
@@ -3649,24 +3651,17 @@ export default function Home() {
       // and tombstones them under the category namespace. Drop any key tombstoned
       // there before/after the union, or a stale remote payload resurrects the
       // folded-away recipe-name preset key (mirrors the list dropDeleted guard).
-      const dropTombstonedPresetKeys = <V,>(obj: Record<string, V>, namespace: string): Record<string, V> => {
-        const kept = dropDeleted(Object.keys(obj), deletedMap, namespace);
-        const keptSet = new Set(kept);
-        const out: Record<string, V> = {};
-        for (const [k, v] of Object.entries(obj)) if (keptSet.has(k)) out[k] = v;
-        return out;
-      };
       if (payload.doughRecipePresets && Object.keys(payload.doughRecipePresets).length > 0) {
         const merged = { ...loadDoughRecipePresets(), ...payload.doughRecipePresets };
-        saveDoughRecipePresets(dropTombstonedPresetKeys(merged, "doughRecipeNames"));
+        saveDoughRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "doughRecipeNames"));
       }
       if (payload.frontlineRecipePresets && Object.keys(payload.frontlineRecipePresets).length > 0) {
         const merged = { ...loadFrontlineRecipePresets(), ...payload.frontlineRecipePresets };
-        saveFrontlineRecipePresets(dropTombstonedPresetKeys(merged, "frontlineRecipeNames"));
+        saveFrontlineRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "frontlineRecipeNames"));
       }
       if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
         const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
-        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, "cheeseRecipeNames"));
+        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "cheeseRecipeNames"));
       }
 
       // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
