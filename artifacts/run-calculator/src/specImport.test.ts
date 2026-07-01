@@ -452,6 +452,85 @@ describe("sanitizeParsedSpecImport", () => {
     expect(r.targets).toBeUndefined();
     expect(r.brand).toBe("Aldo's");
   });
+
+  it("demotes a target flavor invented by the model (absent from source) to a brand anchor", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "dough",
+            name: "Modified Malted Barley Dough",
+            brand: "Four Hands",
+            // The model hallucinated "Mission Taco Mexican" — the sheet only says
+            // "Four Hands ... varieties" (whole-brand), never a specific flavor.
+            targets: [{ brand: "Four Hands", flavor: "Mission Taco Mexican" }],
+            rows: [{ ingredient: "ADM Wheat Flour", lbs: 200 }],
+          },
+        ],
+      },
+      {},
+      { sourceText: "FOUR HANDS Modified Barley Pizza varieties\nADM Wheat Flour" },
+    );
+    const r = out.recipes[0];
+    expect(r.targets).toBeUndefined();
+    expect(r.brandAnchors).toEqual(["Four Hands"]);
+  });
+
+  it("KEEPS a real target flavor that appears in the source (no false demotion)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "dough",
+            name: "Naan Dough",
+            targets: [{ brand: "Hannaford", flavor: "Masala Pizza" }],
+            rows: [{ ingredient: "Flour", lbs: 200 }],
+          },
+        ],
+      },
+      {},
+      { sourceText: "NAAN DOUGH\nHannaford (Masala Pizza)\t11.5\t0.72" },
+    );
+    expect(out.recipes[0].targets).toEqual([{ brand: "Hannaford", flavor: "Masala Pizza" }]);
+  });
+
+  it("KEEPS a known flavor even when it is absent from the source text", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "cheese",
+            name: "Shared Blend",
+            targets: [{ brand: "Aldo's", flavor: "Pepperoni" }],
+            rows: [{ ingredient: "Mozzarella", lbs: 50 }],
+          },
+        ],
+      },
+      {},
+      { sourceText: "just some rows with no flavor words", knownFlavors: ["Pepperoni"] },
+    );
+    expect(out.recipes[0].targets).toEqual([{ brand: "Aldo's", flavor: "Pepperoni" }]);
+  });
+
+  it("does NOT demote any target flavor when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Some Dough",
+          targets: [{ brand: "Four Hands", flavor: "Totally Invented Flavor" }],
+          rows: [{ ingredient: "Flour", lbs: 200 }],
+        },
+      ],
+    });
+    expect(out.recipes[0].targets).toEqual([
+      { brand: "Four Hands", flavor: "Totally Invented Flavor" },
+    ]);
+  });
 });
 
 describe("isCatchAllFlavor", () => {

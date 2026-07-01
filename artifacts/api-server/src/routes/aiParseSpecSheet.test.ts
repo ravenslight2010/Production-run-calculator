@@ -86,6 +86,27 @@ describe("buildParseSpecSheetPrompt standalone procedure rule", () => {
     expect(system).toContain("add ONE whole-brand target with the `flavor` LEFT EMPTY");
     expect(system).not.toContain("best reading of its brand and flavor");
   });
+
+  it("splits a multi-customer brand cell but keeps a single '&' company name whole", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    // "Lucia's Craft & 4Hands" must fan out into one target per customer...
+    expect(system).toContain("SPLIT it into one target PER");
+    // ...while a legitimate single '&' company name stays one brand.
+    expect(system).toContain("Maria & Son");
+  });
+
+  it("reads a doughball/yield table as per-customer targets (parenthesized flavor optional)", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("Hannaford (Masala Pizza)");
+    expect(system).toContain("flavor = the parenthesized");
+  });
+
+  it("keeps a standalone procedure's full title as the name (no junk first-word brand)", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    // 'MYSTIC PIZZA SAUCE PROCEDURE' -> name 'Mystic Pizza Sauce', not brand 'Mystic'.
+    expect(system).toContain("Mystic Pizza Sauce");
+    expect(system).toContain("do NOT peel the first");
+  });
 });
 
 // Regression guard: the prompt must NOT hand the model incoherent (cyclic/

@@ -304,3 +304,43 @@ Any change to one app's order/logic must land in the other verbatim.
   tabs, each with one or more named topping mixes). These are CHEESE-kind recipes
   (topping blends), mapped to specific flavors by mix name — the existing cheese-tab
   handling + catch-all scrub covers them; no new code path needed.
+
+## Batch-3 real-library hardening (combined brand cells, grounding backstop)
+- **A doughball/yield table near the bottom of a procedure sheet lists the customers
+  it feeds** — one row per customer, sometimes `Customer (Flavor)` in parentheses
+  (e.g. `Hannaford (Masala Pizza)`). Prompt tells the model to read each such row as
+  a target: brand = the customer, flavor = the parenthesized product ONLY if written,
+  else EMPTY (whole-brand). This is the row that legit customer/flavor targets come
+  from on an otherwise type-named sheet (e.g. Naan Dough → Hannaford/Masala Pizza).
+- **One cell listing SEVERAL customers joined by `&`/`and`/`/`/`+` must SPLIT into one
+  target per customer, same flavor** (`Lucia's Craft & 4Hands` → `Lucia's Craft` +
+  `4Hands`, each carrying `Masala Pizza`). BUT a single company name that legitimately
+  contains `&` (`Maria & Son`, `Ben & Jerry's`, `M&M`) stays ONE brand. **Prompt-only
+  by design** — a deterministic `&`-split is UNSAFE because real single-company brands
+  contain `&` (Maria & Son is a real customer in this very library). Verified live:
+  Naan splits into 3 targets AND Tikka Masala keeps `brand="Maria & Son"` whole.
+  Pinned by `aiParseSpecSheet.test.ts`.
+- **Standalone procedure NAME = the full sheet title minus generic process words; do
+  NOT peel the first word into a junk `brand`.** A `MYSTIC PIZZA SAUCE PROCEDURE` sheet
+  was parsed as `brand="Mystic" name="Pizza Sauce"` (junk truncated name); now
+  `name="Mystic Pizza Sauce"`. If it's a TYPE with no customer, `brand` stays EMPTY;
+  a plausible product-line word left as `brand` (Mystic) is acceptable, the junk-split
+  name is not. Prompt-only.
+- **Deterministic grounding backstop for invented target flavors** — `isGroundedFlavor`
+  (pure, `lib/spec-import`) + a demote branch in `sanitizeParsedSpecImport`. A target
+  flavor sharing ZERO word tokens (len ≥3) with the source workbook text AND not in
+  the factory's known flavors is treated as model-invented and demoted to a whole-brand
+  anchor (kept fan-out, no junk `Brand / <invented>` profile). Threaded server-side via
+  `sanitizeParseSpecSheet(raw, input)` (`sourceText = workbookText`, `knownFlavors =
+  flatten known.flavorsByBrand`); runs on the parse response so **both clients are
+  covered, no client edit**. **Conservative on purpose:** returns keep when no grounding
+  is passed (back-compat) or when any token matches, so a real flavor written on the
+  sheet is never dropped. **Important:** what looked like a batch-3 hallucination
+  (`Modified Malted Barley → Four Hands / "Mission Taco Mexican"`) turned out to be a
+  REAL sheet flavor (`… Pizza varietiy: Mission Taco Mexican`), and the backstop
+  correctly KEPT it (tokens are in the source). So the backstop is defense-in-depth,
+  NOT triggered by a confirmed batch-3 case. Tests in `specImport.test.ts`.
+- **`Production_Schedule_*.xlsx` (87 weekly tabs, columns Brand|Flavor|Units|Customer|
+  Ship|PO) is a SCHEDULE file, not a spec sheet** — it belongs to the schedule importer,
+  not `/ai/parse-spec-sheet`. Out of scope for spec-import hardening; do not feed it to
+  the spec parser (it would time out / mis-parse).

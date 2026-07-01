@@ -1954,7 +1954,7 @@ router.post(
       return;
     }
 
-    const parsed = sanitizeParseSpecSheet(raw);
+    const parsed = sanitizeParseSpecSheet(raw, validation.data);
 
     const verdicts = await reviewSuggestions({
       featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",

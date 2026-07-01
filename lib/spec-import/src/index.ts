@@ -601,6 +601,17 @@ export type SpecImportLimits = {
   maxNameChars?: number;
 };
 
+/** Optional grounding for the sanitizer's hallucination backstop. When provided,
+ * a recipe TARGET flavor that appears NOWHERE in `sourceText` and is not one of
+ * `knownFlavors` is treated as invented by the model (e.g. a "Naan" dough turned
+ * into a "Mission Taco Mexican" flavor) and demoted to a whole-brand anchor
+ * instead of minting a junk brand+flavor profile. Callers that pass nothing keep
+ * the previous behavior (no demotion). */
+export type SpecImportGrounding = {
+  sourceText?: string;
+  knownFlavors?: string[];
+};
+
 const DEFAULT_SPEC_LIMITS: Required<SpecImportLimits> = {
   maxProfiles: 100,
   maxRecipes: 200,
@@ -658,14 +669,55 @@ export function isCatchAllFlavor(flavor: string, kind: string): boolean {
   return false;
 }
 
+/** Split a name into lowercase alphanumeric word tokens of length >= 3, dropping
+ * short stop-words like "of"/"the". Pure. */
+function flavorTokens(s: string): string[] {
+  return s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((w) => w.length >= 3);
+}
+
+/** True when a target flavor is plausibly real given the parsed source text and the
+ * factory's known flavors. Deliberately conservative: it returns true (keep) unless
+ * there IS grounding to check against AND the flavor shares ZERO word tokens with
+ * the source AND is not a known flavor. That way a genuine flavor written on the
+ * sheet ("Masala Pizza" -> "masala"/"pizza" appear in the source) is always kept,
+ * while a purely invented one ("Mission Taco Mexican" on a Naan dough) is caught.
+ * With no grounding provided it always returns true, preserving prior behavior.
+ * Pure. */
+export function isGroundedFlavor(
+  flavor: string,
+  grounding: { sourceLower?: string; knownFlavorSet?: Set<string> },
+): boolean {
+  const f = flavor.trim().toLowerCase();
+  if (!f) return true;
+  const { sourceLower, knownFlavorSet } = grounding;
+  if (knownFlavorSet && knownFlavorSet.has(f)) return true;
+  if (!sourceLower) return true; // nothing to check against -> cannot judge, keep
+  const toks = flavorTokens(flavor);
+  if (toks.length === 0) return true; // no checkable token -> keep
+  for (const t of toks) if (sourceLower.includes(t)) return true;
+  return false;
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
  * server so both clients receive a clean, identical contract.
  */
-export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits = {}): ParsedSpecImport {
+export function sanitizeParsedSpecImport(
+  raw: unknown,
+  limits: SpecImportLimits = {},
+  grounding: SpecImportGrounding = {},
+): ParsedSpecImport {
   const lim = { ...DEFAULT_SPEC_LIMITS, ...limits };
   const root = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const sourceLower = grounding.sourceText ? grounding.sourceText.toLowerCase() : undefined;
+  const knownFlavorSet =
+    grounding.knownFlavors && grounding.knownFlavors.length
+      ? new Set(grounding.knownFlavors.map((s) => s.trim().toLowerCase()).filter(Boolean))
+      : undefined;
 
   const profiles: ParsedProfile[] = [];
   const rawProfiles = Array.isArray(root.profiles) ? root.profiles : [];
@@ -752,7 +804,14 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
         const tb = clampName(to.brand, lim.maxNameChars);
         const tf = clampName(to.flavor, lim.maxNameChars);
         if (!tb) continue;
-        if (isCatchAllFlavor(tf, kind)) {
+        // A whole-brand scope word ("All Varieties") or the recipe's own kind, OR a
+        // specific flavor the model invented that appears nowhere in the source and
+        // isn't a known flavor — all become brand-wide anchors rather than junk
+        // brand+flavor profiles.
+        if (
+          isCatchAllFlavor(tf, kind) ||
+          !isGroundedFlavor(tf, { sourceLower, knownFlavorSet })
+        ) {
           const key = tb.toLowerCase();
           if (!anchorSeen.has(key)) {
             anchorSeen.add(key);

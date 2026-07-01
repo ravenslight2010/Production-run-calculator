@@ -53,9 +53,19 @@ export function validateParseSpecSheetBody(body: unknown): ParseSpecSheetValidat
 }
 
 // The model returns structured JSON but is not trustworthy — the lib's
-// sanitizer coerces/bounds/drops anything malformed and never throws.
-export function sanitizeParseSpecSheet(raw: unknown): ParsedSpecImport {
-  return sanitizeParsedSpecImport(raw);
+// sanitizer coerces/bounds/drops anything malformed and never throws. Passing the
+// parsed input lets the sanitizer ground target flavors against the source
+// workbook + known flavors and demote invented ones to whole-brand anchors.
+export function sanitizeParseSpecSheet(raw: unknown, input?: ParseSpecSheetInput): ParsedSpecImport {
+  const grounding = input
+    ? {
+        sourceText: input.workbookText ?? "",
+        knownFlavors: Object.values(input.known?.flavorsByBrand ?? {})
+          .flat()
+          .filter((f): f is string => typeof f === "string" && f.length > 0),
+      }
+    : {};
+  return sanitizeParsedSpecImport(raw, {}, grounding);
 }
 
 // Shape the validated input into a compact, model-friendly prompt. Heavy shaping
@@ -130,7 +140,22 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "of those in `targets` — one entry per brand with the `flavor` LEFT EMPTY " +
     "(whole-brand). NEVER invent or guess a specific flavor for such a shared " +
     "procedure (do not turn 'Masa' into 'Masala', etc.); an empty flavor already " +
-    "means every flavor of that brand. " +
+    "means every flavor of that brand. A doughball/yield table near the bottom " +
+    "often lists the customers this recipe feeds, one row per customer, sometimes " +
+    "with the product in parentheses like 'Hannaford (Masala Pizza)' — treat each " +
+    "such row as a target (brand = the customer, flavor = the parenthesized " +
+    "product ONLY if one is written; otherwise leave flavor EMPTY). If ONE cell " +
+    "lists SEVERAL customers joined by '&', 'and', '/', or '+' (e.g. \"Lucia's " +
+    "Craft & 4Hands\", \"Hannaford / Lowe's\"), SPLIT it into one target PER " +
+    "customer, each carrying the SAME flavor — do NOT emit a combined brand like " +
+    "\"Lucia's Craft & 4Hands\". BUT do NOT split a single company name that " +
+    "legitimately contains '&' (e.g. 'Maria & Son', 'Ben & Jerry's', 'M&M') — " +
+    "those stay ONE brand. " +
+    "For a standalone procedure sheet, the recipe `name` is the FULL product " +
+    "title on the sheet minus generic process words (e.g. a 'MYSTIC PIZZA SAUCE " +
+    "PROCEDURE' sheet becomes name 'Mystic Pizza Sauce'); do NOT peel the first " +
+    "word off the title into `brand` (never name 'Pizza Sauce' with brand " +
+    "'Mystic') — if it is a recipe TYPE with no customer, leave `brand` EMPTY. " +
     "ONLY populate `targets` when the sheet EXPLICITLY maps a recipe to " +
     "specific flavors (e.g. a cheese tab listing 'Pepperoni: X Mix', 'Hawaiian: Y " +
     "Mix' — then target those brand+flavor pairs); an 'All Varieties' or 'Standard' " +
