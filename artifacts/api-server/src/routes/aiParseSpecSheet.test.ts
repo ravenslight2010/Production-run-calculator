@@ -48,6 +48,25 @@ describe("buildParseSpecSheetPrompt brand rule", () => {
   });
 });
 
+// Regression guard for the standalone-procedure rule. A sheet that is one whole
+// sauce/dough/cheese procedure for a single product line (brand in the title,
+// no per-flavor grid) must produce a brand-only recipe (flavor + targets EMPTY)
+// so it attaches to every flavor of that brand — never a targetless recipe (which
+// attaches to nothing) or an invented "Dough" flavor / size-suffixed brand.
+describe("buildParseSpecSheetPrompt standalone procedure rule", () => {
+  it("tells the model to take the brand from the title and leave flavor/targets empty", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("standalone PROCEDURE");
+    expect(system).toContain("BRAND from the sheet title or tab name");
+    expect(system).toContain("LEAVE `flavor` EMPTY and `targets` EMPTY");
+    // Explicit anti-patterns it must avoid.
+    expect(system).toContain("Do NOT " + "invent a placeholder flavor like 'Dough'");
+    expect(system).toContain("do NOT fold the size into the");
+    // But an explicit per-flavor cheese-tab mapping still populates targets.
+    expect(system).toContain("EXPLICITLY maps a recipe to");
+  });
+});
+
 // Regression guard: the prompt must NOT hand the model incoherent (cyclic/
 // chained) learned aliases. A polluted pool (e.g. CHICKEN TIKKA MASALA =>
 // Red Hot Chicken alongside Red Hot Chicken => Red Hot, and a PEPPERONI <=>

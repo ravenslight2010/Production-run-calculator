@@ -600,6 +600,43 @@ function num(v: unknown): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
+/** Flavor labels that are not a real per-pizza flavor but a "whole brand" scope
+ * word. A recipe target carrying one of these (e.g. brand "Aldo's" / flavor
+ * "All Varieties", or a dough recipe with flavor "Dough") must NOT be kept as an
+ * explicit brand+flavor target — that would create a junk "Aldo's / All Varieties"
+ * profile instead of fanning the shared recipe out to every real flavor of the
+ * brand. Kept conservative so a genuine flavor is never swallowed. */
+const CATCH_ALL_FLAVORS = new Set([
+  "all",
+  "all varieties",
+  "all variety",
+  "all flavors",
+  "all flavours",
+  "all flavor",
+  "every variety",
+  "any",
+  "n/a",
+  "na",
+]);
+
+/** Kinds whose own name is NEVER a real pizza flavor, so a target flavor equal to
+ * the kind ("Dough" on a dough recipe, "Sauce" on a sauce recipe) is a placeholder.
+ * "cheese" is intentionally EXCLUDED — "Cheese" is a common, legitimate flavor. */
+const KINDS_WHOSE_NAME_IS_NEVER_A_FLAVOR = new Set(["dough", "sauce"]);
+
+/** True when `flavor` is a whole-brand scope word (see CATCH_ALL_FLAVORS) or is
+ * just the recipe's own kind used as a placeholder — but only for kinds whose name
+ * is never a real flavor (dough/sauce). A cheese recipe's "Cheese" flavor is a real
+ * flavor and is NOT treated as catch-all. Pure. */
+export function isCatchAllFlavor(flavor: string, kind: string): boolean {
+  const f = flavor.trim().toLowerCase();
+  if (!f) return true;
+  if (CATCH_ALL_FLAVORS.has(f)) return true;
+  const k = kind.trim().toLowerCase();
+  if (f === k && KINDS_WHOSE_NAME_IS_NEVER_A_FLAVOR.has(k)) return true;
+  return false;
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -679,15 +716,27 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
     const rawTargets = Array.isArray(o.targets) ? o.targets : [];
     if (rawTargets.length) {
       const targets: ParsedRecipeTarget[] = [];
+      // A target whose flavor is a whole-brand scope word ("All Varieties") or the
+      // recipe's own kind ("Dough") is not a real profile — keep it as a brand-wide
+      // anchor instead of a junk brand/"All Varieties" profile. recipeApplyTargets()
+      // then fans the recipe out to every real flavor of that brand.
+      let catchAllBrand = "";
       for (const t of rawTargets.slice(0, lim.maxProfiles)) {
         if (!t || typeof t !== "object") continue;
         const to = t as Record<string, unknown>;
         const tb = clampName(to.brand, lim.maxNameChars);
         const tf = clampName(to.flavor, lim.maxNameChars);
-        if (!tb || !tf) continue;
+        if (!tb) continue;
+        if (isCatchAllFlavor(tf, kind)) {
+          if (!catchAllBrand) catchAllBrand = tb;
+          continue;
+        }
         targets.push({ brand: tb, flavor: tf });
       }
       if (targets.length) recipe.targets = targets;
+      // Preserve the brand anchor when the only target(s) were catch-alls and the
+      // recipe carried no singular brand of its own.
+      if (!recipe.brand && catchAllBrand) recipe.brand = catchAllBrand;
     }
     if (kind === "dough") {
       const oz = num(o.doughballOz);

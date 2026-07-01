@@ -107,6 +107,21 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "covers rather than leaving `targets` empty or splitting it into duplicate " +
     "recipes. A shared recipe with an empty `targets` array is almost always a " +
     "mistake — link it to the profiles it belongs to. " +
+    "SOME workbooks are ONE standalone PROCEDURE for a single product line rather " +
+    "than a per-flavor spec grid — e.g. a sheet titled 'ALDO PIZZA SAUCE " +
+    "PROCEDURE', 'ALDO'S DOUGH MIXING PROCEDURE', or a per-customer cheese tab. " +
+    "For these, take the product-line BRAND from the sheet title or tab name " +
+    "(apply the brand rule above: drop generic words like 'Procedure', 'Mixing', " +
+    "'Pizza Sauce', 'Recipe', and drop a trailing SIZE such as 12\" when it is only " +
+    "a doughball/measurement spec, not a distinct product line), set the recipe's " +
+    "`brand` to it, and LEAVE `flavor` EMPTY and `targets` EMPTY — a recipe with a " +
+    "brand and no flavor already applies to EVERY flavor of that brand, which is " +
+    "exactly what a shared sauce, dough, or standard-cheese procedure means. Do NOT " +
+    "invent a placeholder flavor like 'Dough' and do NOT fold the size into the " +
+    "brand here. ONLY populate `targets` when the sheet EXPLICITLY maps a recipe to " +
+    "specific flavors (e.g. a cheese tab listing 'Pepperoni: X Mix', 'Hawaiian: Y " +
+    "Mix' — then target those brand+flavor pairs); an 'All Varieties' or 'Standard' " +
+    "mix stays brand-level with an empty flavor. " +
     "EVERY recipe MUST have a non-empty `name`. A recipe's name is usually the " +
     "label directly above or beside its ingredient table (e.g. 'Standard Dough', " +
     "'Pizza Sauce', 'Cheese Blend'); if the table itself is unlabeled, name it " +

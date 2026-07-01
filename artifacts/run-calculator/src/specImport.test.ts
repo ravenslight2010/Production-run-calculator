@@ -12,6 +12,7 @@ import {
   crossFillSpecImport,
   recipeTargets,
   recipeApplyTargets,
+  isCatchAllFlavor,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
@@ -307,6 +308,102 @@ describe("sanitizeParsedSpecImport", () => {
     });
     expect(out.recipes).toHaveLength(2);
     expect(out.recipes.every((r) => r.name === "")).toBe(true);
+  });
+
+  it("drops catch-all-flavor targets ('All Varieties') and keeps the brand as a brand-wide anchor", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Aldo's Standard Cheese Mix",
+          targets: [{ brand: "Aldo's", flavor: "All Varieties" }],
+          rows: [{ ingredient: "Part Skim Mozzarella", lbs: 20 }],
+        },
+      ],
+    });
+    expect(out.recipes).toHaveLength(1);
+    const r = out.recipes[0];
+    expect(r.targets).toBeUndefined();
+    expect(r.brand).toBe("Aldo's");
+    expect(r.flavor).toBeUndefined();
+  });
+
+  it("keeps real per-flavor targets while dropping only the catch-all ones", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Mix",
+          brand: "Basha's Ultra Thin",
+          targets: [
+            { brand: "Basha's Ultra Thin", flavor: "Pepperoni" },
+            { brand: "Basha's Ultra Thin", flavor: "All" },
+          ],
+          rows: [{ ingredient: "Whole Mozzarella", lbs: 20 }],
+        },
+      ],
+    });
+    expect(out.recipes[0].targets).toEqual([
+      { brand: "Basha's Ultra Thin", flavor: "Pepperoni" },
+    ]);
+  });
+
+  it("preserves a real 'Cheese' flavor target on a cheese recipe (not treated as catch-all)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Mix",
+          targets: [
+            { brand: "Aldo's", flavor: "Cheese" },
+            { brand: "Aldo's", flavor: "All Varieties" },
+          ],
+          rows: [{ ingredient: "Part Skim Mozzarella", lbs: 20 }],
+        },
+      ],
+    });
+    expect(out.recipes[0].targets).toEqual([{ brand: "Aldo's", flavor: "Cheese" }]);
+  });
+
+  it("drops a dough target whose flavor is just the recipe kind ('Dough')", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Aldo's Dough",
+          targets: [{ brand: "Aldo's", flavor: "Dough" }],
+          rows: [{ ingredient: "Flour", lbs: 200 }],
+        },
+      ],
+    });
+    const r = out.recipes[0];
+    expect(r.targets).toBeUndefined();
+    expect(r.brand).toBe("Aldo's");
+  });
+});
+
+describe("isCatchAllFlavor", () => {
+  it("flags whole-brand scope words, case-insensitively, for any kind", () => {
+    for (const f of ["All Varieties", "all", "N/A", "every variety", "", "  "]) {
+      expect(isCatchAllFlavor(f, "cheese")).toBe(true);
+    }
+  });
+  it("flags the recipe's own kind as a placeholder for dough/sauce only", () => {
+    expect(isCatchAllFlavor("Dough", "dough")).toBe(true);
+    expect(isCatchAllFlavor("Sauce", "sauce")).toBe(true);
+  });
+  it("does NOT treat 'Cheese' as catch-all on a cheese recipe (it is a real flavor)", () => {
+    expect(isCatchAllFlavor("Cheese", "cheese")).toBe(false);
+    expect(isCatchAllFlavor("cheese", "cheese")).toBe(false);
+  });
+  it("does not flag a genuine flavor", () => {
+    for (const f of ["Pepperoni", "Five Cheese", "Hawaiian", "BBQ Chicken", "Supreme"]) {
+      expect(isCatchAllFlavor(f, "cheese")).toBe(false);
+    }
   });
 });
 

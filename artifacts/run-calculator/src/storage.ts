@@ -1881,11 +1881,20 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   // ── Tie recipes onto their profiles ──
   // One recipe can serve many brand/flavor profiles (recipeApplyTargets unions
   // the singular brand/flavor with the targets[] list, then falls back to all
-  // same-brand profiles in this import when targets are empty), so it ties to
-  // each without being duplicated in the recipe library.
+  // same-brand profiles when targets are empty), so it ties to each without being
+  // duplicated in the recipe library. The fallback pool is this import's profiles
+  // PLUS every already-saved profile, so a standalone sauce/dough/cheese procedure
+  // sheet (brand-only recipe, no in-import profiles) still attaches to the brand's
+  // existing flavors — otherwise it would import to the library and link to nothing.
+  const applyProfilePool = [
+    ...parsed.profiles,
+    ...Object.entries(loadBrandFlavors()).flatMap(([brand, flavors]) =>
+      (flavors ?? []).map(flavor => ({ brand, flavor, applicators: [], pepperonis: [] })),
+    ),
+  ];
   for (const r of parsed.recipes) {
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
-    for (const { brand, flavor } of recipeApplyTargets(r, parsed.profiles)) {
+    for (const { brand, flavor } of recipeApplyTargets(r, applyProfilePool)) {
       registerBrandFlavor(brand, flavor);
       const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
       if (r.kind === "dough") {

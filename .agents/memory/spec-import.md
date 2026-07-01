@@ -254,3 +254,30 @@ Any change to one app's order/logic must land in the other verbatim.
   `canonicalize` is insufficient; de-conflict the aliases before embedding too.
 - **Why non-destructive:** read-time guards neutralize existing bad rows without a
   risky purge; the pools keep learning and self-heal as coherent data accumulates.
+
+## Standalone procedure sheets + catch-all "All Varieties" scope (real-library hardening)
+- **Standalone sauce/dough/cheese-only procedure sheets** (no per-flavor spec grid,
+  just a title + one ingredient table) must import as a NAMED recipe attached to a
+  BRAND, with NO invented flavor and NO size suffix. Prompt (`buildParseSpecSheetPrompt`)
+  tells the model: brand from the sheet title, leave flavor + targets EMPTY for a
+  standalone procedure. **Why:** baseline probe showed a sauce sheet silently
+  producing brand="" targets=[] (dropped) and a dough sheet inventing a bogus
+  `Aldo's 12'' / Dough` target. Prompt-only, pinned by `aiParseSpecSheet.test.ts`.
+- **Catch-all-flavor targets are deterministically scrubbed in the sanitizer** (pure
+  `isCatchAllFlavor` + scrub in `sanitizeParsedSpecImport`, shared lib → both clients).
+  A target whose flavor is a whole-brand scope word ("All Varieties"/"All"/"N/A"/
+  "every variety"/empty) or the recipe's own kind ("Dough" on a dough recipe, "Sauce"
+  on a sauce recipe — **but NOT "Cheese" on a cheese recipe; "Cheese" is a real
+  flavor**, gated by `KINDS_WHOSE_NAME_IS_NEVER_A_FLAVOR`={dough,sauce}) is NOT a
+  real profile. Keeping it makes a junk `Brand / All Varieties` profile; instead drop
+  the explicit target and promote its brand to a brand-wide anchor (`recipe.brand`) so
+  `recipeApplyTargets` fans the recipe to EVERY real flavor of the brand. **Why:** the
+  25-customer-tab cheese-mix file emits one "Standard/All Varieties" mix per brand;
+  without the scrub each becomes a bogus catch-all profile. Kept conservative
+  (`CATCH_ALL_FLAVORS` allow-list) so a genuine flavor is never swallowed. Tests in
+  `specImport.test.ts`.
+- **Web apply pool = parsed.profiles + all existing `loadBrandFlavors()` profiles**
+  (`applySpecImport` builds `applyProfilePool`, passes to `recipeApplyTargets`) so a
+  brand-only recipe attaches to EXISTING same-brand flavors, not just profiles in the
+  same import. **WEB-ONLY glue** (parity paused) — mobile apply path still needs the
+  same pool build when parity resumes.
