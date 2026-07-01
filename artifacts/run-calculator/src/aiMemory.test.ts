@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   correctionKey,
   normalizeCorrections,
+  dropConflictingCorrections,
   filterCorrectionsByDomain,
   buildCorrectionsBlock,
   MAX_CORRECTION_TEXT_LEN,
@@ -83,6 +84,46 @@ describe("normalizeCorrections", () => {
     expect(normalizeCorrections(null)).toEqual([]);
     expect(normalizeCorrections(undefined)).toEqual([]);
     expect(normalizeCorrections([42 as unknown as AiCorrection])).toEqual([]);
+  });
+});
+
+describe("dropConflictingCorrections", () => {
+  it("drops both directions of a contradictory cycle within a domain", () => {
+    const out = dropConflictingCorrections([
+      { domain: "flavor", fromText: "PEPPERONI", toText: "ULTIMATE PEPPERONI" },
+      { domain: "flavor", fromText: "ULTIMATE PEPPERONI", toText: "PEPPERONI" },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("drops the whole chain/collapse when a target is also a source", () => {
+    // Real-world pollution: several unrelated flavors mapped to one target that
+    // is itself re-mapped ("Red Hot Chicken" is both a target and a source).
+    const out = dropConflictingCorrections([
+      { domain: "flavor", fromText: "CHICKEN TIKKA MASALA", toText: "Red Hot Chicken" },
+      { domain: "flavor", fromText: "CLUB", toText: "Red Hot Chicken" },
+      { domain: "flavor", fromText: "Red Hot Chicken", toText: "Red Hot" },
+      { domain: "flavor", fromText: "Buffalo Chicken", toText: "BBQ Chicken" },
+    ]);
+    expect(out).toEqual([
+      { domain: "flavor", fromText: "Buffalo Chicken", toText: "BBQ Chicken" },
+    ]);
+  });
+
+  it("keeps coherent many-to-one mappings (legit for ingredient/item domains)", () => {
+    const input: AiCorrection[] = [
+      { domain: "ingredient", fromText: "mozz", toText: "Whole Mozzarella" },
+      { domain: "ingredient", fromText: "mozzarella cheese", toText: "Whole Mozzarella" },
+    ];
+    expect(dropConflictingCorrections(input)).toEqual(input);
+  });
+
+  it("scopes conflicts by domain (same name in two domains is independent)", () => {
+    const input: AiCorrection[] = [
+      { domain: "flavor", fromText: "Pep", toText: "Pepperoni" },
+      { domain: "brand", fromText: "Pepperoni", toText: "Acme" },
+    ];
+    expect(dropConflictingCorrections(input)).toEqual(input);
   });
 });
 

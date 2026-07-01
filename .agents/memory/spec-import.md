@@ -235,3 +235,22 @@ Any change to one app's order/logic must land in the other verbatim.
   misparse. Numeric EDITING was intentionally left out of scope.
 - **When parity resumes:** mirror the attach-target warning + assign inputs and the
   read-only summaries in the mobile `SpecImportModal`.
+
+## Polluted learned-name pools break imports (de-conflict at read/apply time)
+- **Symptom → cause:** "file couldn't be read / nothing imports" even though the
+  .xlsx parses fine. Real cause = corrupt learned-name data (cycles/chains) in the
+  server `ai_corrections` pool AND the client `spec_import_aliases` pool (e.g.
+  `PEPPERONI <=> ULTIMATE PEPPERONI`, `A => B` alongside `B => C`). They get injected
+  into the parse prompt AND applied in `canonicalize`, renaming/colliding valid
+  flavors so downstream tombstone logic skips them.
+- **Fix = non-destructive read/apply-time de-confliction (NOT a DB purge):** pure
+  `dropConflictingCorrections` (`lib/ai-memory`) + `dropConflictingSpecAliases`
+  (`lib/spec-import`). Rule: within a scope (domain / kind; context ignored) a name
+  that is BOTH a source and a target is conflicted — drop every mapping touching it.
+  Kills cycles/chains, keeps coherent many-to-one ingredient aliases.
+- **Three wiring points (all must be guarded):** server `loadCorrections`, shared
+  `canonicalize()` (covers both clients), AND server `buildParseSpecSheetPrompt` —
+  the prompt embeds client `input.aliases` DIRECTLY, so filtering only in
+  `canonicalize` is insufficient; de-conflict the aliases before embedding too.
+- **Why non-destructive:** read-time guards neutralize existing bad rows without a
+  risky purge; the pools keep learning and self-heal as coherent data accumulates.

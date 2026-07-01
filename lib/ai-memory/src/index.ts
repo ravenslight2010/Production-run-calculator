@@ -45,6 +45,39 @@ export function normalizeCorrections(
   return out;
 }
 
+// Drop incoherent corrections before they are fed to a prompt. Within a domain,
+// a name that appears BOTH as a `fromText` (a label to read AS something else)
+// AND as a `toText` (a target other labels are read as) makes the mapping
+// direction ambiguous — it is part of a cycle (A=>B and B=>A) or a chain (A=>B
+// and B=>C). Such learned memory can't be trusted, so every correction touching
+// a conflicted name is removed rather than handed to the model. This keeps
+// polluted/contradictory learned corrections from silently mis-renaming and
+// colliding otherwise-valid names (e.g. on spec-sheet import). Pure and
+// order-preserving for the survivors.
+export function dropConflictingCorrections(
+  corrections: ReadonlyArray<AiCorrection>,
+): AiCorrection[] {
+  const dl = (s: string) => s.trim().toLowerCase();
+  const froms = new Map<string, Set<string>>();
+  const tos = new Map<string, Set<string>>();
+  for (const c of corrections) {
+    const d = dl(c.domain);
+    let f = froms.get(d);
+    if (!f) froms.set(d, (f = new Set()));
+    f.add(dl(c.fromText));
+    let t = tos.get(d);
+    if (!t) tos.set(d, (t = new Set()));
+    t.add(dl(c.toText));
+  }
+  return corrections.filter((c) => {
+    const d = dl(c.domain);
+    const f = froms.get(d);
+    const t = tos.get(d);
+    const conflicted = (name: string) => !!f && !!t && f.has(name) && t.has(name);
+    return !conflicted(dl(c.fromText)) && !conflicted(dl(c.toText));
+  });
+}
+
 // Keep only corrections whose domain is in the allow-list (case-insensitive).
 export function filterCorrectionsByDomain(
   corrections: ReadonlyArray<AiCorrection>,

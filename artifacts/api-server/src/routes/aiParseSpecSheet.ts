@@ -1,5 +1,10 @@
 import { AiParseSpecSheetBody } from "@workspace/api-zod";
-import { sanitizeParsedSpecImport, type ParsedSpecImport } from "@workspace/spec-import";
+import {
+  dropConflictingSpecAliases,
+  sanitizeParsedSpecImport,
+  type ParsedSpecImport,
+  type SpecImportAlias,
+} from "@workspace/spec-import";
 import * as z from "zod";
 
 // Bounds so a single request can't blow up cost/latency. Mirrors the photo /
@@ -147,11 +152,17 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   list("Sauce ingredients", known.sauceIngredients);
   list("Die types", known.dieTypes);
 
-  if (input.aliases && input.aliases.length) {
+  // Drop incoherent (cyclic/chained) learned aliases before handing them to the
+  // model, so polluted/contradictory mappings can't make the AI mis-rename and
+  // collide otherwise-valid names. Mirrors the client's canonicalize() guard.
+  const safeAliases = dropConflictingSpecAliases(
+    (input.aliases ?? []) as ReadonlyArray<SpecImportAlias>,
+  );
+  if (safeAliases.length) {
     lines.push("");
     lines.push("KNOWN ALIASES (apply these label→canonical mappings):");
     lines.push(
-      input.aliases
+      safeAliases
         .map(
           (a) =>
             `  - [${a.kind}] "${a.externalName}" => "${a.canonicalName}"` +

@@ -283,6 +283,41 @@ export function pickAlias(
   return null;
 }
 
+/**
+ * Drop incoherent learned aliases before they are applied. Within a `kind`, a
+ * name that appears BOTH as an `externalName` (a label to be renamed away) AND as
+ * a `canonicalName` (a rename target) makes the mapping direction ambiguous — it
+ * is part of a cycle (A→B and B→A) or a chain (A→B and B→C). Such learned memory
+ * cannot be trusted (which direction wins?), so every alias touching a conflicted
+ * name is removed rather than applied. This keeps polluted/contradictory learned
+ * aliases from silently mis-renaming and colliding otherwise-valid names on
+ * import. Context is intentionally ignored so cross-context cycles are caught too.
+ * Pure and order-preserving for the survivors.
+ */
+export function dropConflictingSpecAliases(
+  aliases: ReadonlyArray<SpecImportAlias>,
+): SpecImportAlias[] {
+  const dl = (s: string) => s.trim().toLowerCase();
+  const froms = new Map<string, Set<string>>();
+  const tos = new Map<string, Set<string>>();
+  for (const a of aliases) {
+    const k = dl(a.kind);
+    let f = froms.get(k);
+    if (!f) froms.set(k, (f = new Set()));
+    f.add(dl(a.externalName));
+    let t = tos.get(k);
+    if (!t) tos.set(k, (t = new Set()));
+    t.add(dl(a.canonicalName));
+  }
+  return aliases.filter((a) => {
+    const k = dl(a.kind);
+    const f = froms.get(k);
+    const t = tos.get(k);
+    const conflicted = (name: string) => !!f && !!t && f.has(name) && t.has(name);
+    return !conflicted(dl(a.externalName)) && !conflicted(dl(a.canonicalName));
+  });
+}
+
 // ── Name canonicalization (alias → exact → fuzzy → new) ──────────────────────
 
 function levenshtein(a: string, b: string): number {
@@ -330,7 +365,10 @@ export function canonicalize(
   const externalName = (raw ?? "").trim();
   if (!externalName) return { value: "", source: "new", externalName };
 
-  const aliased = pickAlias(aliases, kind, externalName, context);
+  // Ignore incoherent (cyclic/chained) learned aliases so polluted memory can't
+  // mis-rename or collide otherwise-valid names; such labels fall through to the
+  // exact/fuzzy/new path instead.
+  const aliased = pickAlias(dropConflictingSpecAliases(aliases), kind, externalName, context);
   if (aliased) return { value: aliased, source: "alias", externalName };
 
   const lower = externalName.toLowerCase();

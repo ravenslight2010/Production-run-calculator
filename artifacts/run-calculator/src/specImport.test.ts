@@ -3,6 +3,7 @@ import {
   specAliasKey,
   pickAlias,
   canonicalize,
+  dropConflictingSpecAliases,
   collectSpecAliases,
   gridsToPromptText,
   splitGridsForPrompt,
@@ -93,6 +94,76 @@ describe("canonicalize", () => {
     const r = canonicalize("   ", known, aliases, "brand");
     expect(r.source).toBe("new");
     expect(r.value).toBe("");
+  });
+});
+
+describe("dropConflictingSpecAliases", () => {
+  const a = (
+    kind: SpecImportAlias["kind"],
+    externalName: string,
+    canonicalName: string,
+    context: string | null = null,
+  ): SpecImportAlias => ({ kind, externalName, canonicalName, context });
+
+  it("drops both directions of a contradictory cycle within a kind", () => {
+    const out = dropConflictingSpecAliases([
+      a("flavor", "PEPPERONI", "ULTIMATE PEPPERONI"),
+      a("flavor", "ULTIMATE PEPPERONI", "PEPPERONI"),
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("drops a chain/collapse where a target is also a source", () => {
+    const kept = a("flavor", "Buffalo Chicken", "BBQ Chicken");
+    const out = dropConflictingSpecAliases([
+      a("flavor", "CHICKEN TIKKA MASALA", "Red Hot Chicken"),
+      a("flavor", "CLUB", "Red Hot Chicken"),
+      a("flavor", "Red Hot Chicken", "Red Hot"),
+      kept,
+    ]);
+    expect(out).toEqual([kept]);
+  });
+
+  it("catches cross-context cycles (context ignored for conflict detection)", () => {
+    const out = dropConflictingSpecAliases([
+      a("flavor", "HAWAIIAN", "Supreme", "BrandA"),
+      a("flavor", "Supreme", "HAWAIIAN", "BrandB"),
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("keeps coherent many-to-one mappings (legit for ingredients)", () => {
+    const input = [
+      a("appType", "mozz", "Whole Mozzarella"),
+      a("appType", "mozzarella cheese", "Whole Mozzarella"),
+    ];
+    expect(dropConflictingSpecAliases(input)).toEqual(input);
+  });
+
+  it("scopes conflicts by kind", () => {
+    const input = [a("flavor", "Pep", "Pepperoni"), a("brand", "Pepperoni", "Acme")];
+    expect(dropConflictingSpecAliases(input)).toEqual(input);
+  });
+});
+
+describe("canonicalize ignores conflicting aliases", () => {
+  it("falls through to exact instead of applying a cyclic alias", () => {
+    const aliases: SpecImportAlias[] = [
+      { kind: "flavor", externalName: "CHICKEN TIKKA MASALA", canonicalName: "Red Hot Chicken", context: null },
+      { kind: "flavor", externalName: "Red Hot Chicken", canonicalName: "Red Hot", context: null },
+    ];
+    const res = canonicalize("CHICKEN TIKKA MASALA", ["Chicken Tikka Masala"], aliases, "flavor");
+    expect(res.source).toBe("exact");
+    expect(res.value).toBe("Chicken Tikka Masala");
+  });
+
+  it("still applies a clean (non-conflicting) alias", () => {
+    const aliases: SpecImportAlias[] = [
+      { kind: "flavor", externalName: "Buffalo Chicken", canonicalName: "BBQ Chicken", context: null },
+    ];
+    const res = canonicalize("Buffalo Chicken", ["BBQ Chicken"], aliases, "flavor");
+    expect(res.source).toBe("alias");
+    expect(res.value).toBe("BBQ Chicken");
   });
 });
 

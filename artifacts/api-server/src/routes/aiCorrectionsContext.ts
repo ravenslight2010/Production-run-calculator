@@ -3,6 +3,7 @@ import { db, aiCorrectionsTable } from "@workspace/db";
 import { currentScope } from "../lib/requestScope";
 import {
   buildCorrectionsBlock,
+  dropConflictingCorrections,
   filterCorrectionsByDomain,
   normalizeCorrections,
   type AiCorrection,
@@ -25,8 +26,10 @@ export async function loadCorrections(log: ContextLogger): Promise<AiCorrection[
       .from(aiCorrectionsTable)
       .where(eq(aiCorrectionsTable.scope, currentScope()))
       .orderBy(desc(aiCorrectionsTable.updatedAt));
-    return normalizeCorrections(
-      rows.map((r) => ({ domain: r.domain, fromText: r.fromText, toText: r.toText })),
+    return dropConflictingCorrections(
+      normalizeCorrections(
+        rows.map((r) => ({ domain: r.domain, fromText: r.fromText, toText: r.toText })),
+      ),
     );
   } catch (err) {
     log.error({ err }, "failed to load ai corrections for prompt");
