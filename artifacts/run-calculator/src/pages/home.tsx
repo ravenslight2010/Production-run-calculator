@@ -2537,11 +2537,18 @@ export default function Home() {
 
   // Target picklist. For mixes it unions the factory-preset names so a user-added
   // duplicate can be folded into a canonical factory recipe name; otherwise it's
-  // the ranked category universe.
+  // the ranked category universe. The currently-checked sources are hoisted to the
+  // top so the user can quickly pick one of the names they selected as the one to
+  // keep (the common case) instead of hunting for it in the full list.
   const mergeTargetOptions = useMemo(
-    () => (mergeCategory === "mixes" ? dedupSorted(allMixRecipeOptions) : mergeUniverseRanked),
+    () => {
+      const base = mergeCategory === "mixes" ? dedupSorted(allMixRecipeOptions) : mergeUniverseRanked;
+      if (mergeSources.length === 0) return base;
+      const chosen = new Set(mergeSources);
+      return [...mergeSources, ...base.filter(n => !chosen.has(n))];
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mergeCategory, allMixRecipeOptions, mergeUniverseRanked],
+    [mergeCategory, allMixRecipeOptions, mergeUniverseRanked, mergeSources],
   );
 
   // Gather every value surface a merge would touch, so the confirmation preview
