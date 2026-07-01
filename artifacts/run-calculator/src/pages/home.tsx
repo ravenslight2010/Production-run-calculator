@@ -331,6 +331,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -5030,7 +5031,11 @@ export default function Home() {
       setImportResult(result);
       setShowImportDialog(true);
     } catch {
-      // ignore malformed file — user can retry
+      toast({
+        variant: "destructive",
+        title: "Couldn't read that file",
+        description: "The spreadsheet couldn't be read. Check the format and try again.",
+      });
     }
   }
 
@@ -5088,6 +5093,12 @@ export default function Home() {
       if (importedRecipes) setMergeCheckRequest((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
+      toast({
+        title: "Spec sheet imported",
+        description: importedRecipes
+          ? "Brands, flavors, and recipes have been added."
+          : "Brands and flavors have been added.",
+      });
     } catch (err) {
       setSpecImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
@@ -5138,6 +5149,10 @@ export default function Home() {
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       setShowPremixImport(false);
       setPremixImportPrepared(null);
+      toast({
+        title: "Premix sheet imported",
+        description: `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
+      });
     } catch (err) {
       setPremixImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",
@@ -5166,7 +5181,11 @@ export default function Home() {
       setImportResult(result);
       setShowImportDialog(true);
     } catch {
-      // ignore malformed file — user can retry
+      toast({
+        variant: "destructive",
+        title: "Couldn't read that file",
+        description: "The spreadsheet couldn't be read. Check the format and try again.",
+      });
     }
   }
 
@@ -5204,18 +5223,32 @@ export default function Home() {
       brandFlavors: loadBrandFlavors(),
       deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
     };
+    let ok = false;
     try {
       const res = await fetch(`/api/sync/${date}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: outPayload }),
       });
+      ok = res.ok;
       if (res.ok) {
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
     setShowImportDialog(false);
     setImportResult(null);
+    if (ok) {
+      toast({
+        title: "Import complete",
+        description: `${payload.runs.length} run${payload.runs.length === 1 ? "" : "s"} imported to ${date}.`,
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Import failed",
+        description: "Could not save the imported runs. Please try again.",
+      });
+    }
   }
 
   function importExcelIntoEditor(payload: ImportCommit) {
@@ -5250,6 +5283,7 @@ export default function Home() {
     const byDate = payload.byDate ?? [];
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
+    let failed = 0;
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
@@ -5285,13 +5319,16 @@ export default function Home() {
         brandFlavors: loadBrandFlavors(),
         deletedItems: unionDeletedItems(loadDeletedItems(), existing?.deletedItems),
       };
+      let dayOk = false;
       try {
-        await fetch(`/api/sync/${date}`, {
+        const res = await fetch(`/api/sync/${date}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ payload: outPayload }),
         });
+        dayOk = res.ok;
       } catch {}
+      if (!dayOk) failed += 1;
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
@@ -5300,6 +5337,18 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
+    if (failed === 0) {
+      toast({
+        title: "Import complete",
+        description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.`,
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: failed === byDate.length ? "Import failed" : "Import partly failed",
+        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved. Please try again.`,
+      });
+    }
   }
 
   function printSummary() {

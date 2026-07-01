@@ -922,39 +922,57 @@ export default function MasterDataScreen() {
       setImportResult(result);
       setImportOpen(true);
     } catch {
-      // ignore — user can retry
+      Alert.alert(
+        "Couldn't read that file",
+        "The spreadsheet couldn't be read. Check the format and try again.",
+      );
     }
   }
 
   function commitExcelImport(payload: ImportCommit) {
-    payload.createBrands.forEach((b) => addListItem("brands", b));
-    payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
-    if (payload.multiDay) {
-      const byDate = (payload.byDate ?? []).map((day) => ({
-        date: day.date,
-        runs: day.runs.map((r) => ({
-          brand: r.brand,
-          flavor: r.flavor,
-          casesNeeded: r.casesPlanned,
-          dieType: brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "",
-          notes: r.notes,
-        })),
-      }));
-      importScheduledRuns(byDate);
-    } else {
-      payload.runs.forEach((r) => {
-        const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
-        addScheduledRun(payload.date, {
-          brand: r.brand,
-          flavor: r.flavor,
-          casesNeeded: r.casesPlanned,
-          dieType,
-          notes: r.notes,
+    try {
+      payload.createBrands.forEach((b) => addListItem("brands", b));
+      payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
+      let count = 0;
+      if (payload.multiDay) {
+        const byDate = (payload.byDate ?? []).map((day) => ({
+          date: day.date,
+          runs: day.runs.map((r) => ({
+            brand: r.brand,
+            flavor: r.flavor,
+            casesNeeded: r.casesPlanned,
+            dieType: brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "",
+            notes: r.notes,
+          })),
+        }));
+        count = byDate.reduce((n, d) => n + d.runs.length, 0);
+        importScheduledRuns(byDate);
+      } else {
+        payload.runs.forEach((r) => {
+          const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
+          addScheduledRun(payload.date, {
+            brand: r.brand,
+            flavor: r.flavor,
+            casesNeeded: r.casesPlanned,
+            dieType,
+            notes: r.notes,
+          });
         });
-      });
+        count = payload.runs.length;
+      }
+      setImportOpen(false);
+      setImportResult(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        "Import complete",
+        `${count} run${count === 1 ? "" : "s"} imported.`,
+      );
+    } catch (e) {
+      Alert.alert(
+        "Import failed",
+        e instanceof Error ? e.message : "Could not import the runs. Please try again.",
+      );
     }
-    setImportOpen(false);
-    setImportResult(null);
   }
   const mixNames = Object.keys(mixRecipePresets);
 
@@ -1274,6 +1292,12 @@ export default function MasterDataScreen() {
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setReconSignal((c) => c + 1);
+      Alert.alert(
+        "Spec sheet imported",
+        importedRecipes
+          ? "Brands, flavors, and recipes have been added."
+          : "Brands and flavors have been added.",
+      );
     } catch (e) {
       setSpecError(
         e instanceof Error ? e.message : "Could not apply the import. Please retry.",
@@ -1355,6 +1379,10 @@ export default function MasterDataScreen() {
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        "Premix sheet imported",
+        `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
+      );
     } catch (e) {
       setPremixError(
         e instanceof Error ? e.message : "Could not apply the import. Please retry.",
