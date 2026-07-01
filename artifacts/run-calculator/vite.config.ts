@@ -136,6 +136,15 @@ export default defineConfig({
     strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
+    // On Replit the preview is served through an HTTPS proxy (port 443) inside
+    // an iframe. By default Vite's HMR client tries to open its websocket
+    // against the internal dev port, which the proxy routes unreliably — the
+    // socket drops every so often, and Vite calls location.reload() on every
+    // reconnect, which yanks the page out from under the user (e.g. aborting an
+    // in-progress spec/Excel import). Pinning the HMR client to the proxied
+    // HTTPS port keeps the websocket stable so those spurious reloads stop.
+    // Scoped to Replit so plain local dev (localhost over HTTP) is untouched.
+    hmr: process.env.REPL_ID ? { clientPort: 443 } : undefined,
     fs: {
       strict: true,
     },

@@ -54,3 +54,24 @@ therefore reloads the preview.
 server: check for the vite connection-lost/reconnect console pattern + absence of app
 reload endpoints + aborted in-flight requests. It does NOT happen in the published build
 (no HMR in prod). Restarting the web workflow clears the churn.
+
+### Root cause of the recurring drops + the real fix: HMR websocket over the proxy
+
+The recurring `[vite] server connection lost. Polling for restart…` → `connecting… /
+connected.` cycles happened with the **dev server still alive** (single "VITE ready" in the
+workflow log, no restart, no OOM, CPU idle). The tell: browser shows N lost→reconnect
+cycles but the server log shows exactly one startup. In Vite, when the HMR websocket drops
+and later re-reaches the server, the client calls `location.reload()` **on every
+reconnect** — so each flaky-socket cycle = one full page reload, which aborts any in-flight
+request (e.g. `POST /api/ai/parse-spec-sheet` shows `request aborted`).
+
+**Why the socket was flaky:** the preview is served through Replit's HTTPS proxy (port 443)
+inside an iframe, but Vite's HMR client defaults to opening its websocket against the
+*internal* dev port, which the proxy routes unreliably.
+
+**Fix (applied):** `server.hmr.clientPort = 443` in `artifacts/run-calculator/vite.config.ts`
+pins the HMR socket to the proxied HTTPS port so it stays connected → no reconnect-reloads.
+It's a dev-only config change (no app-logic/parity impact; mobile uses Metro). If drops
+persist (e.g. iframe throttling), the fallback is `server.hmr: false` — the user is *using*
+the preview, not developing it, so losing hot-reload is an acceptable trade to stop the
+interruptions (restart the workflow to see code changes).
