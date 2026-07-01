@@ -1,5 +1,15 @@
+import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  recipeApplyIssue,
+  profileApplyIssue,
+  type ParsedProfile,
+  type ParsedRecipe,
+  type ParsedSpecImport,
+} from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
+import { buildDiscrepancies } from "@/specImport";
+import { profileExistsForImport, recipeExistsForImport } from "@/storage";
 import ReviewBadge from "./ReviewBadge";
 
 type Props = {
@@ -11,14 +21,82 @@ type Props = {
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
-  onConfirm: () => void;
+  /** Confirm with the edited, kept-only import the user chose to apply. */
+  onConfirm: (parsed: ParsedSpecImport) => void;
 };
 
-// Single review/summary screen for the Excel spec-sheet importer. Per product
-// decision there are NO per-item prompts: the AI parses the workbook, names are
-// canonicalized against the app's known lists + learned aliases, and the user
-// just sees what will be created vs overwritten before confirming. Mirrors the
-// mobile modal in artifacts/run-calculator-mobile (replit.md parity).
+// One editable profile row in the review. `orig` keeps every field the parser
+// found (applicators, pepperonis, die, sauce oz); only brand/flavor + include are
+// editable here. `tombstoned` = the user had merged/deleted this away, so it's
+// excluded by default and shown as re-includable.
+type ProfileItem = {
+  key: string;
+  orig: ParsedProfile;
+  brand: string;
+  flavor: string;
+  include: boolean;
+  tombstoned: boolean;
+};
+
+// One editable recipe row. `orig` keeps rows/targets/doughballOz/app; name + kind
+// + include are editable (fixes "no name" and "cheese read as sauce").
+type RecipeItem = {
+  key: string;
+  orig: ParsedRecipe;
+  name: string;
+  kind: ParsedRecipe["kind"];
+  include: boolean;
+  tombstoned: boolean;
+};
+
+const KINDS: ParsedRecipe["kind"][] = ["dough", "sauce", "cheese"];
+
+function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
+  const kept = prepared.parsed.profiles.map((p, i) => ({
+    key: `pk${i}`,
+    orig: p,
+    brand: p.brand ?? "",
+    flavor: p.flavor ?? "",
+    include: true,
+    tombstoned: false,
+  }));
+  const skipped = prepared.skipped.profiles.map((p, i) => ({
+    key: `ps${i}`,
+    orig: p,
+    brand: p.brand ?? "",
+    flavor: p.flavor ?? "",
+    include: false,
+    tombstoned: true,
+  }));
+  return [...kept, ...skipped];
+}
+
+function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
+  const kept = prepared.parsed.recipes.map((r, i) => ({
+    key: `rk${i}`,
+    orig: r,
+    name: r.name ?? "",
+    kind: r.kind,
+    include: true,
+    tombstoned: false,
+  }));
+  const skipped = prepared.skipped.recipes.map((r, i) => ({
+    key: `rs${i}`,
+    orig: r,
+    name: r.name ?? "",
+    kind: r.kind,
+    include: false,
+    tombstoned: true,
+  }));
+  return [...kept, ...skipped];
+}
+
+// Editable review/summary screen for the Excel spec-sheet importer. The manager
+// can include/exclude each parsed profile & recipe, fix a recipe's name (unnamed
+// recipes are flagged, not silently dropped), fix its type (dough/sauce/cheese),
+// and correct a profile's brand/flavor match. Items the user previously merged or
+// deleted away are shown separately (excluded by default) so a re-import never
+// silently resurrects them. Only the included, corrected items are applied.
 export default function SpecImportDialog({
   open,
   onClose,
@@ -29,10 +107,57 @@ export default function SpecImportDialog({
   applying,
   onConfirm,
 }: Props) {
+  const [profiles, setProfiles] = useState<ProfileItem[]>([]);
+  const [recipes, setRecipes] = useState<RecipeItem[]>([]);
+
+  useEffect(() => {
+    if (prepared) {
+      setProfiles(buildProfileItems(prepared));
+      setRecipes(buildRecipeItems(prepared));
+    } else {
+      setProfiles([]);
+      setRecipes([]);
+    }
+  }, [prepared]);
+
+  const brands = prepared?.brands ?? [];
+  const flavorsByBrand = prepared?.flavorsByBrand ?? {};
+
+  const setProfile = (key: string, patch: Partial<ProfileItem>) =>
+    setProfiles((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
+  const setRecipe = (key: string, patch: Partial<RecipeItem>) =>
+    setRecipes((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  // The edited, include-only import that would be applied. Recomputed live so the
+  // change list and counts always reflect the user's edits.
+  const edited: ParsedSpecImport = useMemo(() => {
+    const outProfiles = profiles
+      .filter((p) => p.include)
+      .map((p): ParsedProfile => ({ ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() }));
+    const outRecipes = recipes
+      .filter((r) => r.include)
+      .map((r): ParsedRecipe => ({ ...r.orig, name: r.name.trim(), kind: r.kind }));
+    const out: ParsedSpecImport = { profiles: outProfiles, recipes: outRecipes };
+    if (prepared?.parsed.note) out.note = prepared.parsed.note;
+    return out;
+  }, [profiles, recipes, prepared]);
+
+  const discrepancies = useMemo(
+    () => (prepared ? buildDiscrepancies(edited) : []),
+    [edited, prepared],
+  );
+
   if (!open) return null;
 
-  const s = prepared?.summary;
-  const nothing = s != null && s.totalProfiles === 0 && s.totalRecipes === 0;
+  const includedProfiles = profiles.filter((p) => p.include).length;
+  const includedRecipes = recipes.filter((r) => r.include).length;
+  const includedCount = includedProfiles + includedRecipes;
+  const nothingParsed = prepared != null && profiles.length === 0 && recipes.length === 0;
+
+  // Live "would be dropped" attention count across included items.
+  const attentionCount =
+    edited.profiles.filter((p) => profileApplyIssue(p)).length +
+    edited.recipes.filter((r) => recipeApplyIssue(r)).length;
 
   return (
     <div
@@ -83,25 +208,82 @@ export default function SpecImportDialog({
           {!loading && !error && prepared && (
             <>
               <p className="text-sm text-muted-foreground">
-                Review what will be applied. Existing brand/flavor profiles and recipes
-                will be <span className="font-medium text-foreground">overwritten</span>;
-                new ones will be <span className="font-medium text-foreground">added</span>.
+                Review each item. Uncheck anything you don't want, fix a recipe's{" "}
+                <span className="font-medium text-foreground">name</span> or{" "}
+                <span className="font-medium text-foreground">type</span>, or correct a
+                product's brand/flavor. Only checked items are applied — existing ones are
+                overwritten, new ones are added.
               </p>
 
               <div className="grid grid-cols-2 gap-3">
-                <SummaryCard
-                  label="Spec profiles"
-                  total={s!.totalProfiles}
-                  created={s!.profilesNew}
-                  updated={s!.profilesUpdated}
-                />
-                <SummaryCard
-                  label="Recipes"
-                  total={s!.totalRecipes}
-                  created={s!.recipesNew}
-                  updated={s!.recipesUpdated}
-                />
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-2xl font-bold text-foreground">{includedProfiles}</div>
+                  <div className="text-xs font-medium text-muted-foreground">
+                    of {profiles.length} spec profiles
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="text-2xl font-bold text-foreground">{includedRecipes}</div>
+                  <div className="text-xs font-medium text-muted-foreground">
+                    of {recipes.length} recipes
+                  </div>
+                </div>
               </div>
+
+              {attentionCount > 0 && (
+                <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700">
+                  {attentionCount} checked item{attentionCount === 1 ? "" : "s"} still{" "}
+                  need attention — a recipe needs a name, or a profile is missing its
+                  brand/flavor. These won't be saved until fixed or unchecked.
+                </div>
+              )}
+
+              {/* Shared brand suggestions for the profile match pickers. */}
+              <datalist id="spec-import-brands">
+                {brands.map((b) => (
+                  <option key={b} value={b} />
+                ))}
+              </datalist>
+
+              {profiles.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Spec profiles
+                  </p>
+                  <ul className="space-y-2">
+                    {profiles.map((p) => (
+                      <ProfileRow
+                        key={p.key}
+                        item={p}
+                        brands={brands}
+                        flavorsByBrand={flavorsByBrand}
+                        onToggle={() => setProfile(p.key, { include: !p.include })}
+                        onBrand={(brand) => setProfile(p.key, { brand })}
+                        onFlavor={(flavor) => setProfile(p.key, { flavor })}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {recipes.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Recipes
+                  </p>
+                  <ul className="space-y-2">
+                    {recipes.map((r) => (
+                      <RecipeRow
+                        key={r.key}
+                        item={r}
+                        onToggle={() => setRecipe(r.key, { include: !r.include })}
+                        onName={(name) => setRecipe(r.key, { name })}
+                        onKind={(kind) => setRecipe(r.key, { kind })}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {prepared.newAliases.length > 0 && (
                 <p className="text-xs text-muted-foreground">
@@ -126,22 +308,22 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {prepared.discrepancies.length > 0 && (
+              {discrepancies.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-muted-foreground">
-                    Applying this import will change {prepared.discrepancies.length} thing
-                    {prepared.discrepancies.length === 1 ? "" : "s"} in your current recipes:
+                    Applying these will change {discrepancies.length} thing
+                    {discrepancies.length === 1 ? "" : "s"} in your current recipes:
                   </p>
                   <ul className="space-y-0.5">
-                    {prepared.discrepancies.slice(0, 12).map((d, i) => (
+                    {discrepancies.slice(0, 12).map((d, i) => (
                       <li key={i} className="text-xs text-foreground">
                         {d.message}
                       </li>
                     ))}
                   </ul>
-                  {prepared.discrepancies.length > 12 && (
+                  {discrepancies.length > 12 && (
                     <p className="text-xs text-muted-foreground">
-                      +{prepared.discrepancies.length - 12} more
+                      +{discrepancies.length - 12} more
                     </p>
                   )}
                 </div>
@@ -157,7 +339,7 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {nothing && (
+              {nothingParsed && (
                 <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
                   Nothing recognizable was found in this workbook. Try a different file.
                 </div>
@@ -177,8 +359,16 @@ export default function SpecImportDialog({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            disabled={loading || applying || !!error || !prepared || nothing}
+            onClick={() => onConfirm(edited)}
+            disabled={
+              loading ||
+              applying ||
+              !!error ||
+              !prepared ||
+              nothingParsed ||
+              includedCount === 0 ||
+              attentionCount > 0
+            }
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {applying ? (
@@ -186,7 +376,8 @@ export default function SpecImportDialog({
             ) : (
               <CheckCircle2 className="h-4 w-4" />
             )}
-            Apply import
+            Apply {includedCount > 0 ? includedCount : ""} item
+            {includedCount === 1 ? "" : "s"}
           </button>
         </div>
       </div>
@@ -194,25 +385,203 @@ export default function SpecImportDialog({
   );
 }
 
-function SummaryCard({
-  label,
-  total,
-  created,
-  updated,
-}: {
-  label: string;
-  total: number;
-  created: number;
-  updated: number;
-}) {
+function StatusBadge({ tombstoned, isNew }: { tombstoned: boolean; isNew: boolean }) {
+  if (tombstoned) {
+    return (
+      <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-600">
+        Merged away
+      </span>
+    );
+  }
   return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="text-2xl font-bold text-foreground">{total}</div>
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-2 flex gap-3 text-xs">
-        <span className="text-green-600">{created} new</span>
-        <span className="text-primary">{updated} updated</span>
+    <span
+      className={
+        isNew
+          ? "shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-green-600"
+          : "shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary"
+      }
+    >
+      {isNew ? "new" : "update"}
+    </span>
+  );
+}
+
+function ProfileRow({
+  item,
+  brands,
+  flavorsByBrand,
+  onToggle,
+  onBrand,
+  onFlavor,
+}: {
+  item: ProfileItem;
+  brands: string[];
+  flavorsByBrand: Record<string, string[]>;
+  onToggle: () => void;
+  onBrand: (v: string) => void;
+  onFlavor: (v: string) => void;
+}) {
+  const brand = item.brand.trim();
+  const flavor = item.flavor.trim();
+  const issue = profileApplyIssue({ ...item.orig, brand, flavor });
+  const isNew = !brand || !flavor || !profileExistsForImport(brand, flavor);
+  const flavorMatch = Object.keys(flavorsByBrand).find(
+    (b) => b.trim().toLowerCase() === brand.toLowerCase(),
+  );
+  const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
+  const flavorListId = `spec-flavors-${item.key}`;
+
+  return (
+    <li
+      className={`rounded-lg border p-3 ${item.include ? "border-border" : "border-border/60 opacity-70"}`}
+      data-testid={`spec-profile-${item.key}`}
+    >
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={item.include}
+          onChange={onToggle}
+          className="mt-1 h-4 w-4 accent-primary"
+          aria-label={`Include ${item.orig.brand} ${item.orig.flavor}`}
+          data-testid={`spec-profile-include-${item.key}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-medium text-foreground">
+              {item.orig.brand || "(no brand)"} — {item.orig.flavor || "(no flavor)"}
+            </span>
+            <StatusBadge tombstoned={item.tombstoned} isNew={isNew} />
+          </div>
+
+          <datalist id={flavorListId}>
+            {flavorOpts.map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              value={item.brand}
+              onChange={(e) => onBrand(e.target.value)}
+              list="spec-import-brands"
+              placeholder="Brand"
+              aria-label={`Brand for ${item.orig.brand} ${item.orig.flavor}`}
+              data-testid={`spec-profile-brand-${item.key}`}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            />
+            <input
+              value={item.flavor}
+              onChange={(e) => onFlavor(e.target.value)}
+              list={flavorListId}
+              placeholder="Flavor"
+              aria-label={`Flavor for ${item.orig.brand} ${item.orig.flavor}`}
+              data-testid={`spec-profile-flavor-${item.key}`}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            />
+          </div>
+
+          {item.include && issue && (
+            <div className="mt-1 text-xs text-amber-600">
+              {issue === "missing-brand"
+                ? "Needs a brand — add one or it won't be saved."
+                : "Needs a flavor — add one or it won't be saved."}
+            </div>
+          )}
+          {item.tombstoned && (
+            <div className="mt-1 text-xs text-amber-600">
+              You merged/removed this before — check the box only if you want it back.
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </li>
+  );
+}
+
+function RecipeRow({
+  item,
+  onToggle,
+  onName,
+  onKind,
+}: {
+  item: RecipeItem;
+  onToggle: () => void;
+  onName: (v: string) => void;
+  onKind: (v: ParsedRecipe["kind"]) => void;
+}) {
+  const name = item.name.trim();
+  const candidate: ParsedRecipe = { ...item.orig, name, kind: item.kind };
+  const issue = recipeApplyIssue(candidate);
+  const isNew = !name || !recipeExistsForImport(item.kind, name);
+  const rowCount = item.orig.rows?.length ?? 0;
+
+  return (
+    <li
+      className={`rounded-lg border p-3 ${item.include ? "border-border" : "border-border/60 opacity-70"}`}
+      data-testid={`spec-recipe-${item.key}`}
+    >
+      <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={item.include}
+          onChange={onToggle}
+          className="mt-1 h-4 w-4 accent-primary"
+          aria-label={`Include recipe ${item.orig.name || "(unnamed)"}`}
+          data-testid={`spec-recipe-include-${item.key}`}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate text-sm font-medium text-foreground">
+              {item.orig.name || "(unnamed recipe)"}
+            </span>
+            <StatusBadge tombstoned={item.tombstoned} isNew={isNew} />
+          </div>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              value={item.name}
+              onChange={(e) => onName(e.target.value)}
+              placeholder="Recipe name"
+              aria-label={`Name for recipe ${item.orig.name || "(unnamed)"}`}
+              data-testid={`spec-recipe-name-${item.key}`}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            />
+            <select
+              value={item.kind}
+              onChange={(e) => onKind(e.target.value as ParsedRecipe["kind"])}
+              aria-label={`Type for recipe ${item.orig.name || "(unnamed)"}`}
+              data-testid={`spec-recipe-kind-${item.key}`}
+              className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground capitalize"
+            >
+              {KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-1 text-xs text-muted-foreground">
+            {rowCount} ingredient{rowCount === 1 ? "" : "s"}
+          </div>
+
+          {item.include && issue === "missing-name" && (
+            <div className="mt-1 text-xs text-amber-600">
+              Needs a name — this recipe won't be saved until you name it.
+            </div>
+          )}
+          {item.include && issue === "no-rows" && (
+            <div className="mt-1 text-xs text-amber-600">
+              No ingredients were read — it won't be saved.
+            </div>
+          )}
+          {item.tombstoned && (
+            <div className="mt-1 text-xs text-amber-600">
+              You merged/removed this before — check the box only if you want it back.
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }

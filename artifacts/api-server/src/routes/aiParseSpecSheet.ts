@@ -102,8 +102,23 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "covers rather than leaving `targets` empty or splitting it into duplicate " +
     "recipes. A shared recipe with an empty `targets` array is almost always a " +
     "mistake — link it to the profiles it belongs to. " +
+    "EVERY recipe MUST have a non-empty `name`. A recipe's name is usually the " +
+    "label directly above or beside its ingredient table (e.g. 'Standard Dough', " +
+    "'Pizza Sauce', 'Cheese Blend'); if the table itself is unlabeled, name it " +
+    "from its section/brand plus its kind (e.g. \"<Brand> Dough\", \"<Brand> " +
+    "Sauce\", \"<Brand> Cheese Blend\"). Never return a recipe with a blank name; " +
+    "if you truly cannot find one, synthesize a short descriptive one from context. " +
+    "CLASSIFY each recipe's `kind` carefully — dough vs sauce vs cheese: a DOUGH " +
+    "recipe is the crust/mixing formula (flour, water, yeast, oil, salt, sugar, " +
+    "dough conditioner); a SAUCE recipe is the tomato/pizza-sauce blend (tomato " +
+    "paste or puree, water, spices, oil, sugar, salt); a CHEESE recipe is the " +
+    "cheese-and-topping blend applied on top (mozzarella, provolone, blends, cheese " +
+    "substitute). When a table lists cheeses/toppings by the pound it is CHEESE, not " +
+    "SAUCE, even if it sits near the sauce section; only a tomato-based blend is " +
+    "SAUCE. Use the section heading and the ingredient names together — do not " +
+    "assume position alone. " +
     "Never invent data that is not in the workbook. Omit fields you cannot find. " +
-    "This is read-only; the user reviews a summary before anything is saved.";
+    "This is read-only; the user reviews and can edit a summary before anything is saved.";
 
   const known = input.known ?? {};
   const lines: string[] = [];

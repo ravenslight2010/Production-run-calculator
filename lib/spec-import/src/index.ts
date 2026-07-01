@@ -66,12 +66,17 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
   const profileMap = new Map<string, ParsedProfile>();
   const recipeMap = new Map<string, ParsedRecipe>();
   const notes: string[] = [];
+  // Nameless recipes (kept so the review can rescue them) must not collide on an
+  // empty name key, or several distinct ones would collapse into one. Give each
+  // a unique synthetic key so they all survive to the review screen.
+  let anon = 0;
   for (const item of list) {
     for (const p of item.profiles) {
       profileMap.set(`${p.brand.trim().toLowerCase()}|${p.flavor.trim().toLowerCase()}`, p);
     }
     for (const r of item.recipes) {
-      recipeMap.set(`${r.kind}|${r.name.trim().toLowerCase()}`, r);
+      const nm = r.name.trim().toLowerCase();
+      recipeMap.set(nm ? `${r.kind}|${nm}` : `${r.kind}|__anon${anon++}`, r);
     }
     if (item.note && item.note.trim()) notes.push(item.note.trim());
   }
@@ -149,6 +154,73 @@ export function recipeApplyTargets(
     out.push({ brand: pb, flavor: pf });
   }
   return out;
+}
+
+// ── Tombstone filtering (respect merged-away / deleted names on import) ───────
+
+/** The parsed items an import skipped because they were previously merged/deleted away. */
+export type SpecImportSkipped = {
+  profiles: ParsedProfile[];
+  recipes: ParsedRecipe[];
+};
+
+/**
+ * Split a parsed import into what should apply (`kept`) versus what the user has
+ * previously merged or deleted away (`skipped`). A live import must respect the
+ * same tombstones the sync merge does, or re-importing a sheet resurrects names
+ * the user deliberately removed. The tombstone semantics live in each app's glue
+ * (they read localStorage / AsyncStorage), so this pure helper takes predicates
+ * and stays platform-agnostic. Non-mutating; preserves the note.
+ */
+export function partitionTombstonedParse(
+  parsed: ParsedSpecImport,
+  isProfileTombstoned: (brand: string, flavor: string) => boolean,
+  isRecipeTombstoned: (kind: ParsedRecipe["kind"], name: string) => boolean,
+): { kept: ParsedSpecImport; skipped: SpecImportSkipped } {
+  const keptProfiles: ParsedProfile[] = [];
+  const skippedProfiles: ParsedProfile[] = [];
+  for (const p of parsed.profiles) {
+    if (isProfileTombstoned(p.brand ?? "", p.flavor ?? "")) skippedProfiles.push(p);
+    else keptProfiles.push(p);
+  }
+  const keptRecipes: ParsedRecipe[] = [];
+  const skippedRecipes: ParsedRecipe[] = [];
+  for (const r of parsed.recipes) {
+    // A blank name can't have been merged away, so never skip it here — the
+    // review screen surfaces it for naming instead.
+    if (r.name && r.name.trim() && isRecipeTombstoned(r.kind, r.name)) skippedRecipes.push(r);
+    else keptRecipes.push(r);
+  }
+  const kept: ParsedSpecImport = { profiles: keptProfiles, recipes: keptRecipes };
+  if (parsed.note) kept.note = parsed.note;
+  return { kept, skipped: { profiles: skippedProfiles, recipes: skippedRecipes } };
+}
+
+// ── Would-drop / "needs attention" detection for the review screen ────────────
+
+/** Why a recipe would be dropped at apply time (so the review can flag it). */
+export type RecipeApplyIssue = "missing-name" | "no-rows";
+
+/**
+ * The reason a recipe would silently vanish at apply time, or null if it will
+ * apply. `applySpecImport` skips recipes with a blank name or no rows; the review
+ * screen uses this to flag them "needs attention" so nothing disappears quietly.
+ * Pure.
+ */
+export function recipeApplyIssue(r: ParsedRecipe): RecipeApplyIssue | null {
+  if (!r.name || !r.name.trim()) return "missing-name";
+  if (!r.rows || r.rows.length === 0) return "no-rows";
+  return null;
+}
+
+/** Why a profile would be dropped at apply time, or null if it will apply. */
+export type ProfileApplyIssue = "missing-brand" | "missing-flavor";
+
+/** The reason a profile would not apply (blank brand/flavor), or null. Pure. */
+export function profileApplyIssue(p: ParsedProfile): ProfileApplyIssue | null {
+  if (!p.brand || !p.brand.trim()) return "missing-brand";
+  if (!p.flavor || !p.flavor.trim()) return "missing-flavor";
+  return null;
 }
 
 // ── Learned aliases ─────────────────────────────────────────────────────────
@@ -546,8 +618,10 @@ export function sanitizeParsedSpecImport(raw: unknown, limits: SpecImportLimits 
     const kindRaw = clampName(o.kind, 16).toLowerCase();
     const kind = kindRaw === "dough" || kindRaw === "sauce" || kindRaw === "cheese" ? kindRaw : null;
     if (!kind) continue;
+    // Keep the name even when blank: a recipe with real rows but no name should
+    // reach the review screen flagged "needs a name" (the apply step skips blank
+    // names) instead of vanishing silently.
     const name = clampName(o.name, lim.maxNameChars);
-    if (!name) continue;
     const rows: RecipeRow[] = [];
     const rawRows = Array.isArray(o.rows) ? o.rows : [];
     for (const row of rawRows.slice(0, lim.maxRecipeRows)) {

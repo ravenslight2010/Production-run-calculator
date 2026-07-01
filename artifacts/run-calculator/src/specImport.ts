@@ -19,6 +19,7 @@ import {
   crossFillSpecImport,
   gridsToPromptText,
   mergeParsedSpecImports,
+  partitionTombstonedParse,
   recipeTargets,
   splitGridsForPrompt,
   summarizeSpecImport,
@@ -31,6 +32,7 @@ import {
   type SheetGrid,
   type SpecAliasKind,
   type SpecImportAlias,
+  type SpecImportSkipped,
   type SpecImportSummary,
   type SpecMatchKnown,
 } from "@workspace/spec-import";
@@ -43,6 +45,8 @@ import {
   loadSpecImportKnown,
   profileExistsForImport,
   recipeExistsForImport,
+  importProfileIsTombstoned,
+  recipeNameIsTombstoned,
   applySpecImport,
 } from "./storage";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
@@ -73,6 +77,16 @@ export type SpecImportPrepared = {
    * AI involved.
    */
   discrepancies: Discrepancy[];
+  /**
+   * Profiles/recipes this import would have re-created but the user previously
+   * merged or deleted away. Excluded from `parsed` (so the merge sticks), but
+   * surfaced in the review so the user can knowingly re-include one if they meant
+   * to bring it back.
+   */
+  skipped: SpecImportSkipped;
+  /** Known brands + flavors-by-brand for the review's product-match pickers. */
+  brands: string[];
+  flavorsByBrand: Record<string, string[]>;
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
   note?: string;
@@ -393,7 +407,7 @@ function specMatchAliasKey(a: SpecImportAlias): string {
 }
 
 /** Build the "what will change" diff of the incoming spec vs current recipes. */
-function buildDiscrepancies(parsed: ParsedSpecImport): Discrepancy[] {
+export function buildDiscrepancies(parsed: ParsedSpecImport): Discrepancy[] {
   try {
     return reconcileSpecWithRecipes({
       specRecipes: toReconcileRecipes(parsed.recipes),
@@ -441,14 +455,33 @@ export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPr
   );
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed, matchAliases } = await linkParsed(rawParsed, known);
+  const { parsed: linked, matchAliases } = await linkParsed(rawParsed, known);
+
+  // Respect the user's prior merges/deletions: an import must not resurrect a
+  // brand/flavor or recipe name they tombstoned. Skipped items are surfaced (not
+  // silently dropped) so they can be knowingly re-included in review.
+  const { kept: parsed, skipped } = partitionTombstonedParse(
+    linked,
+    importProfileIsTombstoned,
+    recipeNameIsTombstoned,
+  );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
   const discrepancies = buildDiscrepancies(parsed);
   const note = appendDroppedNote(parsed.note, droppedRows);
 
-  return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
+  return {
+    parsed,
+    summary,
+    newAliases,
+    flagged,
+    discrepancies,
+    skipped,
+    brands: known.brands,
+    flavorsByBrand: known.flavorsByBrand,
+    ...(note ? { note } : {}),
+  };
 }
 
 /** Hard cap on files per import so one batch can't fan out into a flood of AI calls. */
@@ -496,7 +529,14 @@ export async function prepareSpecImportMulti(
 
   const merged = mergeParsedSpecImports(parsedList);
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed, matchAliases } = await linkParsed(merged, known);
+  const { parsed: linked, matchAliases } = await linkParsed(merged, known);
+
+  // Respect prior merges/deletions (see prepareSpecImport).
+  const { kept: parsed, skipped } = partitionTombstonedParse(
+    linked,
+    importProfileIsTombstoned,
+    recipeNameIsTombstoned,
+  );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
   const newAliases = [...collectSpecAliases(allResolved), ...matchAliases];
@@ -511,7 +551,17 @@ export async function prepareSpecImportMulti(
   }
   const note = appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped);
 
-  return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
+  return {
+    parsed,
+    summary,
+    newAliases,
+    flagged,
+    discrepancies,
+    skipped,
+    brands: known.brands,
+    flavorsByBrand: known.flavorsByBrand,
+    ...(note ? { note } : {}),
+  };
 }
 
 /** Apply a prepared import: write profiles + recipes, then persist new aliases. */

@@ -1621,6 +1621,40 @@ export function recipeExistsForImport(kind: ParsedRecipe["kind"], name: string):
   return Object.keys(map).some(k => k.trim().toLowerCase() === lower);
 }
 
+/**
+ * True when a brand+flavor was previously merged or deleted away (so an import
+ * must NOT resurrect it — mirrors the sync-receive guard). Combines the flat
+ * merged-away set with the per-namespace deletion tombstones.
+ */
+export function importProfileIsTombstoned(brand: string, flavor: string): boolean {
+  const key = `${brand.trim().toLowerCase()}__${flavor.trim().toLowerCase()}`;
+  const tombSet = new Set(loadMergedAway().map((s) => s.trim().toLowerCase()));
+  return profileKeyIsTombstoned(key, loadDeletedItems(), tombSet);
+}
+
+// The deletion-tombstone namespace for each recipe kind's name list (matches the
+// namespaces used by applyRecipeNameMerge / the sync-receive preset-key drop).
+const RECIPE_KIND_DELETE_NAMESPACE: Record<ParsedRecipe["kind"], string> = {
+  dough: "doughRecipeNames",
+  sauce: "frontlineRecipeNames",
+  cheese: "cheeseRecipeNames",
+};
+
+/**
+ * True when a dough/sauce/cheese recipe NAME was previously merged or deleted
+ * away, so an import must skip it rather than recreate the tombstoned recipe.
+ */
+export function recipeNameIsTombstoned(kind: ParsedRecipe["kind"], name: string): boolean {
+  const lower = name.trim().toLowerCase();
+  if (!lower) return false;
+  const ns = RECIPE_KIND_DELETE_NAMESPACE[kind];
+  const deleted = loadDeletedItems()[ns] ?? [];
+  if (deleted.some((n) => n.trim().toLowerCase() === lower)) return true;
+  // Recipe-name merges also drop the source through the flat merged-away set in
+  // some paths; honor that too.
+  return loadMergedAway().some((n) => n.trim().toLowerCase() === lower);
+}
+
 function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaults: string[] } {
   if (kind === "dough") return { key: DOUGH_INGREDIENTS_KEY, defaults: DEFAULT_DOUGH_INGREDIENTS };
   if (kind === "sauce") return { key: FRONTLINE_INGREDIENTS_KEY, defaults: DEFAULT_FRONTLINE_INGREDIENTS };
@@ -1636,6 +1670,27 @@ function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaul
  */
 export function applySpecImport(parsed: ParsedSpecImport): void {
   if (typeof localStorage === "undefined") return;
+
+  // ── Un-tombstone anything the user chose to re-include ──
+  // A profile/recipe reaching apply was explicitly kept in the review. If it had
+  // been merged or deleted away, clear its tombstones so the reintroduction is
+  // durable — otherwise live-sync's additive union would strip it right back out.
+  // No-op when the name isn't tombstoned, so clearing unconditionally is safe.
+  for (const p of parsed.profiles) {
+    const brand = p.brand.trim();
+    const flavor = p.flavor.trim();
+    if (!brand || !flavor) continue;
+    clearDeleted("brands", brand);
+    clearDeleted(flavorNamespace(brand), flavor);
+    clearMergedAway(brand);
+    clearMergedAway(flavor);
+  }
+  for (const r of parsed.recipes) {
+    const name = r.name.trim();
+    if (!name || r.rows.length === 0) continue;
+    clearDeleted(RECIPE_KIND_DELETE_NAMESPACE[r.kind], name);
+    clearMergedAway(name);
+  }
 
   // ── Recipe libraries (overwrite by name + register names/ingredients) ──
   const doughPresets = loadDoughRecipePresets();

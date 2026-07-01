@@ -153,3 +153,42 @@ Any change to one app's order/logic must land in the other verbatim.
   is plain-language — render directly.
 - **targets[] nudge stays prompt-only (D3).** Strengthened in
   `buildParseSpecSheetPrompt` only; no contract change, no client parity edit.
+
+## Editable review + merge/deletion safety (mass-upload hardening)
+- **Import must respect the SAME tombstones as live sync — a re-import can NOT
+  silently resurrect a merged-away/deleted brand/flavor or recipe name.** Filtering
+  runs at PREPARE time via shared `partitionTombstonedParse(parsed, isProfileTomb,
+  isRecipeTomb) -> {kept, skipped}`. `kept` feeds summary/discrepancies/apply;
+  `skipped` is surfaced in the review (excluded by default, user can knowingly
+  re-include). Recipe tombstone namespaces: dough=`doughRecipeNames`,
+  sauce=`frontlineRecipeNames` (frontline IS sauce), cheese=`cheeseRecipeNames`;
+  profiles reuse `profileKeyIsTombstoned`.
+  **Why:** without this, the additive-union import path re-adds exactly what a user
+  merged/deleted, same failure mode as sync (see merge-tombstones/deletion-tombstones).
+- **Nameless recipes are KEPT (name ""), not dropped, by the sanitizer** so the
+  editable review can flag them for a user-supplied name. `recipeApplyIssue`
+  (missing-name/no-rows) and `profileApplyIssue` (missing-brand/missing-flavor) are
+  shared pure helpers used by the dialog's needs-attention flags.
+- **"Nothing-vanishes" is enforced at the button, not just visually.** Apply is
+  DISABLED while any INCLUDED item still has an apply-issue (`attentionCount>0`),
+  because `applySpecImport` silently skips blank-name/no-rows/blank-brand-flavor
+  rows — so an enabled Apply over an invalid included item would drop it exactly
+  like the old silent-drop bug. Fix or uncheck to proceed.
+- **Re-including a tombstoned item clears its tombstone on apply.** `applySpecImport`
+  calls `clearMergedAway`/`clearDeleted` for every applied profile (brand + flavor
+  namespaces) and recipe (kind namespace) so a knowingly re-included merged/deleted
+  item STICKS instead of being stripped again by the additive sync union. Safe to
+  clear unconditionally (no-op when not tombstoned); only kept items reach apply.
+- **The review is editable and commits only the kept+corrected set.** Web
+  `SpecImportDialog` emits an edited `ParsedSpecImport` via `onConfirm(parsed)`;
+  `home.tsx` commits `{...prepared, parsed: edited}` (preserves aliases/sourceNames
+  for the snapshot). Per-item include/exclude, fix recipe name+kind, fix profile
+  brand/flavor (datalist from `prepared.brands`/`flavorsByBrand`). Discrepancy list
+  is recomputed live from the edited set via exported `buildDiscrepancies`.
+- **Parse-accuracy prompt asks for a non-empty name per recipe + explicit
+  dough/sauce/cheese classification** (cheese/topping tables are CHEESE even beside
+  the sauce section; only tomato-based blends are SAUCE). Prompt-only, pinned by
+  `aiParseSpecSheet.test.ts`.
+- **MOBILE parity DEFERRED (parity paused):** shared lib + server prompt already
+  cover both; mobile `SpecImportModal` + `context/specImport.ts` prepare still need
+  the tombstone filter + editable review when parity resumes.

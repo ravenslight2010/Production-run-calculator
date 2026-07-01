@@ -14,6 +14,9 @@ import {
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
+  partitionTombstonedParse,
+  recipeApplyIssue,
+  profileApplyIssue,
   SPEC_ALIAS_KINDS,
   type ParsedSpecImport,
   type SheetGrid,
@@ -222,6 +225,17 @@ describe("sanitizeParsedSpecImport", () => {
       { brand: "Basha's", flavor: "Original" },
       { brand: "Lowe's CRB", flavor: "Pepperoni" },
     ]);
+  });
+  it("keeps a nameless recipe that has rows (so the review can rescue it)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        { kind: "sauce", name: "", rows: [{ ingredient: "Tomato", lbs: 20 }] },
+        { kind: "cheese", rows: [{ ingredient: "Mozz", lbs: 30 }] },
+      ],
+    });
+    expect(out.recipes).toHaveLength(2);
+    expect(out.recipes.every((r) => r.name === "")).toBe(true);
   });
 });
 
@@ -652,5 +666,89 @@ describe("crossFillSpecImport", () => {
     const { parsed: out, filledCount } = crossFillSpecImport(parsed);
     expect(out.profiles[1].sauceOzPerPizza).toBe(0);
     expect(filledCount).toBe(1);
+  });
+});
+
+describe("mergeParsedSpecImports (nameless recipes)", () => {
+  it("does not collapse several nameless recipes of the same kind", () => {
+    const a: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "sauce", name: "", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    const b: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "sauce", name: "", rows: [{ ingredient: "Basil", lbs: 2 }] }],
+    };
+    const out = mergeParsedSpecImports([a, b]);
+    expect(out.recipes).toHaveLength(2);
+  });
+  it("still de-dupes named recipes by kind+name (later wins)", () => {
+    const a: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "dough", name: "Std", rows: [{ ingredient: "Flour", lbs: 10 }] }],
+    };
+    const b: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "dough", name: "std", rows: [{ ingredient: "Flour", lbs: 20 }] }],
+    };
+    const out = mergeParsedSpecImports([a, b]);
+    expect(out.recipes).toHaveLength(1);
+    expect(out.recipes[0].rows[0].lbs).toBe(20);
+  });
+});
+
+describe("partitionTombstonedParse", () => {
+  const parsed: ParsedSpecImport = {
+    profiles: [
+      { brand: "Basha's", flavor: "Cheese", applicators: [], pepperonis: [] },
+      { brand: "Gone", flavor: "Pepperoni", applicators: [], pepperonis: [] },
+    ],
+    recipes: [
+      { kind: "sauce", name: "House Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] },
+      { kind: "cheese", name: "Old Blend", rows: [{ ingredient: "Mozz", lbs: 5 }] },
+      { kind: "dough", name: "", rows: [{ ingredient: "Flour", lbs: 50 }] },
+    ],
+    note: "hi",
+  };
+  it("splits merged-away profiles and recipes into skipped, preserving the note", () => {
+    const { kept, skipped } = partitionTombstonedParse(
+      parsed,
+      (brand) => brand === "Gone",
+      (kind, name) => kind === "cheese" && name === "Old Blend",
+    );
+    expect(kept.profiles.map((p) => p.brand)).toEqual(["Basha's"]);
+    expect(kept.recipes.map((r) => r.name)).toEqual(["House Sauce", ""]);
+    expect(skipped.profiles.map((p) => p.brand)).toEqual(["Gone"]);
+    expect(skipped.recipes.map((r) => r.name)).toEqual(["Old Blend"]);
+    expect(kept.note).toBe("hi");
+  });
+  it("never treats a blank-name recipe as tombstoned", () => {
+    const { kept, skipped } = partitionTombstonedParse(
+      parsed,
+      () => false,
+      () => true, // predicate would tombstone everything...
+    );
+    // ...but the blank-name dough is exempt so it can be rescued in review.
+    expect(kept.recipes.map((r) => r.name)).toEqual([""]);
+    expect(skipped.recipes).toHaveLength(2);
+  });
+});
+
+describe("recipeApplyIssue / profileApplyIssue", () => {
+  it("flags missing name then missing rows", () => {
+    expect(recipeApplyIssue({ kind: "sauce", name: "", rows: [{ ingredient: "T", lbs: 1 }] })).toBe(
+      "missing-name",
+    );
+    expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [] })).toBe("no-rows");
+    expect(recipeApplyIssue({ kind: "sauce", name: "S", rows: [{ ingredient: "T", lbs: 1 }] })).toBeNull();
+  });
+  it("flags missing brand then missing flavor", () => {
+    expect(profileApplyIssue({ brand: "", flavor: "X", applicators: [], pepperonis: [] })).toBe(
+      "missing-brand",
+    );
+    expect(profileApplyIssue({ brand: "B", flavor: "", applicators: [], pepperonis: [] })).toBe(
+      "missing-flavor",
+    );
+    expect(profileApplyIssue({ brand: "B", flavor: "F", applicators: [], pepperonis: [] })).toBeNull();
   });
 });

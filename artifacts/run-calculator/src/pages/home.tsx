@@ -329,6 +329,7 @@ import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDi
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
+import type { ParsedSpecImport } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 
@@ -5475,15 +5476,19 @@ export default function Home() {
     }
   }
 
-  async function handleSpecImportConfirm() {
+  async function handleSpecImportConfirm(editedParsed: ParsedSpecImport) {
     if (!specImportPrepared) return;
     setSpecImportApplying(true);
+    // Apply exactly what the user kept/corrected in the review — not the raw
+    // parse. Everything else on `prepared` (aliases, source names for the
+    // snapshot) is preserved.
+    const toCommit: SpecImportPrepared = { ...specImportPrepared, parsed: editedParsed };
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.
-    const importedRecipes = (specImportPrepared.summary?.totalRecipes ?? 0) > 0;
+    const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      await commitSpecImport(specImportPrepared);
+      await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
       setShowSpecImport(false);
