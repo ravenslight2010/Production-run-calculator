@@ -112,7 +112,7 @@ beforeEach(async () => {
   await db.execute(sql`TRUNCATE ${savedSpecSheetsTable} RESTART IDENTITY CASCADE`);
 });
 
-type ApiSpecSheet = { id: number; label: string; createdAt: number; data: unknown };
+type ApiSpecSheet = { id: number; label: string; sourceKey?: string | null; createdAt: number; data: unknown };
 type TestScope = "live" | "sandbox";
 
 function headers(scope: TestScope): Record<string, string> {
