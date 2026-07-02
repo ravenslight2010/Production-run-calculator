@@ -9400,6 +9400,12 @@ export default function Home() {
                               traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
                               batchesReady: (existing.batchesReady ?? 0) + excessBatches,
                             });
+                            // The carried dough leaves THIS run's staged supply —
+                            // deduct it here too, or the current run keeps showing
+                            // (and auto-tracking) trays/batches that now belong to
+                            // the next run.
+                            form.setValue("traysOnLine", Math.max(0, v.traysOnLine - excessTrays), { shouldDirty: true });
+                            form.setValue("batchesReady", Math.max(0, v.batchesReady - excessBatches), { shouldDirty: true });
                             form.setValue("carryOverDone", true, { shouldDirty: true });
                             navigator.vibrate?.(15);
                           }}

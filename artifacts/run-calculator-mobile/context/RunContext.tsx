@@ -2553,7 +2553,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   // Carry leftover dough/crusts into the next run: add surplus trays + batches
-  // to the following run's staged supply and mark this run's carry-over done.
+  // to the following run's staged supply, DEDUCT them from this run's staged
+  // supply (they physically leave this run), and mark this run's carry-over done.
   const applyCarryOver = useCallback(
     (excessTrays: number, excessBatches: number) => {
       setAppState((prev) => {
@@ -2562,7 +2563,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         if (!cur) return prev;
         runs[prev.currentIndex] = {
           ...cur,
-          progress: { ...cur.progress, carryOverDone: true },
+          progress: {
+            ...cur.progress,
+            carryOverDone: true,
+            traysOnLine: Math.max(0, cur.progress.traysOnLine - excessTrays),
+            batchesReady: Math.max(0, cur.progress.batchesReady - excessBatches),
+          },
         };
         const nextIdx = prev.currentIndex + 1;
         const nextRun = runs[nextIdx];
