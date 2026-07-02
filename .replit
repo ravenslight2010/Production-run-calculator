@@ -40,6 +40,10 @@ args = "test:spec-reconcile"
 task = "workflow.run"
 args = "test:scheduled-recipe-check"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test:spec-export"
+
 [[workflows.workflow]]
 name = "test"
 author = "agent"
@@ -102,6 +106,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scheduled-recipe-check run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "test:spec-export"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/spec-export run test"
 
 [workflows.workflow.metadata]
 isValidation = true

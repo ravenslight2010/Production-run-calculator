@@ -52,6 +52,7 @@
 - [Allergen tracking](allergen-tracking.md) — per-run allergen + advisory sequence warnings in shared @workspace/allergen lib; client-only (opaque sync jsonb), web+mobile parity, default none.
 - [AI merge suggestions + learned aliases](merge-suggest.md) — AI dedupe assist + factory-wide learned merge memory; cost-guard must sanitize body (blank padding bypasses count cap); web+mobile parity.
 - [Spec-sheet Excel importer](spec-import.md) — AI-parsed .xlsx → profiles+recipes w/ learned aliases; sauce rows ground to FRONTLINE pool (not cheese); mobile profileExists must mirror web profileObjHasRealData; web+mobile parity.
+- [Spec/recipe/mix Excel export](spec-export.md) — mirror of the importers; TWO workbooks (AI spec vs deterministic premix, never combine); pure @workspace/spec-export; pep-B slots omitted; web-only (parity paused).
 - [Learned-memory pattern](learned-memory-pattern.md) — server-persisted "remember user corrections" for AI features (import/fill-missing/photo): requireAuth-only, ci-upsert, pure tested matcher w/ existence guard, best-effort, web+mobile.
 - [Learned import aliases](learned-import-aliases.md) — confirmed Excel-import brand/flavor matches persisted server-side, auto-applied next time; priority alias>AI>fuzzy; apply only if target still exists.
 - [AI reviewer + corrections memory](ai-reviewer-and-corrections.md) — 2nd-pass reviewer AI (ok/warn/reject, advisory/fail-safe, strip id at wire) + factory-wide name-corrections pool written on merge/match/spec confirms; web+mobile.

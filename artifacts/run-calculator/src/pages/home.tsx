@@ -333,6 +333,7 @@ import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDi
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
+import { exportSpecRecipes, type ExportSelection } from "@/specExport";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
@@ -2388,6 +2389,14 @@ export default function Home() {
   const [mgStandaloneInput, setMgStandaloneInput] = useState("");
   const [mgSelectedPreset, setMgSelectedPreset] = useState<string | null>(null);
   const [mgPresetRows, setMgPresetRows] = useState<RecipeRow[]>([]);
+  const [exportSelection, setExportSelection] = useState<ExportSelection>({
+    profiles: true,
+    dough: true,
+    sauce: true,
+    cheese: true,
+    mixes: true,
+  });
+  const [exporting, setExporting] = useState(false);
   const [newPin, setNewPin] = useState("");
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [pinChangeMsg, setPinChangeMsg] = useState("");
@@ -8118,6 +8127,55 @@ export default function Home() {
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted">
                       <Upload className="w-4 h-4" /> Import Excel
                     </button>
+
+                    {isManager && (
+                      <div className="pt-3 mt-1 border-t border-border space-y-2">
+                        <p className="text-xs text-muted-foreground">Export spec sheets &amp; recipes to an Excel workbook. Choose what to include — the file re-imports through the spec/premix importers.</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {([
+                            ["profiles", "Profiles"],
+                            ["dough", "Dough Recipes"],
+                            ["sauce", "Sauce Recipes"],
+                            ["cheese", "Cheese Recipes"],
+                            ["mixes", "Mixes"],
+                          ] as [keyof ExportSelection, string][]).map(([key, label]) => (
+                            <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 accent-primary"
+                                checked={exportSelection[key]}
+                                onChange={(e) => setExportSelection((s) => ({ ...s, [key]: e.target.checked }))}
+                              />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={exporting || !Object.values(exportSelection).some(Boolean)}
+                          onClick={async () => {
+                            setExporting(true);
+                            try {
+                              const res = await exportSpecRecipes(exportSelection, todayStr());
+                              if (res.specSheets === 0 && res.mixSheets === 0) {
+                                toast({ title: "Nothing to export", description: "The selected data is empty. Add spec profiles, recipes, or mixes first." });
+                              } else {
+                                const parts: string[] = [];
+                                if (res.specSheets) parts.push(`spec/recipes (${res.specSheets} sheet${res.specSheets === 1 ? "" : "s"})`);
+                                if (res.mixSheets) parts.push(`mixes (${res.mixSheets} sheet${res.mixSheets === 1 ? "" : "s"})`);
+                                toast({ title: "Export ready", description: `Downloaded ${parts.join(" and ")}.` });
+                              }
+                            } catch {
+                              toast({ variant: "destructive", title: "Export failed", description: "Couldn't build the workbook. Please try again." });
+                            } finally {
+                              setExporting(false);
+                            }
+                          }}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed">
+                          <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Exporting…" : "Export Spec/Recipes"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 

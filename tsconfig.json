@@ -34,6 +34,9 @@
       "path": "./lib/spec-reconcile"
     },
     {
+      "path": "./lib/spec-export"
+    },
+    {
       "path": "./lib/merge-suggest"
     },
     {
