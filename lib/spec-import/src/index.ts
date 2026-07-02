@@ -788,6 +788,129 @@ export function isGroundedFlavor(
   return false;
 }
 
+/** Lowercase + collapse every non-alphanumeric run to a single space, so a
+ * flavor phrase can be compared against messy sheet text regardless of case,
+ * punctuation, or spacing. Pure. */
+function normalizePhrase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Max word-tokens for a source cell to count as a plausible flavor-name
+ * candidate when snapping (real flavor names are short phrases; long cells are
+ * sentences/notes, not flavors). */
+const MAX_SNAP_CANDIDATE_TOKENS = 6;
+
+/** Grounding context for PROFILE flavors, precomputed once per sanitize pass.
+ * `cells` are the workbook's individual cell values (the flattened prompt text
+ * is tab/newline-separated), each kept as original text + normalized phrase. */
+export type ProfileFlavorGroundingCtx = {
+  cells: ReadonlyArray<{ original: string; normalized: string }>;
+  knownFlavorSet?: Set<string>;
+  /** Known flavors (original casing) that actually appear in the source cells —
+   * the preferred snap candidates. */
+  knownInSource: ReadonlyArray<string>;
+};
+
+/** Build the profile-flavor grounding context from the raw grounding input.
+ * Returns undefined when there is no source text to check against (no grounding
+ * -> profiles are kept as-is, preserving prior behavior). Pure. */
+export function buildProfileFlavorGrounding(
+  grounding: SpecImportGrounding,
+): ProfileFlavorGroundingCtx | undefined {
+  const src = grounding.sourceText;
+  if (!src) return undefined;
+  const seen = new Set<string>();
+  const cells: { original: string; normalized: string }[] = [];
+  for (const raw of src.split(/[\t\n\r]+/)) {
+    const original = raw.trim();
+    if (!original) continue;
+    const normalized = normalizePhrase(original);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    cells.push({ original, normalized });
+  }
+  // Normalize known flavors the same way as source cells so punctuation/spacing
+  // variants ("Buffalo-Chicken" vs known "Buffalo Chicken") still count as known.
+  const knownFlavorSet =
+    grounding.knownFlavors && grounding.knownFlavors.length
+      ? new Set(grounding.knownFlavors.map((s) => normalizePhrase(s)).filter(Boolean))
+      : undefined;
+  const knownInSource: string[] = [];
+  if (grounding.knownFlavors) {
+    for (const kf of grounding.knownFlavors) {
+      const norm = normalizePhrase(kf);
+      if (!norm) continue;
+      if (cells.some((c) => c.normalized.includes(norm))) knownInSource.push(kf.trim());
+    }
+  }
+  return { cells, knownFlavorSet, knownInSource };
+}
+
+export type ProfileFlavorGroundResult =
+  | { kind: "grounded" }
+  | { kind: "snapped"; flavor: string }
+  | { kind: "ungrounded" };
+
+/**
+ * Grounding backstop for PROFILE flavors, stricter than the recipe-target token
+ * check: the parse model has been seen paraphrasing a flavor wholesale (e.g.
+ * "Buffalo Chicken" -> "BBQ Chicken"), which the shared-token test cannot catch
+ * ("chicken" appears in the source either way). A profile flavor is grounded
+ * only when it is a known flavor OR its FULL phrase appears inside some source
+ * cell. Otherwise we try to SNAP it to the nearest real flavor that does appear
+ * in the source (preferring known flavors, then short source cells) by shared
+ * word tokens; with no confident match it is flagged ungrounded (kept, but the
+ * caller surfaces a warning) — never silently invented. Pure. */
+export function groundProfileFlavor(
+  flavor: string,
+  ctx: ProfileFlavorGroundingCtx,
+): ProfileFlavorGroundResult {
+  const f = flavor.trim();
+  if (!f) return { kind: "grounded" };
+  const phrase = normalizePhrase(f);
+  if (!phrase) return { kind: "grounded" };
+  if (ctx.knownFlavorSet && ctx.knownFlavorSet.has(phrase)) return { kind: "grounded" };
+  if (ctx.cells.some((c) => c.normalized.includes(phrase))) return { kind: "grounded" };
+
+  // Not in the source and not known -> invented. Try to snap to the nearest
+  // flavor that IS in the source, scored by shared word tokens.
+  const toks = flavorTokens(f);
+  if (toks.length === 0) return { kind: "grounded" }; // nothing checkable, keep
+  const tokSet = new Set(toks);
+  const score = (candidate: string): number => {
+    const cToks = flavorTokens(candidate);
+    if (cToks.length === 0 || cToks.length > MAX_SNAP_CANDIDATE_TOKENS) return 0;
+    let shared = 0;
+    const seen = new Set<string>();
+    for (const t of cToks) {
+      if (tokSet.has(t) && !seen.has(t)) {
+        seen.add(t);
+        shared++;
+      }
+    }
+    if (shared === 0) return 0;
+    return shared / Math.max(cToks.length, toks.length);
+  };
+
+  let best: { flavor: string; score: number } | undefined;
+  // Known flavors present in the source are the safest candidates — check first
+  // with a scoring bonus so they win ties against raw cells.
+  for (const kf of ctx.knownInSource) {
+    const s = score(kf);
+    if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: kf, score: s + 0.25 };
+  }
+  for (const c of ctx.cells) {
+    const s = score(c.original);
+    if (s >= 0.5 && (!best || s > best.score)) best = { flavor: c.original, score: s };
+  }
+  if (best) return { kind: "snapped", flavor: best.flavor };
+  return { kind: "ungrounded" };
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -805,6 +928,8 @@ export function sanitizeParsedSpecImport(
     grounding.knownFlavors && grounding.knownFlavors.length
       ? new Set(grounding.knownFlavors.map((s) => s.trim().toLowerCase()).filter(Boolean))
       : undefined;
+  const profileCtx = buildProfileFlavorGrounding(grounding);
+  const groundingWarnings: string[] = [];
 
   const profiles: ParsedProfile[] = [];
   const rawProfiles = Array.isArray(root.profiles) ? root.profiles : [];
@@ -812,8 +937,25 @@ export function sanitizeParsedSpecImport(
     if (!p || typeof p !== "object") continue;
     const o = p as Record<string, unknown>;
     const brand = clampName(o.brand, lim.maxNameChars);
-    const flavor = clampName(o.flavor, lim.maxNameChars);
+    let flavor = clampName(o.flavor, lim.maxNameChars);
     if (!brand || !flavor) continue;
+    // Grounding backstop for PROFILE flavors: the parse model has paraphrased
+    // flavors wholesale (e.g. "Buffalo Chicken" -> "BBQ Chicken"), minting
+    // profiles under a name that never appears on the sheet. Snap such an
+    // invented flavor to the nearest flavor that DOES appear in the source; if
+    // no confident match, keep it but surface a warning in `note` so the review
+    // screen flags it — never silently invented.
+    if (profileCtx) {
+      const g = groundProfileFlavor(flavor, profileCtx);
+      if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
+        groundingWarnings.push(`Corrected flavor "${flavor}" to "${g.flavor}" (brand ${brand}).`);
+        flavor = clampName(g.flavor, lim.maxNameChars);
+      } else if (g.kind === "ungrounded") {
+        groundingWarnings.push(
+          `Flavor "${flavor}" (brand ${brand}) was not found on the sheet — please verify.`,
+        );
+      }
+    }
     const applicators: ParsedApplicator[] = [];
     const rawApps = Array.isArray(o.applicators) ? o.applicators : [];
     for (const a of rawApps.slice(0, lim.maxApplicators)) {
@@ -937,7 +1079,12 @@ export function sanitizeParsedSpecImport(
 
   const result: ParsedSpecImport = { profiles, recipes };
   const note = clampName(root.note, 400);
-  if (note) result.note = note;
+  // Surface flavor-grounding corrections/warnings on the note so the review
+  // screen shows them (dedup repeated profiles; bounded so a flood can't bloat
+  // the payload).
+  const uniqueWarnings = [...new Set(groundingWarnings)].slice(0, 10);
+  const combined = [note, ...uniqueWarnings].filter(Boolean).join(" ");
+  if (combined) result.note = clampName(combined, 1200);
   return result;
 }
 

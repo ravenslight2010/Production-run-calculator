@@ -361,6 +361,20 @@ Any change to one app's order/logic must land in the other verbatim.
   REAL sheet flavor (`… Pizza varietiy: Mission Taco Mexican`), and the backstop
   correctly KEPT it (tokens are in the source). So the backstop is defense-in-depth,
   NOT triggered by a confirmed batch-3 case. Tests in `specImport.test.ts`.
+- **PROFILE flavors need a STRICTER grounding than the recipe-target token check —
+  full-phrase per-cell + snap.** The parse model paraphrased "Buffalo Chicken" →
+  "BBQ Chicken" for every brand at every chunk size; the shared-token test can't
+  catch it ("chicken" appears either way). `groundProfileFlavor` +
+  `buildProfileFlavorGrounding` (pure, `lib/spec-import`): a profile flavor is
+  grounded only if it's a known flavor OR its normalized phrase appears inside a
+  single source CELL (workbookText split on tabs/newlines — per-cell, because a
+  whole-text substring check false-positives on adjacent cells "BBQ\tChicken").
+  Ungrounded → SNAP to the nearest flavor that IS in the source (shared word
+  tokens, score ≥ 0.5; known-flavors-in-source preferred via bonus); no confident
+  match → keep the profile but append a warning to `note` — flagged or corrected,
+  never dropped (no data loss), never silently invented. Runs inside
+  `sanitizeParsedSpecImport`, so both clients covered; back-compat (no grounding
+  → no change). Tests in `specImport.test.ts`.
 - **`Production_Schedule_*.xlsx` (87 weekly tabs, columns Brand|Flavor|Units|Customer|
   Ship|PO) is a SCHEDULE file, not a spec sheet** — it belongs to the schedule importer,
   not `/ai/parse-spec-sheet`. Out of scope for spec-import hardening; do not feed it to

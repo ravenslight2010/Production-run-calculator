@@ -547,6 +547,145 @@ describe("sanitizeParsedSpecImport", () => {
   });
 });
 
+describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
+  // Flattened workbook text: tab-separated cells, one sheet block per brand.
+  const workbook =
+    "ALDO'S PIZZAS\tSPECS\n" +
+    "Flavor\tSauce oz\tCheese oz\n" +
+    "Cheese\t3\t4\n" +
+    "Pepperoni\t3\t4.5\n" +
+    "Buffalo Chicken\t2.5\t4\n";
+
+  it("snaps a paraphrased profile flavor back to the flavor written on the sheet", () => {
+    // The model paraphrased "Buffalo Chicken" into "BBQ Chicken" — the token
+    // check alone can't catch this ("chicken" appears either way), so the full
+    // phrase must be grounded and snapped to the nearest real flavor.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [
+          { brand: "Aldo's", flavor: "Cheese" },
+          { brand: "Aldo's", flavor: "Pepperoni" },
+          { brand: "Aldo's", flavor: "BBQ Chicken" },
+        ],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles.map((p) => p.flavor)).toEqual([
+      "Cheese",
+      "Pepperoni",
+      "Buffalo Chicken",
+    ]);
+    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+  });
+
+  it("prefers a KNOWN flavor over a raw sheet cell when both could snap", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "BBQ Chicken" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook, knownFlavors: ["Buffalo Chicken", "Cheese", "Pepperoni"] },
+    );
+    expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
+  });
+
+  it("keeps a profile flavor that appears verbatim on the sheet (no false snap)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Buffalo Chicken" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("keeps a KNOWN flavor even when it is absent from the source text", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Hawaiian" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook, knownFlavors: ["Hawaiian"] },
+    );
+    expect(out.profiles[0].flavor).toBe("Hawaiian");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("is case/punctuation-insensitive when checking the sheet for the flavor", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Buffalo-Chicken" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: "BUFFALO   CHICKEN\t2.5\t4\n" },
+    );
+    expect(out.profiles[0].flavor).toBe("Buffalo-Chicken");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("flags (keeps + notes) an invented flavor with no plausible sheet match", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Mission Taco Mexican" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    // Never dropped (no data loss), but never silently accepted either.
+    expect(out.profiles).toHaveLength(1);
+    expect(out.profiles[0].flavor).toBe("Mission Taco Mexican");
+    expect(out.note).toContain('Flavor "Mission Taco Mexican" (brand Aldo\'s) was not found');
+  });
+
+  it("does not treat cross-cell adjacency as grounding (per-cell phrase check)", () => {
+    // "BBQ" and "Chicken" sit in SEPARATE adjacent cells — a whole-text
+    // substring check would false-positive on the joined text and silently
+    // accept the invented flavor; the per-cell check must flag or correct it.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "BBQ Chicken" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: "Toppings sheet\nBBQ\tChicken\t2\n" },
+    );
+    expect(out.profiles).toHaveLength(1);
+    expect(out.note).toBeTruthy(); // corrected or flagged — never silent
+  });
+
+  it("leaves profiles untouched when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [{ brand: "Aldo's", flavor: "Totally Invented Flavor" }],
+      recipes: [],
+    });
+    expect(out.profiles[0].flavor).toBe("Totally Invented Flavor");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("appends the flavor warnings after an existing model note", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "BBQ Chicken" }],
+        recipes: [],
+        note: "Could not parse the second sheet.",
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.note).toContain("Could not parse the second sheet.");
+    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+  });
+});
+
 describe("isCatchAllFlavor", () => {
   it("flags whole-brand scope words, case-insensitively, for any kind", () => {
     for (const f of ["All Varieties", "all", "N/A", "every variety", "", "  "]) {
