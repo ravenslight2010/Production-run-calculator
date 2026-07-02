@@ -305,6 +305,23 @@ Any change to one app's order/logic must land in the other verbatim.
   (topping blends), mapped to specific flavors by mix name — the existing cheese-tab
   handling + catch-all scrub covers them; no new code path needed.
 
+## Pepperoni is a pep TYPE, never a recipe (+ die reviewer false-positive)
+- **Pepperoni must NOT import as a cheese recipe.** Pepperoni belongs on a profile's
+  `pepperonis` (type + sticks + oz/pizza). The importer has only dough/sauce/cheese
+  recipe kinds, so a "Pepperoni Stick" row was bucketed as a bogus CHEESE recipe →
+  the AI reviewer then flagged it as mis-classified (false-positive popup). Fixed
+  three ways: (1) prompt (`buildParseSpecSheetPrompt`) states pepperoni incl.
+  "pepperoni sticks" is ALWAYS a profile pepperoni, never a recipe; (2) deterministic
+  backstop `isPepperoniOnlyCheeseRecipe(rows)` (pure, `@workspace/spec-import`) — the
+  sanitizer drops a cheese recipe whose rows are ALL pepperoni; (3) a real cheese
+  blend that merely LISTS pepperoni among other cheeses is KEPT (every-row guard).
+- **Die reviewer false-positive:** the spec-sheet `reviewSuggestions` instructions
+  (`ai.ts`) now tell the reviewer die types are commonly non-numeric custom dies
+  (e.g. "Argus"/"Mystic"), not inch sizes — don't flag a die for not being a numeric
+  size. (Die source itself: `.agents/memory/die-size-source.md`.)
+- All three are shared-lib/server → both clients auto-covered; pinned by
+  `aiParseSpecSheet.test.ts`.
+
 ## Batch-3 real-library hardening (combined brand cells, grounding backstop)
 - **A doughball/yield table near the bottom of a procedure sheet lists the customers
   it feeds** — one row per customer, sometimes `Customer (Flavor)` in parentheses

@@ -1959,7 +1959,7 @@ router.post(
     const verdicts = await reviewSuggestions({
       featureLabel: "pizza spec-sheet profiles and recipes parsed from a spreadsheet",
       instructions:
-        "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible.",
+        "Flag any profile or recipe with implausible weights, a mismatched brand/flavor, or values outside normal pizza-production ranges. Approve entries that look correctly parsed and plausible. Die types are commonly non-numeric custom dies (e.g. \"Argus\", \"Mystic\"), not inch sizes — do NOT flag a die merely for not being a standard numeric pizza size.",
       items: [
         ...parsed.profiles.map((p, i) => ({
           id: `profile-${i}`,

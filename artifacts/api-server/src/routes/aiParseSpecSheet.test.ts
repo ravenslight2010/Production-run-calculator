@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   buildParseSpecSheetPrompt,
+  sanitizeParseSpecSheet,
   type ParseSpecSheetInput,
 } from "./aiParseSpecSheet";
+import { isPepperoniOnlyCheeseRecipe } from "@workspace/spec-import";
 
 function input(overrides: Partial<ParseSpecSheetInput> = {}): ParseSpecSheetInput {
   return {
@@ -158,5 +160,62 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
     expect(system).toContain("never round");
     expect(system).toContain("NEVER swap units");
     expect(system).toContain("per-pizza ounce");
+  });
+});
+
+// Pepperoni is a pep TYPE (captured on a profile's `pepperonis`), never a
+// cheese/topping recipe. The prompt tells the model not to emit it as a recipe,
+// and the sanitizer deterministically drops any that slip through — so the
+// import review UI never flags a bogus "cheese recipe" for what is a pep type.
+describe("pepperoni is a pep type, not a cheese recipe", () => {
+  it("tells the model pepperoni is a profile pepperoni, never a recipe", () => {
+    const { system } = buildParseSpecSheetPrompt(input());
+    expect(system).toContain("PEPPERONI IS NOT A RECIPE");
+    expect(system).toContain("`pepperonis`");
+  });
+
+  it("drops a cheese recipe whose ingredients are purely pepperoni", () => {
+    const raw = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Pepperoni Stick",
+          rows: [{ ingredient: "Pepperoni Stick", lbs: 5 }],
+        },
+      ],
+    };
+    const out = sanitizeParseSpecSheet(raw);
+    expect(out.recipes).toHaveLength(0);
+  });
+
+  it("keeps a real cheese blend that merely lists pepperoni among cheeses", () => {
+    const raw = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Topping Blend",
+          rows: [
+            { ingredient: "Mozzarella", lbs: 40 },
+            { ingredient: "Pepperoni", lbs: 5 },
+          ],
+        },
+      ],
+    };
+    const out = sanitizeParseSpecSheet(raw);
+    expect(out.recipes).toHaveLength(1);
+    expect(out.recipes[0].name).toBe("Topping Blend");
+  });
+
+  it("isPepperoniOnlyCheeseRecipe: true only when every row is pepperoni", () => {
+    expect(isPepperoniOnlyCheeseRecipe([{ ingredient: "Pep Stick", lbs: 3 }])).toBe(true);
+    expect(
+      isPepperoniOnlyCheeseRecipe([
+        { ingredient: "Pepperoni", lbs: 3 },
+        { ingredient: "Provolone", lbs: 10 },
+      ]),
+    ).toBe(false);
+    expect(isPepperoniOnlyCheeseRecipe([])).toBe(false);
   });
 });

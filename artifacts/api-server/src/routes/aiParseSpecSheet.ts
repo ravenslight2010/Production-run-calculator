@@ -174,7 +174,11 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "substitute). When a table lists cheeses/toppings by the pound it is CHEESE, not " +
     "SAUCE, even if it sits near the sauce section; only a tomato-based blend is " +
     "SAUCE. Use the section heading and the ingredient names together — do not " +
-    "assume position alone. " +
+    "assume position alone. PEPPERONI IS NOT A RECIPE: pepperoni (including " +
+    "'pepperoni sticks') is a profile PEPPERONI — capture it in that profile's " +
+    "`pepperonis` list (type + sticks + oz per pizza) and NEVER emit it as a " +
+    "cheese or topping recipe; do not create a recipe whose ingredients are " +
+    "pepperoni. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap units: `ozPerPizza`/`sauceOzPerPizza` are " +

@@ -669,6 +669,20 @@ export function isCatchAllFlavor(flavor: string, kind: string): boolean {
   return false;
 }
 
+/** Matches a pepperoni ingredient/recipe name ("Pepperoni", "Pep Stick"). Pure. */
+const PEPPERONI_NAME_RE = /pepp?eroni|pep\s*stick/i;
+
+/**
+ * True when a CHEESE-kind recipe is really just pepperoni — a pep TYPE, not a
+ * cheese/topping blend. Pepperoni is captured on a profile's `pepperonis`
+ * (type + sticks + oz per pizza), never as a recipe, so the importer drops such
+ * recipes instead of creating a bogus "cheese recipe". Conservative: fires only
+ * when EVERY ingredient row is pepperoni (a real cheese blend that merely lists
+ * pepperoni among its cheeses is kept). Pure. */
+export function isPepperoniOnlyCheeseRecipe(rows: ReadonlyArray<RecipeRow>): boolean {
+  return rows.length > 0 && rows.every((r) => PEPPERONI_NAME_RE.test(r.ingredient));
+}
+
 /** Split a name into lowercase alphanumeric word tokens of length >= 3, dropping
  * short stop-words like "of"/"the". Pure. */
 function flavorTokens(s: string): string[] {
@@ -781,6 +795,10 @@ export function sanitizeParsedSpecImport(
       rows.push({ ingredient, lbs });
     }
     if (rows.length === 0) continue;
+    // Pepperoni is a pep TYPE (captured on the profile's `pepperonis`), not a
+    // recipe. Drop a cheese recipe whose ingredients are purely pepperoni so it
+    // never imports as a bogus "cheese recipe".
+    if (kind === "cheese" && isPepperoniOnlyCheeseRecipe(rows)) continue;
     const recipe: ParsedRecipe = { kind, name, rows };
     const brand = clampName(o.brand, lim.maxNameChars);
     if (brand) recipe.brand = brand;
