@@ -391,3 +391,15 @@ Any change to one app's order/logic must land in the other verbatim.
 - **Only remove UNAMBIGUOUS strays** (a size-tagged name whose clean equivalent already
   exists in the correct brand). Casing/truncation near-dups without a clear canonical
   (e.g. `White Spin` vs `White Spinach`) are left alone — ask, don't guess.
+- **The injection vector is DOUGH (and any) recipe target lists, not just profile rows.**
+  `applySpecImport` runs every recipe through `recipeApplyTargets` and calls
+  `registerBrandFlavor(brand, flavor)` for each target (storage.ts ~1897), writing the
+  flavor string VERBATIM. A dough sheet listing pizzas as `7" Red Fajita` creates a flavor
+  `7" Red Fajita`. Premix sheets can't touch brand/flavor (Mixes only). Cheese/mix&veg go
+  through the spec importer too but were clean in the data (no mix/cheese name = a flavor).
+- **Size-in-flavor can be INTENTIONAL, not contamination.** Profiles are keyed brand+flavor
+  with NO size field, so encoding size in the flavor (`Bobo's` `12" CHEESE` / `9" CHEESE`,
+  `Medulla 12x16` `Cheese 7"`) is a valid way to run multiple sizes of one brand — the
+  alternative Lowe's uses is separate brands (`Lowe's` vs `Lowe's 7in`). Confirm with the
+  user before stripping size tags; only merge the obvious dup (sized vs un-sized SAME name,
+  e.g. Bobo's `12" DELUXE` vs `Deluxe` → keep sized, tombstone `deluxe`).
