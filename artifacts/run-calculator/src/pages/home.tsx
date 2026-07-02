@@ -50,6 +50,7 @@ import {
   type MasterDataChangeType,
   type IngredientSubstitution,
   type SubstitutionLogEntry,
+  withTempOverrides,
 } from "../types";
 import {
   fmtElapsed,
@@ -5381,7 +5382,7 @@ export default function Home() {
   }
 
   function applyTemplate(t: RunTemplate) {
-    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false };
+    const clean = { ...t.values, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false, tempFreezerTime: 0, tempCrustsPerCycle: 0, tempCycleSpeed: 0 };
     form.reset(clean);
     resetFieldArrays(clean);
     saveRunValues(currentRunId, clean);
@@ -5400,7 +5401,7 @@ export default function Home() {
     setDayState(newDs);
     saveDayState(newDs);
     // Copy all form values except progress fields
-    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false };
+    const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false, tempFreezerTime: 0, tempCrustsPerCycle: 0, tempCycleSpeed: 0 };
     saveRunValues(newId, copied);
     form.reset(copied);
     resetFieldArrays(copied);
@@ -5850,13 +5851,18 @@ export default function Home() {
 
   const nowTime = useClock(runStatus);
 
+  // Effective values for calculation/display: the Run-tab temporary overrides
+  // (freezer time, crusts/cycle, cycle speed) overlaid on the Setup numbers.
+  // Setup fields themselves are never touched.
+  const ve = useMemo(() => withTempOverrides(v), [v]);
+
   const liveFreezerMin = (() => {
     if (!currentRun?.startedAt) return 0;
-    if (currentRun.endedAt) return Number(v.freezerTime);
+    if (currentRun.endedAt) return Number(ve.freezerTime);
     // When paused, freeze the timer at the moment of pause
     const refTime = currentRun.pausedAt ?? nowTime.getTime();
     const elapsed = (refTime - currentRun.startedAt) / 60000;
-    return Math.min(elapsed, Number(v.freezerTime));
+    return Math.min(elapsed, Number(ve.freezerTime));
   })();
 
   useEffect(() => {
@@ -6026,7 +6032,7 @@ export default function Home() {
     const ppm =
       doughSubTab === "crusts"
         ? v.approxLineSpeed
-        : v.crustsPerCycle * v.cycleSpeed * v.speedAdjustment;
+        : ve.crustsPerCycle * ve.cycleSpeed * v.speedAdjustment;
 
     const perTray = doughSubTab === "crusts" ? v.crustsPerStack : v.doughballsPerTray;
 
@@ -6091,7 +6097,7 @@ export default function Home() {
 
     // Timing — spreadsheet D5 = (60/cycleSpeed)/speedAdjustment
     const timePressHzSec =
-      ppm > 0 ? (60 / v.cycleSpeed) / v.speedAdjustment : 0;
+      ppm > 0 ? (60 / ve.cycleSpeed) / v.speedAdjustment : 0;
     // Unified formula: perTray / ppm * 60 — equivalent to press-cycle formula in dough
     // mode, and correct for crust mode where ppm = approxLineSpeed directly
     const timePerTraySec =
@@ -6197,7 +6203,7 @@ export default function Home() {
       const refTime = currentRun.pausedAt ?? Date.now();
       const downtimeMs = (currentRun.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
       const elapsedMin = Math.max(0, (refTime - currentRun.startedAt - downtimeMs)) / 60000;
-      const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(v.freezerTime));
+      const elapsedMinAfterTunnel = Math.max(0, elapsedMin - Number(ve.freezerTime));
       const expectedCases = Math.floor((ppm * elapsedMinAfterTunnel) / v.pizzasPerCase);
       paceDelta = casesCompleted - expectedCases;
       paceStatus = Math.abs(paceDelta) <= 2 ? "on-pace" : paceDelta > 0 ? "ahead" : "behind";
@@ -6275,7 +6281,7 @@ export default function Home() {
       perBatch: effectiveDoughBatchYield,
       sauceEffBarrel,
     };
-  }, [v, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
+  }, [v, ve, liveFreezerMin, currentRun?.startedAt, currentRun?.pausedAt, currentRun?.endedAt, nowTime]);
 
   // ── Next-run die type (for change warning) ────────────────────────────────
   const nextRunDieType = useMemo(() => {
@@ -6309,7 +6315,7 @@ export default function Home() {
     nowTime,
     currentRun,
     calc,
-    v,
+    v: ve,
     isCrust: doughSubTab === "crusts",
   });
 
@@ -6326,7 +6332,8 @@ export default function Home() {
     nowTime,
     elapsedBatchSec,
     calc,
-    v,
+    // Effective values so temp overrides (freezer time) drive tunnel timing.
+    v: ve,
     form,
     // Cast/wall display screens are read-only viewers: they must never run
     // auto-track writes, or their decrements sync back and clobber the
@@ -6662,7 +6669,7 @@ export default function Home() {
   }
 
   if (screenMode === "backline") {
-    const freezerMs = Number(v.freezerTime) * 60000;
+    const freezerMs = Number(ve.freezerTime) * 60000;
     const freezerRemainMs = runStatus === "ended" && currentRun?.endedAt && freezerMs > 0
       ? Math.max(0, currentRun.endedAt + freezerMs - nowTime.getTime())
       : 0;
@@ -6738,7 +6745,7 @@ export default function Home() {
                   <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
                     <div className="h-full rounded-full bg-amber-500 transition-all duration-1000" style={{ width: `${freezerPct * 100}%` }} />
                   </div>
-                  <p className="text-lg text-muted-foreground">{fmtNum(Number(v.freezerTime), 0)} min total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
+                  <p className="text-lg text-muted-foreground">{fmtNum(Number(ve.freezerTime), 0)} min total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
                 </>
               )}
               {!freezerDraining && (
@@ -6759,7 +6766,7 @@ export default function Home() {
             <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Up Next — {upcomingRuns.length} run{upcomingRuns.length > 1 ? "s" : ""}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {upcomingRuns.map((run, i) => {
-                const vals = loadRunValues(run.id);
+                const vals = withTempOverrides(loadRunValues(run.id));
                 const s = computeSummaryStats(vals);
                 const estSec = s.estimatedTimeSec;
                 const dieChange = vals.dieType && v.dieType && vals.dieType !== (i === 0 ? v.dieType : loadRunValues(upcomingRuns[i - 1].id).dieType);
@@ -8676,7 +8683,7 @@ export default function Home() {
                 </div>
               )}
               {runStatus === "ended" && (() => {
-                const emptyMs = Number(v.freezerTime) * 60000;
+                const emptyMs = Number(ve.freezerTime) * 60000;
                 const remainMs = lastEndedRun?.endedAt && emptyMs > 0
                   ? Math.max(0, lastEndedRun.endedAt + emptyMs - nowTime.getTime())
                   : 0;
@@ -9194,7 +9201,7 @@ export default function Home() {
               <TabsContent value="run">
                 {/* Ended-run banner */}
                 {currentRun?.endedAt && (() => {
-                  const emptyMs = Number(v.freezerTime) * 60000;
+                  const emptyMs = Number(ve.freezerTime) * 60000;
                   const remainMs = emptyMs > 0
                     ? Math.max(0, currentRun.endedAt + emptyMs - nowTime.getTime())
                     : 0;
@@ -9215,7 +9222,7 @@ export default function Home() {
                               : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtNum(Number(v.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
+                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtNum(Number(ve.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
                           </p>
                           {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
@@ -9250,7 +9257,7 @@ export default function Home() {
                 {/* Freezer status — filling at run start, emptying at run end.
                     Auto-hidden whenever the tunnel is in steady state. */}
                 {!currentRun?.endedAt && runStatus === "running" && (() => {
-                  const freezerMin = Number(v.freezerTime) || 0;
+                  const freezerMin = Number(ve.freezerTime) || 0;
                   if (freezerMin <= 0) return null;
                   const elapsedMin = elapsedBatchSec / 60;
                   const ppm = calc.ppm;
@@ -9963,7 +9970,7 @@ export default function Home() {
                   for (const r of dayState.runs) {
                     if (!r.endedAt) continue;
                     if (r.id === currentRunId) continue;
-                    const rv = loadRunValues(r.id);
+                    const rv = withTempOverrides(loadRunValues(r.id));
                     const rfT = Number(rv.freezerTime) || 0;
                     if (rfT <= 0) continue;
                     if (nowMsT >= r.endedAt + rfT * 60000) continue; // freezer fully empty
@@ -10201,11 +10208,11 @@ export default function Home() {
                         </button>
                       )}
                       {/* Freezer countdowns */}
-                      {Number(v.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
+                      {Number(ve.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
                         <Separator className="opacity-30 my-1" />
                       )}
-                      {runStatus === "running" && Number(v.freezerTime) > 0 && (() => {
-                        const totalSecs = Number(v.freezerTime) * 60;
+                      {runStatus === "running" && Number(ve.freezerTime) > 0 && (() => {
+                        const totalSecs = Number(ve.freezerTime) * 60;
                         const elapsedSecs = liveFreezerMin * 60;
                         const remainSecs = Math.max(0, totalSecs - elapsedSecs);
                         const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
@@ -10227,8 +10234,8 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                      {Number(v.freezerTime) > 0 && lastEndedRun?.endedAt && lastEndedRun.id === currentRunId && (() => {
-                        const freezerMs = Number(v.freezerTime) * 60000;
+                      {Number(ve.freezerTime) > 0 && lastEndedRun?.endedAt && lastEndedRun.id === currentRunId && (() => {
+                        const freezerMs = Number(ve.freezerTime) * 60000;
                         const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
                         const pct = Math.min(1 - remainMs / freezerMs, 1);
                         const mm = Math.floor(remainMs / 60000);
@@ -10249,6 +10256,40 @@ export default function Home() {
                           </div>
                         );
                       })()}
+                    </CardContent>
+                  </Card>
+
+                  {/* Temporary adjustments — this-run-only overrides of Setup values */}
+                  <Card className="mt-4 bg-card/50 border-dashed border-border/70 shadow-md">
+                    <CardContent className="pt-4 pb-4 px-5 space-y-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Temporary Adjustments</p>
+                        {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
+                            <button
+                              type="button"
+                              data-testid="button-clear-temp-overrides"
+                              onClick={() => {
+                                form.setValue("tempFreezerTime", 0, { shouldDirty: true });
+                                form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
+                                form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
+                              }}
+                              className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
+                      </p>
+                      <div className="grid grid-cols-3 gap-3">
+                        <NumField control={form.control} name="tempFreezerTime" label={`Freezer Time${Number(v.freezerTime) > 0 ? ` (setup: ${fmtNum(Number(v.freezerTime), 0)})` : ""}`} step="1" testId="input-temp-freezer-time" />
+                        <NumField control={form.control} name="tempCrustsPerCycle" label={`Crusts / Cycle${Number(v.crustsPerCycle) > 0 ? ` (setup: ${fmtNum(Number(v.crustsPerCycle), 0)})` : ""}`} step="1" testId="input-temp-crusts-per-cycle" />
+                        <NumField control={form.control} name="tempCycleSpeed" label={`Cycle Speed${Number(v.cycleSpeed) > 0 ? ` (setup: ${fmtNum(Number(v.cycleSpeed), 1)})` : ""}`} step="0.1" testId="input-temp-cycle-speed" />
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -12414,7 +12455,8 @@ export default function Home() {
 
                           {/* Expected cases by now — only for running current run */}
                           {isCurrent && run.startedAt && !run.endedAt && (() => {
-                            const ppm = vals.crustsPerCycle * vals.cycleSpeed * vals.speedAdjustment;
+                            const ev = withTempOverrides(vals);
+                            const ppm = ev.crustsPerCycle * ev.cycleSpeed * ev.speedAdjustment;
                             const expectedCases = ppm > 0 && vals.pizzasPerCase > 0
                               ? Math.floor(ppm * liveFreezerMin / vals.pizzasPerCase)
                               : 0;

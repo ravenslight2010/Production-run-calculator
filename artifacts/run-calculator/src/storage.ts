@@ -213,7 +213,11 @@ export function saveBrandFlavors(bf: Record<string, string[]>): void {
 }
 
 // Fields that are run-specific and must never carry over via a brand/flavor profile
-const PER_RUN_FIELDS: (keyof FormValues)[] = ["casesNeeded", "carryOverDone"];
+const PER_RUN_FIELDS: (keyof FormValues)[] = [
+  "casesNeeded", "carryOverDone",
+  // Temporary this-run-only Setup overrides — never part of a profile
+  "tempFreezerTime", "tempCrustsPerCycle", "tempCycleSpeed",
+];
 
 // Rename legacy pep-type names ("Pep - Cured"/"Pep - Natural") to the detailed
 // standard names on read, so saved profiles/runs keep their pre-made calc behavior

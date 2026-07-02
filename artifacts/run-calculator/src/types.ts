@@ -92,9 +92,31 @@ export const formSchema = z.object({
   skidStacking: z.string().default(""),
   gripSheets: z.string().default("none"),
   slipSheets: z.string().default("no"),
+  // Temporary this-run-only overrides for the Setup numbers. 0/blank = no
+  // override (use the Setup value). Never saved into brand/flavor profiles.
+  tempFreezerTime: z.coerce.number().min(0).default(0),
+  tempCrustsPerCycle: z.coerce.number().min(0).default(0),
+  tempCycleSpeed: z.coerce.number().min(0).default(0),
 });
 
 export type FormValues = z.infer<typeof formSchema>;
+
+// Overlay the temporary Run-tab overrides (tempFreezerTime / tempCrustsPerCycle /
+// tempCycleSpeed) onto a values object for CALCULATION and DISPLAY. The
+// underlying Setup fields are never mutated — clearing an override (0/blank)
+// falls straight back to the permanent Setup number.
+export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v: T): T {
+  const ft = Number((v as Record<string, unknown>).tempFreezerTime) || 0;
+  const cpc = Number((v as Record<string, unknown>).tempCrustsPerCycle) || 0;
+  const cs = Number((v as Record<string, unknown>).tempCycleSpeed) || 0;
+  if (ft <= 0 && cpc <= 0 && cs <= 0) return v;
+  return {
+    ...v,
+    ...(ft > 0 ? { freezerTime: ft } : {}),
+    ...(cpc > 0 ? { crustsPerCycle: cpc } : {}),
+    ...(cs > 0 ? { cycleSpeed: cs } : {}),
+  };
+}
 
 export type RecipeRow = { ingredient: string; lbs: number };
 export type DoughRecipePreset = { rows: RecipeRow[] };
@@ -171,6 +193,9 @@ export const DEFAULT_VALUES: FormValues = {
   skidStacking: "",
   gripSheets: "none",
   slipSheets: "no",
+  tempFreezerTime: 0,
+  tempCrustsPerCycle: 0,
+  tempCycleSpeed: 0,
 };
 
 // Single-select packaging configuration fields, shown in Setup → Packaging
