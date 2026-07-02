@@ -86,6 +86,7 @@ import {
   loadTemplates,
   saveTemplates,
   loadProfile,
+  backfillSauceFromProfile,
   saveProfile,
   resolvePep1Combined,
   loadBrandFlavors,
@@ -3231,7 +3232,9 @@ export default function Home() {
         const stored = scheduleEditorRunValues[r.id];
         const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
         const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
-        runValues[r.id] = { ...base, casesNeeded: r.casesNeeded };
+        // Stored editor values are a snapshot — if their sauce is blank but the
+        // profile has one now, carry the profile's sauce (blank-fill only).
+        runValues[r.id] = backfillSauceFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
       }
       const payload: SyncPayload = {
         dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
@@ -3956,13 +3959,22 @@ export default function Home() {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, mergeRunDefaults(vals as FormValues));
+              // Scheduled run values are a snapshot from scheduling time; blank
+              // sauce fields backfill from the CURRENT profile (mobile parity —
+              // its pull-up spreads the live profile).
+              const metaById = new Map(ds.runs.map(r => [r.id, r]));
+              const pulledVals: Record<string, FormValues> = {};
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
+                const meta = metaById.get(id);
+                pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                saveRunValues(id, pulledVals[id]);
+              }
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
-              const firstVals = firstId ? mergeRunDefaults((payload.runValues ?? {})[firstId] as FormValues) : DEFAULT_VALUES;
+              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);
@@ -5927,13 +5939,22 @@ export default function Home() {
             const payload = await res.json() as SyncPayload | null;
             if (payload?.dayState?.runs?.length) {
               const ds: DayState = { runs: payload.dayState.runs, currentIndex: 0, date: newDate, shiftNotes: payload.dayState.shiftNotes, runToTime: payload.dayState.runToTime, resetAt: Date.now(), substitutions: [], substitutionLog: [], stagedItems: {} };
-              for (const [id, vals] of Object.entries(payload.runValues ?? {})) saveRunValues(id, mergeRunDefaults(vals as FormValues));
+              // Scheduled run values are a snapshot from scheduling time; blank
+              // sauce fields backfill from the CURRENT profile (mobile parity —
+              // its pull-up spreads the live profile).
+              const metaById = new Map(ds.runs.map(r => [r.id, r]));
+              const pulledVals: Record<string, FormValues> = {};
+              for (const [id, vals] of Object.entries(payload.runValues ?? {})) {
+                const meta = metaById.get(id);
+                pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
+                saveRunValues(id, pulledVals[id]);
+              }
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
               if (ds.runToTime) setRunToTime(ds.runToTime);
               const firstId = ds.runs[0]?.id;
-              const firstVals = firstId ? mergeRunDefaults((payload.runValues ?? {})[firstId] as FormValues) : DEFAULT_VALUES;
+              const firstVals = (firstId && pulledVals[firstId]) || DEFAULT_VALUES;
               form.reset(firstVals);
               resetFieldArrays(firstVals);
               schedulePush(ds, 0);

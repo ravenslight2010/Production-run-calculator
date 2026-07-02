@@ -339,6 +339,38 @@ function profileObjHasRealData(p: Record<string, unknown>): boolean {
   return false;
 }
 
+/**
+ * Backfill a run's sauce fields from the CURRENT saved profile when the run
+ * carries none. Scheduled/imported runs snapshot the profile at scheduling
+ * time — a sauce recipe added to the profile afterward never reached them
+ * (applicator fields looked "auto-applied" only because they were present at
+ * snapshot time, while the sauce stayed blank). Fills blanks only — never
+ * overwrites a sauce the run already has. Mobile parity: its pull-up
+ * (applyScheduledDay) spreads the live profile, so it already behaves this way.
+ */
+export function backfillSauceFromProfile(
+  values: FormValues,
+  brand: string | undefined,
+  flavor: string | undefined,
+): FormValues {
+  if (!brand) return values;
+  const hasName = (values.frontlineRecipeName ?? "").trim() !== "";
+  const hasRows = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+  if (hasName || hasRows) return values;
+  const profile = loadProfile(brand, flavor ?? "");
+  if (!profile) return values;
+  const pName = (profile.frontlineRecipeName ?? "").trim();
+  const pRows = (profile.frontlineRecipe ?? []).filter(r => Number(r.lbs ?? 0) > 0);
+  if (!pName && pRows.length === 0) return values;
+  const out: FormValues = { ...values };
+  if (pName) out.frontlineRecipeName = pName;
+  if (pRows.length) out.frontlineRecipe = profile.frontlineRecipe;
+  if (!(Number(out.sauceOzPerPizza ?? 0) > 0) && Number(profile.sauceOzPerPizza ?? 0) > 0) {
+    out.sauceOzPerPizza = profile.sauceOzPerPizza;
+  }
+  return out;
+}
+
 /** True when the stored profile for brand+flavor has real recipe/applicator data. */
 export function profileHasRealData(brand: string, flavor: string): boolean {
   try {
