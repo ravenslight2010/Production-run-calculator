@@ -390,8 +390,62 @@ export function loadDayState(): DayState {
   return freshDayState();
 }
 
-export function saveDayState(ds: DayState): void {
-  try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...ds, date: todayStr() })); } catch {}
+// True when two run objects carry the same metadata, ignoring the LWW stamp
+// itself. Used to decide whether a save actually changed a run's meta.
+function runMetaEquals(a: RunMeta, b: RunMeta): boolean {
+  const { metaUpdatedAt: _a, ...restA } = a;
+  const { metaUpdatedAt: _b, ...restB } = b;
+  return deepEqual(restA, restB);
+}
+
+// Diff-stamp each run's lifecycle/metadata against the currently STORED copy:
+// a run whose meta changed (or is new) gets metaUpdatedAt = now; an unchanged
+// run keeps its prior stamp. Centralized here so EVERY local mutation path
+// (start/pause/resume/end, stoppages, notes, …) is stamped without touching
+// each call site. The sync-receive path passes { stampMeta: false } so runs
+// adopted FROM a peer keep the peer's stamp instead of being re-claimed as a
+// local edit (which would defeat the newer-stamp-wins merge and start echo wars).
+export function saveDayState(ds: DayState, opts?: { stampMeta?: boolean }): void {
+  let toSave = ds;
+  if (opts?.stampMeta !== false) {
+    try {
+      const stored = loadDayState();
+      const storedById = new Map(stored.runs.map(r => [r.id, r]));
+      const now = Date.now();
+      let changed = false;
+      const runs = ds.runs.map(r => {
+        const prev = storedById.get(r.id);
+        if (prev && runMetaEquals(r, prev)) {
+          // Unchanged meta: keep the strongest stamp either copy carries.
+          const keep = Math.max(r.metaUpdatedAt ?? 0, prev.metaUpdatedAt ?? 0);
+          if (keep !== (r.metaUpdatedAt ?? 0)) { changed = true; return { ...r, metaUpdatedAt: keep }; }
+          return r;
+        }
+        changed = true;
+        return { ...r, metaUpdatedAt: now };
+      });
+      if (changed) toSave = { ...ds, runs };
+    } catch {}
+  }
+  try { localStorage.setItem(DAY_KEY, JSON.stringify({ ...toSave, date: todayStr() })); } catch {}
+}
+
+// Overlay each run's durable metaUpdatedAt (stamped by saveDayState into
+// localStorage) onto an in-memory run list before pushing it to /api/sync.
+// React state doesn't carry the fresh stamps (mutation sites don't stamp — the
+// diff-stamp lives in saveDayState), so the push payload must re-attach them or
+// the server/peers could never tell our just-started run is the newer copy.
+export function overlayRunMetaStamps(runs: RunMeta[]): RunMeta[] {
+  try {
+    const stored = loadDayState();
+    const storedById = new Map(stored.runs.map(r => [r.id, r]));
+    return runs.map(r => {
+      const stamp = Math.max(r.metaUpdatedAt ?? 0, storedById.get(r.id)?.metaUpdatedAt ?? 0);
+      return stamp > 0 && stamp !== r.metaUpdatedAt ? { ...r, metaUpdatedAt: stamp } : r;
+    });
+  } catch {
+    return runs;
+  }
 }
 
 export function loadHistory(): HistoryDay[] {

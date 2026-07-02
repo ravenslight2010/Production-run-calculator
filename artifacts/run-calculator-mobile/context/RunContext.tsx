@@ -242,6 +242,12 @@ export interface RunState {
   isRunning: boolean;
   actualCases?: number;
   wasteLbs?: number;
+  // Last-write-wins stamp for this run's lifecycle fields (startedAt, endedAt,
+  // isRunning, stoppages, actualCases, wasteLbs). Bumped whenever one of those
+  // changes locally; the sync merge (mapping.ts, server, web) keeps the
+  // strictly-newer-stamped copy so a just-started run can't be clobbered back
+  // to "unstarted" by a stale peer/server copy (web parity).
+  metaUpdatedAt?: number;
 }
 
 export interface RunCalc {
@@ -448,6 +454,21 @@ function makeNewRun(overrides?: Partial<RunSettings>): RunState {
     stoppages: [],
     isRunning: false,
   };
+}
+
+// True when a run mutation touched its lifecycle metadata (the fields the
+// per-run metaUpdatedAt stamp protects). Settings/progress are excluded — they
+// converge via the per-run VALUE stamps instead.
+function runLifecycleChanged(a: RunState, b: RunState): boolean {
+  return (
+    a.startedAt !== b.startedAt ||
+    a.endedAt !== b.endedAt ||
+    a.isRunning !== b.isRunning ||
+    a.actualCases !== b.actualCases ||
+    a.wasteLbs !== b.wasteLbs ||
+    a.stoppages !== b.stoppages &&
+      JSON.stringify(a.stoppages) !== JSON.stringify(b.stoppages)
+  );
 }
 
 // Freeze a run at a time boundary so archived history is immutable: stop the
@@ -2325,7 +2346,20 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     (updater: (prev: RunState) => RunState) => {
       setAppState((prev) => {
         const runs = [...prev.runs];
-        runs[prev.currentIndex] = updater(runs[prev.currentIndex]);
+        const before = runs[prev.currentIndex];
+        let after = updater(before);
+        // Diff-stamp the run's lifecycle metadata (web parity with
+        // saveDayState's central diff-stamp): when a lifecycle field actually
+        // changed, bump metaUpdatedAt so the sync merges (mobile receive,
+        // server union, web receive) keep this copy over a stale peer's —
+        // e.g. a just-started run surviving an app reload before the push
+        // landed. Settings/progress edits are covered by the per-run VALUE
+        // stamps and must NOT bump this, or an idle value edit could shadow
+        // a peer's genuine lifecycle change.
+        if (after !== before && runLifecycleChanged(before, after)) {
+          after = { ...after, metaUpdatedAt: Date.now() };
+        }
+        runs[prev.currentIndex] = after;
         const next = { ...prev, runs };
         persist(next);
         return next;
@@ -2381,9 +2415,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         });
         const runs = prev.runs.map((r, i) =>
           i === prev.currentIndex
-            ? { ...r, isRunning: true, startedAt: r.startedAt ?? now, endedAt: undefined }
+            ? { ...r, isRunning: true, startedAt: r.startedAt ?? now, endedAt: undefined, metaUpdatedAt: now }
             : r.startedAt != null && r.endedAt == null
-              ? { ...r, isRunning: false, endedAt: now }
+              ? { ...r, isRunning: false, endedAt: now, metaUpdatedAt: now }
               : r,
         );
         const next = { ...prev, runs };
@@ -2474,7 +2508,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const updateRunMeta = useCallback(
     (id: string, partial: Partial<Pick<RunState, "actualCases" | "wasteLbs">>) => {
       setAppState((prev) => {
-        const runs = prev.runs.map((r) => (r.id === id ? { ...r, ...partial } : r));
+        const runs = prev.runs.map((r) => {
+          if (r.id !== id) return r;
+          const after = { ...r, ...partial };
+          // actualCases/wasteLbs are lifecycle metadata protected by the
+          // per-run LWW stamp — bump it on a real change (this path bypasses
+          // updateCurrentRun's central diff-stamp).
+          return runLifecycleChanged(r, after)
+            ? { ...after, metaUpdatedAt: Date.now() }
+            : after;
+        });
         const next = { ...prev, runs };
         persist(next);
         return next;

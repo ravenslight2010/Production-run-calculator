@@ -104,6 +104,11 @@ function cloneRows(rows: RecipeRow[] | WebRecipeRow[] | undefined): WebRecipeRow
 // (pausedAt, actualCases, wasteLbs, gapType, gapNote) are carried over from it
 // so a mobile write doesn't clobber them.
 export function runToMeta(run: RunState, rawMeta?: WebRunMeta): WebRunMeta {
+  // Push the strongest lifecycle stamp we know of: our own (bumped on local
+  // start/end/stoppage changes) or the last remote copy's. Carrying the remote
+  // stamp forward on non-lifecycle pushes keeps them tied with the stored row,
+  // so the server's tie→incoming rule still lets settings/notes edits through.
+  const metaStamp = Math.max(run.metaUpdatedAt ?? 0, rawMeta?.metaUpdatedAt ?? 0);
   return {
     ...(rawMeta ?? {}),
     id: run.id,
@@ -114,6 +119,7 @@ export function runToMeta(run: RunState, rawMeta?: WebRunMeta): WebRunMeta {
     subTab: run.progress.subTab,
     notes: run.settings.notes,
     stoppages: (run.stoppages ?? []).map(mobileStoppageToWeb),
+    ...(metaStamp > 0 ? { metaUpdatedAt: metaStamp } : {}),
   };
 }
 
@@ -310,6 +316,8 @@ function metaToRun(
     startedAt: meta.startedAt,
     endedAt: meta.endedAt,
     isRunning: !!meta.startedAt && !meta.endedAt && !meta.pausedAt,
+    metaUpdatedAt:
+      typeof meta.metaUpdatedAt === "number" ? meta.metaUpdatedAt : undefined,
   };
 }
 
@@ -627,7 +635,26 @@ export function applyPayloadToState(
         rejectedStale = true;
         return prevRun;
       }
-      return metaToRun(meta, payload.runValues?.[meta.id], prevRun);
+      const mapped = metaToRun(meta, payload.runValues?.[meta.id], prevRun);
+      // Per-run lifecycle LWW (web/server parity): when OUR lifecycle stamp is
+      // strictly newer than the remote copy's, overlay our lifecycle fields onto
+      // the mapped run — so a just-started run can't be flipped back to
+      // "unstarted" by a stale remote. Overlay (not wholesale prevRun) so the
+      // remote's newer VALUES still land; re-push heals the shared row.
+      if (prevRun && (prevRun.metaUpdatedAt ?? 0) > (meta.metaUpdatedAt ?? 0)) {
+        rejectedStale = true;
+        return {
+          ...mapped,
+          startedAt: prevRun.startedAt,
+          endedAt: prevRun.endedAt,
+          isRunning: prevRun.isRunning,
+          stoppages: prevRun.stoppages,
+          actualCases: prevRun.actualCases,
+          wasteLbs: prevRun.wasteLbs,
+          metaUpdatedAt: prevRun.metaUpdatedAt,
+        };
+      }
+      return mapped;
     });
     // Runs are day-state and converge like the substitution/staging overlays below:
     // on a true daily reset adopt the remote runs wholesale; during same-day

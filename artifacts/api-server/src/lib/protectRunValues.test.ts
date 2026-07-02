@@ -204,3 +204,86 @@ describe("protectRunValues", () => {
     expect(protectRunValues("x", { runValues: {} })).toBe("x");
   });
 });
+
+describe("protectRunValues run-list lifecycle LWW (metaUpdatedAt)", () => {
+  type RunMeta = {
+    id: string;
+    startedAt?: number;
+    endedAt?: number;
+    metaUpdatedAt?: number;
+  };
+  type DayPayload = {
+    dayState: { runs: RunMeta[]; resetAt?: number };
+    runValues: Record<string, unknown>;
+    runValuesUpdatedAt: Record<string, number>;
+    deletedItems?: Record<string, string[]>;
+  };
+  const mk = (runs: RunMeta[], extra?: Partial<DayPayload>): DayPayload => ({
+    dayState: { runs, resetAt: 500 },
+    runValues: {},
+    runValuesUpdatedAt: {},
+    ...extra,
+  });
+  const outRuns = (out: unknown): RunMeta[] =>
+    (out as DayPayload).dayState.runs;
+
+  it("keeps the STORED run copy when its metaUpdatedAt is strictly newer (a stale peer can't un-start a run)", () => {
+    // Stored row has the just-started run (stamped 2000); a stale peer pushes
+    // the same run still unstarted with an older stamp. The started copy wins.
+    const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 2000 }]);
+    const incoming = mk([{ id: "r1", metaUpdatedAt: 1000 }]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out).toEqual([{ id: "r1", startedAt: 111, metaUpdatedAt: 2000 }]);
+  });
+
+  it("accepts the INCOMING run copy when its metaUpdatedAt is strictly newer", () => {
+    const existing = mk([{ id: "r1", metaUpdatedAt: 1000 }]);
+    const incoming = mk([{ id: "r1", startedAt: 222, metaUpdatedAt: 2000 }]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out).toEqual([{ id: "r1", startedAt: 222, metaUpdatedAt: 2000 }]);
+  });
+
+  it("keeps incoming on EQUAL stamps (tie -> incoming, the pre-stamp status quo)", () => {
+    const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 1000 }]);
+    const incoming = mk([{ id: "r1", endedAt: 333, metaUpdatedAt: 1000 }]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out).toEqual([{ id: "r1", endedAt: 333, metaUpdatedAt: 1000 }]);
+  });
+
+  it("keeps incoming when NEITHER side carries a stamp (legacy payloads unchanged)", () => {
+    const existing = mk([{ id: "r1", startedAt: 111 }]);
+    const incoming = mk([{ id: "r1" }]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out).toEqual([{ id: "r1" }]);
+  });
+
+  it("keeps a stamped STORED copy over an UNSTAMPED incoming one", () => {
+    const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 2000 }]);
+    const incoming = mk([{ id: "r1" }]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out).toEqual([{ id: "r1", startedAt: 111, metaUpdatedAt: 2000 }]);
+  });
+
+  it("preserves incoming-first ordering and appends stored-only runs", () => {
+    const existing = mk([
+      { id: "r1", metaUpdatedAt: 1000 },
+      { id: "r3", metaUpdatedAt: 1000 },
+    ]);
+    const incoming = mk([
+      { id: "r2", metaUpdatedAt: 1000 },
+      { id: "r1", startedAt: 9, metaUpdatedAt: 3000 },
+    ]);
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out.map((r) => r.id)).toEqual(["r2", "r1", "r3"]);
+    expect(out[1]).toEqual({ id: "r1", startedAt: 9, metaUpdatedAt: 3000 });
+  });
+
+  it("still filters tombstoned runs even when the stored copy is newer-stamped", () => {
+    const existing = mk([{ id: "r1", startedAt: 111, metaUpdatedAt: 9999 }]);
+    const incoming = mk([{ id: "r2", metaUpdatedAt: 1 }], {
+      deletedItems: { runs: ["r1"] },
+    });
+    const out = outRuns(protectRunValues(incoming, existing));
+    expect(out.map((r) => r.id)).toEqual(["r2"]);
+  });
+});

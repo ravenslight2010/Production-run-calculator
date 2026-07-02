@@ -39,6 +39,12 @@ export interface WebRunMeta {
   gapType?: "switchover" | "break";
   gapNote?: string;
   stoppages?: WebStoppage[];
+  // Last-write-wins stamp for the run's lifecycle/metadata (startedAt, endedAt,
+  // stoppages, …). Every merge point (web receive, mobile receive, server
+  // run-list union) keeps the strictly-newer-stamped run copy, so a just-started
+  // run can't be clobbered back to "unstarted" by a stale peer/server copy.
+  // Absent stamps fall back to the old remote-wins behavior.
+  metaUpdatedAt?: number;
 }
 
 // Web per-run config + live progress. The web app folds progress counters

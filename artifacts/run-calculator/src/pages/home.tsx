@@ -69,6 +69,7 @@ import {
   freshDayState,
   loadDayState,
   saveDayState,
+  overlayRunMetaStamps,
   loadHistory,
   archiveDayToHistory,
   loadRunValues,
@@ -3494,6 +3495,18 @@ export default function Home() {
 
       // ── Day state (runs + shiftNotes + runToTime) ──
       if (acceptRemoteDay) {
+        // If we're about to keep a strictly-newer-stamped LOCAL run over the
+        // remote copy (run lifecycle LWW below), flag a re-push so peers/server
+        // converge on ours. Computed here (against the same current state the
+        // updater sees) because `rejectedStale` is read right after this block,
+        // possibly before React runs the updater.
+        if (remoteResetAt <= localResetAt) {
+          const localMetaById = new Map(dayStateRef.current.runs.map(r => [r.id, r]));
+          if (payload.dayState.runs.some(rr => {
+            const lr = localMetaById.get(rr.id);
+            return !!lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0);
+          })) rejectedStale = true;
+        }
         setDayState(prev => {
           const isReset = remoteResetAt > localResetAt;
           // Runs are day-state and converge like the substitution/staging overlays
@@ -3506,9 +3519,22 @@ export default function Home() {
           const newRuns = isReset
             ? remoteRuns
             : (() => {
+                // Per-run lifecycle LWW: for a run BOTH sides have, keep whichever
+                // copy carries the strictly-newer metaUpdatedAt stamp. This is what
+                // stops "I pressed Start, refreshed, and the run was unstarted":
+                // the local stored run was stamped by startRun's saveDayState, so a
+                // stale server copy (the push hadn't landed before the refresh)
+                // can't clobber it back to unstarted. Absent/equal stamps keep the
+                // old remote-wins behavior; a kept-local run triggers the
+                // rejectedStale re-push below so peers converge on ours.
+                const localById = new Map(prev.runs.map(r => [r.id, r]));
+                const mergedRemote = remoteRuns.map(rr => {
+                  const lr = localById.get(rr.id);
+                  return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
+                });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
                 const localOnly = prev.runs.filter(r => !remoteIds.has(r.id));
-                return [...remoteRuns, ...localOnly].filter(
+                return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
                 );
               })();
@@ -3558,7 +3584,10 @@ export default function Home() {
           // Skip the re-render when nothing actually changed (sync echoes its own
           // pushes ~every 10s); a fresh object every time reset open-menu scroll.
           if (JSON.stringify(newDs) === JSON.stringify(prev)) return prev;
-          saveDayState(newDs);
+          // stampMeta:false — the merged runs carry the winning side's stamp
+          // already; re-stamping a remote-adopted run here would re-claim it as
+          // a local edit and defeat the newer-stamp-wins merge on every peer.
+          saveDayState(newDs, { stampMeta: false });
           return newDs;
         });
         if (payload.dayState.runToTime) setRunToTime(payload.dayState.runToTime);
@@ -4050,7 +4079,7 @@ export default function Home() {
       }
     }
     return {
-      dayState: { runs: ds.runs, shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
+      dayState: { runs: overlayRunMetaStamps(ds.runs), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
       runValuesUpdatedAt: loadRunValuesUpdated(),
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),

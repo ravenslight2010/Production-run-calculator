@@ -233,14 +233,35 @@ export function protectRunValues(incoming: unknown, existing: unknown): unknown 
 
   // ── Additively union the run LIST by id ────────────────────────────────────
   // Incoming order first, then stored-only runs appended; tombstoned runs out.
-  const mergedRuns: unknown[] = [];
-  const seen = new Set<string>();
-  for (const r of [...asArray(inDay?.runs), ...asArray(exDay?.runs)]) {
+  //
+  // Per-run lifecycle LWW: each run object may carry a `metaUpdatedAt` stamp,
+  // bumped by the clients whenever the run's lifecycle/metadata (startedAt,
+  // pausedAt, endedAt, stoppages, notes, …) actually changed locally. When BOTH
+  // sides have the same run id, keep the strictly-newer-stamped copy — so a
+  // stale peer's push can't clobber a just-started run back to "unstarted" on
+  // the shared row. Absent/equal stamps keep the old incoming-wins behavior.
+  const metaStampOf = (r: unknown): number =>
+    isPlainObject(r) ? asNumber(r.metaUpdatedAt) : 0;
+  const runById = new Map<string, unknown>();
+  const runOrder: string[] = [];
+  for (const r of asArray(inDay?.runs)) {
     const id = runIdOf(r);
-    if (!id || tombstoned.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    mergedRuns.push(r);
+    if (!id || tombstoned.has(id) || runById.has(id)) continue;
+    runById.set(id, r);
+    runOrder.push(id);
   }
+  for (const r of asArray(exDay?.runs)) {
+    const id = runIdOf(r);
+    if (!id || tombstoned.has(id)) continue;
+    if (!runById.has(id)) {
+      runById.set(id, r);
+      runOrder.push(id);
+    } else if (metaStampOf(r) > metaStampOf(runById.get(id))) {
+      // Stored copy is strictly newer than the incoming one — keep it.
+      runById.set(id, r);
+    }
+  }
+  const mergedRuns: unknown[] = runOrder.map((id) => runById.get(id));
 
   // ── Per-run VALUE register merge (strictly-newer-stamp wins), additive ──────
   const outVals: Record<string, unknown> = {};

@@ -223,6 +223,14 @@ export type RunMeta = {
   // the schedule replaces imported runs on a given date (preserving manual runs
   // and any imported run already started/ended). Absent ⇒ manual run.
   imported?: boolean;
+  // Last-write-wins stamp for the run's lifecycle/metadata (startedAt, pausedAt,
+  // endedAt, stoppages, notes, …). Bumped by saveDayState whenever this run's
+  // meta actually changed locally. Every merge point (web receive, mobile
+  // receive, server run-list union) keeps the strictly-newer-stamped run object,
+  // so a just-started run can't be clobbered back to "unstarted" by a stale
+  // peer/server copy (e.g. a refresh moments after pressing Start, before the
+  // push landed). Absent stamps fall back to the old remote-wins behavior.
+  metaUpdatedAt?: number;
 };
 
 export type DayState = {
