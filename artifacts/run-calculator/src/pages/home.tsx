@@ -10545,33 +10545,6 @@ export default function Home() {
                     </Card>
                   );
                 })()}
-                {/* Recipe Setup Needed (managers): upcoming scheduled runs whose
-                    brand+flavor has no saved profile (or a profile with no recipe
-                    rows). Their reorder demand silently falls back to defaults, so
-                    warn managers and let them jump to set the profile up.
-                    Detection is shared with mobile (replit.md parity). */}
-                {isManager &&
-                  (() => {
-                    const scheduledRuns = scheduledDays.flatMap((day) =>
-                      (day.runs ?? [])
-                        .filter((r) => r.brand)
-                        .map((r) => ({
-                          date: day.date,
-                          brand: r.brand,
-                          flavor: r.flavor,
-                          casesNeeded: r.casesNeeded,
-                        })),
-                    );
-                    return (
-                      <ScheduledRecipeWarningCard
-                        scheduledRuns={scheduledRuns}
-                        onSetup={(brand, flavor) => {
-                          if (currentRunId) updateRunMeta(currentRunId, { brand, flavor });
-                          setActiveTab("setup");
-                        }}
-                      />
-                    );
-                  })()}
                 {/* Reorder Now: cross-location on-hand at/below reorder threshold
                     once upcoming scheduled-run demand is subtracted. Scheduled
                     runs carry no recipe rows, so resolve each via its profile ->
@@ -13285,6 +13258,36 @@ export default function Home() {
                     <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                   </div>
                   <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-3 min-h-0">
+                    {/* Recipe Setup Needed (managers): upcoming scheduled runs whose
+                        brand+flavor has no saved profile (or a profile with no recipe
+                        rows). Their reorder demand silently falls back to defaults, so
+                        warn managers and let them jump to set the profile up. Lives on
+                        the Schedule screen (moved from Warehouse) so the warning sits
+                        beside the runs it's about. Detection stays in the shared
+                        @workspace/scheduled-recipe-check lib. */}
+                    {isManager &&
+                      (() => {
+                        const scheduledRuns = scheduledDays.flatMap((day) =>
+                          (day.runs ?? [])
+                            .filter((r) => r.brand)
+                            .map((r) => ({
+                              date: day.date,
+                              brand: r.brand,
+                              flavor: r.flavor,
+                              casesNeeded: r.casesNeeded,
+                            })),
+                        );
+                        return (
+                          <ScheduledRecipeWarningCard
+                            scheduledRuns={scheduledRuns}
+                            onSetup={(brand, flavor) => {
+                              if (currentRunId) updateRunMeta(currentRunId, { brand, flavor });
+                              setShowScheduleDialog(false);
+                              setActiveTab("setup");
+                            }}
+                          />
+                        );
+                      })()}
                     {scheduledDays.length === 0 ? (
                       <div className="text-center py-10">
                         <CalendarPlus className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />

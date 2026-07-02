@@ -6,7 +6,7 @@ import {
 } from "@workspace/scheduled-recipe-check";
 import { loadRawProfile } from "../storage";
 
-// Advisory "Recipe Setup Needed" card for the Warehouse tab (managers only).
+// Advisory "Recipe Setup Needed" card on the Scheduled Days screen (managers only).
 //
 // The reorder/transfer demand projections resolve each upcoming scheduled run to
 // its saved brand+flavor profile. When that profile is missing or carries no
