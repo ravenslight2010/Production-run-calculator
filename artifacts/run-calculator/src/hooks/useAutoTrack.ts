@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { type FormValues } from "../types";
 
@@ -27,8 +27,6 @@ interface AutoTrackParams {
   calc: AutoTrackCalc;
   v: AutoTrackValues;
   form: UseFormReturn<FormValues>;
-  /** Refresh interval in minutes between auto-track writes (default 5). */
-  intervalMin?: number;
 }
 
 interface AutoTrackResult {
@@ -43,24 +41,40 @@ interface AutoTrackResult {
     batches: number | null;
   } | null;
   autoSuppressUntilRef: React.MutableRefObject<number>;
-  lastAutoMinBucketRef: React.MutableRefObject<number>;
+  /** Force every counter's next tick to fire immediately (e.g. "Resume now"). */
+  fireAutoTrackNow: () => void;
+}
+
+// Each counter ticks at its own natural production pace, clamped to a sane
+// range: never faster than once per 2s (the app clock ticks per second) and
+// never slower than once per hour (a stalled/garbage rate must not freeze the
+// counter forever).
+function clampPeriodMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 60 * 60 * 1000;
+  return Math.min(60 * 60 * 1000, Math.max(2000, ms));
 }
 
 /**
- * Tracks expected progress automatically once per refresh-interval bucket
- * (configurable via `intervalMin`, default 5 minutes) while running.
+ * Tracks expected progress automatically while running. Each counter updates
+ * at its own natural production cadence instead of a fixed wall-clock interval:
  *
- * Skids/cases: applied INCREMENTALLY — each bucket adds the production since the
- * last bucket on top of the current (possibly manually-entered) value. This means
+ *  • cases (and therefore skids): every time-to-run-one-case
+ *    (pizzasPerCase / ppm). The skid counter is derived from the same total, so
+ *    it rolls the moment the case count completes a skid.
+ *  • trays: every time-to-consume-one-tray (perTray / ppm).
+ *  • batches: every quarter-batch duration (perBatch / ppm / 4) — the integer
+ *    count still drops once per full batch, via the fractional remainder carry.
+ *
+ * Skids/cases: applied INCREMENTALLY — each tick adds the production since the
+ * last tick on top of the current (possibly manually-entered) value. This means
  * a manual correction by the operator becomes the new baseline and auto-track
  * continues forward from it instead of overwriting it with its own absolute
- * estimate. (The previous absolute approach reverted manual entries the moment the
- * suppression window expired.) On the first bucket after a (re)start/switch the
- * absolute count is seeded only when there is no existing progress, so reloads and
- * run switches never double-count saved progress.
+ * estimate. On the first tick after a (re)start/switch the absolute count is
+ * seeded only when there is no existing progress, so reloads and run switches
+ * never double-count saved progress.
  *
- * Trays/batches: incremental decrement per bucket — subtracts consumption for the
- * actual duration since the last bucket fired.
+ * Trays/batches: incremental decrement per tick — subtracts consumption for the
+ * actual duration since that counter's last tick (capped to 2 periods).
  */
 export function useAutoTrack({
   runId,
@@ -70,22 +84,24 @@ export function useAutoTrack({
   calc,
   v,
   form,
-  intervalMin,
 }: AutoTrackParams): AutoTrackResult {
-  // Sanitize: a bad/missing setting falls back to the historical 5-minute cadence.
-  const bucketMin = Math.max(1, Math.min(60, Math.floor(Number(intervalMin)) || 5));
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   const autoSuppressUntilRef = useRef<number>(0);
-  const lastAutoMinBucketRef = useRef<number>(-1);
-  // Wall-clock timestamp (ms) when the last bucket write happened.
-  // Used to compute actual duration for incremental tray/batch decrement.
-  const lastBucketTimeMsRef = useRef<number>(0);
-  // expectedCases value at the last bucket — the baseline the incremental
-  // skids/cases delta is measured from. -1 = "not baselined yet" (first bucket
+  // Per-counter "next tick due at" wall-clock timestamps (ms). 0 = fire on the
+  // next tick (fresh baseline / forced resume).
+  const caseNextDueMsRef = useRef<number>(0);
+  const trayNextDueMsRef = useRef<number>(0);
+  const batchNextDueMsRef = useRef<number>(0);
+  // Wall-clock ms of each consumption counter's last tick — drives the
+  // incremental decrement (consumption for the actual elapsed duration).
+  const trayLastMsRef = useRef<number>(0);
+  const batchLastMsRef = useRef<number>(0);
+  // expectedCases value at the last case tick — the baseline the incremental
+  // skids/cases delta is measured from. -1 = "not baselined yet" (first tick
   // after a mount/reset).
   const lastExpectedCasesRef = useRef<number>(-1);
-  // Fractional tray/batch consumption carried between buckets so sub-unit
-  // depletion per bucket accumulates instead of being lost to Math.floor (which
+  // Fractional tray/batch consumption carried between ticks so sub-unit
+  // depletion per tick accumulates instead of being lost to Math.floor (which
   // would freeze slow-depleting dough — especially batches — at its start value).
   const traysRemainderRef = useRef<number>(0);
   const batchesRemainderRef = useRef<number>(0);
@@ -132,123 +148,115 @@ export function useAutoTrack({
     elapsedBatchSec,
   ]);
 
-  // Baseline resets are declared BEFORE the bucket-write effect below on purpose:
+  const resetBookkeeping = useCallback(() => {
+    caseNextDueMsRef.current = 0;
+    trayNextDueMsRef.current = 0;
+    batchNextDueMsRef.current = 0;
+    trayLastMsRef.current = 0;
+    batchLastMsRef.current = 0;
+    lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
+  }, []);
+
+  // Cancel the wait until every counter's next tick (used by "Resume now" and
+  // the Auto toggle). Unlike resetBookkeeping this keeps the expectedCases
+  // baseline and last-tick timestamps, so resuming never causes a catch-up jump
+  // over a manual edit.
+  const fireAutoTrackNow = useCallback(() => {
+    caseNextDueMsRef.current = 0;
+    trayNextDueMsRef.current = 0;
+    batchNextDueMsRef.current = 0;
+  }, []);
+
+  // Baseline resets are declared BEFORE the tick-write effect below on purpose:
   // React runs effects in declaration order, so on mount (and on runId/toggle
   // changes) the refs are reset FIRST and the write effect then fires exactly once
   // with clean baselines. With the old order (write first, resets after), the
-  // mount pass wrote a bucket, the resets then wiped the bookkeeping (losing the
-  // fractional tray/batch remainder carry) and re-armed the SAME bucket to fire
-  // again on the next tick — double-decrementing trays and freezing slow-depleting
-  // batches whose per-bucket consumption is < 1 unit.
+  // mount pass wrote, the resets then wiped the bookkeeping (losing the
+  // fractional tray/batch remainder carry) and re-armed the SAME tick to fire
+  // again on the next second — double-decrementing trays and freezing
+  // slow-depleting batches whose per-tick consumption is < 1 unit.
 
-  // Reset bucket bookkeeping when the run stops so the next run starts fresh.
+  // Reset bookkeeping when the run stops so the next run starts fresh.
   useEffect(() => {
     if (runStatus === "pending" || runStatus === "ended") {
-      lastBucketTimeMsRef.current = 0;
-      lastAutoMinBucketRef.current = -1;
-      lastExpectedCasesRef.current = -1;
-      traysRemainderRef.current = 0;
-      batchesRemainderRef.current = 0;
+      resetBookkeeping();
     }
-  }, [runStatus]);
+  }, [runStatus, resetBookkeeping]);
 
   // Re-baseline when the active run changes (switching runs / first mount) so the
   // incremental delta is never computed against another run's numbers, and a run
   // we switch or reload into is not double-counted.
   useEffect(() => {
-    lastBucketTimeMsRef.current = 0;
-    lastAutoMinBucketRef.current = -1;
-    lastExpectedCasesRef.current = -1;
-    traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
-  }, [runId]);
+    resetBookkeeping();
+  }, [runId, resetBookkeeping]);
 
-  // Re-baseline when auto-track is toggled on so the first bucket after re-enabling
+  // Re-baseline when auto-track is toggled on so the first tick after re-enabling
   // continues from the current value instead of adding all the production that
   // accumulated while it was off.
   useEffect(() => {
-    lastBucketTimeMsRef.current = 0;
-    lastAutoMinBucketRef.current = -1;
-    lastExpectedCasesRef.current = -1;
-    traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
-  }, [autoTrackProgress]);
+    resetBookkeeping();
+  }, [autoTrackProgress, resetBookkeeping]);
 
-  // Re-baseline when the refresh interval setting changes so the bucket index
-  // (which is derived from the interval) can't collide with a stale marker.
-  useEffect(() => {
-    lastBucketTimeMsRef.current = 0;
-    lastAutoMinBucketRef.current = -1;
-    lastExpectedCasesRef.current = -1;
-    traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
-  }, [bucketMin]);
-
-  // Apply expected values once per refresh-interval bucket while running.
+  // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
     if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
 
-    const bucket = Math.floor(nowTime.getTime() / (bucketMin * 60 * 1000));
-    if (bucket === lastAutoMinBucketRef.current) return;
-
-    // How long since the last bucket fired (capped to 2 intervals to avoid huge jumps).
     const nowMs = nowTime.getTime();
-    const prevMs = lastBucketTimeMsRef.current;
-    const bucketDurationMin = prevMs > 0
-      ? Math.min(bucketMin * 2, (nowMs - prevMs) / 60000)
-      : bucketMin; // first bucket — assume one full interval
+    // While the manual-edit suppression window is open, keep baselines current
+    // but do not write — the operator is taking over. Bookkeeping still
+    // advances so the window expiring never causes a catch-up jump that wipes
+    // the operator's manual edit.
+    const suppressed = Date.now() < autoSuppressUntilRef.current;
 
-    const expectedCases = autoTrackSuggestion.expectedCases;
-    // Baseline the incremental delta off the UNCLAMPED total so the count keeps
-    // advancing even after the time-based estimate saturates at casesNeeded (e.g.
-    // the estimate ran ahead, the operator corrected the count down, then hit
-    // "Resume now"). Using the clamped value here would pin the delta at 0 and the
-    // count would never climb again.
-    const expectedRaw = autoTrackSuggestion.expectedCasesRaw;
-    const prevExpected = lastExpectedCasesRef.current;
+    // ── Cases (and skids, derived from the same total): tick once per case. ──
+    if (calc.ppm > 0 && v.pizzasPerCase > 0 && nowMs >= caseNextDueMsRef.current) {
+      const casePeriodMs = clampPeriodMs((v.pizzasPerCase / calc.ppm) * 60000);
+      const prevExpected = lastExpectedCasesRef.current;
+      // Baseline the incremental delta off the UNCLAMPED total so the count keeps
+      // advancing even after the time-based estimate saturates at casesNeeded (e.g.
+      // the estimate ran ahead, the operator corrected the count down, then hit
+      // "Resume now"). Using the clamped value here would pin the delta at 0 and
+      // the count would never climb again.
+      const expectedRaw = autoTrackSuggestion.expectedCasesRaw;
+      const expectedCases = autoTrackSuggestion.expectedCases;
+      caseNextDueMsRef.current = nowMs + casePeriodMs;
+      lastExpectedCasesRef.current = expectedRaw;
 
-    // Always advance the bucket bookkeeping — even while suppressed — so the
-    // suppression window expiring never causes a catch-up jump that wipes the
-    // operator's manual edit.
-    lastAutoMinBucketRef.current = bucket;
-    lastBucketTimeMsRef.current = nowMs;
-    lastExpectedCasesRef.current = expectedRaw;
-
-    // While the manual-edit suppression window is open, keep baselines current but
-    // do not write — the operator is taking over.
-    if (Date.now() < autoSuppressUntilRef.current) return;
-
-    // Skids / cases.
-    const cps = v.casesPerSkid;
-    const curTotal =
-      (Number(form.getValues("skidsCompleted")) || 0) * cps +
-      (Number(form.getValues("casesOnCurrentSkid")) || 0);
-    if (prevExpected < 0) {
-      // First bucket after a (re)start/switch: seed the absolute count only when
-      // there is no progress yet. If progress already exists (reload / switching
-      // into a run that's already going / a prior manual entry), just baseline so
-      // we don't double-count.
-      if (curTotal === 0 && expectedCases > 0) {
-        const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
-        form.setValue("skidsCompleted", Math.floor(seedTotal / cps), { shouldDirty: true });
-        form.setValue("casesOnCurrentSkid", seedTotal % cps, { shouldDirty: true });
-      }
-    } else {
-      // Add the production since the last bucket on top of the current value, so a
-      // manual correction is preserved and tracking continues forward from it.
-      const deltaCases = Math.max(0, expectedRaw - prevExpected);
-      if (deltaCases > 0) {
-        const target = curTotal + deltaCases;
-        // Never pull a value down below what the operator already has on the floor.
-        const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
-        if (newTotal !== curTotal) {
-          form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
-          form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+      if (!suppressed) {
+        const cps = v.casesPerSkid;
+        const curTotal =
+          (Number(form.getValues("skidsCompleted")) || 0) * cps +
+          (Number(form.getValues("casesOnCurrentSkid")) || 0);
+        if (prevExpected < 0) {
+          // First tick after a (re)start/switch: seed the absolute count only when
+          // there is no progress yet. If progress already exists (reload / switching
+          // into a run that's already going / a prior manual entry), just baseline so
+          // we don't double-count.
+          if (curTotal === 0 && expectedCases > 0) {
+            const seedTotal = v.casesNeeded > 0 ? Math.min(v.casesNeeded, expectedCases) : expectedCases;
+            form.setValue("skidsCompleted", Math.floor(seedTotal / cps), { shouldDirty: true });
+            form.setValue("casesOnCurrentSkid", seedTotal % cps, { shouldDirty: true });
+          }
+        } else {
+          // Add the production since the last tick on top of the current value, so a
+          // manual correction is preserved and tracking continues forward from it.
+          const deltaCases = Math.max(0, expectedRaw - prevExpected);
+          if (deltaCases > 0) {
+            const target = curTotal + deltaCases;
+            // Never pull a value down below what the operator already has on the floor.
+            const newTotal = v.casesNeeded > 0 ? Math.min(target, Math.max(curTotal, v.casesNeeded)) : target;
+            if (newTotal !== curTotal) {
+              form.setValue("skidsCompleted", Math.floor(newTotal / cps), { shouldDirty: true });
+              form.setValue("casesOnCurrentSkid", newTotal % cps, { shouldDirty: true });
+            }
+          }
         }
       }
     }
 
-    // Trays / batches: incremental decrement for this bucket's duration.
+    // Trays / batches: incremental decrement, each at its own cadence.
     // Works after page reloads and naturally handles mid-run replenishments.
     // Stop once all the dough the run needs has been fed onto the line — dough
     // enters at the front (no tunnel offset), so feeding finishes when the
@@ -261,20 +269,45 @@ export function useAutoTrack({
       calc.ppm > 0 &&
       v.pizzasPerCase > 0 &&
       Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase) >= v.casesNeeded;
-    if (!doughFeedComplete && calc.perTray > 0 && calc.ppm > 0) {
-      const traysExact = (bucketDurationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
-      const traysConsumed = Math.floor(traysExact);
-      traysRemainderRef.current = traysExact - traysConsumed;
-      if (traysConsumed > 0) {
-        form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
+
+    // ── Trays: tick once per time-to-consume-one-tray. ──
+    if (calc.perTray > 0 && calc.ppm > 0 && nowMs >= trayNextDueMsRef.current) {
+      const trayPeriodMs = clampPeriodMs((calc.perTray / calc.ppm) * 60000);
+      const prevMs = trayLastMsRef.current;
+      // Consumption for the actual duration since this counter's last tick
+      // (capped to 2 periods to avoid huge jumps); assume one full period on
+      // the first tick.
+      const durationMin = prevMs > 0
+        ? Math.min((trayPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+        : trayPeriodMs / 60000;
+      trayNextDueMsRef.current = nowMs + trayPeriodMs;
+      trayLastMsRef.current = nowMs;
+      if (!suppressed && !doughFeedComplete) {
+        const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
+        const traysConsumed = Math.floor(traysExact);
+        traysRemainderRef.current = traysExact - traysConsumed;
+        if (traysConsumed > 0) {
+          form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
+        }
       }
     }
-    if (!doughFeedComplete && calc.perBatch > 0 && calc.ppm > 0) {
-      const batchesExact = (bucketDurationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
-      const batchesConsumed = Math.floor(batchesExact);
-      batchesRemainderRef.current = batchesExact - batchesConsumed;
-      if (batchesConsumed > 0) {
-        form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
+
+    // ── Batches: tick once per quarter-batch duration. ──
+    if (calc.perBatch > 0 && calc.ppm > 0 && nowMs >= batchNextDueMsRef.current) {
+      const batchPeriodMs = clampPeriodMs((calc.perBatch / calc.ppm / 4) * 60000);
+      const prevMs = batchLastMsRef.current;
+      const durationMin = prevMs > 0
+        ? Math.min((batchPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+        : batchPeriodMs / 60000;
+      batchNextDueMsRef.current = nowMs + batchPeriodMs;
+      batchLastMsRef.current = nowMs;
+      if (!suppressed && !doughFeedComplete) {
+        const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
+        const batchesConsumed = Math.floor(batchesExact);
+        batchesRemainderRef.current = batchesExact - batchesConsumed;
+        if (batchesConsumed > 0) {
+          form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
+        }
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -285,6 +318,6 @@ export function useAutoTrack({
     setAutoTrackProgress,
     autoTrackSuggestion,
     autoSuppressUntilRef,
-    lastAutoMinBucketRef,
+    fireAutoTrackNow,
   };
 }

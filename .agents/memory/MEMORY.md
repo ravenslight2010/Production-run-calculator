@@ -90,7 +90,7 @@
 - [Freezer phase indicators](freezer-phase-indicators.md) — Run-tab auto-hiding "Freezer filling/emptying" banners; time-based phase detection gated on ppm>0 & freezerTime>0; running-only; web+mobile parity.
 - [Notification view re-fire](notification-view-refire.md) — sticky-true "completion" alerts (e.g. freezer empty) need an "armed while pending" Set latch, not a last-id ref, or browsing completed runs re-fires them; web+mobile parity.
 - [Run-complete alert timing](run-complete-alert-timing.md) — "time's up" fires only when ppm>0 AND time counted down (runWasTimedRef latch); web adjustedTimeSec falls back to totalTimeSec so it needs an explicit ppm>0 guard to match mobile's null minutesRemaining.
-- [Auto-track remainder carry](autotrack-remainder-carry.md) — remainder carry across buckets, reset-effects-before-write ordering, and user-set refresh interval (re-baseline on change); web+mobile parity.
+- [Auto-track remainder carry](autotrack-remainder-carry.md) — remainder carry, resets-before-write ordering, and per-counter rate-based cadence (fixed interval setting REJECTED); web+mobile parity.
 - [Draining-run selection](draining-run-selection.md) — packaging draining panel must filter-eligible-FIRST then pick latest endedAt (not pick-latest-then-bail); web must NOT reuse lastEndedRun; web+mobile parity.
 - [Multi-file AI import](multi-file-ai-import.md) — batched spec/photo import: 1 sequential AI call per file, fault-tolerant per-file reads (no raw Promise.all), merge/accumulate not clobber, cap+progress; web+mobile parity.
 - [Saved spec sheets + AI reconcile](saved-spec-reconcile.md) — max-2 saved spec sheets cross-ref'd vs CURRENT recipes; deterministic diff in @workspace/spec-reconcile, AI only narrates, must be rate-limited.

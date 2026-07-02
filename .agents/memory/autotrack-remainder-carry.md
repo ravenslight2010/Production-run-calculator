@@ -5,18 +5,19 @@ description: Why auto-track dough trays/batches must carry a fractional remainde
 
 # Auto-track tray/batch decrement must carry a fractional remainder
 
-Auto-track runs once per 5-min wall-clock bucket. Skids/cases advance via a
-**cumulative-floor delta** (`floor(cumulative) - prevFloored`), so sub-unit
-production is preserved across buckets. Trays/batches originally decremented with
-a fresh per-bucket `Math.floor((bucketDurationMin * ppm) / perUnit)`.
+Each auto-track counter ticks at its own natural production pace (see "Rate-based
+cadence" below). Skids/cases advance via a **cumulative-floor delta**
+(`floor(cumulative) - prevFloored`), so sub-unit production is preserved across
+ticks. Trays/batches originally decremented with a fresh per-tick
+`Math.floor((durationMin * ppm) / perUnit)`.
 
-**Bug:** any consumption under 1 unit *per bucket* floored to 0 and was lost
+**Bug:** any consumption under 1 unit *per tick* floored to 0 and was lost
 forever. For batches especially (`perBatch` = doughBatchYield, often hundreds of
-doughballs), one 5-min bucket consumes < 1 batch, so it floored to 0 every bucket
+doughballs), one tick consumes < 1 batch, so it floored to 0 every tick
 and batches never moved — user reported "trays and batches are not auto updating".
 
 **Fix / invariant:** carry a fractional remainder ref per unit:
-`exact = bucketConsumption + remainder; consumed = floor(exact); remainder = exact - consumed`.
+`exact = tickConsumption + remainder; consumed = floor(exact); remainder = exact - consumed`.
 Reset the remainder refs wherever the other auto-track baselines reset (run
 end/pending, active-run/runId change, autoTrack toggle), so a new/switched run
 starts clean.
@@ -27,8 +28,9 @@ cumulative-delta pattern used by skids/cases does not have it.
 
 **How to apply:** mirror web `useAutoTrack.ts` and mobile `RunContext.tsx`
 auto-track effect exactly (strict parity). Remainder is NOT advanced while the
-manual-edit suppression window is open (effect returns before the decrement
-block) — accepted <1-unit catch-up lag, consistent with skids/cases.
+manual-edit suppression window is open (writes AND remainder updates are skipped;
+bookkeeping refs still advance) — accepted <1-unit catch-up lag, consistent with
+skids/cases.
 
 **Freezer/tunnel offset for skids/cases (fixed):** skids/cases count *completed
 output*, which exits the freezer tunnel `freezerTime` minutes after the dough is
@@ -42,7 +44,7 @@ completed cases by `freezerTime` worth of production.
 
 **Incremental delta must baseline off the UNCLAMPED expected, not the clamped
 one:** skids/cases `expectedCases` is clamped to `casesNeeded` for display/write,
-but the per-bucket delta MUST be `rawExpected_now - rawExpected_prev` (web
+but the per-tick delta MUST be `rawExpected_now - rawExpected_prev` (web
 `expectedCasesRaw`, mobile `outputCasesRaw`). If the delta uses the *clamped*
 value, then once the time-based estimate saturates at `casesNeeded` both terms pin
 at `casesNeeded`, delta is 0 forever, and after the operator corrects the count
@@ -59,25 +61,32 @@ already does (`target = curTotal + delta`, tunnel-offset output). Do NOT remove
 the tunnel offset for a "primed" line; an attempt to credit output immediately
 on a primed line was explicitly rejected by the user.
 
-## Effect declaration order: resets BEFORE the bucket-write effect
+## Effect declaration order: resets BEFORE the write effect
 
 React runs effects in declaration order. The baseline-reset effects (runId /
-auto-track toggle / run-stopped) must be declared BEFORE the bucket-write
-effect. With write-first ordering, the mount pass wrote a bucket, the resets
-then wiped the bookkeeping refs — losing the fractional tray/batch remainder
-(freezing slow-depleting batches) — and re-armed the SAME bucket to fire again
-on the next tick (double tray decrement). Mobile always had reset-first; web
-was fixed to match. Guarded by the web auto-track tray/batch test suite
-(single-bucket-on-mount + remainder-carry cases).
+auto-track toggle / run-stopped) must be declared BEFORE the write effect. With
+write-first ordering, the mount pass wrote, the resets then wiped the
+bookkeeping refs — losing the fractional tray/batch remainder (freezing
+slow-depleting batches) — and re-armed the SAME tick to fire again on the next
+second (double tray decrement). Mobile always had reset-first; web was fixed to
+match. Guarded by the web auto-track test suite (single-tick-on-mount +
+remainder-carry cases).
 
-## Refresh interval is a user setting (default 5 min)
+## Rate-based cadence: each counter ticks at its production pace (NO interval setting)
 
-The bucket cadence is configurable (clamped 1–60 min, fallback 5). Everything
-derives from the interval: bucket index, first-bucket assumed duration, and the
-duration cap (2× interval). Changing the interval must re-baseline the
-bookkeeping refs (a reset effect keyed on the interval, declared before the
-write effect) because the bucket index formula changes with it. Storage is an
-intentional platform asymmetry: web keeps it device-local in localStorage
-("run-calc-auto-interval", e.g. a floor TV vs office laptop can differ); mobile
-persists it in AppState (additive AsyncStorage migration). Option pills/select
-offer 1/2/5/10/15 min on both apps.
+A user-configurable fixed refresh interval was built and then explicitly
+REJECTED by the user — do not reintroduce it. Instead every counter has its own
+period derived from the line rate: cases/skids = `pizzasPerCase/ppm` min (skid
+counter derives from the same running total, so it rolls the moment a skid's
+last case completes); trays = `perTray/ppm`; batches = quarter-batch
+`perBatch/ppm/4` (the integer count still drops once per full batch via the
+remainder carry). Periods are clamped 2s–60min (`clampPeriodMs` web /
+`clampAutoPeriodMs` mobile): floor because the app clock ticks per second,
+ceiling so a garbage rate can't freeze a counter forever. Implementation is
+per-counter "next due at" wall-clock refs (0 = fire on next tick) plus
+per-counter lastMs refs for actual-duration consumption (capped at 2 periods,
+first tick assumes one period). "Resume now" / auto-toggle-on
+(`fireAutoTrackNow` web, `resumeAutoTrack` mobile) zero ONLY the due refs —
+keeping the expectedCases baseline and lastMs — so resuming never causes a
+catch-up jump over a manual edit; full resets (run change/stop/toggle) clear
+everything.

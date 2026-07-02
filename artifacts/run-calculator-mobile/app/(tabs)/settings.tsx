@@ -13,7 +13,7 @@ export default function SettingsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { run, runIndex, autoTrack, setAutoTrack, autoTrackIntervalMin, setAutoTrackIntervalMin, floorModeEnabled, setFloorModeEnabled, resetRun } = useRun();
+  const { run, runIndex, autoTrack, setAutoTrack, floorModeEnabled, setFloorModeEnabled, resetRun } = useRun();
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -68,49 +68,6 @@ export default function SettingsScreen() {
               </Text>
             </Pressable>
           </View>
-          {autoTrack ? (
-            <View style={[styles.row, { marginTop: 12 }]}>
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={[styles.rowLabel, { color: colors.foreground }]}>
-                  Refresh interval
-                </Text>
-                <Text style={[styles.rowHint, { color: colors.mutedForeground }]}>
-                  How often auto-track updates its numbers.
-                </Text>
-              </View>
-              <View style={styles.intervalRow}>
-                {[1, 2, 5, 10, 15].map((m) => {
-                  const active = autoTrackIntervalMin === m;
-                  return (
-                    <Pressable
-                      key={m}
-                      onPress={() => {
-                        Haptics.selectionAsync();
-                        setAutoTrackIntervalMin(m);
-                      }}
-                      style={({ pressed }) => [
-                        styles.intervalPill,
-                        {
-                          backgroundColor: active ? colors.primary : colors.secondary,
-                          borderColor: active ? colors.primary : colors.border,
-                          opacity: pressed ? 0.7 : 1,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.autoPillText,
-                          { color: active ? "#000" : colors.mutedForeground },
-                        ]}
-                      >
-                        {m}m
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
         </CardSection>
 
         {/* Floor Mode */}
@@ -252,16 +209,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   autoPillText: { fontSize: 12, fontWeight: "700" as const, fontFamily: FONTS.bold },
-
-  intervalRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  intervalPill: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
 
   linkBtn: {
     flexDirection: "row",

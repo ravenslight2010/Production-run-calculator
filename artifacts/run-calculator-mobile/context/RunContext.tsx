@@ -964,9 +964,6 @@ interface AppState {
   templates: RunTemplate[];
   history: HistoryDay[];
   autoTrack: boolean;
-  // Auto-track refresh interval in minutes (how often auto-track writes a
-  // bucket). Configurable in Settings; default 5.
-  autoTrackIntervalMin: number;
   // Floor Mode (big-number idle monitor) can be turned off entirely for users
   // who don't want it (manual launch + idle auto-activate both gated on this).
   floorModeEnabled: boolean;
@@ -1490,8 +1487,6 @@ interface RunContextValue {
   deleteTemplate: (id: string) => void;
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
-  autoTrackIntervalMin: number;
-  setAutoTrackIntervalMin: (min: number) => void;
   floorModeEnabled: boolean;
   setFloorModeEnabled: (on: boolean) => void;
   suppressAutoTrack: () => void;
@@ -1594,7 +1589,6 @@ const INITIAL_STATE: AppState = {
   templates: [],
   history: [],
   autoTrack: true,
-  autoTrackIntervalMin: 5,
   floorModeEnabled: true,
   supervisorPin: DEFAULT_SUPERVISOR_PIN,
   brands: [...MIX_SEED.brands],
@@ -1694,11 +1688,13 @@ export function renameIngredientList(list: string[] | undefined): string[] {
   return out;
 }
 
-// Clamp the auto-track refresh interval to a sane 1–60 min range; anything
-// missing/invalid falls back to the historical 5-minute cadence.
-function normalizeAutoTrackInterval(raw: unknown): number {
-  const n = Math.floor(Number(raw));
-  return Number.isFinite(n) && n >= 1 && n <= 60 ? n : 5;
+// Each auto-track counter ticks at its own natural production pace, clamped to
+// a sane range: never faster than once per 2s (the app clock ticks per second)
+// and never slower than once per hour (a stalled/garbage rate must not freeze
+// the counter forever). Web useAutoTrack parity.
+function clampAutoPeriodMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 60 * 60 * 1000;
+  return Math.min(60 * 60 * 1000, Math.max(2000, ms));
 }
 
 function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
@@ -1741,7 +1737,6 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         : t
     ),
     autoTrack: parsed.autoTrack ?? true,
-    autoTrackIntervalMin: normalizeAutoTrackInterval(parsed.autoTrackIntervalMin),
     floorModeEnabled: parsed.floorModeEnabled ?? true,
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
     brands: parsed.brands ?? [...MIX_SEED.brands],
@@ -1784,10 +1779,16 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const [tick, setTick] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const saveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoBucketRef = useRef<number>(-1);
-  // Wall-clock ms of the last auto-track bucket write — drives the incremental
-  // tray/batch decrement (duration since the last bucket).
-  const autoBucketTimeMsRef = useRef<number>(0);
+  // Per-counter "next tick due at" wall-clock timestamps (ms) — each counter
+  // updates at its own natural production cadence (web useAutoTrack parity).
+  // 0 = fire on the next tick (fresh baseline / forced resume).
+  const caseNextDueMsRef = useRef<number>(0);
+  const trayNextDueMsRef = useRef<number>(0);
+  const batchNextDueMsRef = useRef<number>(0);
+  // Wall-clock ms of each consumption counter's last tick — drives the
+  // incremental tray/batch decrement (consumption for the actual duration).
+  const trayLastMsRef = useRef<number>(0);
+  const batchLastMsRef = useRef<number>(0);
   const autoSuppressRef = useRef<number>(0);
   // Reactive mirror of autoSuppressRef so UI can show the "manual override active"
   // banner + a Resume now control. The ref stays the source of truth for the
@@ -2885,17 +2886,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
-  const setAutoTrackIntervalMin = useCallback(
-    (min: number) => {
-      setAppState((prev) => {
-        const next = { ...prev, autoTrackIntervalMin: normalizeAutoTrackInterval(min) };
-        persist(next);
-        return next;
-      });
-    },
-    [persist],
-  );
-
   const setFloorModeEnabled = useCallback(
     (on: boolean) => {
       setAppState((prev) => {
@@ -2914,12 +2904,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // Cancel an active manual-override window so auto-track resumes immediately.
-  // Mirrors web's "Resume now": clear suppression and force the next tick to fire
-  // a bucket (without re-baselining the expectedCases delta, so no catch-up jump).
+  // Mirrors web's "Resume now": clear suppression and force every counter's next
+  // tick to fire (without re-baselining the expectedCases delta, so no catch-up
+  // jump).
   const resumeAutoTrack = useCallback(() => {
     autoSuppressRef.current = 0;
     setAutoSuppressUntil(0);
-    autoBucketRef.current = -1;
+    caseNextDueMsRef.current = 0;
+    trayNextDueMsRef.current = 0;
+    batchNextDueMsRef.current = 0;
   }, []);
 
   // Keep the override banner's countdown ticking and guarantee it clears at expiry
@@ -3860,22 +3853,29 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
-  // Reset the bucket marker whenever the active run changes or its running state
-  // flips, so the next auto-track write fires immediately instead of being
-  // blocked until the next wall-clock bucket boundary.
+  // Reset the tick bookkeeping whenever the active run changes or its running
+  // state flips, so the next auto-track write fires immediately with a clean
+  // baseline instead of continuing another run's cadence.
   useEffect(() => {
-    autoBucketRef.current = -1;
-    autoBucketTimeMsRef.current = 0;
+    caseNextDueMsRef.current = 0;
+    trayNextDueMsRef.current = 0;
+    batchNextDueMsRef.current = 0;
+    trayLastMsRef.current = 0;
+    batchLastMsRef.current = 0;
     autoExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
-  }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack, appState.autoTrackIntervalMin]);
+  }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
 
-  // Auto-track: once per refresh-interval bucket while running, derive skids completed
-  // and cases on the current skid from expected output (net elapsed × ppm), and
-  // incrementally decrement dough trays / batches by what the line consumed in
-  // the bucket (web parity). Suppressed for 1 minute after the user manually
-  // edits a stepper, so it never fights a supervisor who is taking over.
+  // Auto-track: while running, each counter updates at its own natural
+  // production cadence instead of a fixed wall-clock interval (web useAutoTrack
+  // parity):
+  //  • cases (and skids, derived from the same total): every time-to-run-one-case
+  //  • trays: every time-to-consume-one-tray
+  //  • batches: every quarter-batch duration (the integer count still drops once
+  //    per full batch via the fractional remainder carry)
+  // Suppressed for 1 minute after the user manually edits a stepper, so it
+  // never fights a supervisor who is taking over.
   useEffect(() => {
     if (!appState.autoTrack) return;
     const r = appState.runs[appState.currentIndex];
@@ -3888,15 +3888,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       r.settings.pizzasPerCase <= 0
     )
       return;
-    const intervalMin = normalizeAutoTrackInterval(appState.autoTrackIntervalMin);
-    const bucket = Math.floor(nowMs / (intervalMin * 60 * 1000));
-    if (bucket === autoBucketRef.current) return;
 
-    // Duration since the last bucket write (capped to 2 intervals to avoid huge
-    // jumps); assume one full interval on the first write of a run.
-    const prevMs = autoBucketTimeMsRef.current;
-    const bucketDurationMin =
-      prevMs > 0 ? Math.min(intervalMin * 2, (nowMs - prevMs) / 60000) : intervalMin;
+    // While the manual-edit suppression window is open, bookkeeping still
+    // advances (so the window expiring never causes a catch-up jump that wipes
+    // a manual edit) but nothing is written — a supervisor is taking over.
+    const suppressed = nowMs < autoSuppressRef.current;
 
     // Two case counts, mirroring web useAutoTrack:
     //  • feed count (front-of-line, no tunnel offset) gates dough-feed completion.
@@ -3918,75 +3914,89 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         ? Math.min(r.settings.casesNeeded, outputCasesRaw)
         : outputCasesRaw;
 
-    const prevExpected = autoExpectedCasesRef.current;
-    // Advance bookkeeping even while suppressed so the suppression window
-    // expiring never causes a catch-up jump that wipes a manual edit.
-    autoBucketRef.current = bucket;
-    autoBucketTimeMsRef.current = nowMs;
-    // Baseline the incremental delta off the UNCLAMPED output total (web parity)
-    // so the count keeps advancing even after the time-based estimate saturates at
-    // casesNeeded — e.g. the estimate ran ahead, the operator corrected the count
-    // down, then resumed auto-track. Using the clamped value here would pin the
-    // delta at 0 and the count would never climb again.
-    autoExpectedCasesRef.current = outputCasesRaw;
-
-    // While the manual-edit suppression window is open, keep baselines current
-    // but do not write — a supervisor is taking over.
-    if (nowMs < autoSuppressRef.current) return;
-
     const next: Partial<RunProgress> = {};
 
+    // ── Cases (and skids, derived from the same total): tick once per case. ──
     // Skids / cases: applied INCREMENTALLY (web parity — see useAutoTrack). Each
-    // bucket adds the production since the last bucket on top of the current
+    // tick adds the production since the last tick on top of the current
     // (possibly manually-entered) value, so a manual correction becomes the new
     // baseline instead of being overwritten by the absolute estimate. On the
-    // first bucket after a (re)start/switch the absolute count is seeded only
+    // first tick after a (re)start/switch the absolute count is seeded only
     // when there is no existing progress, so reloads/switches never double-count.
-    const cps = r.settings.casesPerSkid;
-    const curTotal =
-      r.progress.skidsCompleted * cps + r.progress.casesOnCurrentSkid;
-    let newTotal = curTotal;
-    if (prevExpected < 0) {
-      if (curTotal === 0 && expectedCases > 0) {
-        newTotal =
-          r.settings.casesNeeded > 0
-            ? Math.min(r.settings.casesNeeded, expectedCases)
-            : expectedCases;
+    if (nowMs >= caseNextDueMsRef.current) {
+      const casePeriodMs = clampAutoPeriodMs(
+        (r.settings.pizzasPerCase / c.ppm) * 60000,
+      );
+      const prevExpected = autoExpectedCasesRef.current;
+      caseNextDueMsRef.current = nowMs + casePeriodMs;
+      // Baseline the incremental delta off the UNCLAMPED output total (web
+      // parity) so the count keeps advancing even after the time-based estimate
+      // saturates at casesNeeded — e.g. the estimate ran ahead, the operator
+      // corrected the count down, then resumed auto-track. Using the clamped
+      // value here would pin the delta at 0 and the count would never climb.
+      autoExpectedCasesRef.current = outputCasesRaw;
+
+      if (!suppressed) {
+        const cps = r.settings.casesPerSkid;
+        const curTotal =
+          r.progress.skidsCompleted * cps + r.progress.casesOnCurrentSkid;
+        let newTotal = curTotal;
+        if (prevExpected < 0) {
+          if (curTotal === 0 && expectedCases > 0) {
+            newTotal =
+              r.settings.casesNeeded > 0
+                ? Math.min(r.settings.casesNeeded, expectedCases)
+                : expectedCases;
+          }
+        } else {
+          const deltaCases = Math.max(0, outputCasesRaw - prevExpected);
+          if (deltaCases > 0) {
+            const target = curTotal + deltaCases;
+            newTotal =
+              r.settings.casesNeeded > 0
+                ? Math.min(target, Math.max(curTotal, r.settings.casesNeeded))
+                : target;
+          }
+        }
+        if (newTotal !== curTotal) {
+          const skids = Math.floor(newTotal / cps);
+          const casesOnSkid = newTotal % cps;
+          if (skids !== r.progress.skidsCompleted) next.skidsCompleted = skids;
+          if (casesOnSkid !== r.progress.casesOnCurrentSkid)
+            next.casesOnCurrentSkid = casesOnSkid;
+        }
       }
-    } else {
-      const deltaCases = Math.max(0, outputCasesRaw - prevExpected);
-      if (deltaCases > 0) {
-        const target = curTotal + deltaCases;
-        newTotal =
-          r.settings.casesNeeded > 0
-            ? Math.min(target, Math.max(curTotal, r.settings.casesNeeded))
-            : target;
-      }
-    }
-    if (newTotal !== curTotal) {
-      const skids = Math.floor(newTotal / cps);
-      const casesOnSkid = newTotal % cps;
-      if (skids !== r.progress.skidsCompleted) next.skidsCompleted = skids;
-      if (casesOnSkid !== r.progress.casesOnCurrentSkid)
-        next.casesOnCurrentSkid = casesOnSkid;
     }
 
-    // Trays / batches: incremental decrement for this bucket's duration. Stop
+    // Trays / batches: incremental decrement, each at its own cadence. Stop
     // once all the dough the run needs has been fed onto the line — dough enters
     // at the front (no tunnel offset), so feeding finishes when the front-of-line
     // case count reaches casesNeeded. Mirrors web mode-aware per-unit sources.
     const doughFeedComplete =
       r.settings.casesNeeded > 0 && feedCasesRaw >= r.settings.casesNeeded;
-    if (!doughFeedComplete) {
-      const supply = computeDoughSupply(r, nowMs, r.progress.subTab);
-      const perTray = supply.perTray;
-      const perBatch =
-        r.progress.subTab === "crusts"
-          ? r.settings.crustsPerCase
-          : supply.perBatch;
-      if (perTray > 0) {
+    const supply = computeDoughSupply(r, nowMs, r.progress.subTab);
+    const perTray = supply.perTray;
+    const perBatch =
+      r.progress.subTab === "crusts"
+        ? r.settings.crustsPerCase
+        : supply.perBatch;
+
+    // ── Trays: tick once per time-to-consume-one-tray. ──
+    if (perTray > 0 && nowMs >= trayNextDueMsRef.current) {
+      const trayPeriodMs = clampAutoPeriodMs((perTray / c.ppm) * 60000);
+      const prevMs = trayLastMsRef.current;
+      // Consumption for the actual duration since this counter's last tick
+      // (capped to 2 periods to avoid huge jumps); assume one full period on
+      // the first tick.
+      const durationMin =
+        prevMs > 0
+          ? Math.min((trayPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+          : trayPeriodMs / 60000;
+      trayNextDueMsRef.current = nowMs + trayPeriodMs;
+      trayLastMsRef.current = nowMs;
+      if (!suppressed && !doughFeedComplete) {
         const traysExact =
-          (bucketDurationMin * c.ppm) / perTray + traysRemainderRef.current;
+          (durationMin * c.ppm) / perTray + traysRemainderRef.current;
         const traysConsumed = Math.floor(traysExact);
         traysRemainderRef.current = traysExact - traysConsumed;
         if (traysConsumed > 0) {
@@ -3994,9 +4004,21 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           if (nextTrays !== r.progress.traysOnLine) next.traysOnLine = nextTrays;
         }
       }
-      if (perBatch > 0) {
+    }
+
+    // ── Batches: tick once per quarter-batch duration. ──
+    if (perBatch > 0 && nowMs >= batchNextDueMsRef.current) {
+      const batchPeriodMs = clampAutoPeriodMs((perBatch / c.ppm / 4) * 60000);
+      const prevMs = batchLastMsRef.current;
+      const durationMin =
+        prevMs > 0
+          ? Math.min((batchPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+          : batchPeriodMs / 60000;
+      batchNextDueMsRef.current = nowMs + batchPeriodMs;
+      batchLastMsRef.current = nowMs;
+      if (!suppressed && !doughFeedComplete) {
         const batchesExact =
-          (bucketDurationMin * c.ppm) / perBatch + batchesRemainderRef.current;
+          (durationMin * c.ppm) / perBatch + batchesRemainderRef.current;
         const batchesConsumed = Math.floor(batchesExact);
         batchesRemainderRef.current = batchesExact - batchesConsumed;
         if (batchesConsumed > 0) {
@@ -4066,8 +4088,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         deleteTemplate,
         autoTrack: appState.autoTrack,
         setAutoTrack,
-        autoTrackIntervalMin: appState.autoTrackIntervalMin,
-        setAutoTrackIntervalMin,
         floorModeEnabled: appState.floorModeEnabled,
         setFloorModeEnabled,
         suppressAutoTrack,

@@ -2263,20 +2263,6 @@ export default function Home() {
       return next;
     });
   }
-  // Auto-track refresh interval (minutes between auto writes). Device-local
-  // preference (not synced), clamped 1–60, default 5 (the historical cadence).
-  const [autoTrackIntervalMin, setAutoTrackIntervalMinState] = useState<number>(() => {
-    try {
-      const n = Math.floor(Number(localStorage.getItem("run-calc-auto-interval")));
-      return Number.isFinite(n) && n >= 1 && n <= 60 ? n : 5;
-    } catch { return 5; }
-  });
-  function setAutoTrackIntervalMin(min: number) {
-    const n = Math.floor(Number(min));
-    const clamped = Number.isFinite(n) && n >= 1 && n <= 60 ? n : 5;
-    setAutoTrackIntervalMinState(clamped);
-    try { localStorage.setItem("run-calc-auto-interval", String(clamped)); } catch { /* ignore */ }
-  }
   // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
   // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
   const [floorDimmed, setFloorDimmed] = useState(false);
@@ -6278,7 +6264,7 @@ export default function Home() {
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
   // ── Auto-track progress ───────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, lastAutoMinBucketRef } = useAutoTrack({
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow } = useAutoTrack({
     runId: currentRunId,
     runStatus,
     nowTime,
@@ -6286,7 +6272,6 @@ export default function Home() {
     calc,
     v,
     form,
-    intervalMin: autoTrackIntervalMin,
   });
 
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;
@@ -10052,36 +10037,21 @@ export default function Home() {
                           Current Progress
                         </CardTitle>
                         {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
-                          <div className="flex items-center gap-1.5">
-                            {autoTrackProgress && (
-                              <select
-                                value={autoTrackIntervalMin}
-                                onChange={(e) => setAutoTrackIntervalMin(Number(e.target.value))}
-                                data-testid="select-auto-interval"
-                                title="How often auto-track updates its numbers"
-                                className="text-[10px] font-semibold px-1.5 py-1 rounded-full border border-border bg-muted/20 text-muted-foreground focus:outline-none"
-                              >
-                                {[1, 2, 5, 10, 15].map((m) => (
-                                  <option key={m} value={m}>every {m} min</option>
-                                ))}
-                              </select>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const next = !autoTrackProgress;
-                                setAutoTrackProgress(next);
-                                if (next) {
-                                  autoSuppressUntilRef.current = 0;
-                                  lastAutoMinBucketRef.current = -1;
-                                }
-                              }}
-                              className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${autoTrackProgress ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground"}`}
-                            >
-                              <Sparkles className="w-2.5 h-2.5" />
-                              {autoTrackProgress ? "Auto" : "Manual"}
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = !autoTrackProgress;
+                              setAutoTrackProgress(next);
+                              if (next) {
+                                autoSuppressUntilRef.current = 0;
+                                fireAutoTrackNow();
+                              }
+                            }}
+                            className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${autoTrackProgress ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground"}`}
+                          >
+                            <Sparkles className="w-2.5 h-2.5" />
+                            {autoTrackProgress ? "Auto" : "Manual"}
+                          </button>
                         )}
                       </div>
                     </CardHeader>
@@ -10098,7 +10068,7 @@ export default function Home() {
                             {autoTrackProgress && s && suppressed && (
                               <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px]">
                                 <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
-                                <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; lastAutoMinBucketRef.current = -1; }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
+                                <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
                               </div>
                             )}
                             <div className="grid grid-cols-2 gap-2">
@@ -11084,7 +11054,7 @@ export default function Home() {
                         {autoTrackProgress && s && suppressed && (
                           <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2">
                             <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
-                            <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; lastAutoMinBucketRef.current = -1; }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
+                            <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
                           </div>
                         )}
                         <div className={doughSubTab !== "crusts" ? "grid grid-cols-2 gap-2" : ""}>
