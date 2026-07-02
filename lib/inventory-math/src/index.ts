@@ -34,6 +34,13 @@ export interface SummaryStatsInput {
   pizzasPerCase: number;
   casesPerLayer: number;
   frontlineRecipe?: RecipeRow[];
+  /**
+   * Sauce recipe name. When set WITHOUT any `frontlineRecipe` rows it marks a
+   * bought/ready-made sauce used as-is (e.g. BBQ, Ranch): consumption and the
+   * warehouse needs roll-up pull it by this name in LBS instead of generic
+   * mixed "Sauce" batches. Optional so callers that never set it are unaffected.
+   */
+  frontlineRecipeName?: string;
   sauceBarrelLbs: number;
   sauceOzPerPizza: number;
   app1OzPerPizza: number;
@@ -164,6 +171,7 @@ export function computeSummaryStats(
     totalCases: vals.casesNeeded,
     totalPizzas,
     estimatedTimeSec,
+    sauceLbs,
     sauceBatches,
     sauceEffBarrel,
     app1Lbs, app1Batches, app1Type: vals.app1Type,
@@ -206,8 +214,16 @@ export function computeRunLines(
     add("ingredient:Dough:batches", "ingredient", "Dough", "batches", batches);
   }
 
-  // Sauce
-  if (s.sauceBatches > 0) {
+  // Sauce — a profile with a sauce NAME but no mixed recipe rows uses a
+  // bought/ready-made sauce (e.g. BBQ, Ranch): it isn't made in-house, so pull
+  // it as-is by name in LBS (spec-sheet oz/pizza drives the total). Otherwise
+  // keep the mixed-sauce behavior (generic "Sauce" in batches). The oz/pizza
+  // guard keeps the flat +30 lbs buffer from charging a sauce that isn't used.
+  const sauceName = (vals.frontlineRecipeName ?? "").trim();
+  const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+  if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
+    add(`ingredient:${sauceName}:lbs`, "ingredient", sauceName, "lbs", s.sauceLbs);
+  } else if (s.sauceBatches > 0) {
     add("ingredient:Sauce:batches", "ingredient", "Sauce", "batches", s.sauceBatches);
   }
 

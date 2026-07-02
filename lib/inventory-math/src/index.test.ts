@@ -168,6 +168,62 @@ describe("overlay changes inventory consumption keys", () => {
   });
 });
 
+// A named bought/ready-made sauce (frontlineRecipeName set, no recipe rows) is
+// consumed as-is by name in LBS; a mixed sauce recipe keeps generic "Sauce"
+// batches even when a name is set.
+describe("ready-made sauce consumption", () => {
+  it("named sauce with no recipe rows consumes by name in lbs", () => {
+    const vals = baseVals({
+      frontlineRecipeName: "BBQ Sauce",
+      sauceOzPerPizza: 4,
+      sauceBarrelLbs: 100,
+    });
+    const lines = computeRunConsumptionLines(vals as unknown as RunLinesInput, PEP);
+    const keys = lines.map((l) => l.itemKey);
+    expect(keys).toContain("ingredient:BBQ Sauce:lbs");
+    expect(keys).not.toContain("ingredient:Sauce:batches");
+    // qty = sauceLbs = ((10 + 1 case/layer) pizzas * 4 oz) / 16 + 30 buffer
+    const bbq = lines.find((l) => l.itemKey === "ingredient:BBQ Sauce:lbs");
+    expect(bbq?.qty).toBeCloseTo((11 * 4) / 16 + 30, 5);
+  });
+
+  it("a mixed sauce recipe keeps generic Sauce batches even when named", () => {
+    const vals = baseVals({
+      frontlineRecipeName: "House Red",
+      frontlineRecipe: [{ ingredient: "Tomato Paste", lbs: 50 }],
+      sauceOzPerPizza: 4,
+    });
+    const keys = computeRunConsumptionLines(vals as unknown as RunLinesInput, PEP).map(
+      (l) => l.itemKey,
+    );
+    expect(keys).toContain("ingredient:Sauce:batches");
+    expect(keys.some((k) => k.includes("House Red"))).toBe(false);
+  });
+
+  it("named sauce with zero oz/pizza consumes nothing (no +30 phantom)", () => {
+    const vals = baseVals({
+      frontlineRecipeName: "Ranch",
+      sauceOzPerPizza: 0,
+      sauceBarrelLbs: 0,
+    });
+    const keys = computeRunConsumptionLines(vals as unknown as RunLinesInput, PEP).map(
+      (l) => l.itemKey,
+    );
+    expect(keys.some((k) => k.includes("Ranch") || k.includes("Sauce"))).toBe(false);
+  });
+
+  it("unnamed empty-recipe sauce keeps legacy Sauce batches via barrel lbs", () => {
+    const vals = baseVals({
+      sauceOzPerPizza: 4,
+      sauceBarrelLbs: 100,
+    });
+    const keys = computeRunConsumptionLines(vals as unknown as RunLinesInput, PEP).map(
+      (l) => l.itemKey,
+    );
+    expect(keys).toContain("ingredient:Sauce:batches");
+  });
+});
+
 // Parity guard: the SAME shared overlay + summary math must produce identical
 // material totals regardless of which app calls it (replit.md parity). Both
 // platforms route through applySubstitutions then computeSummaryStats, so a

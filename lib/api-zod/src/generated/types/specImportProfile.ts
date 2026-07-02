@@ -14,6 +14,8 @@ export interface SpecImportProfile {
   flavor: string;
   dieType?: string;
   sauceOzPerPizza?: number;
+  /** Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name. */
+  sauceName?: string;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
   review?: ReviewVerdict;

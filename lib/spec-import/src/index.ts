@@ -21,6 +21,13 @@ export type ParsedProfile = {
   flavor: string;
   dieType?: string;
   sauceOzPerPizza?: number;
+  /**
+   * Name of the sauce when the spec sheet names a specific one (e.g. BBQ,
+   * Ranch). Bought/ready-made sauces have no mixing recipe in the workbook —
+   * the apply step records this name (when no mixed sauce recipe exists) so
+   * needs/consumption pull the sauce as-is by name instead of generic "Sauce".
+   */
+  sauceName?: string;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
 };
@@ -626,6 +633,15 @@ function clampName(s: unknown, max: number): string {
   return t.length > max ? t.slice(0, max).trim() : t;
 }
 
+/**
+ * A generic placeholder like "Sauce" or "Pizza Sauce" is not a real
+ * ready-made product name — the parse prompt says to omit these, but this
+ * is a deterministic backstop in case the model returns one anyway.
+ */
+function isGenericSauceName(name: string): boolean {
+  return /^(pizza\s+)?sauce$/i.test(name.trim());
+}
+
 function num(v: unknown): number | undefined {
   if (v === "" || v == null) return undefined;
   const n = Number(v);
@@ -779,6 +795,8 @@ export function sanitizeParsedSpecImport(
     if (die) profile.dieType = die;
     const sauceOz = num(o.sauceOzPerPizza);
     if (sauceOz != null) profile.sauceOzPerPizza = sauceOz;
+    const sauceName = clampName(o.sauceName, lim.maxNameChars);
+    if (sauceName && !isGenericSauceName(sauceName)) profile.sauceName = sauceName;
     profiles.push(profile);
   }
 

@@ -6,6 +6,7 @@
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
 - [Frontline is sauce](frontline-is-sauce.md) — internal "frontline" recipe system IS the UI's "Sauce Recipe"; seed sauces into frontline plumbing, no new field.
+- [Ready-made sauce](ready-made-sauce.md) — sauce name w/o recipe rows (BBQ/Ranch) = bought as-is: consume `ingredient:<name>:lbs` (needs oz/pizza>0 guard), not generic Sauce batches.
 - [sauceBarrelBreakdown signature](sauce-barrel-breakdown-signature.md) — same-named helper takes batches on web but LBS on mobile; pass calc.sauceLbs on mobile, don't copy web call sites.
 - [Cast-to-Screens](cast-screens.md) — web-only station displays via `?screen=` param; parity exception (no mobile equivalent).
 - [Web/mobile parity](web-mobile-parity.md) — run identity on Run screen, line config on Setup; commit-before-saveProfile ordering; single auto-load effect.

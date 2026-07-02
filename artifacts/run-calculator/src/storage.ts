@@ -1854,6 +1854,16 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
     if (p.dieType) values.dieType = p.dieType;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
+    // Named bought/ready-made sauce (e.g. BBQ, Ranch): the sheet names the
+    // sauce but there's no mixing recipe — record the name so needs/consumption
+    // pull it as-is by name. Never clobber an existing mixed sauce recipe or a
+    // name the user already set; a sauce-recipe tie later in this import still
+    // overwrites (correctly) via the recipe apply loop below.
+    const specSauceName = (p.sauceName ?? "").trim();
+    const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+    if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
+      values.frontlineRecipeName = specSauceName;
+    }
     p.applicators.slice(0, 4).forEach((a, i) => {
       const slot = i + 1;
       const type = a.type.trim();

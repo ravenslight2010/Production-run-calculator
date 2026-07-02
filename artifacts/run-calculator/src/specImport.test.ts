@@ -269,6 +269,20 @@ describe("sanitizeParsedSpecImport", () => {
     const cheese = out.recipes.find((r) => r.kind === "cheese");
     expect(cheese?.app).toBeUndefined(); // 9 is out of 1-4 range
   });
+  it("keeps a real ready-made sauceName but drops generic placeholders", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "A", flavor: "BBQ Chicken", sauceOzPerPizza: 2.5, sauceName: "Sweet Baby Ray's BBQ" },
+        { brand: "A", flavor: "Cheese", sauceOzPerPizza: 3, sauceName: "Sauce" },
+        { brand: "A", flavor: "Pepperoni", sauceOzPerPizza: 3, sauceName: "Pizza Sauce" },
+      ],
+      recipes: [],
+    });
+    expect(out.profiles).toHaveLength(3);
+    expect(out.profiles[0].sauceName).toBe("Sweet Baby Ray's BBQ");
+    expect(out.profiles[1].sauceName).toBeUndefined();
+    expect(out.profiles[2].sauceName).toBeUndefined();
+  });
   it("never throws on garbage input", () => {
     expect(() => sanitizeParsedSpecImport(null)).not.toThrow();
     expect(sanitizeParsedSpecImport(null).profiles).toEqual([]);

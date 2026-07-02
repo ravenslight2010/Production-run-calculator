@@ -1683,6 +1683,7 @@ export const AiParseSpecSheetResponse = zod.object({
   "flavor": zod.string(),
   "dieType": zod.string().optional(),
   "sauceOzPerPizza": zod.number().optional(),
+  "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought\/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
   "applicators": zod.array(zod.object({
   "type": zod.string(),
   "ozPerPizza": zod.number()

@@ -471,7 +471,13 @@ function aggregateNeedRows(valsList: FormValues[]): NeedRow[] {
       const batches = Math.ceil(s.totalPizzas / effYield);
       if (batches > 0) add("Dough", batches, "batches");
     }
-    if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
+    // Named bought/ready-made sauce (name, no mixed recipe rows) is pulled
+    // as-is by name in LBS — mirrors computeRunLines in @workspace/inventory-math.
+    const sauceName = (vals.frontlineRecipeName ?? "").trim();
+    const hasSauceRecipe = (vals.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
+    if (sauceName && !hasSauceRecipe && vals.sauceOzPerPizza > 0) {
+      if (s.sauceLbs > 0) add(sauceName, s.sauceLbs, "lbs");
+    } else if (s.sauceBatches > 0) add("Sauce", s.sauceBatches, "batches");
     const apps = [
       { type: s.app1Type, lbs: s.app1Lbs, batches: s.app1Batches },
       { type: s.app2Type, lbs: s.app2Lbs, batches: s.app2Batches },

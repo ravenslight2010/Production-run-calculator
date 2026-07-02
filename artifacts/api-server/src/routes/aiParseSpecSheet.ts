@@ -189,6 +189,11 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "each value to the correct brand/flavor/ingredient row it sits on; if a cell is " +
     "blank or unreadable, omit that field rather than borrowing a neighbor's number. " +
     "Never invent data that is not in the workbook. Omit fields you cannot find. " +
+    "When a spec sheet NAMES a specific sauce on its sauce row (e.g. 'BBQ Sauce', " +
+    "'Ranch'), capture that name as the profile's `sauceName` — purchased/ready-made " +
+    "sauces come as-is and have no mixing recipe in the workbook, so the name is the " +
+    "only way the app can identify what to pull. Omit `sauceName` when the sheet just " +
+    "says a generic 'sauce' without naming one. " +
     "This is read-only; the user reviews and can edit a summary before anything is saved.";
 
   const known = input.known ?? {};
@@ -238,7 +243,8 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
-      '"sauceOzPerPizza":number,"applicators":[{"type":string,"ozPerPizza":number}],' +
+      '"sauceOzPerPizza":number,"sauceName":string,' +
+      '"applicators":[{"type":string,"ozPerPizza":number}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
