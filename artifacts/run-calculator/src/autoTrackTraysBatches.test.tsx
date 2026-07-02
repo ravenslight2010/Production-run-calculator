@@ -77,6 +77,34 @@ describe("auto-track tray/batch decrement", () => {
     expect(values.batchesReady).toBe(9);
   });
 
+  it("respects a custom refresh interval (1-min buckets fire every minute)", () => {
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+          form,
+          intervalMin: 1,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60 } },
+    );
+
+    // First bucket assumes a 1-min duration: trays -= floor(1*100/60)=1 (0.667
+    // remainder carried).
+    expect(values.traysOnLine).toBe(49);
+
+    // One minute later the next bucket fires: 1.667 + 0.667 = 2.33 -> 2 consumed.
+    rerender({ nowTime: new Date(t0 + 60 * 1000), elapsedBatchSec: 11 * 60 });
+    expect(values.traysOnLine).toBe(47);
+  });
+
   it("applies only ONE bucket on mount — reset effects must not re-arm the same bucket", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;

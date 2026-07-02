@@ -27,6 +27,8 @@ interface AutoTrackParams {
   calc: AutoTrackCalc;
   v: AutoTrackValues;
   form: UseFormReturn<FormValues>;
+  /** Refresh interval in minutes between auto-track writes (default 5). */
+  intervalMin?: number;
 }
 
 interface AutoTrackResult {
@@ -45,7 +47,8 @@ interface AutoTrackResult {
 }
 
 /**
- * Tracks expected progress automatically every 5-minute bucket while running.
+ * Tracks expected progress automatically once per refresh-interval bucket
+ * (configurable via `intervalMin`, default 5 minutes) while running.
  *
  * Skids/cases: applied INCREMENTALLY — each bucket adds the production since the
  * last bucket on top of the current (possibly manually-entered) value. This means
@@ -67,7 +70,10 @@ export function useAutoTrack({
   calc,
   v,
   form,
+  intervalMin,
 }: AutoTrackParams): AutoTrackResult {
+  // Sanitize: a bad/missing setting falls back to the historical 5-minute cadence.
+  const bucketMin = Math.max(1, Math.min(60, Math.floor(Number(intervalMin)) || 5));
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   const autoSuppressUntilRef = useRef<number>(0);
   const lastAutoMinBucketRef = useRef<number>(-1);
@@ -168,19 +174,29 @@ export function useAutoTrack({
     batchesRemainderRef.current = 0;
   }, [autoTrackProgress]);
 
-  // Apply expected values once per 5-minute bucket while running.
+  // Re-baseline when the refresh interval setting changes so the bucket index
+  // (which is derived from the interval) can't collide with a stale marker.
+  useEffect(() => {
+    lastBucketTimeMsRef.current = 0;
+    lastAutoMinBucketRef.current = -1;
+    lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
+  }, [bucketMin]);
+
+  // Apply expected values once per refresh-interval bucket while running.
   useEffect(() => {
     if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
 
-    const bucket = Math.floor(nowTime.getTime() / (5 * 60 * 1000));
+    const bucket = Math.floor(nowTime.getTime() / (bucketMin * 60 * 1000));
     if (bucket === lastAutoMinBucketRef.current) return;
 
-    // How long since the last bucket fired (capped to 10 min to avoid huge jumps).
+    // How long since the last bucket fired (capped to 2 intervals to avoid huge jumps).
     const nowMs = nowTime.getTime();
     const prevMs = lastBucketTimeMsRef.current;
     const bucketDurationMin = prevMs > 0
-      ? Math.min(10, (nowMs - prevMs) / 60000)
-      : 5; // first bucket — assume 5-min duration
+      ? Math.min(bucketMin * 2, (nowMs - prevMs) / 60000)
+      : bucketMin; // first bucket — assume one full interval
 
     const expectedCases = autoTrackSuggestion.expectedCases;
     // Baseline the incremental delta off the UNCLAMPED total so the count keeps

@@ -69,3 +69,15 @@ then wiped the bookkeeping refs — losing the fractional tray/batch remainder
 on the next tick (double tray decrement). Mobile always had reset-first; web
 was fixed to match. Guarded by the web auto-track tray/batch test suite
 (single-bucket-on-mount + remainder-carry cases).
+
+## Refresh interval is a user setting (default 5 min)
+
+The bucket cadence is configurable (clamped 1–60 min, fallback 5). Everything
+derives from the interval: bucket index, first-bucket assumed duration, and the
+duration cap (2× interval). Changing the interval must re-baseline the
+bookkeeping refs (a reset effect keyed on the interval, declared before the
+write effect) because the bucket index formula changes with it. Storage is an
+intentional platform asymmetry: web keeps it device-local in localStorage
+("run-calc-auto-interval", e.g. a floor TV vs office laptop can differ); mobile
+persists it in AppState (additive AsyncStorage migration). Option pills/select
+offer 1/2/5/10/15 min on both apps.

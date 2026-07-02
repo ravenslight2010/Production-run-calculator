@@ -964,6 +964,9 @@ interface AppState {
   templates: RunTemplate[];
   history: HistoryDay[];
   autoTrack: boolean;
+  // Auto-track refresh interval in minutes (how often auto-track writes a
+  // bucket). Configurable in Settings; default 5.
+  autoTrackIntervalMin: number;
   // Floor Mode (big-number idle monitor) can be turned off entirely for users
   // who don't want it (manual launch + idle auto-activate both gated on this).
   floorModeEnabled: boolean;
@@ -1487,6 +1490,8 @@ interface RunContextValue {
   deleteTemplate: (id: string) => void;
   autoTrack: boolean;
   setAutoTrack: (on: boolean) => void;
+  autoTrackIntervalMin: number;
+  setAutoTrackIntervalMin: (min: number) => void;
   floorModeEnabled: boolean;
   setFloorModeEnabled: (on: boolean) => void;
   suppressAutoTrack: () => void;
@@ -1589,6 +1594,7 @@ const INITIAL_STATE: AppState = {
   templates: [],
   history: [],
   autoTrack: true,
+  autoTrackIntervalMin: 5,
   floorModeEnabled: true,
   supervisorPin: DEFAULT_SUPERVISOR_PIN,
   brands: [...MIX_SEED.brands],
@@ -1688,6 +1694,13 @@ export function renameIngredientList(list: string[] | undefined): string[] {
   return out;
 }
 
+// Clamp the auto-track refresh interval to a sane 1–60 min range; anything
+// missing/invalid falls back to the historical 5-minute cadence.
+function normalizeAutoTrackInterval(raw: unknown): number {
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n >= 1 && n <= 60 ? n : 5;
+}
+
 function normalizeSettings(s: Partial<RunSettings> | undefined): RunSettings {
   return renameIngredientSettings(
     renamePepSettings({
@@ -1728,6 +1741,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
         : t
     ),
     autoTrack: parsed.autoTrack ?? true,
+    autoTrackIntervalMin: normalizeAutoTrackInterval(parsed.autoTrackIntervalMin),
     floorModeEnabled: parsed.floorModeEnabled ?? true,
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
     brands: parsed.brands ?? [...MIX_SEED.brands],
@@ -2871,6 +2885,17 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
+  const setAutoTrackIntervalMin = useCallback(
+    (min: number) => {
+      setAppState((prev) => {
+        const next = { ...prev, autoTrackIntervalMin: normalizeAutoTrackInterval(min) };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
   const setFloorModeEnabled = useCallback(
     (on: boolean) => {
       setAppState((prev) => {
@@ -3844,9 +3869,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     autoExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
-  }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
+  }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack, appState.autoTrackIntervalMin]);
 
-  // Auto-track: once per 5-minute bucket while running, derive skids completed
+  // Auto-track: once per refresh-interval bucket while running, derive skids completed
   // and cases on the current skid from expected output (net elapsed × ppm), and
   // incrementally decrement dough trays / batches by what the line consumed in
   // the bucket (web parity). Suppressed for 1 minute after the user manually
@@ -3863,14 +3888,15 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       r.settings.pizzasPerCase <= 0
     )
       return;
-    const bucket = Math.floor(nowMs / (5 * 60 * 1000));
+    const intervalMin = normalizeAutoTrackInterval(appState.autoTrackIntervalMin);
+    const bucket = Math.floor(nowMs / (intervalMin * 60 * 1000));
     if (bucket === autoBucketRef.current) return;
 
-    // Duration since the last bucket write (capped to 10 min to avoid huge
-    // jumps); assume a 5-min bucket on the first write of a run.
+    // Duration since the last bucket write (capped to 2 intervals to avoid huge
+    // jumps); assume one full interval on the first write of a run.
     const prevMs = autoBucketTimeMsRef.current;
     const bucketDurationMin =
-      prevMs > 0 ? Math.min(10, (nowMs - prevMs) / 60000) : 5;
+      prevMs > 0 ? Math.min(intervalMin * 2, (nowMs - prevMs) / 60000) : intervalMin;
 
     // Two case counts, mirroring web useAutoTrack:
     //  • feed count (front-of-line, no tunnel offset) gates dough-feed completion.
@@ -4040,6 +4066,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         deleteTemplate,
         autoTrack: appState.autoTrack,
         setAutoTrack,
+        autoTrackIntervalMin: appState.autoTrackIntervalMin,
+        setAutoTrackIntervalMin,
         floorModeEnabled: appState.floorModeEnabled,
         setFloorModeEnabled,
         suppressAutoTrack,
