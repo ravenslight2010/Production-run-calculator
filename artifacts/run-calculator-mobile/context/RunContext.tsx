@@ -2883,7 +2883,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const suppressAutoTrack = useCallback(() => {
-    const until = Date.now() + 10 * 60 * 1000;
+    const until = Date.now() + 1 * 60 * 1000;
     autoSuppressRef.current = until;
     setAutoSuppressUntil(until);
   }, []);
@@ -2898,7 +2898,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // Keep the override banner's countdown ticking and guarantee it clears at expiry
-  // even when no other state changes. Runs only during the (rare, ≤10 min) window.
+  // even when no other state changes. Runs only during the (rare, ≤1 min) window.
   useEffect(() => {
     if (autoSuppressUntil <= Date.now()) return;
     const id = setInterval(() => {
@@ -3849,7 +3849,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // Auto-track: once per 5-minute bucket while running, derive skids completed
   // and cases on the current skid from expected output (net elapsed × ppm), and
   // incrementally decrement dough trays / batches by what the line consumed in
-  // the bucket (web parity). Suppressed for 10 minutes after the user manually
+  // the bucket (web parity). Suppressed for 1 minute after the user manually
   // edits a stepper, so it never fights a supervisor who is taking over.
   useEffect(() => {
     if (!appState.autoTrack) return;

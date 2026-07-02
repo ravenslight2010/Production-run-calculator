@@ -1508,7 +1508,7 @@ function NumField({
   );
 }
 
-const AUTO_SUPPRESS_MS = 10 * 60 * 1000;
+const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
 
 function StepperField({
   control,

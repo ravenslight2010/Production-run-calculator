@@ -309,7 +309,7 @@ export default function PackagingScreen() {
             {autoTrack ? (
               <Text style={[styles.autoHint, { color: colors.mutedForeground }]}>
                 Skids &amp; cases update automatically from run time. Tap a stepper to take
-                over for 10 min.
+                over for 1 min.
               </Text>
             ) : null}
 
