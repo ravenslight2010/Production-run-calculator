@@ -5249,8 +5249,10 @@ export default function Home() {
   }
 
   function updateStop(id: string, patch: Partial<Stoppage>) {
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
+    // Search ALL runs (not just the current one) — the Stoppage Log lists the
+    // whole day's events, so edits must reach earlier runs' stoppages too.
+    const newRuns = dayState.runs.map(r =>
+      (r.stoppages ?? []).some(s => s.id === id)
         ? { ...r, stoppages: (r.stoppages ?? []).map(s => s.id === id ? { ...s, ...patch } : s) }
         : r
     );
@@ -5295,8 +5297,9 @@ export default function Home() {
   }
 
   function deleteStop(stopId: string) {
-    const newRuns = dayState.runs.map((r, i) =>
-      i === dayState.currentIndex
+    // Search ALL runs — the Stoppage Log lists the whole day's events.
+    const newRuns = dayState.runs.map(r =>
+      (r.stoppages ?? []).some(s => s.id === stopId)
         ? { ...r, stoppages: (r.stoppages ?? []).filter(s => s.id !== stopId) }
         : r
     );
@@ -12003,20 +12006,27 @@ export default function Home() {
 
               {/* ─── STOPPAGES ─── */}
               <TabsContent value="stoppages">
-                {/* ── Stoppage Log ── */}
+                {/* ── Stoppage Log ──
+                    Shows the WHOLE day's events across ALL runs (grouped per
+                    run), not just the current run — otherwise a pause logged on
+                    a run that has since ended silently disappears from this
+                    screen and it looks like nothing was recorded. */}
                 {currentRun && (() => {
-                  const stoppages = currentRun.stoppages ?? [];
+                  const runGroups = dayState.runs
+                    .map((r, i) => ({ run: r, idx: i, stops: r.stoppages ?? [] }))
+                    .filter(g => g.stops.length > 0);
+                  const allStops = runGroups.flatMap(g => g.stops);
                   const hasActiveRun = !!currentRun.startedAt && !currentRun.endedAt;
-                  if (stoppages.length === 0 && !hasActiveRun) return null;
-                  const stopOnlyMs = stoppages.filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
-                  const noReasonCount = stoppages.filter(s => !s.reason.trim()).length;
+                  if (allStops.length === 0 && !hasActiveRun) return null;
+                  const stopOnlyMs = allStops.filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
+                  const noReasonCount = allStops.filter(s => !s.reason.trim()).length;
                   return (
                     <div className="mb-5 rounded-lg border border-border/50 bg-card/40 overflow-hidden">
                       <div className="flex items-center justify-between px-4 py-3 border-b border-border/30">
                         <div className="flex items-center gap-2">
                           <OctagonX className="w-4 h-4 text-orange-400 shrink-0" />
                           <span className="text-sm font-semibold">Stoppage Log</span>
-                          {stoppages.length > 0 && <span className="text-xs text-muted-foreground">{stoppages.length} event{stoppages.length !== 1 ? "s" : ""}</span>}
+                          {allStops.length > 0 && <span className="text-xs text-muted-foreground">{allStops.length} event{allStops.length !== 1 ? "s" : ""}</span>}
                           {noReasonCount > 0 && (
                             <span className="text-xs font-semibold text-amber-400 animate-pulse">{noReasonCount} need reason</span>
                           )}
@@ -12067,11 +12077,22 @@ export default function Home() {
                           )}
                         </div>
                       </div>
-                      {stoppages.length === 0 ? (
+                      {allStops.length === 0 ? (
                         <p className="text-xs text-muted-foreground text-center py-4">No events recorded yet. Pauses and stops are logged automatically.</p>
                       ) : (
-                        <div className="divide-y divide-border/20">
-                          {[...stoppages].reverse().map(stop => {
+                        <div>
+                          {runGroups.map(group => (
+                          <div key={group.run.id}>
+                          <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/30 border-y border-border/20">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+                              {(`${group.run.brand ?? ""}${group.run.flavor ? ` – ${group.run.flavor}` : ""}`.trim()) || `Run ${group.idx + 1}`}
+                            </span>
+                            {group.idx === dayState.currentIndex && (
+                              <span className="text-[10px] font-semibold uppercase tracking-wider text-primary shrink-0">Current</span>
+                            )}
+                          </div>
+                          <div className="divide-y divide-border/20">
+                          {[...group.stops].reverse().map(stop => {
                             const isPause = stop.type === "pause";
                             const isManual = stop.type === "manual";
                             const dur = stop.endedAt ? (stop.endedAt - stop.startedAt) / 1000 : null;
@@ -12143,6 +12164,9 @@ export default function Home() {
                               </div>
                             );
                           })}
+                          </div>
+                          </div>
+                          ))}
                         </div>
                       )}
                     </div>
