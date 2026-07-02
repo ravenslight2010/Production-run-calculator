@@ -672,15 +672,25 @@ export function isCatchAllFlavor(flavor: string, kind: string): boolean {
 /** Matches a pepperoni ingredient/recipe name ("Pepperoni", "Pep Stick"). Pure. */
 const PEPPERONI_NAME_RE = /pepp?eroni|pep\s*stick/i;
 
+/** DICED pepperoni is a topping ingredient (part of a cheese/topping blend), NOT
+ * a stick pep type — the ONE pepperoni exception that stays a cheese recipe. Pure. */
+const DICED_RE = /diced/i;
+
 /**
- * True when a CHEESE-kind recipe is really just pepperoni — a pep TYPE, not a
- * cheese/topping blend. Pepperoni is captured on a profile's `pepperonis`
- * (type + sticks + oz per pizza), never as a recipe, so the importer drops such
- * recipes instead of creating a bogus "cheese recipe". Conservative: fires only
- * when EVERY ingredient row is pepperoni (a real cheese blend that merely lists
- * pepperoni among its cheeses is kept). Pure. */
+ * True when a CHEESE-kind recipe is really just pepperoni STICKS — a pep TYPE,
+ * not a cheese/topping blend. Pepperoni sticks are captured on a profile's
+ * `pepperonis` (type + sticks + oz per pizza), never as a recipe, so the importer
+ * drops such recipes instead of creating a bogus "cheese recipe". Conservative:
+ * fires only when EVERY ingredient row is (non-diced) pepperoni (a real cheese
+ * blend that merely lists pepperoni among its cheeses is kept). DICED pepperoni
+ * is a topping and is the exception — a recipe containing it is kept. Pure. */
 export function isPepperoniOnlyCheeseRecipe(rows: ReadonlyArray<RecipeRow>): boolean {
-  return rows.length > 0 && rows.every((r) => PEPPERONI_NAME_RE.test(r.ingredient));
+  return (
+    rows.length > 0 &&
+    rows.every(
+      (r) => PEPPERONI_NAME_RE.test(r.ingredient) && !DICED_RE.test(r.ingredient),
+    )
+  );
 }
 
 /** Split a name into lowercase alphanumeric word tokens of length >= 3, dropping

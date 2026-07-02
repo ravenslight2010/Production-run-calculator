@@ -178,7 +178,8 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "'pepperoni sticks') is a profile PEPPERONI — capture it in that profile's " +
     "`pepperonis` list (type + sticks + oz per pizza) and NEVER emit it as a " +
     "cheese or topping recipe; do not create a recipe whose ingredients are " +
-    "pepperoni. " +
+    "pepperoni. THE ONE EXCEPTION IS DICED PEPPERONI: diced pepperoni is a " +
+    "topping and stays part of a CHEESE/topping recipe, NOT a profile pepperoni. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap units: `ozPerPizza`/`sauceOzPerPizza` are " +

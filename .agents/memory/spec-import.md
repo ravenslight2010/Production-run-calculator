@@ -315,6 +315,10 @@ Any change to one app's order/logic must land in the other verbatim.
   backstop `isPepperoniOnlyCheeseRecipe(rows)` (pure, `@workspace/spec-import`) — the
   sanitizer drops a cheese recipe whose rows are ALL pepperoni; (3) a real cheese
   blend that merely LISTS pepperoni among other cheeses is KEPT (every-row guard).
+- **DICED pepperoni is the ONE exception — it stays a cheese/topping recipe.** Diced
+  pepperoni is a topping ingredient, NOT a stick pep type, so the helper excludes any
+  `diced` row (`DICED_RE`) from the drop and the prompt calls it out explicitly. A
+  recipe containing diced pepperoni is never dropped.
 - **Die reviewer false-positive:** the spec-sheet `reviewSuggestions` instructions
   (`ai.ts`) now tell the reviewer die types are commonly non-numeric custom dies
   (e.g. "Argus"/"Mystic"), not inch sizes — don't flag a die for not being a numeric
