@@ -365,3 +365,29 @@ Any change to one app's order/logic must land in the other verbatim.
   Ship|PO) is a SCHEDULE file, not a spec sheet** — it belongs to the schedule importer,
   not `/ai/parse-spec-sheet`. Out of scope for spec-import hardening; do not feed it to
   the spec parser (it would time out / mis-parse).
+
+## Hand-fixing mixed size-line brand/flavor data directly in the DB
+- **Same failure class as Basha, seen again with Lowe's (`Lowe's` vs `Lowe's 7in`):** two
+  size lines' flavors leak into each other (size-tagged strays like `7in Red Fajita` under
+  the 11in/general brand, `11in White Spinach` under the 7in brand) AND learned rules keep
+  re-mixing them on every import.
+- **To un-mix without the app UI, replicate what `mergeFlavors`/`removeFlavor` do, three
+  parts — all required or the fix silently reverts:**
+  1. **Edit EVERY `scope='live'` `daily_sync` row's `data->'brandFlavors'`, not just the
+     latest.** Live-sync's additive union pulls each brand's flavor list from ALL rows, so
+     a stray left in an older row re-appears.
+  2. **Write `deletedItems` tombstones** in namespace `flavor:<brand lowercased>` (see
+     `flavorNamespace`) for every removed string, names LOWERCASED (matching is
+     case-insensitive). Without the tombstone the union resurrects the removal. (Mirror of
+     the existing Basha tombstones already in `deletedItems`.)
+  3. **Delete the collapse rules in BOTH `spec_import_aliases` AND `ai_corrections`** or the
+     next import re-mixes: the size-collapse is a `brand` row `X 11in → X 7in` in each
+     table; wrong flavor remaps are `flavor` rows scoped by `context='<brand>'` (e.g.
+     `Buffalo Chicken → BBQ Chicken`). Keep benign normalizations (`Lowes → Lowe's`,
+     `ULTIMATE PEPPERONI → Pepperoni`) and unrelated mix/item renames.
+- **Before removing a flavor, check no `dayState.runs` / `runValues` reference it** (they'd
+  orphan). Bump `daily_sync.updated_at` so clients re-pull. Profiles are NOT in the synced
+  blob (client-local only) — orphaned profiles are benign and can't be cleaned via DB.
+- **Only remove UNAMBIGUOUS strays** (a size-tagged name whose clean equivalent already
+  exists in the correct brand). Casing/truncation near-dups without a clear canonical
+  (e.g. `White Spin` vs `White Spinach`) are left alone — ask, don't guess.
