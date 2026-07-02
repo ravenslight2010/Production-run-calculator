@@ -111,3 +111,4 @@
 - [Import "reload" = sandbox auto-reset OR Vite HMR](web-form-button-submit-reload.md) — web import blanks page from two distinct causes: sandbox auto-reset on focus refetch, and Vite HMR ws dropping through the Replit proxy (reconnect → `location.reload()` aborts the import).
 - [Web brand palette](web-brand-palette.md) — web app unified on brand amber #FF9500; Tailwind v4 @theme remaps amber-* AND orange-* to one ramp (orange==amber by design); theme-color lives in 3 synced spots.
 - [Recipe-merge sync-receive guards](recipe-merge-sync-receive.md) — web receive-side merge-survival logic extracted to storage.ts helpers (acceptRemoteRunValueOnSync, dropTombstonedPresetKeys); keep home.tsx wired to them, don't re-inline.
+- [Spec-import scale harness](spec-import-scale-harness.md) — run BOTH committed real-AI harnesses after any model change; exporter cells bound for the AI prompt must wrap under PROMPT_MAX_CELL_CHARS or targets silently truncate.

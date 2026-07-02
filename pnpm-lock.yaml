@@ -1188,6 +1188,13 @@ importers:
   lib/voice-commands: {}
 
   scripts:
+    dependencies:
+      '@workspace/spec-export':
+        specifier: workspace:*
+        version: link:../lib/spec-export
+      '@workspace/spec-import':
+        specifier: workspace:*
+        version: link:../lib/spec-import
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -22,7 +22,7 @@
 // They are kept in SEPARATE workbooks on purpose: feeding mix tabs to the AI
 // spec importer (or spec/recipe tabs to the premix scanner) would cross-parse.
 
-import type { SheetGrid } from "@workspace/spec-import";
+import { PROMPT_MAX_CELL_CHARS, type SheetGrid } from "@workspace/spec-import";
 import type { Mix } from "@workspace/mixes";
 
 export type { SheetGrid };
@@ -284,7 +284,24 @@ function buildRecipeGrid(
     const tie = ties.get(name.toLowerCase());
     if (tie) {
       for (const [brand, flavors] of tie.targetsByBrand) {
-        rows.push([`${brand}: ${flavors.join(", ")}`]);
+        // The AI prompt path clamps each CELL to PROMPT_MAX_CELL_CHARS when the
+        // workbook is flattened for parsing. A brand with many flavors renders
+        // one long single-cell line — if it exceeds the clamp, the trailing
+        // flavors get silently truncated and re-import loses those targets
+        // (verified end-to-end: 8-flavor brands lost "BBQ Chicken"/"Veggie").
+        // Wrap into multiple "Brand: f1, f2" rows that each fit under the
+        // clamp; the importer unions repeated brand rows into one target set.
+        let group: string[] = [];
+        const flush = () => {
+          if (group.length) rows.push([`${brand}: ${group.join(", ")}`]);
+          group = [];
+        };
+        for (const flavor of flavors) {
+          const line = `${brand}: ${[...group, flavor].join(", ")}`;
+          if (group.length > 0 && line.length > PROMPT_MAX_CELL_CHARS) flush();
+          group.push(flavor);
+        }
+        flush();
       }
       if (kind === "dough" && tie.doughballOz != null) {
         rows.push(["Target Doughball Weight (oz)", num(tie.doughballOz)]);

@@ -93,6 +93,40 @@ describe("buildSpecExportGrids", () => {
     expect(cflat).toContain("Applicator Slot|1");
   });
 
+  it("wraps a brand's target flavors across rows so no cell exceeds the prompt cell clamp", () => {
+    const flavors = [
+      "Cheese", "Pepperoni", "Supreme", "Hawaiian", "Margherita", "Sausage", "Veggie",
+      "BBQ Chicken",
+    ];
+    const wide: SpecExportInput = {
+      profiles: flavors.map((flavor) => ({
+        brand: "Silverline Kitchens",
+        flavor,
+        applicators: [],
+        pepperonis: [],
+        doughRecipeName: "Silverline Kitchens Dough",
+      })),
+      doughRecipes: [
+        { name: "Silverline Kitchens Dough", rows: [{ ingredient: "Flour", lbs: 10 }] },
+      ],
+      sauceRecipes: [],
+      cheeseRecipes: [],
+    };
+    const grids = buildSpecExportGrids(wide, ALL);
+    const dough = findSheet(grids, "Dough Recipes");
+    const targetLines = dough.rows
+      .map((r) => r.join("|"))
+      .filter((l) => l.startsWith("Silverline Kitchens:"));
+    // A single line would be >80 chars and get truncated by the prompt cell
+    // clamp (losing trailing flavors) — it must wrap into several short lines.
+    expect(targetLines.length).toBeGreaterThan(1);
+    for (const line of targetLines) expect(line.length).toBeLessThanOrEqual(80);
+    // Every flavor survives across the wrapped lines.
+    const joined = targetLines.map((l) => l.slice("Silverline Kitchens:".length)).join(", ");
+    const seen = joined.split(",").map((s) => s.trim()).filter(Boolean);
+    expect([...seen].sort()).toEqual([...flavors].sort());
+  });
+
   it("honors the selection (only chosen kinds are emitted)", () => {
     const only: SpecExportSelection = { profiles: true, dough: false, sauce: false, cheese: false };
     const grids = buildSpecExportGrids(input, only);

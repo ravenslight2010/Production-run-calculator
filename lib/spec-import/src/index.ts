@@ -455,11 +455,20 @@ export type GridTextLimits = {
   maxTotalChars?: number;
 };
 
+/**
+ * Per-CELL char clamp applied when a workbook is flattened to prompt text.
+ * Exported so producers of prompt-bound grids (the spec exporter's
+ * "Brand: flavor, flavor…" target rows) can wrap long single-cell lines under
+ * this limit instead of getting silently truncated here — a clipped targets
+ * cell loses trailing flavors and the AI has to guess them back.
+ */
+export const PROMPT_MAX_CELL_CHARS = 80;
+
 const DEFAULT_LIMITS: Required<GridTextLimits> = {
   maxSheets: 24,
   maxRows: 1000,
   maxCols: 60,
-  maxCellChars: 80,
+  maxCellChars: PROMPT_MAX_CELL_CHARS,
   // Per-chunk prompt budget. Must stay under the server's MAX_WORKBOOK_CHARS
   // (60k), but the real ceiling is the AI's OUTPUT side: parse output is
   // roughly input-proportional, and dense sheets (one spec profile per row)

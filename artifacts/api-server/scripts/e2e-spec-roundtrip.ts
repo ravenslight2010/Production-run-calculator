@@ -19,6 +19,11 @@
 // "ALL CHECKS PASSED — full round-trip with no data loss." Raw AI output and
 // the sanitized parse are dumped to /tmp/spec-e2e-{raw,parsed}.json for triage.
 // Last verified passing (2 consecutive runs): 2026-07-02, gemini-3.1-pro-preview.
+//
+// Companion harness: scripts/src/verify-large-spec-import.mts (repo-root
+// scripts/ package) verifies LARGE imports (30 brands × 8 flavors, chunked
+// through the real /ai/parse-spec-sheet endpoint). Run BOTH after changing the
+// AI model — this one stresses parse rules, that one stresses size limits.
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { writeFileSync, readFileSync } from "node:fs";

@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "verify-large-spec-import": "tsx ./src/verify-large-spec-import.mts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@workspace/spec-export": "workspace:*",
+    "@workspace/spec-import": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
