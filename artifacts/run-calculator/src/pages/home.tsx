@@ -61,6 +61,7 @@ import {
   sauceBarrelBreakdown,
   genId,
   todayStr,
+  writeDayResetAt,
   runLabel,
 } from "../utils";
 import { setActiveSubstitutions } from "../substitutionState";
@@ -3217,7 +3218,7 @@ export default function Home() {
         runValues[r.id] = { ...base, casesNeeded: r.casesNeeded };
       }
       const payload: SyncPayload = {
-        dayState: { runs, date: scheduleEditorDate, resetAt: Date.now() },
+        dayState: { runs, date: scheduleEditorDate, resetAt: writeDayResetAt(scheduleEditorDate, todayStr(), undefined, dayStateRef.current.resetAt, Date.now()) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),
@@ -3281,7 +3282,7 @@ export default function Home() {
     const base = tgt ?? src;
     const targetPayload: SyncPayload = {
       ...base,
-      dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: Date.now() },
+      dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: writeDayResetAt(toDate, todayStr(), (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues: vals.target,
     };
     const tRes = await fetch(`/api/sync/${toDate}`, {
@@ -5641,7 +5642,7 @@ export default function Home() {
     const runValues = { ...existingRunValues, ...newRunValues };
     const outPayload: SyncPayload = {
       ...(existing ?? {}),
-      dayState: { ...existingDayState, runs, date, resetAt: existingDayState.resetAt ?? Date.now() },
+      dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
@@ -5737,7 +5738,7 @@ export default function Home() {
       const runValues = { ...keptRunValues, ...newRunValues };
       const outPayload: SyncPayload = {
         ...(existing ?? {}),
-        dayState: { ...existingDayState, runs, date, resetAt: existingDayState.resetAt ?? Date.now() },
+        dayState: { ...existingDayState, runs, date, resetAt: writeDayResetAt(date, todayStr(), existingDayState.resetAt, dayStateRef.current.resetAt, Date.now()) },
         runValues,
         brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
         brandFlavors: loadBrandFlavors(),

@@ -59,3 +59,18 @@ Mobile: `context/authEvents.ts` (`notifyUnauthorized`) called from
 
 **SSE can't read HTTP status**, so on stream error both apps call `revalidate`
 (web invalidates ["me"]; mobile fetchMe → 401 → clear) as a fallback bounce.
+
+**ONLY a real rollover may advance `resetAt`.** Because `resetAt` IS the boundary
+(and `protectRunValues` treats a strictly-forward `resetAt` as a "true daily reset"
+→ wholesale-adopt incoming runs), any OTHER write to today's live row that stamps a
+fresh `Date.now()` resetAt force-signs-out everyone AND wipes the live day = an
+"early daily reset" report. The Excel-import + schedule (editor/move) commit paths
+used to stamp `Date.now()`; importing/scheduling a block dated TODAY (import allows
+today; schedule editor defaults to `todayStr()`) tripped this. Fix: pure
+`writeDayResetAt(targetDate, today, existingResetAt, liveResetAt, now)` in web
+`utils.ts` — FUTURE target ⇒ `now` (override semantics, harmless: boundary reads
+today's row only); TODAY target ⇒ `existingResetAt ?? liveResetAt ?? 0` (never
+advance; 0 = no fence; treats stored 0 as real). Wired into all 4 home.tsx write
+sites. **Rule for any new day-row write:** never pass `Date.now()` as resetAt for a
+today-target — preserve the existing boundary. Mobile has the same latent bug
+(parity paused; MOBILE TODO logged).

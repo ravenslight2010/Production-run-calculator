@@ -46,6 +46,30 @@ export function todayStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// `dayState.resetAt` doubles as the server-side daily-reset SESSION BOUNDARY: any
+// auth token issued before today's row's resetAt is force-signed-out, and
+// protectRunValues treats a strictly-forward resetAt as a "true daily reset"
+// (adopt the incoming runs WHOLESALE). Only a real midnight rollover may advance
+// it.
+//
+// A schedule/import write into a FUTURE day may stamp `now` to get that
+// wholesale-override behaviour on that future row — harmless, because the server
+// only reads TODAY's row for the boundary. But stamping `now` onto TODAY's live
+// row would fence every session (an early "daily reset" — everyone bounced to
+// login) AND wholesale-wipe the live day. So when the write target is today we
+// must NEVER advance the boundary: preserve the existing value (from the fetched
+// server row, else the live day) and default to 0.
+export function writeDayResetAt(
+  targetDate: string,
+  today: string,
+  existingResetAt: number | undefined,
+  liveResetAt: number | undefined,
+  now: number,
+): number {
+  if (targetDate === today) return existingResetAt ?? liveResetAt ?? 0;
+  return now;
+}
+
 export function runLabel(r: RunMeta): string {
   if (r.brand && r.flavor) return `${r.brand} – ${r.flavor}`;
   if (r.brand) return r.brand;
