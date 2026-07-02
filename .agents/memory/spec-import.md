@@ -445,3 +445,17 @@ Any change to one app's order/logic must land in the other verbatim.
   (all brands, all chunk sizes, even single-chunk). Real flow mitigates via
   known-list canonicalization; profile-level grounding against sourceText (like
   the recipe-target backstop) would close it fully.
+
+## Failed AI pass on a chunk → ONE automatic client-side retry
+- The parse server returns `profiles:[] recipes:[]` + a `note` when the model's
+  response is cut off/malformed. Both prepare cores (web `parseWorkbookCore`,
+  mobile `parseGridsCore`) retry such a chunk ONCE before merging, so one bad
+  pass doesn't force re-running (re-billing) the whole import.
+- Retry condition: `(0 profiles AND 0 recipes) OR note present`, AND the chunk's
+  prompt text ≥ `RETRY_MIN_CHUNK_CHARS` (200) — tiny header-only chunks can
+  legitimately parse to nothing and are never retried.
+- Fail-safe: if the retry ITSELF throws, keep the first (noted) result rather
+  than failing the import; a failed retry result is also discarded in favor of
+  the original so the note still surfaces. One retry per chunk stays under the
+  10/min parse rate limit for realistic imports (≤8 chunks/file).
+- Web+mobile identical (only `knownInput` vs `store.known` differ).

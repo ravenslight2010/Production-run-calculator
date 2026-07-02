@@ -239,6 +239,27 @@ type ParseCore = {
 };
 
 /**
+ * Chunks whose prompt text is at least this many characters are expected to
+ * yield SOMETHING; an empty parse for one is treated as a failed AI pass and
+ * retried once. Tiny chunks (e.g. a stray header-only sheet) can legitimately
+ * parse to nothing, so they are never retried. Mirrors web RETRY_MIN_CHUNK_CHARS.
+ */
+const RETRY_MIN_CHUNK_CHARS = 200;
+
+/**
+ * True when an AI parse pass came back unusable: nothing extracted, or the
+ * server attached a failure note (it returns empty + note when the model's
+ * response was cut off / malformed). Mirrors web isFailedParsePass.
+ */
+function isFailedParsePass(ai: {
+  profiles: unknown[];
+  recipes: unknown[];
+  note?: string;
+}): boolean {
+  return (ai.profiles.length === 0 && ai.recipes.length === 0) || Boolean(ai.note);
+}
+
+/**
  * Read one workbook's grids → AI parse → canonicalize, returning the
  * canonicalized parse, resolved alias pairs, and reviewer-AI flags for that
  * single file. A workbook too large for one prompt is split into chunks and
@@ -262,7 +283,21 @@ async function parseGridsCore(
   for (const chunk of chunks) {
     const workbookText = gridsToPromptText(chunk);
     if (!workbookText.trim()) continue;
-    const ai = await requestParseSpecSheet({ workbookText, known: store.known, aliases });
+    let ai = await requestParseSpecSheet({ workbookText, known: store.known, aliases });
+    // One automatic retry for a failed pass on a non-trivial chunk: the model
+    // occasionally returns an empty/cut-off response for a single chunk, and
+    // without a retry the user's only recourse is re-running (and re-billing)
+    // the WHOLE import. A single retry per chunk stays well under the server's
+    // 10/min parse rate limit. Fail-safe: if the retry itself throws, keep the
+    // first (noted) result instead of failing the whole import. Mirrors web.
+    if (isFailedParsePass(ai) && workbookText.length >= RETRY_MIN_CHUNK_CHARS) {
+      try {
+        const retry = await requestParseSpecSheet({ workbookText, known: store.known, aliases });
+        if (!isFailedParsePass(retry)) ai = retry;
+      } catch {
+        // Keep the original result (empty + note) — the note still surfaces.
+      }
+    }
     rawList.push({
       profiles: ai.profiles,
       recipes: ai.recipes,
