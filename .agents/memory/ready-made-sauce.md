@@ -31,3 +31,10 @@ that isn't used at all.
   mobile's needs-rollup UI label + import glue were deferred (parity paused).
 - Existing profiles do NOT retroactively gain a name — the spec sheet must be
   re-imported (or the name set manually) for the new behavior to kick in.
+- **Visibility matters:** an applied sauceName that is shown nowhere reads as
+  "didn't import" to the user. Web now (a) shows it in the import review
+  summary line (`Sauce 4.5 oz (BBQ Sauce)`) and (b) registers it as a Sauce
+  Recipe dropdown option in `applySpecImport`. Gotcha: the `newSauceNames`
+  option-list flush runs BEFORE the profile loop — profile sauce names need
+  their own post-loop merge (`profileSauceNames`), a push into `newSauceNames`
+  inside the profile loop is silently a no-op.

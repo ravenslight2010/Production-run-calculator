@@ -106,7 +106,18 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
 function profileSummary(p: ParsedProfile): string {
   const parts: string[] = [];
   if (p.dieType) parts.push(`Die ${p.dieType}`);
-  if (p.sauceOzPerPizza != null) parts.push(`Sauce ${p.sauceOzPerPizza} oz`);
+  if (p.sauceOzPerPizza != null) {
+    // Include the named bought/ready-made sauce (e.g. "BBQ Sauce") so the user
+    // can see at a glance that the sheet's sauce name was read — otherwise a
+    // successfully imported sauce name is invisible on this screen.
+    parts.push(
+      p.sauceName
+        ? `Sauce ${p.sauceOzPerPizza} oz (${p.sauceName})`
+        : `Sauce ${p.sauceOzPerPizza} oz`,
+    );
+  } else if (p.sauceName) {
+    parts.push(`Sauce: ${p.sauceName}`);
+  }
   for (const a of p.applicators ?? []) {
     if (a.type) parts.push(`${a.type} ${a.ozPerPizza} oz`);
   }

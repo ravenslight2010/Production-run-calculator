@@ -1838,6 +1838,7 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   const newBrands: string[] = [];
   const newAppTypes: string[] = [];
   const newPepTypes: string[] = [];
+  const profileSauceNames: string[] = [];
 
   function registerBrandFlavor(brand: string, flavor: string): void {
     if (!brand || !flavor) return;
@@ -1860,6 +1861,18 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     // name the user already set; a sauce-recipe tie later in this import still
     // overwrites (correctly) via the recipe apply loop below.
     const specSauceName = (p.sauceName ?? "").trim();
+    if (specSauceName) {
+      // Register the bought/ready-made sauce name as a selectable Sauce Recipe
+      // option regardless of whether this profile keeps it — otherwise the name
+      // only ever appears on the one profile and looks like it never imported.
+      // (Collected separately: the newSauceNames list was already flushed to
+      // storage before this loop runs.) Clear any delete/merge tombstone for
+      // the name too, or the sync receive-side dropDeleted/dropMergedAway
+      // filters would strip it right back out of the options list.
+      profileSauceNames.push(specSauceName);
+      clearDeleted("frontlineRecipeNames", specSauceName);
+      clearMergedAway(specSauceName);
+    }
     const hasMixedSauce = (values.frontlineRecipe ?? []).some(r => Number(r.lbs ?? 0) > 0);
     if (specSauceName && !hasMixedSauce && !(values.frontlineRecipeName ?? "").trim()) {
       values.frontlineRecipeName = specSauceName;
@@ -1886,6 +1899,10 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     // combined (checkbox checked).
     (values as Record<string, unknown>).pep1Combined = namedPeps.length >= 2 ? false : true;
     saveProfile(brand, flavor, values);
+  }
+
+  if (profileSauceNames.length) {
+    saveList(FRONTLINE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES), profileSauceNames).sort((a, b) => a.localeCompare(b)));
   }
 
   // ── Tie recipes onto their profiles ──
