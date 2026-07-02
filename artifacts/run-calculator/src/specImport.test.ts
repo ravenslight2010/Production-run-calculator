@@ -796,6 +796,74 @@ describe("splitGridsForPrompt", () => {
     const { chunks } = splitGridsForPrompt(grids, { maxSheets: 2 });
     for (const c of chunks) expect(c.length).toBeLessThanOrEqual(2);
   });
+
+  // Build an exporter-style recipe sheet: N blocks of
+  //   Recipe: <name> / Brand: flavor / Ingredient|Lbs / <rows…>
+  const recipeSheet = (nBlocks: number, rowsPerBlock: number): SheetGrid => {
+    const rows: string[][] = [];
+    for (let b = 0; b < nBlocks; b++) {
+      rows.push([`Recipe: Blend ${b}`]);
+      rows.push([`Brand ${b}: Cheese, Pepperoni`]);
+      rows.push(["Ingredient", "Lbs"]);
+      for (let r = 0; r < rowsPerBlock; r++) rows.push([`Ingredient ${b}-${r}`, String(r + 1)]);
+    }
+    return { name: "Cheese Recipes", rows };
+  };
+
+  it("never splits a 'Recipe:' block across chunks (block-atomic chunking)", () => {
+    const sheet = recipeSheet(12, 6);
+    const { chunks, droppedRows } = splitGridsForPrompt([sheet], { maxTotalChars: 400 }, 50);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(droppedRows).toBe(0);
+    // Each chunk's slice of the sheet starts at a block header, and every
+    // block's rows live in exactly one chunk (header + targets + all rows).
+    const byBlock = new Map<string, Set<number>>();
+    for (const [ci, c] of chunks.entries()) {
+      for (const s of c) {
+        expect(s.rows[0][0]).toMatch(/^Recipe:/);
+        let current = "";
+        for (const row of s.rows) {
+          if (/^Recipe:/.test(row[0])) current = row[0];
+          const set = byBlock.get(current) ?? new Set<number>();
+          set.add(ci);
+          byBlock.set(current, set);
+        }
+      }
+    }
+    expect(byBlock.size).toBe(12);
+    for (const [, set] of byBlock) expect(set.size).toBe(1);
+    // No rows lost overall.
+    const total = chunks.flatMap((c) => c.flatMap((s) => s.rows)).length;
+    expect(total).toBe(sheet.rows.length);
+  });
+
+  it("still splits a single block bigger than a whole chunk (forward progress)", () => {
+    const sheet = recipeSheet(1, 40);
+    const { chunks, droppedRows } = splitGridsForPrompt([sheet], { maxTotalChars: 200 }, 50);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(droppedRows).toBe(0);
+    const total = chunks.flatMap((c) => c.flatMap((s) => s.rows)).length;
+    expect(total).toBe(sheet.rows.length);
+  });
+
+  it("keeps blocks atomic when the sheet follows other sheets in the chunk", () => {
+    const filler: SheetGrid = {
+      name: "Profiles",
+      rows: Array.from({ length: 10 }, (_, i) => [`profile-row-${i}-${"x".repeat(20)}`]),
+    };
+    const { chunks, droppedRows } = splitGridsForPrompt(
+      [filler, recipeSheet(8, 5)],
+      { maxTotalChars: 500 },
+      50,
+    );
+    expect(droppedRows).toBe(0);
+    for (const c of chunks) {
+      for (const s of c) {
+        if (s.name !== "Cheese Recipes") continue;
+        expect(s.rows[0][0]).toMatch(/^Recipe:/);
+      }
+    }
+  });
 });
 
 describe("applyNameMatches", () => {

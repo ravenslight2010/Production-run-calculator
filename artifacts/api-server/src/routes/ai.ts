@@ -1931,7 +1931,11 @@ router.post(
     try {
       const response = await openai.chat.completions.create({
         model: pickModel("full"),
-        max_completion_tokens: 32768,
+        // Parsing echoes the whole workbook chunk back as structured JSON, so
+        // output scales with input: a chunk carrying ~240 spec profiles
+        // overflowed 32768 output tokens → truncated non-JSON → empty result.
+        // Use the model's full 64k output budget for this route.
+        max_completion_tokens: 65536,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: system },
@@ -1950,7 +1954,12 @@ router.post(
       raw = JSON.parse(content);
     } catch {
       req.log.warn({ content: content.slice(0, 200) }, "ai-parse-spec-sheet non-JSON response");
-      res.json({ profiles: [], recipes: [], generatedAt: Date.now() });
+      res.json({
+        profiles: [],
+        recipes: [],
+        generatedAt: Date.now(),
+        note: "The AI couldn't parse this portion of the sheet (its response was cut off or malformed). Nothing from this portion was imported — try again or split the file.",
+      });
       return;
     }
 

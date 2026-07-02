@@ -403,3 +403,31 @@ Any change to one app's order/logic must land in the other verbatim.
   alternative Lowe's uses is separate brands (`Lowe's` vs `Lowe's 7in`). Confirm with the
   user before stripping size tags; only merge the obvious dup (sized vs un-sized SAME name,
   e.g. Bobo's `12" DELUXE` vs `Deluxe` → keep sized, tombstone `deluxe`).
+
+## Chunked parsing of very large exports (multi-AI-pass integrity)
+- **`splitGridsForPrompt` keeps "Recipe:" blocks ATOMIC across chunk breaks.** A
+  chunk break that lands inside a recipe block (header/targets in one chunk,
+  ingredient rows in the next) makes the AI drop or orphan the split half. The
+  splitter detects block-start rows (`/^recipe:\s*\S/i` on the first cell) and
+  rewinds a mid-block break so the whole block moves to the next chunk (with a
+  forward-progress guard when one block exceeds a whole chunk). Pinned by
+  block-atomic tests in `specImport.test.ts`.
+- **The per-chunk budget is bounded by the AI's OUTPUT side, not the 60k input
+  cap.** Parse output ≈ input restructured as JSON, and dense one-profile-per-row
+  sheets demand hundreds of JSON objects back. Verified live: ~56k chunks
+  truncated past `max_completion_tokens` (non-JSON → empty), ~30k chunks
+  (~240 profiles) were FLAKY (model sometimes returned valid-but-empty JSON),
+  ~16k chunks (~100-130 profiles) parsed correctly every time →
+  `DEFAULT_LIMITS.maxTotalChars` = 16k. More chunks = more reliable calls;
+  `DEFAULT_MAX_PROMPT_CHUNKS` (8) still covers a 30-brand × 8-flavor export.
+- **Sanitizer caps must exceed what one chunk can legitimately carry.**
+  `maxProfiles` was 100 while a profile-dense chunk can hold ~176 rows — the
+  sanitizer silently sliced valid profiles off large exports. Now 400.
+- **The route's non-JSON fallback must carry a `note`.** It used to return bare
+  `{profiles:[],recipes:[]}` → a failed chunk merged in as silent data loss;
+  `mergeParsedSpecImports` joins notes so the user sees the failure.
+- **Known residual (NOT a chunking issue):** on a large synthetic export the
+  model consistently paraphrased the flavor "Buffalo Chicken" → "BBQ Chicken"
+  (all brands, all chunk sizes, even single-chunk). Real flow mitigates via
+  known-list canonicalization; profile-level grounding against sourceText (like
+  the recipe-target backstop) would close it fully.

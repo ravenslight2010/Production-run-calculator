@@ -460,10 +460,16 @@ const DEFAULT_LIMITS: Required<GridTextLimits> = {
   maxRows: 1000,
   maxCols: 60,
   maxCellChars: 80,
-  // Kept just under the server's MAX_WORKBOOK_CHARS (60k) so a large or
-  // multi-sheet workbook is sent in full instead of being truncated client-side
-  // before the AI ever sees it (was 24k, which silently dropped big imports).
-  maxTotalChars: 56000,
+  // Per-chunk prompt budget. Must stay under the server's MAX_WORKBOOK_CHARS
+  // (60k), but the real ceiling is the AI's OUTPUT side: parse output is
+  // roughly input-proportional, and dense sheets (one spec profile per row)
+  // make a big chunk demand hundreds of JSON objects back. Verified end-to-end:
+  // ~56k chunks truncated past the completion cap (non-JSON → empty), and even
+  // ~30k chunks (~240 profiles) were flaky — the model sometimes returned
+  // valid-but-empty JSON. ~16k chunks (~100-130 profiles) parsed correctly
+  // every time. splitGridsForPrompt sends multiple chunks, so nothing is
+  // dropped — smaller chunks just mean more (reliable) calls.
+  maxTotalChars: 16000,
 };
 
 /** Clamp a row's cells the same way for prompt text + chunking (shared so they
@@ -521,14 +527,27 @@ export type GridSplit = {
  * flood of AI calls). */
 export const DEFAULT_MAX_PROMPT_CHUNKS = 8;
 
+/** A row that begins a new logical block within a sheet — the exporter's (and
+ * many hand-made workbooks') "Recipe: <name>" header. Chunking treats these as
+ * preferred break points so ONE recipe block (header + "Brand: flavor" targets
+ * + ingredient table) is never split across two AI calls: the chunk that saw
+ * only the header would emit a rowless recipe, and the chunk that saw only the
+ * rows would have no name/targets to attach them to. */
+function isBlockStartRow(cells: ReadonlyArray<string>): boolean {
+  return /^recipe:\s*\S/i.test(cells[0] ?? "");
+}
+
 /**
  * Split one workbook's grids into chunks that each render under the prompt char
  * budget (and per-call sheet/row caps), so a large workbook is parsed across
  * several AI calls instead of being silently truncated by gridsToPromptText.
  * Sheets are kept in order; a sheet too large for one chunk is split across
- * chunks by rows (each chunk re-emits the sheet header). Rows beyond `maxChunks`
- * chunks are reported as `droppedRows` so the caller can note them precisely.
- * Pure + deterministic.
+ * chunks by rows (each chunk re-emits the sheet header). When a split point
+ * falls inside a "Recipe: …" block, the break is moved back to the block start
+ * so the whole block lands in the next chunk (unless the block alone exceeds a
+ * whole chunk, in which case it splits anyway for forward progress). Rows
+ * beyond `maxChunks` chunks are reported as `droppedRows` so the caller can
+ * note them precisely. Pure + deterministic.
  */
 export function splitGridsForPrompt(
   grids: ReadonlyArray<SheetGrid>,
@@ -560,7 +579,11 @@ export function splitGridsForPrompt(
         flush();
       }
       const blockRows: string[][] = [];
+      const rowLens: number[] = [];
       let blockChars = headerLen;
+      // Index within blockRows of the most recent "Recipe: …" block-start row
+      // (-1 when none seen in this chunk's slice of the sheet).
+      let lastBlockStart = -1;
       while (i < rows.length && blockRows.length < lim.maxRows) {
         const add = rows[i].join("\t").length + 1;
         if (curChars + blockChars + add > budget) {
@@ -568,14 +591,34 @@ export function splitGridsForPrompt(
           // anyway so we always make forward progress (it becomes its own row).
           if (blockRows.length === 0 && cur.length === 0) {
             blockRows.push(rows[i]);
-            blockChars += add;
+            rowLens.push(add);
             i += 1;
+            blockChars += add;
           }
           break;
         }
+        if (isBlockStartRow(rows[i])) lastBlockStart = blockRows.length;
         blockRows.push(rows[i]);
+        rowLens.push(add);
         blockChars += add;
         i += 1;
+      }
+      // Keep "Recipe: …" blocks atomic: if we stopped mid-sheet and the break
+      // falls INSIDE the block opened at lastBlockStart (the next pending row is
+      // not itself a block start), rewind to the block start so the whole block
+      // moves to the next chunk. Skip the rewind when it would leave nothing to
+      // emit on an empty chunk (block bigger than a whole chunk — split anyway).
+      if (
+        i < rows.length &&
+        lastBlockStart >= 0 &&
+        !isBlockStartRow(rows[i]) &&
+        (lastBlockStart > 0 || cur.length > 0)
+      ) {
+        while (blockRows.length > lastBlockStart) {
+          blockRows.pop();
+          blockChars -= rowLens.pop() ?? 0;
+          i -= 1;
+        }
       }
       if (blockRows.length > 0) {
         cur.push({ name: sheet.name, rows: blockRows });
@@ -620,7 +663,11 @@ export type SpecImportGrounding = {
 };
 
 const DEFAULT_SPEC_LIMITS: Required<SpecImportLimits> = {
-  maxProfiles: 100,
+  // A single ~30k-char prompt chunk can legitimately carry ~240 spec-profile
+  // rows (dense one-row-per-profile sheets), so the cap needs headroom above
+  // that — at 100 the sanitizer silently sliced off valid profiles from large
+  // exports. Still bounded to keep hallucinated floods out.
+  maxProfiles: 400,
   maxRecipes: 200,
   maxApplicators: 4,
   maxPepperonis: 2,
