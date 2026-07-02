@@ -19,6 +19,10 @@ import {
   partitionTombstonedParse,
   recipeApplyIssue,
   profileApplyIssue,
+  isFailedParsePass,
+  shouldRetryParsePass,
+  resolveRetriedParsePass,
+  RETRY_MIN_CHUNK_CHARS,
   SPEC_ALIAS_KINDS,
   type ParsedSpecImport,
   type SheetGrid,
@@ -1317,5 +1321,68 @@ describe("recipeApplyIssue / profileApplyIssue", () => {
       "missing-flavor",
     );
     expect(profileApplyIssue({ brand: "B", flavor: "F", applicators: [], pepperonis: [] })).toBeNull();
+  });
+});
+
+describe("AI parse-pass retry rule", () => {
+  const bigChunk = "x".repeat(RETRY_MIN_CHUNK_CHARS);
+  const tinyChunk = "x".repeat(RETRY_MIN_CHUNK_CHARS - 1);
+  const emptyPass = { profiles: [], recipes: [] };
+  const notedPass = { profiles: [], recipes: [], note: "response was cut off" };
+  const goodPass = { profiles: [{ brand: "B" }], recipes: [] };
+  const notedButPartialPass = {
+    profiles: [{ brand: "B" }],
+    recipes: [],
+    note: "sheet 2 unreadable",
+  };
+
+  describe("isFailedParsePass", () => {
+    it("treats an empty parse (no profiles, no recipes) as failed", () => {
+      expect(isFailedParsePass(emptyPass)).toBe(true);
+    });
+    it("treats empty + note as failed", () => {
+      expect(isFailedParsePass(notedPass)).toBe(true);
+    });
+    it("treats a parse WITH results but a failure note as failed", () => {
+      expect(isFailedParsePass(notedButPartialPass)).toBe(true);
+    });
+    it("treats a parse with results and no note as usable", () => {
+      expect(isFailedParsePass(goodPass)).toBe(false);
+      expect(isFailedParsePass({ profiles: [], recipes: [{ kind: "dough" }] })).toBe(false);
+    });
+  });
+
+  describe("shouldRetryParsePass", () => {
+    it("retries an empty+note pass on a non-trivial chunk", () => {
+      expect(shouldRetryParsePass(notedPass, bigChunk)).toBe(true);
+      expect(shouldRetryParsePass(emptyPass, bigChunk)).toBe(true);
+    });
+    it("never retries a tiny chunk, even when the pass failed", () => {
+      expect(shouldRetryParsePass(notedPass, tinyChunk)).toBe(false);
+      expect(shouldRetryParsePass(emptyPass, "")).toBe(false);
+    });
+    it("never retries a successful pass, regardless of chunk size", () => {
+      expect(shouldRetryParsePass(goodPass, bigChunk)).toBe(false);
+      expect(shouldRetryParsePass(goodPass, tinyChunk)).toBe(false);
+    });
+    it("retries exactly at the threshold boundary", () => {
+      expect(bigChunk.length).toBe(RETRY_MIN_CHUNK_CHARS);
+      expect(shouldRetryParsePass(notedPass, bigChunk)).toBe(true);
+      expect(shouldRetryParsePass(notedPass, tinyChunk)).toBe(false);
+    });
+  });
+
+  describe("resolveRetriedParsePass", () => {
+    it("a successful retry replaces the failed pass", () => {
+      expect(resolveRetriedParsePass(notedPass, goodPass)).toBe(goodPass);
+    });
+    it("a failed retry keeps the original noted result (note still surfaces)", () => {
+      expect(resolveRetriedParsePass(notedPass, emptyPass)).toBe(notedPass);
+      const retryWithNote = { profiles: [], recipes: [], note: "cut off again" };
+      expect(resolveRetriedParsePass(notedPass, retryWithNote)).toBe(notedPass);
+    });
+    it("a retry that returns results but carries a failure note is still rejected", () => {
+      expect(resolveRetriedParsePass(notedPass, notedButPartialPass)).toBe(notedPass);
+    });
   });
 });

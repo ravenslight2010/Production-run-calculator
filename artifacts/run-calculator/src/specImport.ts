@@ -21,6 +21,8 @@ import {
   mergeParsedSpecImports,
   partitionTombstonedParse,
   recipeTargets,
+  resolveRetriedParsePass,
+  shouldRetryParsePass,
   splitGridsForPrompt,
   summarizeSpecImport,
   type CanonicalResult,
@@ -211,27 +213,6 @@ type ParseCore = {
 };
 
 /**
- * Chunks whose prompt text is at least this many characters are expected to
- * yield SOMETHING; an empty parse for one is treated as a failed AI pass and
- * retried once. Tiny chunks (e.g. a stray header-only sheet) can legitimately
- * parse to nothing, so they are never retried. Mirrored in the mobile app.
- */
-const RETRY_MIN_CHUNK_CHARS = 200;
-
-/**
- * True when an AI parse pass came back unusable: nothing extracted, or the
- * server attached a failure note (it returns empty + note when the model's
- * response was cut off / malformed).
- */
-function isFailedParsePass(ai: {
-  profiles: unknown[];
-  recipes: unknown[];
-  note?: string;
-}): boolean {
-  return (ai.profiles.length === 0 && ai.recipes.length === 0) || Boolean(ai.note);
-}
-
-/**
  * Read one workbook → AI parse → canonicalize, returning the canonicalized
  * parse, the resolved alias pairs, and the reviewer-AI flags for that single
  * file. A workbook too large for one prompt is split into chunks and parsed in
@@ -273,10 +254,10 @@ async function parseWorkbookCore(
     // the WHOLE import. A single retry per chunk stays well under the server's
     // 10/min parse rate limit. Fail-safe: if the retry itself throws, keep the
     // first (noted) result instead of failing the whole import.
-    if (isFailedParsePass(ai) && workbookText.length >= RETRY_MIN_CHUNK_CHARS) {
+    if (shouldRetryParsePass(ai, workbookText)) {
       try {
         const retry = await requestParseSpecSheet({ workbookText, known: knownInput, aliases });
-        if (!isFailedParsePass(retry)) ai = retry;
+        ai = resolveRetriedParsePass(ai, retry);
       } catch {
         // Keep the original result (empty + note) — the note still surfaces.
       }

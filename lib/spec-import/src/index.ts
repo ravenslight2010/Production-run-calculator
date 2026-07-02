@@ -1486,3 +1486,48 @@ export function crossFillSpecImport(parsed: ParsedSpecImport): CrossFillResult {
 
   return { parsed: { ...parsed, profiles }, filledCount };
 }
+
+// ── AI parse-pass retry rule ────────────────────────────────────────────────
+
+/**
+ * Chunks whose prompt text is at least this many characters are expected to
+ * yield SOMETHING; an empty parse for one is treated as a failed AI pass and
+ * retried once. Tiny chunks (e.g. a stray header-only sheet) can legitimately
+ * parse to nothing, so they are never retried. Shared by web + mobile glue so
+ * the retry rule cannot drift between apps.
+ */
+export const RETRY_MIN_CHUNK_CHARS = 200;
+
+/** Minimal shape of a raw AI parse pass the retry rule needs to inspect. */
+export type ParsePassLike = {
+  profiles: unknown[];
+  recipes: unknown[];
+  note?: string;
+};
+
+/**
+ * True when an AI parse pass came back unusable: nothing extracted, or the
+ * server attached a failure note (it returns empty + note when the model's
+ * response was cut off / malformed). Pure.
+ */
+export function isFailedParsePass(ai: ParsePassLike): boolean {
+  return (ai.profiles.length === 0 && ai.recipes.length === 0) || Boolean(ai.note);
+}
+
+/**
+ * Whole retry decision for one chunk: retry exactly once when the pass failed
+ * AND the chunk's prompt text is non-trivial (≥ RETRY_MIN_CHUNK_CHARS). Tiny
+ * chunks never retry — an empty parse for them is legitimate. Pure.
+ */
+export function shouldRetryParsePass(ai: ParsePassLike, workbookText: string): boolean {
+  return isFailedParsePass(ai) && workbookText.length >= RETRY_MIN_CHUNK_CHARS;
+}
+
+/**
+ * Pick the pass to keep after a retry: the retry replaces the original only
+ * when the retry itself is usable; a failed retry keeps the original (noted)
+ * result so its note still surfaces. Pure.
+ */
+export function resolveRetriedParsePass<T extends ParsePassLike>(original: T, retry: T): T {
+  return isFailedParsePass(retry) ? original : retry;
+}
