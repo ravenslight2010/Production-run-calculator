@@ -112,6 +112,7 @@
 - [Import "reload" = sandbox auto-reset OR Vite HMR](web-form-button-submit-reload.md) — web import blanks page from two distinct causes: sandbox auto-reset on focus refetch, and Vite HMR ws dropping through the Replit proxy (reconnect → `location.reload()` aborts the import).
 - [Web brand palette](web-brand-palette.md) — web app unified on brand amber #FF9500; Tailwind v4 @theme remaps amber-* AND orange-* to one ramp (orange==amber by design); theme-color lives in 3 synced spots.
 - [Recipe-merge sync-receive guards](recipe-merge-sync-receive.md) — web receive-side merge-survival logic extracted to storage.ts helpers (acceptRemoteRunValueOnSync, dropTombstonedPresetKeys); keep home.tsx wired to them, don't re-inline.
+- [Dropdown scroll snap](dropdown-scroll-snap.md) — dev-preview-only list snap-to-top; useDropdownScrollKeeper defends; wire NEW scrollable web dropdown panels into it; e2e sampling gotchas inside.
 - [Multi-day import 401](schedule-import-401.md) — raw-fetch write loops bypass the 401→login bounce; must detect 401, stop, and call reportUnauthorized(), else session expiry looks like "N of N days failed".
 - [Scheduled runs snapshot the profile](scheduled-run-profile-snapshot.md) — web scheduled runs freeze the profile at scheduling time; sauce backfill is blank-fill-only at pull-up; mobile spreads live profile.
 - [Run lifecycle LWW stamp](run-meta-lww.md) — per-run metaUpdatedAt, newer-stamp wins at all 3 sync merge points; stamping is centralized, bypass paths must self-stamp; never bump on value edits.

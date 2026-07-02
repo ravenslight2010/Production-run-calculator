@@ -602,6 +602,7 @@ function IngredientSelect({
   const [rect, setRect] = useState<{ top: number; bottom: number; left: number; width: number } | null>(null);
   const confirmDeleteRef = useRef<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const scrollKeep = useDropdownScrollKeeper(open);
   const filtered = (options ?? []).filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -666,7 +667,7 @@ function IngredientSelect({
             placeholder="Search or add…"
             className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
           />
-          <div className="max-h-60 overflow-y-auto overscroll-contain">
+          <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-60 overflow-y-auto overscroll-contain">
             {filtered.map(opt =>
               confirmDelete === opt ? (
                 <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
@@ -1353,6 +1354,24 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+function useDropdownScrollKeeper(open: boolean) {
+  const posRef = useRef(0);
+  const wasOpenRef = useRef(false);
+  if (open && !wasOpenRef.current) posRef.current = 0;
+  wasOpenRef.current = open;
+  const handlersRef = useRef({
+    listRef: (node: HTMLDivElement | null) => {
+      if (node && posRef.current > 0 && node.scrollTop !== posRef.current) {
+        node.scrollTop = posRef.current;
+      }
+    },
+    onScroll: (e: { currentTarget: HTMLDivElement }) => {
+      posRef.current = e.currentTarget.scrollTop;
+    },
+  });
+  return handlersRef.current;
+}
+
 function TypeDropdown({
   label,
   value,
@@ -1374,6 +1393,7 @@ function TypeDropdown({
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const confirmDeleteRef = useRef<string | null>(null);
+  const scrollKeep = useDropdownScrollKeeper(open);
   const filtered = options.filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
@@ -1411,7 +1431,7 @@ function TypeDropdown({
               placeholder="Search or add…"
               className="w-full px-3 py-1.5 text-xs bg-transparent border-b border-border/50 outline-none"
             />
-            <div className="max-h-48 overflow-y-auto overscroll-contain">
+            <div ref={scrollKeep.listRef} onScroll={scrollKeep.onScroll} className="max-h-48 overflow-y-auto overscroll-contain">
               {allowClear && value && (
                 <button
                   type="button"
@@ -2222,6 +2242,8 @@ export default function Home() {
   const [flavorInput, setFlavorInput] = useState("");
   const [showBrandDrop, setShowBrandDrop] = useState(false);
   const [showFlavorDrop, setShowFlavorDrop] = useState(false);
+  const brandScrollKeep = useDropdownScrollKeeper(showBrandDrop);
+  const flavorScrollKeep = useDropdownScrollKeeper(showFlavorDrop);
   const [confirmDeleteBrand, setConfirmDeleteBrand] = useState<string | null>(null);
   const [confirmDeleteFlavor, setConfirmDeleteFlavor] = useState<string | null>(null);
   const confirmDeleteBrandRef = useRef<string | null>(null);
@@ -8456,7 +8478,7 @@ export default function Home() {
                     onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
                   />
                   {showBrandDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
+                    <div ref={brandScrollKeep.listRef} onScroll={brandScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
                       {brands
                         .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
                         .map((b) =>
@@ -8534,7 +8556,7 @@ export default function Home() {
                     onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
                   />
                   {showFlavorDrop && (
-                    <div className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
+                    <div ref={flavorScrollKeep.listRef} onScroll={flavorScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
                       {!(currentRun?.brand) && (
                         <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
                       )}
