@@ -347,6 +347,23 @@ async function linkParsed(
     cheese: known.cheeseIngredients,
   };
 
+  // One automatic retry for a failed match request, mirroring the parse-chunk
+  // retry: a transient hiccup (network blip, 429/502) would otherwise silently
+  // no-op the WHOLE match pass and the import would duplicate brands/flavors
+  // instead of updating existing ones. linkParsed makes at most 2 match calls,
+  // so with one retry each we stay well under the server's 10/min rate limit.
+  // If the retry throws too, the error propagates to the outer catch and the
+  // pass stays fail-safe (canonicalized parse kept as-is).
+  const requestMatchImportWithRetry = async (
+    input: Parameters<typeof requestMatchImport>[0],
+  ): Promise<Awaited<ReturnType<typeof requestMatchImport>>> => {
+    try {
+      return await requestMatchImport(input);
+    } catch {
+      return await requestMatchImport(input);
+    }
+  };
+
   try {
     // Pass 1: brands + flavors-under-known-brands + ingredients/applicators/pepperonis.
     const c1 = collectMatchCandidates(working, matchKnown);
@@ -360,7 +377,7 @@ async function linkParsed(
       c1.appTypes.length ||
       c1.pepTypes.length
     ) {
-      const result = await requestMatchImport({
+      const result = await requestMatchImportWithRetry({
         brands: known.brands,
         brandFlavors: known.flavorsByBrand,
         unmatchedBrands: c1.brands,
@@ -410,7 +427,7 @@ async function linkParsed(
           ),
       );
       if (newFlavors.length) {
-        const r2 = await requestMatchImport({
+        const r2 = await requestMatchImportWithRetry({
           brands: known.brands,
           brandFlavors: known.flavorsByBrand,
           unmatchedBrands: [],
