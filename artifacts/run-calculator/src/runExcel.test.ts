@@ -400,4 +400,52 @@ describe("filterImportFromDate", () => {
     );
     expect(filterImportFromDate(flat, "2099-01-01")).toBe(flat);
   });
+
+  it("drops skipped-row errors from past days, keeps them for imported days", () => {
+    // A "Missing Brand" annotation on the earlier day, and one on the later day.
+    const wb = wbWith({
+      S: [
+        HEADER(SERIAL_20260622),
+        ["", "", "", "Closed - Holiday", "", "", "", ""],
+        [],
+        HEADER(SERIAL_20260629),
+        ["", "", "", "INVENTORY", "", "", "", ""],
+      ],
+    });
+    const parsed = parseScheduleWorkbook(wb);
+    // Both blank-brand rows are reported before filtering.
+    expect(parsed.errors.filter((e) => e.message === "Missing Brand")).toHaveLength(2);
+    // Importing from the later date drops the earlier day's skip warning.
+    const out = filterImportFromDate(parsed, "2026-06-29");
+    const msgs = out.errors.map((e) => e.message);
+    expect(msgs.filter((m) => m === "Missing Brand")).toHaveLength(1);
+    expect(out.errors.every((e) => !e.date || e.date >= "2026-06-29")).toBe(true);
+  });
+
+  it("attaches the day-block date to schedule skip errors", () => {
+    const wb = wbWith({
+      S: [HEADER(SERIAL_20260629), ["", "", "", "QC School", "", "", "", ""]],
+    });
+    const parsed = parseScheduleWorkbook(wb);
+    const err = parsed.errors.find((e) => e.message === "Missing Brand");
+    expect(err?.date).toBe("2026-06-29");
+  });
+
+  it("filters dated Invalid Units errors by the import window too", () => {
+    const wb = wbWith({
+      S: [
+        HEADER(SERIAL_20260622),
+        ["", "", "A", "x", "abc", "", "", ""],
+        [],
+        HEADER(SERIAL_20260629),
+        ["", "", "B", "y", "xyz", "", "", ""],
+      ],
+    });
+    const parsed = parseScheduleWorkbook(wb);
+    expect(parsed.errors.filter((e) => e.message.startsWith("Invalid Units"))).toHaveLength(2);
+    const out = filterImportFromDate(parsed, "2026-06-29");
+    const invalid = out.errors.filter((e) => e.message.startsWith("Invalid Units"));
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0].date).toBe("2026-06-29");
+  });
 });

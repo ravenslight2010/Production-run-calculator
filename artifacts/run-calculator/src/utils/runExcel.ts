@@ -144,9 +144,14 @@ export type ImportRow = {
   date?: string;
 };
 
+// A row that could not be turned into a run. `date` (when present, on schedule
+// imports) is the day-block date the skipped row belongs to, so the skipped list
+// can be scoped to the same window that actually imports (today-or-later).
+export type ImportParseError = { rowNumber: number; message: string; date?: string };
+
 export type ImportParseResult = {
   rows: ImportRow[];
-  errors: { rowNumber: number; message: string }[];
+  errors: ImportParseError[];
   // True when the file was a multi-sheet day-block schedule planner: each row
   // carries its own `date` and the UI imports across many days (no single date
   // picker). Absent/false for the flat single-sheet format.
@@ -197,7 +202,7 @@ export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
   if (workbookIsSchedule(wb)) return parseScheduleWorkbook(wb);
   const sheetName = wb.SheetNames[0];
   const rows: ImportRow[] = [];
-  const errors: { rowNumber: number; message: string }[] = [];
+  const errors: ImportParseError[] = [];
   if (!sheetName) {
     return { rows, errors: [{ rowNumber: 0, message: "No sheets found in file." }] };
   }
@@ -340,7 +345,7 @@ function buildScheduleNotes(
  */
 export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
   const rows: ImportRow[] = [];
-  const errors: { rowNumber: number; message: string }[] = [];
+  const errors: ImportParseError[] = [];
   let rowCounter = 0; // synthetic 1-based counter across all sheets (UI/merge display)
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
@@ -388,12 +393,12 @@ export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
           continue;
         }
         if (!brand) {
-          errors.push({ rowNumber: rowCounter, message: "Missing Brand" });
+          errors.push({ rowNumber: rowCounter, message: "Missing Brand", date });
           continue;
         }
         const casesPlanned = unitsStr === "" ? 0 : Number(unitsStr.replace(/[, ]/g, ""));
         if (unitsStr !== "" && (!isFinite(casesPlanned) || casesPlanned < 0)) {
-          errors.push({ rowNumber: rowCounter, message: `Invalid Units "${unitsStr}"` });
+          errors.push({ rowNumber: rowCounter, message: `Invalid Units "${unitsStr}"`, date });
           continue;
         }
         rows.push({
@@ -422,6 +427,11 @@ export function filterImportFromDate(result: ImportParseResult, fromISO: string)
   return {
     ...result,
     rows: result.rows.filter((r) => !r.date || r.date >= fromISO),
+    // Only warn about rows we would actually import: a schedule spans past days
+    // too, and their skipped rows (holiday/note annotations, brand-in-flavor
+    // typos on old sheets) are irrelevant when we only import today-or-later.
+    // Undated errors (e.g. a run row whose date failed to parse) are kept.
+    errors: result.errors.filter((e) => !e.date || e.date >= fromISO),
   };
 }
 
