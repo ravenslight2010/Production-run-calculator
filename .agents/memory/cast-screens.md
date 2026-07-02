@@ -22,8 +22,9 @@ write effect (auto-track, autosave-triggering mutations) runs on the display dev
 and its writes push through live sync with fresh stamps — clobbering the operator's
 manual edits on every other device. `useAutoTrack` takes `disabled: screenMode !== null`
 for exactly this; any future write effect added to home.tsx must be gated the same way.
-Related: the manual-edit suppression window `AUTO_SUPPRESS_MS` must stay 10 minutes
-(mobile parity) — it once regressed to 1 minute and manual tray edits got eaten.
+Related: the web manual-edit suppression window `AUTO_SUPPRESS_MS` is 1 minute BY
+USER CHOICE (July 2026) — do not "fix" it back to mobile's 10 minutes; the user wants
+tracking to resume quickly from a manual baseline.
 
 **How to apply:** when adding/changing a cast screen, do it in web only. To add a new
 castable screen you must (1) add an `if (screenMode === "X")` early-return view and

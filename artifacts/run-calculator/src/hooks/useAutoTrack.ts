@@ -123,6 +123,11 @@ export function useAutoTrack({
   const caseNextDueMsRef = useRef<number>(0);
   const trayNextDueMsRef = useRef<number>(0);
   const batchNextDueMsRef = useRef<number>(0);
+  // Production ("count up") tick schedules — the press/mixer keep MAKING dough
+  // while the run still has a deficit, so the counters move up as well as down.
+  // 0 = not scheduled yet (first encounter arms the schedule without writing).
+  const trayProdNextDueMsRef = useRef<number>(0);
+  const batchProdNextDueMsRef = useRef<number>(0);
   // Wall-clock ms of each consumption counter's last tick — drives the
   // incremental decrement (consumption for the actual elapsed duration).
   const trayLastMsRef = useRef<number>(0);
@@ -189,6 +194,8 @@ export function useAutoTrack({
     caseNextDueMsRef.current = 0;
     trayNextDueMsRef.current = 0;
     batchNextDueMsRef.current = 0;
+    trayProdNextDueMsRef.current = 0;
+    batchProdNextDueMsRef.current = 0;
     trayLastMsRef.current = 0;
     batchLastMsRef.current = 0;
     lastExpectedCasesRef.current = -1;
@@ -309,73 +316,132 @@ export function useAutoTrack({
       v.pizzasPerCase > 0 &&
       Math.floor((elapsedMin * calc.ppm) / v.pizzasPerCase) >= v.casesNeeded;
 
-    // ── Trays: tick once per time-to-consume-one-tray. ──
-    if (calc.perTray > 0 && calc.ppm > 0 && nowMs >= trayNextDueMsRef.current) {
+    // ── Trays: count up while dough is still being pressed, down as the line
+    // eats it. Production (+1 tray per tray-period, offset half a period from
+    // consumption so the two visibly alternate) continues while the run still
+    // has a dough DEFICIT (calc.traysNeeded > 0 — i.e. staged dough does not
+    // yet cover everything left to run). Once the deficit is closed the press
+    // is done and the counter only counts down; whatever is left at the end
+    // carries over to the next run. ──
+    if (calc.perTray > 0 && calc.ppm > 0) {
       const trayPeriodMs = clampPeriodMs((calc.perTray / calc.ppm) * 60000);
-      const prevMs = trayLastMsRef.current;
-      // Consumption for the actual duration since this counter's last tick
-      // (capped to 2 periods to avoid huge jumps); assume one full period on
-      // the first tick.
-      const durationMin = prevMs > 0
-        ? Math.min((trayPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
-        : trayPeriodMs / 60000;
-      trayNextDueMsRef.current = nowMs + trayPeriodMs;
-      trayLastMsRef.current = nowMs;
-      if (!suppressed && !doughFeedComplete) {
-        // First tray tick of a run where the operator never entered staged
-        // dough (counter still 0): seed the suggested staging (the same number
-        // the "Suggest" button applies) so the countdown has something to count
-        // down from — otherwise a crew that never types their dough counts sees
-        // trays sit at 0 the whole run. One-shot per run; a counter with a
-        // value (manual or seeded) just depletes normally below.
-        let traySeededThisTick = false;
-        if (!traySeededRef.current) {
-          traySeededRef.current = true;
-          const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
-          if (v.traysOnLine === 0 && seed !== null) {
-            form.setValue("traysOnLine", seed, { shouldDirty: true });
-            traySeededThisTick = true;
+      let delta = 0;
+      let traySeededThisTick = false;
+
+      // Production tick.
+      if (trayProdNextDueMsRef.current === 0) {
+        // First encounter: arm the schedule half a period out of phase with
+        // consumption; no write.
+        trayProdNextDueMsRef.current = nowMs + trayPeriodMs / 2;
+      } else if (nowMs >= trayProdNextDueMsRef.current) {
+        trayProdNextDueMsRef.current = nowMs + trayPeriodMs;
+        if (!suppressed && !doughFeedComplete && calc.traysNeeded > 0) {
+          delta += 1;
+        }
+      }
+
+      // Consumption tick.
+      if (nowMs >= trayNextDueMsRef.current) {
+        const prevMs = trayLastMsRef.current;
+        // Consumption for the actual duration since this counter's last tick
+        // (capped to 2 periods to avoid huge jumps); assume one full period on
+        // the first tick.
+        const durationMin = prevMs > 0
+          ? Math.min((trayPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+          : trayPeriodMs / 60000;
+        trayNextDueMsRef.current = nowMs + trayPeriodMs;
+        trayLastMsRef.current = nowMs;
+        if (!suppressed && !doughFeedComplete) {
+          // First tray tick of a run where the operator never entered staged
+          // dough (counter still 0): seed the suggested staging (the same number
+          // the "Suggest" button applies) so the counter has real stock to track
+          // — otherwise a crew that never types their dough counts sees trays
+          // sit at 0 the whole run. One-shot per run; a counter with a value
+          // (manual or seeded) just tracks normally below.
+          if (!traySeededRef.current) {
+            traySeededRef.current = true;
+            const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
+            if (v.traysOnLine === 0 && seed !== null) {
+              form.setValue("traysOnLine", seed, { shouldDirty: true });
+              traySeededThisTick = true;
+            }
+          }
+          if (!traySeededThisTick) {
+            const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
+            const traysConsumed = Math.floor(traysExact);
+            traysRemainderRef.current = traysExact - traysConsumed;
+            delta -= traysConsumed;
           }
         }
-        if (!traySeededThisTick) {
-          const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
-          const traysConsumed = Math.floor(traysExact);
-          traysRemainderRef.current = traysExact - traysConsumed;
-          if (traysConsumed > 0) {
-            form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
-          }
+      }
+
+      if (!traySeededThisTick && delta !== 0) {
+        // Production never pushes past the stepper max (74) — but must never
+        // clamp an already-higher value DOWN either.
+        let next = v.traysOnLine + delta;
+        if (delta > 0) next = Math.min(next, Math.max(v.traysOnLine, 74));
+        next = Math.max(0, next);
+        if (next !== v.traysOnLine) {
+          form.setValue("traysOnLine", next, { shouldDirty: true });
         }
       }
     }
 
-    // ── Batches: tick once per quarter-batch duration. ──
-    if (calc.perBatch > 0 && calc.ppm > 0 && nowMs >= batchNextDueMsRef.current) {
+    // ── Batches: +1 when the mixer finishes a batch (one per full batch-time,
+    // while the run still has a batch deficit), down once per full batch
+    // consumed (quarter-batch ticks with fractional remainder carry). ──
+    if (calc.perBatch > 0 && calc.ppm > 0) {
       const batchPeriodMs = clampPeriodMs((calc.perBatch / calc.ppm / 4) * 60000);
-      const prevMs = batchLastMsRef.current;
-      const durationMin = prevMs > 0
-        ? Math.min((batchPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
-        : batchPeriodMs / 60000;
-      batchNextDueMsRef.current = nowMs + batchPeriodMs;
-      batchLastMsRef.current = nowMs;
-      if (!suppressed && !doughFeedComplete) {
-        // Same one-shot seed as trays: an untouched 0 counter gets the
-        // suggested staging on its first tick so it has stock to count down.
-        let batchSeededThisTick = false;
-        if (!batchSeededRef.current) {
-          batchSeededRef.current = true;
-          const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).batches;
-          if (v.batchesReady === 0 && seed !== null) {
-            form.setValue("batchesReady", seed, { shouldDirty: true });
-            batchSeededThisTick = true;
+      const fullBatchMs = clampPeriodMs((calc.perBatch / calc.ppm) * 60000);
+      let delta = 0;
+      let batchSeededThisTick = false;
+
+      // Production tick: the first mixed batch lands one full batch-time in.
+      if (batchProdNextDueMsRef.current === 0) {
+        batchProdNextDueMsRef.current = nowMs + fullBatchMs;
+      } else if (nowMs >= batchProdNextDueMsRef.current) {
+        batchProdNextDueMsRef.current = nowMs + fullBatchMs;
+        if (!suppressed && !doughFeedComplete && calc.batchesNeeded > 0) {
+          delta += 1;
+        }
+      }
+
+      // Consumption tick.
+      if (nowMs >= batchNextDueMsRef.current) {
+        const prevMs = batchLastMsRef.current;
+        const durationMin = prevMs > 0
+          ? Math.min((batchPeriodMs * 2) / 60000, (nowMs - prevMs) / 60000)
+          : batchPeriodMs / 60000;
+        batchNextDueMsRef.current = nowMs + batchPeriodMs;
+        batchLastMsRef.current = nowMs;
+        if (!suppressed && !doughFeedComplete) {
+          // Same one-shot seed as trays: an untouched 0 counter gets the
+          // suggested staging on its first tick so it has stock to track.
+          if (!batchSeededRef.current) {
+            batchSeededRef.current = true;
+            const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).batches;
+            if (v.batchesReady === 0 && seed !== null) {
+              form.setValue("batchesReady", seed, { shouldDirty: true });
+              batchSeededThisTick = true;
+            }
+          }
+          if (!batchSeededThisTick) {
+            const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
+            const batchesConsumed = Math.floor(batchesExact);
+            batchesRemainderRef.current = batchesExact - batchesConsumed;
+            delta -= batchesConsumed;
           }
         }
-        if (!batchSeededThisTick) {
-          const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
-          const batchesConsumed = Math.floor(batchesExact);
-          batchesRemainderRef.current = batchesExact - batchesConsumed;
-          if (batchesConsumed > 0) {
-            form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
-          }
+      }
+
+      if (!batchSeededThisTick && delta !== 0) {
+        // Production never pushes past the stepper max (3) — but must never
+        // clamp an already-higher value DOWN either.
+        let next = v.batchesReady + delta;
+        if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
+        next = Math.max(0, next);
+        if (next !== v.batchesReady) {
+          form.setValue("batchesReady", next, { shouldDirty: true });
         }
       }
     }

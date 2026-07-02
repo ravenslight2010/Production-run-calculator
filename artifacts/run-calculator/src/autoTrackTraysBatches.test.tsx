@@ -44,8 +44,8 @@ function makeV(overrides: Partial<Record<string, number>> = {}) {
   } as any;
 }
 
-describe("auto-track tray/batch decrement", () => {
-  it("decrements one tray per tray-time tick", () => {
+describe("auto-track tray/batch up/down tracking", () => {
+  it("counts up AND down while dough is still being made (deficit open)", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;
 
@@ -60,24 +60,128 @@ describe("auto-track tray/batch decrement", () => {
           runStatus: "running",
           nowTime: props.nowTime,
           elapsedBatchSec: props.elapsedBatchSec,
-          calc: baseCalc,
+          calc: baseCalc, // traysNeeded 30 > 0 -> press still making trays
           v: props.v,
           form,
         }),
       { initialProps: { nowTime: now, elapsedBatchSec: elapsed, v } },
     );
 
-    // First tick assumes one tray-period duration: exactly one tray consumed.
+    // First tick assumes one tray-period duration: one tray consumed;
+    // production is armed half a period out (t0+18s), no write yet.
     expect(values.traysOnLine).toBe(49);
     // Batches: first quarter-batch tick = 0.25 -> floors to 0, remainder carried.
     expect(values.batchesReady).toBe(10);
 
-    // Advance one full tray period (36s) — the next tray tick fires.
-    now = new Date(t0 + 36 * 1000);
-    elapsed += 36;
+    // Half a tray period later the press finishes a tray: count goes UP.
+    now = new Date(t0 + 18 * 1000);
+    elapsed += 18;
     v = makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady });
     rerender({ nowTime: now, elapsedBatchSec: elapsed, v });
+    expect(values.traysOnLine).toBe(50);
+
+    // At the full period the line eats one: count goes back DOWN.
+    now = new Date(t0 + 36 * 1000);
+    elapsed += 18;
+    v = makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady });
+    rerender({ nowTime: now, elapsedBatchSec: elapsed, v });
+    expect(values.traysOnLine).toBe(49);
+  });
+
+  it("only counts down once staged dough covers the rest of the run (deficit closed)", () => {
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const t0 = 1_700_000_000_000;
+
+    let now = new Date(t0);
+    let elapsed = 10 * 60;
+    let v = makeV();
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          // No remaining deficit: all dough needed is already staged.
+          calc: { ...baseCalc, traysNeeded: 0, batchesNeeded: 0 },
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: now, elapsedBatchSec: elapsed, v } },
+    );
+
+    expect(values.traysOnLine).toBe(49);
+
+    // Production tick due at t0+18s must NOT fire (+0), so by the full period
+    // the counter has only counted down.
+    for (const sec of [18, 36]) {
+      now = new Date(t0 + sec * 1000);
+      v = makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady });
+      rerender({ nowTime: now, elapsedBatchSec: elapsed + sec, v });
+    }
     expect(values.traysOnLine).toBe(48);
+  });
+
+  it("bumps the batch count when the mixer finishes a batch", () => {
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 1 });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc, // batchesNeeded 2 > 0 -> mixer still mixing
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV({ batchesReady: 1 }) } },
+    );
+
+    expect(values.batchesReady).toBe(1);
+
+    // One full batch-time later (600/100 = 6 min) the mixer finishes a batch.
+    // Consumption over the same jump is capped at 2 quarter-periods (0.5 batch,
+    // carried as remainder), so the net move is +1.
+    rerender({
+      nowTime: new Date(t0 + 360 * 1000),
+      elapsedBatchSec: 10 * 60 + 360,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    expect(values.batchesReady).toBe(2);
+  });
+
+  it("production +1 never clamps a higher-than-max value down", () => {
+    // Legacy/synced data can exceed the stepper max (3 batches). A mixer tick
+    // must leave it alone, not slam it down to the cap.
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV({ batchesReady: 10 }) } },
+    );
+
+    rerender({
+      nowTime: new Date(t0 + 360 * 1000),
+      elapsedBatchSec: 10 * 60 + 360,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: 10 }),
+    });
+    // +1 would exceed the cap; consumption remainder (0.5) hasn't completed a
+    // batch — value must stay untouched, never clamped down to 3.
+    expect(values.batchesReady).toBe(10);
   });
 
   it("carries the quarter-batch remainder so batches drop once per full batch", () => {
@@ -226,13 +330,17 @@ describe("auto-track tray/batch decrement", () => {
     expect(values.traysOnLine).toBe(30);
     expect(values.batchesReady).toBe(2);
 
-    // The next tray tick depletes the seeded stock normally.
-    rerender({
-      nowTime: new Date(t0 + 36 * 1000),
-      elapsedBatchSec: 10 * 60 + 36,
-      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
-    });
-    expect(values.traysOnLine).toBe(29);
+    // With the deficit still open, the next full period nets out: production
+    // (+1 at 18s) balances consumption (-1 at 36s) — the seeded stock tracks
+    // up and down instead of just draining.
+    for (const sec of [18, 36]) {
+      rerender({
+        nowTime: new Date(t0 + sec * 1000),
+        elapsedBatchSec: 10 * 60 + sec,
+        v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+      });
+    }
+    expect(values.traysOnLine).toBe(30);
   });
 
   it("does not seed when there is no remaining dough need", () => {
@@ -291,7 +399,8 @@ describe("auto-track tray/batch decrement", () => {
           runStatus: "running",
           nowTime: props.nowTime,
           elapsedBatchSec: props.elapsedBatchSec,
-          calc: baseCalc,
+          // Deficit closed -> pure countdown, so the resume is observable.
+          calc: { ...baseCalc, traysNeeded: 0, batchesNeeded: 0 },
           v: props.v,
           form,
         }),

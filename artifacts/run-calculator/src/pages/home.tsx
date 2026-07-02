@@ -1510,10 +1510,10 @@ function NumField({
   );
 }
 
-// How long a manual stepper edit holds off auto-track writes. Must stay at
-// 10 minutes (mobile parity) — a shorter window lets auto-track eat manual
-// tray/batch corrections within a minute of the operator typing them.
-const AUTO_SUPPRESS_MS = 10 * 60 * 1000;
+// How long a manual stepper edit holds off auto-track writes. 1 minute is the
+// user's explicit preference on web (a manual entry is the new baseline and
+// tracking should pick right back up from it, not go quiet for 10 minutes).
+const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
 
 function StepperField({
   control,
