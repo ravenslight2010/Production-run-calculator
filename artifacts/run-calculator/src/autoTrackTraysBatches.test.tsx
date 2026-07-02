@@ -30,7 +30,7 @@ function makeForm(initial: Record<string, number>) {
   };
 }
 
-const baseCalc = { ppm: 100, perTray: 60, perBatch: 600 };
+const baseCalc = { ppm: 100, perTray: 60, perBatch: 600, traysNeeded: 30, batchesNeeded: 2 };
 
 function makeV(overrides: Partial<Record<string, number>> = {}) {
   return {
@@ -198,6 +198,82 @@ describe("auto-track tray/batch decrement", () => {
     );
 
     expect(values.traysOnLine).toBe(50);
+    expect(values.batchesReady).toBe(10);
+  });
+
+  it("seeds untouched 0 counters with the suggested staging on the first tick, then counts down", () => {
+    // Operator never entered dough counts: both counters start at 0. The first
+    // tick must seed them from the "Suggest" formula (trays=min(74,max(1,
+    // round(min(40,traysNeeded))))=30, batches=min(3,max(1,ceil(min(3,
+    // batchesNeeded))))=2) instead of leaving them stuck at 0 all run.
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 });
+    const t0 = 1_700_000_000_000;
+
+    const { rerender } = renderHook(
+      (props: { nowTime: Date; elapsedBatchSec: number; v: any }) =>
+        useAutoTrack({
+          runId: "run-1",
+          runStatus: "running",
+          nowTime: props.nowTime,
+          elapsedBatchSec: props.elapsedBatchSec,
+          calc: baseCalc,
+          v: props.v,
+          form,
+        }),
+      { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV({ traysOnLine: 0, batchesReady: 0 }) } },
+    );
+
+    expect(values.traysOnLine).toBe(30);
+    expect(values.batchesReady).toBe(2);
+
+    // The next tray tick depletes the seeded stock normally.
+    rerender({
+      nowTime: new Date(t0 + 36 * 1000),
+      elapsedBatchSec: 10 * 60 + 36,
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
+    });
+    expect(values.traysOnLine).toBe(29);
+  });
+
+  it("does not seed when there is no remaining dough need", () => {
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 });
+    const t0 = 1_700_000_000_000;
+
+    renderHook(() =>
+      useAutoTrack({
+        runId: "run-1",
+        runStatus: "running",
+        nowTime: new Date(t0),
+        elapsedBatchSec: 10 * 60,
+        calc: { ...baseCalc, traysNeeded: 0, batchesNeeded: 0 },
+        v: makeV({ traysOnLine: 0, batchesReady: 0 }),
+        form,
+      }),
+    );
+
+    expect(values.traysOnLine).toBe(0);
+    expect(values.batchesReady).toBe(0);
+  });
+
+  it("does not seed over an operator-entered value — first tick decrements as before", () => {
+    const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const t0 = 1_700_000_000_000;
+
+    renderHook(() =>
+      useAutoTrack({
+        runId: "run-1",
+        runStatus: "running",
+        nowTime: new Date(t0),
+        elapsedBatchSec: 10 * 60,
+        calc: baseCalc,
+        v: makeV(),
+        form,
+      }),
+    );
+
+    // Manual 50 stays the baseline: no jump to the 30-tray suggestion, and the
+    // first tick still consumes one tray exactly like before the seed existed.
+    expect(values.traysOnLine).toBe(49);
     expect(values.batchesReady).toBe(10);
   });
 

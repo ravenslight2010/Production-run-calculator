@@ -233,7 +233,7 @@ import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 
 import { useClock } from "../hooks/useClock";
-import { useAutoTrack } from "../hooks/useAutoTrack";
+import { useAutoTrack, suggestedDoughStaging } from "../hooks/useAutoTrack";
 import { useNotifications } from "../hooks/useNotifications";
 import { usePendingResetCount } from "../hooks/usePendingResetCount";
 import { useUnreviewedIncidentCount } from "../hooks/useUnreviewedIncidentCount";
@@ -11092,12 +11092,8 @@ export default function Home() {
                     const suppressed = Date.now() < autoSuppressUntilRef.current;
                     const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
                     const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
-                    const suggestedTrays = calc.traysNeeded > 0
-                      ? Math.min(74, Math.max(1, Math.round(Math.min(40, calc.traysNeeded))))
-                      : null;
-                    const suggestedBatches = calc.batchesNeeded > 0
-                      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, calc.batchesNeeded))))
-                      : null;
+                    const { trays: suggestedTrays, batches: suggestedBatches } =
+                      suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
                     const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
                     const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
                     return (

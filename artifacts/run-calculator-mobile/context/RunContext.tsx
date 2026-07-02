@@ -534,6 +534,26 @@ function buildNextDayState(cur: AppState, today: string): AppState {
   };
 }
 
+/**
+ * Suggested dough staging for a run — what the operator would stage right now,
+ * derived from the CURRENT deficit (traysNeeded/batchesNeeded), capped to the
+ * stepper maxes (74 trays / 3 batches) and to a sane staging quantity
+ * (40 trays). Verbatim parity with web useAutoTrack's suggestedDoughStaging.
+ */
+export function suggestedDoughStaging(
+  traysNeeded: number,
+  batchesNeeded: number,
+): { trays: number | null; batches: number | null } {
+  return {
+    trays: traysNeeded > 0
+      ? Math.min(74, Math.max(1, Math.round(Math.min(40, traysNeeded))))
+      : null,
+    batches: batchesNeeded > 0
+      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
+      : null,
+  };
+}
+
 // Sum the lbs across an ingredient recipe's rows (0 when empty/missing).
 export function sumRecipe(rows: RecipeRow[] | undefined): number {
   return (rows ?? []).reduce((acc, r) => acc + (Number(r.lbs) || 0), 0);
@@ -1827,6 +1847,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // would freeze slow-depleting dough — especially batches — at its start value).
   const traysRemainderRef = useRef<number>(0);
   const batchesRemainderRef = useRef<number>(0);
+  // One-shot per run: when the operator never entered staged dough (counter is
+  // 0 at that counter's first tick), seed it with the suggested staging so the
+  // countdown has something to count down from. Without this a crew that never
+  // types their dough counts sees trays/batches sit at 0 the whole run.
+  const traySeededRef = useRef<boolean>(false);
+  const batchSeededRef = useRef<boolean>(false);
 
   // ── Live-sync state/refs ───────────────────────────────────────────────────
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
@@ -3908,6 +3934,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     autoExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
+    traySeededRef.current = false;
+    batchSeededRef.current = false;
   }, [currentRun?.id, currentRun?.isRunning, appState.autoTrack]);
 
   // Auto-track: while running, each counter updates at its own natural
@@ -4038,13 +4066,33 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       trayNextDueMsRef.current = nowMs + trayPeriodMs;
       trayLastMsRef.current = nowMs;
       if (!suppressed && !doughFeedComplete) {
-        const traysExact =
-          (durationMin * c.ppm) / perTray + traysRemainderRef.current;
-        const traysConsumed = Math.floor(traysExact);
-        traysRemainderRef.current = traysExact - traysConsumed;
-        if (traysConsumed > 0) {
-          const nextTrays = Math.max(0, r.progress.traysOnLine - traysConsumed);
-          if (nextTrays !== r.progress.traysOnLine) next.traysOnLine = nextTrays;
+        // First tray tick of a run where the operator never entered staged
+        // dough (counter still 0): seed the suggested staging so the countdown
+        // has something to count down from — otherwise a crew that never types
+        // their dough counts sees trays sit at 0 the whole run. One-shot per
+        // run; a counter with a value (manual or seeded) depletes normally
+        // below. Web useAutoTrack parity.
+        let traySeededThisTick = false;
+        if (!traySeededRef.current) {
+          traySeededRef.current = true;
+          const seed = suggestedDoughStaging(
+            supply.traysNeeded,
+            supply.batchesNeeded,
+          ).trays;
+          if (r.progress.traysOnLine === 0 && seed !== null) {
+            next.traysOnLine = seed;
+            traySeededThisTick = true;
+          }
+        }
+        if (!traySeededThisTick) {
+          const traysExact =
+            (durationMin * c.ppm) / perTray + traysRemainderRef.current;
+          const traysConsumed = Math.floor(traysExact);
+          traysRemainderRef.current = traysExact - traysConsumed;
+          if (traysConsumed > 0) {
+            const nextTrays = Math.max(0, r.progress.traysOnLine - traysConsumed);
+            if (nextTrays !== r.progress.traysOnLine) next.traysOnLine = nextTrays;
+          }
         }
       }
     }
@@ -4060,17 +4108,33 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       batchNextDueMsRef.current = nowMs + batchPeriodMs;
       batchLastMsRef.current = nowMs;
       if (!suppressed && !doughFeedComplete) {
-        const batchesExact =
-          (durationMin * c.ppm) / perBatch + batchesRemainderRef.current;
-        const batchesConsumed = Math.floor(batchesExact);
-        batchesRemainderRef.current = batchesExact - batchesConsumed;
-        if (batchesConsumed > 0) {
-          const nextBatches = Math.max(
-            0,
-            r.progress.batchesReady - batchesConsumed,
-          );
-          if (nextBatches !== r.progress.batchesReady)
-            next.batchesReady = nextBatches;
+        // Same one-shot seed as trays: an untouched 0 counter gets the
+        // suggested staging on its first tick so it has stock to count down.
+        let batchSeededThisTick = false;
+        if (!batchSeededRef.current) {
+          batchSeededRef.current = true;
+          const seed = suggestedDoughStaging(
+            supply.traysNeeded,
+            supply.batchesNeeded,
+          ).batches;
+          if (r.progress.batchesReady === 0 && seed !== null) {
+            next.batchesReady = seed;
+            batchSeededThisTick = true;
+          }
+        }
+        if (!batchSeededThisTick) {
+          const batchesExact =
+            (durationMin * c.ppm) / perBatch + batchesRemainderRef.current;
+          const batchesConsumed = Math.floor(batchesExact);
+          batchesRemainderRef.current = batchesExact - batchesConsumed;
+          if (batchesConsumed > 0) {
+            const nextBatches = Math.max(
+              0,
+              r.progress.batchesReady - batchesConsumed,
+            );
+            if (nextBatches !== r.progress.batchesReady)
+              next.batchesReady = nextBatches;
+          }
         }
       }
     }

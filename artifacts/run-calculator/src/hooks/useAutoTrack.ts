@@ -8,6 +8,29 @@ interface AutoTrackCalc {
   ppm: number;
   perTray: number;
   perBatch: number;
+  traysNeeded: number;
+  batchesNeeded: number;
+}
+
+/**
+ * Suggested dough staging for a run — the same numbers the "Suggest" button
+ * applies to the Trays on Line / Batches Ready steppers. Derived from the
+ * CURRENT deficit (traysNeeded/batchesNeeded), capped to the stepper maxes
+ * (74 trays / 3 batches) and to a sane staging quantity (40 trays). Kept at
+ * verbatim parity with mobile RunContext's suggestedDoughStaging.
+ */
+export function suggestedDoughStaging(
+  traysNeeded: number,
+  batchesNeeded: number,
+): { trays: number | null; batches: number | null } {
+  return {
+    trays: traysNeeded > 0
+      ? Math.min(74, Math.max(1, Math.round(Math.min(40, traysNeeded))))
+      : null,
+    batches: batchesNeeded > 0
+      ? Math.min(3, Math.max(1, Math.ceil(Math.min(3, batchesNeeded))))
+      : null,
+  };
 }
 
 interface AutoTrackValues {
@@ -105,6 +128,12 @@ export function useAutoTrack({
   // would freeze slow-depleting dough — especially batches — at its start value).
   const traysRemainderRef = useRef<number>(0);
   const batchesRemainderRef = useRef<number>(0);
+  // One-shot per run: when the operator never entered staged dough (counter is
+  // 0 at that counter's first tick), seed it with the suggested staging so the
+  // countdown has something to count down from. Without this the crew that
+  // never types their dough counts sees trays/batches sit at 0 the whole run.
+  const traySeededRef = useRef<boolean>(false);
+  const batchSeededRef = useRef<boolean>(false);
 
   const autoTrackSuggestion = useMemo(() => {
     const ok =
@@ -157,6 +186,8 @@ export function useAutoTrack({
     lastExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
     batchesRemainderRef.current = 0;
+    traySeededRef.current = false;
+    batchSeededRef.current = false;
   }, []);
 
   // Cancel the wait until every counter's next tick (used by "Resume now" and
@@ -283,11 +314,28 @@ export function useAutoTrack({
       trayNextDueMsRef.current = nowMs + trayPeriodMs;
       trayLastMsRef.current = nowMs;
       if (!suppressed && !doughFeedComplete) {
-        const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
-        const traysConsumed = Math.floor(traysExact);
-        traysRemainderRef.current = traysExact - traysConsumed;
-        if (traysConsumed > 0) {
-          form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
+        // First tray tick of a run where the operator never entered staged
+        // dough (counter still 0): seed the suggested staging (the same number
+        // the "Suggest" button applies) so the countdown has something to count
+        // down from — otherwise a crew that never types their dough counts sees
+        // trays sit at 0 the whole run. One-shot per run; a counter with a
+        // value (manual or seeded) just depletes normally below.
+        let traySeededThisTick = false;
+        if (!traySeededRef.current) {
+          traySeededRef.current = true;
+          const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).trays;
+          if (v.traysOnLine === 0 && seed !== null) {
+            form.setValue("traysOnLine", seed, { shouldDirty: true });
+            traySeededThisTick = true;
+          }
+        }
+        if (!traySeededThisTick) {
+          const traysExact = (durationMin * calc.ppm) / calc.perTray + traysRemainderRef.current;
+          const traysConsumed = Math.floor(traysExact);
+          traysRemainderRef.current = traysExact - traysConsumed;
+          if (traysConsumed > 0) {
+            form.setValue("traysOnLine", Math.max(0, v.traysOnLine - traysConsumed), { shouldDirty: true });
+          }
         }
       }
     }
@@ -302,11 +350,24 @@ export function useAutoTrack({
       batchNextDueMsRef.current = nowMs + batchPeriodMs;
       batchLastMsRef.current = nowMs;
       if (!suppressed && !doughFeedComplete) {
-        const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
-        const batchesConsumed = Math.floor(batchesExact);
-        batchesRemainderRef.current = batchesExact - batchesConsumed;
-        if (batchesConsumed > 0) {
-          form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
+        // Same one-shot seed as trays: an untouched 0 counter gets the
+        // suggested staging on its first tick so it has stock to count down.
+        let batchSeededThisTick = false;
+        if (!batchSeededRef.current) {
+          batchSeededRef.current = true;
+          const seed = suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded).batches;
+          if (v.batchesReady === 0 && seed !== null) {
+            form.setValue("batchesReady", seed, { shouldDirty: true });
+            batchSeededThisTick = true;
+          }
+        }
+        if (!batchSeededThisTick) {
+          const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
+          const batchesConsumed = Math.floor(batchesExact);
+          batchesRemainderRef.current = batchesExact - batchesConsumed;
+          if (batchesConsumed > 0) {
+            form.setValue("batchesReady", Math.max(0, v.batchesReady - batchesConsumed), { shouldDirty: true });
+          }
         }
       }
     }
