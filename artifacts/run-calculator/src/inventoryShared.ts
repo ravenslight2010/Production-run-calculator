@@ -369,6 +369,13 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
   onUnauthorized = fn;
 }
 
+// For callers that use raw fetch (e.g. the sync/import paths in home.tsx) and
+// therefore bypass api()'s automatic 401 handling: lets them route a detected
+// session expiry through the same back-to-login flow instead of failing silently.
+export function reportUnauthorized(): void {
+  onUnauthorized?.();
+}
+
 function isSessionProbePath(path: string): boolean {
   return path === "/me" || path.startsWith("/auth/");
 }

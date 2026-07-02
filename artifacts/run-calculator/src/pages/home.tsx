@@ -174,7 +174,7 @@ import {
   type VoiceCommandHandlers,
   type VoiceCommandResult,
 } from "@workspace/voice-commands";
-import { restockInventory, adjustInventory, resetSandboxRequest } from "../inventoryShared";
+import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import QualityHistoryTab from "../components/QualityHistoryTab";
@@ -5772,6 +5772,7 @@ export default function Home() {
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
     let failed = 0;
+    let lastErrorDetail = "";
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
@@ -5815,7 +5816,37 @@ export default function Home() {
           body: JSON.stringify({ payload: outPayload }),
         });
         dayOk = res.ok;
-      } catch {}
+        if (!res.ok) {
+          // A 401 means the sign-in session expired (e.g. the daily midnight
+          // boundary): every remaining day would fail identically, so stop,
+          // tell the user why, and route them back to the login screen.
+          if (res.status === 401) {
+            setImportProgress(null);
+            setShowImportDialog(false);
+            setImportResult(null);
+            setImportIntoEditor(false);
+            toast({
+              variant: "destructive",
+              title: "Signed out",
+              description: "Your sign-in expired, so the schedule could not be saved. Please sign in and import the file again.",
+            });
+            reportUnauthorized();
+            return;
+          }
+          // Keep the real reason for the summary toast instead of a blind
+          // "could not be saved" (this failure was undiagnosable before).
+          if (!lastErrorDetail) {
+            let serverMsg = "";
+            try {
+              const body = (await res.json()) as { error?: unknown };
+              if (body && typeof body.error === "string") serverMsg = body.error;
+            } catch {}
+            lastErrorDetail = serverMsg ? `${res.status}: ${serverMsg}` : `error ${res.status}`;
+          }
+        }
+      } catch (err) {
+        if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
+      }
       if (!dayOk) failed += 1;
       done += 1;
       setImportProgress({ done, total: byDate.length });
@@ -5834,7 +5865,7 @@ export default function Home() {
       toast({
         variant: "destructive",
         title: failed === byDate.length ? "Import failed" : "Import partly failed",
-        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved. Please try again.`,
+        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.`,
       });
     }
   }
