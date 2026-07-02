@@ -44,7 +44,7 @@
 - [Onboarding flag](onboarding-seen-flag.md) — first-login "Get Started" overview gated by server-side per-user users.onboardingSeen; auto-open once via ref guard, reopen from header menu; web+mobile parity.
 - [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) — `<Comp<T>/>` typechecks but white-screens Vite dev build; drop the type arg, pin via prop casts.
 - [expo-secure-store web crash](expo-secure-store-web-crash.md) — SecureStore has no web impl; blanks Expo web build (Replit preview + UI tests); branch on Platform.OS, use localStorage on web.
-- [Fill-missing assistant](fill-missing-assistant.md) — run-setup "fill missing data" panel: source priority profile→spec→default→AI→none; never auto-apply (per-field confirm via existing update paths); AI read-only; recipes excluded from detection; web+mobile parity.
+- [Fill-missing assistant](fill-missing-assistant.md) — "fill missing data" panel: source priority learned→profile→spec→default→AI; never auto-apply; context-aware applicability (record must carry subTab); web+mobile parity.
 - [Web test harness](web-test-harness.md) — web artifact owns shared web+mobile vitest; mobile module loaded via strip-imports→transpile→temp-mjs; serialize files + big timeouts or validation flakes under dev-workflow contention.
 - [Fill-missing shared lib](fill-missing-shared-lib.md) — fill-missing pure logic now in @workspace/fill-missing; each app keeps only platform glue + re-exports; test imports lib directly.
 - [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.

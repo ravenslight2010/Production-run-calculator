@@ -181,10 +181,42 @@ function pepSlotInUse(rec: Rec, n: number): boolean {
   );
 }
 
+// Dough-supply mode: the record carries the run's dough sub-tab ("dough" mixes
+// dough in-house; "crusts" opens pre-made crusts). Web passes the run's
+// doughSubTab, mobile the run's progress.subTab. Absent/unknown defaults to
+// dough mode (the app default).
+function isCrustMode(rec: Rec): boolean {
+  return asString(rec.subTab) === "crusts";
+}
+
+// When a dough recipe is selected AND a doughball weight is set, the batch
+// yield is derived from the recipe (recipeLbs * 16 / weightOz) and the manual
+// doughBatchYield field is ignored by the calc — so it must not be flagged as
+// missing. Web names the weight targetDoughballWeight, mobile doughballWeightOz.
+function doughYieldDerivedFromRecipe(rec: Rec): boolean {
+  const rows = Array.isArray(rec.doughRecipe) ? (rec.doughRecipe as Rec[]) : [];
+  const recipeLbs = rows.reduce((s, r) => s + asNumber(r && (r as Rec).lbs), 0);
+  const weightOz = Math.max(
+    asNumber(rec.targetDoughballWeight),
+    asNumber(rec.doughballWeightOz),
+  );
+  return recipeLbs > 0 && weightOz > 0;
+}
+
 // Some fields only matter conditionally (e.g. cartons only when cartoned, an
-// applicator slot only when that slot is in use). Returns false to skip a field.
+// applicator slot only when that slot is in use, dough vs crust supply fields
+// only in their own mode). Returns false to skip a field.
 function fieldApplies(spec: FieldSpec, rec: Rec): boolean {
   if (spec.key === "cartonsPerCase") return asString(rec.cartoned) !== "no";
+  // Dough-mode-only supply fields: irrelevant when the run opens pre-made crusts.
+  if (spec.key === "doughballsPerTray") return !isCrustMode(rec);
+  if (spec.key === "doughBatchYield") {
+    return !isCrustMode(rec) && !doughYieldDerivedFromRecipe(rec);
+  }
+  // Crust-mode-only supply fields: irrelevant when the run mixes dough in-house.
+  if (spec.key === "crustsPerStack" || spec.key === "crustsPerCase") {
+    return isCrustMode(rec);
+  }
   const appMatch = /^app([1-4])/.exec(spec.key);
   if (appMatch) return appSlotInUse(rec, Number(appMatch[1]));
   const pepMatch = /^pep([1-2])/.exec(spec.key);

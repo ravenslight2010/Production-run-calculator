@@ -27,6 +27,18 @@ chosen source is shown as a labeled badge on each row.
   `FillMissingInput` type is defined LOCALLY in each module (neither app depends on @workspace/api-zod,
   only @workspace/api-client-react).
 
+## Context-aware applicability (user-requested — do not regress)
+The user rejected mode-blind detection ("crust fields on dough, batch yield when a
+recipe is selected"). `fieldApplies` in @workspace/fill-missing gates on run context
+automatically — the caller's record MUST include `subTab` (dough vs crusts supply
+mode; web passes doughSubTab, mobile merges run.progress.subTab into settings):
+- dough mode skips crust-supply fields; crust mode skips dough-supply fields.
+- `doughBatchYield` is also skipped when it's derived from a selected recipe
+  (recipe lbs > 0 AND doughball weight > 0 — mirrors the calc's effective-yield
+  condition; both platform weight key spellings accepted).
+**Why:** flagging fields the calc ignores in the current mode trains users to
+distrust the scan. If a new field is added, decide its applicability rule here.
+
 ## Drift / scope decisions
 - **Recipes are intentionally excluded** from required-field detection: a run is computable from
   flat batch-lbs/oz scalars, so recipe rows are not treated as "missing required fields" here.

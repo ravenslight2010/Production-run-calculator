@@ -9506,6 +9506,7 @@ export default function Home() {
                       ...form.getValues(),
                       brand: currentRun?.brand ?? "",
                       flavor: currentRun?.flavor ?? "",
+                      subTab: doughSubTab,
                     })}
                     brand={currentRun?.brand ?? ""}
                     flavor={currentRun?.flavor ?? ""}

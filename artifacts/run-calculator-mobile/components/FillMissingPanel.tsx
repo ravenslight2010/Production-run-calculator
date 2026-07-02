@@ -106,8 +106,18 @@ export default function FillMissingPanel() {
     }
   };
 
+  // The shared detection logic reads the dough-supply mode from `subTab`
+  // (dough vs crusts) so mode-specific supply fields are only flagged when
+  // they apply; settings alone don't carry it, so merge it in from progress.
+  function scanRecord(): Record<string, unknown> {
+    return {
+      ...(s as unknown as Record<string, unknown>),
+      subTab: run.progress.subTab,
+    };
+  }
+
   function scan() {
-    const rec = s as unknown as Record<string, unknown>;
+    const rec = scanRecord();
     const missing = detectMissingFields(rec);
     const props = buildProposals(
       missing,
@@ -137,7 +147,7 @@ export default function FillMissingPanel() {
         s.flavor,
         s.dieType,
         candidates,
-        s as unknown as Record<string, unknown>,
+        scanRecord(),
       );
       const res = await requestFillMissing(input);
       const byKey = new Map(res.suggestions.map((x) => [x.key, x]));

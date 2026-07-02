@@ -55,14 +55,15 @@ describe("detectMissingFields", () => {
       "shipper",
       "skidStacking",
       "doughballsPerTray",
-      "crustsPerStack",
       "doughBatchYield",
-      "crustsPerCase",
       "sauceOzPerPizza",
       "sauceBarrelLbs",
     ]);
     // Applicator / pepperoni slots are not in use, so none are flagged.
     expect(keys.some((k) => /^app\d/.test(k) || /^pep\d/.test(k))).toBe(false);
+    // Default supply mode is dough, so crust-mode fields are not flagged.
+    expect(keys).not.toContain("crustsPerStack");
+    expect(keys).not.toContain("crustsPerCase");
   });
 
   it("skips fields that already hold a value", () => {
@@ -107,6 +108,54 @@ describe("detectMissingFields", () => {
       expect(keysOf({})).toContain("cartonsPerCase");
       expect(keysOf({ cartoned: "no" })).not.toContain("cartonsPerCase");
       expect(keysOf({ cartoned: "yes" })).toContain("cartonsPerCase");
+    });
+  });
+
+  describe("dough-supply mode gating (subTab)", () => {
+    it("dough mode (default) flags dough fields, never crust fields", () => {
+      for (const rec of [{}, { subTab: "dough" }]) {
+        const keys = keysOf(rec);
+        expect(keys).toContain("doughballsPerTray");
+        expect(keys).toContain("doughBatchYield");
+        expect(keys).not.toContain("crustsPerStack");
+        expect(keys).not.toContain("crustsPerCase");
+      }
+    });
+
+    it("crust mode flags crust fields, never dough fields", () => {
+      const keys = keysOf({ subTab: "crusts" });
+      expect(keys).toContain("crustsPerStack");
+      expect(keys).toContain("crustsPerCase");
+      expect(keys).not.toContain("doughballsPerTray");
+      expect(keys).not.toContain("doughBatchYield");
+    });
+  });
+
+  describe("doughBatchYield derived from a selected recipe", () => {
+    it("skips doughBatchYield when a recipe with lbs AND a doughball weight are set (web key)", () => {
+      const keys = keysOf({
+        doughRecipe: [{ ingredient: "Flour", lbs: 500 }],
+        targetDoughballWeight: 16,
+      });
+      expect(keys).not.toContain("doughBatchYield");
+    });
+
+    it("skips doughBatchYield with the mobile weight key too", () => {
+      const keys = keysOf({
+        doughRecipe: [{ ingredient: "Flour", lbs: 500 }],
+        doughballWeightOz: 16,
+      });
+      expect(keys).not.toContain("doughBatchYield");
+    });
+
+    it("still flags doughBatchYield when the recipe or the weight is missing", () => {
+      expect(keysOf({ doughRecipe: [{ ingredient: "Flour", lbs: 500 }] })).toContain(
+        "doughBatchYield",
+      );
+      expect(keysOf({ targetDoughballWeight: 16 })).toContain("doughBatchYield");
+      expect(
+        keysOf({ doughRecipe: [{ ingredient: "Flour", lbs: 0 }], targetDoughballWeight: 16 }),
+      ).toContain("doughBatchYield");
     });
   });
 });
