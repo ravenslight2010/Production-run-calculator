@@ -558,11 +558,13 @@ export default function ExcelImportDialog({
               <p className="text-sm font-semibold text-destructive mb-1">
                 {errors.length} row{errors.length === 1 ? "" : "s"} skipped
               </p>
-              {errors.slice(0, 6).map((e, i) => (
-                <p key={i} className="text-xs text-muted-foreground">
-                  Row {e.rowNumber}: {e.message}
-                </p>
-              ))}
+              <div className="max-h-32 overflow-y-auto space-y-0.5">
+                {errors.map((e, i) => (
+                  <p key={i} className="text-xs text-muted-foreground">
+                    Row {e.rowNumber}: {e.message}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
 
@@ -614,6 +616,22 @@ export default function ExcelImportDialog({
                           Skip
                         </button>
                       </div>
+                      {brands.length > 0 && (
+                        <select
+                          className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                          value={brands.includes(cur) ? cur : ""}
+                          onChange={(e) =>
+                            setBrandChoice((p) => ({ ...p, [key]: e.target.value }))
+                          }
+                        >
+                          <option value="">Or link to an existing brand…</option>
+                          {brands.map((b) => (
+                            <option key={b} value={b}>
+                              {b}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       {aiBrandReview[key] && cur === aiBrandMatch[key] && (
                         <ReviewBadge review={aiBrandReview[key]} className="mt-2" />
                       )}
@@ -670,6 +688,24 @@ export default function ExcelImportDialog({
                           Skip
                         </button>
                       </div>
+                      {(brandFlavors[f.brandName]?.length ?? 0) > 0 && (
+                        <select
+                          className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                          value={
+                            (brandFlavors[f.brandName] ?? []).includes(cur) ? cur : ""
+                          }
+                          onChange={(e) =>
+                            setFlavorChoice((p) => ({ ...p, [f.key]: e.target.value }))
+                          }
+                        >
+                          <option value="">Or link to an existing flavor…</option>
+                          {(brandFlavors[f.brandName] ?? []).map((fl) => (
+                            <option key={fl} value={fl}>
+                              {fl}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       {aiFlavorReview[f.key] && cur === aiFlavorMatch[f.key] && (
                         <ReviewBadge review={aiFlavorReview[f.key]} className="mt-2" />
                       )}

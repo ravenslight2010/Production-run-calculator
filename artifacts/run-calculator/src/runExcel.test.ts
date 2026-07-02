@@ -193,6 +193,7 @@ import {
   workbookIsSchedule,
   parseWorkbookObject,
   filterImportFromDate,
+  isNumericLikeCell,
 } from "@/utils/runExcel";
 
 // 2026-06-22 and 2026-06-29 as Excel 1900-system serials.
@@ -286,6 +287,36 @@ describe("parseScheduleWorkbook", () => {
     expect(res.rows[0].brand).toBe("Acme");
     expect(res.errors.some((e) => e.message === "Missing Brand")).toBe(true);
   });
+
+  it("silently skips stray numeric cells in the Brand column (no run, no error)", () => {
+    const wb = wbWith({
+      "Week 1": [
+        HEADER(SERIAL_20260622),
+        ["", "", "Acme", "Cheese", 10, "", "", ""],
+        ["", "", "0.08", "", "", "", "", ""], // stray running-total cell
+        ["", "", "1,250", "", "", "", "", ""], // stray total with separator
+      ],
+    });
+    const res = parseScheduleWorkbook(wb);
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].brand).toBe("Acme");
+    // Numeric junk must NOT surface as a brand candidate nor inflate the skip count.
+    expect(res.errors).toHaveLength(0);
+  });
+});
+
+describe("isNumericLikeCell", () => {
+  it("flags purely numeric cells (including EU decimals, separators, symbols)", () => {
+    for (const s of ["0.08", "0,08", "1,250", "12%", "$3.50", " 42 ", "(5)"]) {
+      expect(isNumericLikeCell(s)).toBe(true);
+    }
+  });
+
+  it("does not flag real brand/flavor names or blanks", () => {
+    for (const s of ["", "Acme", "Cheese", "Club", "Chicken Bacon Ranch", "PO 401072"]) {
+      expect(isNumericLikeCell(s)).toBe(false);
+    }
+  });
 });
 
 describe("workbookIsSchedule", () => {
@@ -321,6 +352,21 @@ describe("workbookIsSchedule", () => {
     const flatRes = parseWorkbookObject(flat);
     expect(flatRes.multiDay).toBeFalsy();
     expect(flatRes.rows).toHaveLength(1);
+  });
+
+  it("flat parser silently skips stray numeric Brand / lone numeric Flavor rows", () => {
+    const flat = wbWith({
+      Sheet1: [
+        ["Brand", "Flavor", "Cases Planned", "Notes"],
+        ["Acme", "Cheese", 10, "x"],
+        ["0.08", "", "", ""], // stray running-total cell in Brand column
+        ["", "1,250", "", ""], // stray numeric total in a lone Flavor cell
+      ],
+    });
+    const res = parseWorkbookObject(flat);
+    expect(res.rows).toHaveLength(1);
+    expect(res.rows[0].brand).toBe("Acme");
+    expect(res.errors).toHaveLength(0);
   });
 });
 

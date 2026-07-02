@@ -164,6 +164,21 @@ function pick(obj: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
+/**
+ * True when a cell's text is purely a number (allowing thousands separators,
+ * decimals, currency/percent signs and surrounding whitespace) — e.g. "0.08",
+ * "0,08", "1,250", "12%", "$3.50". Such a value in the Brand (or a lone Flavor)
+ * column is a stray subtotal/formula/running-total cell, never a real brand or
+ * flavor, so it should be skipped silently rather than offered as a name to
+ * create. Pure — mirrored verbatim web + mobile (replit.md parity).
+ */
+export function isNumericLikeCell(s: string): boolean {
+  const t = s.trim();
+  if (!t) return false;
+  if (!/[0-9]/.test(t)) return false;
+  return /^[0-9.,%$\s()+-]+$/.test(t);
+}
+
 /** Parse an xlsx ArrayBuffer/Uint8Array into validated import rows + per-row errors. */
 export function parseRunWorkbook(data: ArrayBuffer | Uint8Array): ImportParseResult {
   const wb = XLSX.read(data, { type: "array" });
@@ -195,6 +210,10 @@ export function parseWorkbookObject(wb: XLSX.WorkBook): ImportParseResult {
     const casesStr = pick(obj, ["cases planned", "cases", "casesplanned", "casesneeded", "cases needed"]);
     const notes = pick(obj, ["notes"]);
     if (!brand && !flavor && !casesStr) return; // skip blank rows silently
+    // Stray numeric/subtotal cells (e.g. a running total "0.08" landing in the
+    // Brand column, or a numeric-only Flavor with no brand) are not real runs —
+    // skip them silently instead of offering the number as a name to create.
+    if (isNumericLikeCell(brand) || (!brand && isNumericLikeCell(flavor))) return;
     if (!brand) {
       errors.push({ rowNumber, message: "Missing Brand" });
       return;
@@ -358,6 +377,11 @@ export function parseScheduleWorkbook(wb: XLSX.WorkBook): ImportParseResult {
         const flavor = cellStr(r[flavorCol]);
         const unitsStr = cellStr(r[unitsCol]);
         if (!brand && !flavor) continue; // subtotal / spacer / blank row
+        // Stray numeric/subtotal cells (e.g. a running total "0.08" landing in
+        // the Brand column, or a numeric-only Flavor with no brand) are not real
+        // runs — skip them silently instead of offering the number as a name to
+        // create (and so they don't inflate the skipped-rows count).
+        if (isNumericLikeCell(brand) || (!brand && isNumericLikeCell(flavor))) continue;
         rowCounter++;
         if (!date) {
           errors.push({ rowNumber: rowCounter, message: `"${brand || flavor}" has no day date` });
