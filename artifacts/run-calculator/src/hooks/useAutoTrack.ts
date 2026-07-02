@@ -136,11 +136,12 @@ export function useAutoTrack({
   // skids/cases delta is measured from. -1 = "not baselined yet" (first tick
   // after a mount/reset).
   const lastExpectedCasesRef = useRef<number>(-1);
-  // Fractional tray/batch consumption carried between ticks so sub-unit
-  // depletion per tick accumulates instead of being lost to Math.floor (which
-  // would freeze slow-depleting dough — especially batches — at its start value).
+  // Fractional tray consumption carried between ticks so sub-unit depletion
+  // per tick accumulates instead of being lost to Math.floor (which would
+  // freeze a slow-depleting counter at its start value). Batches don't need a
+  // carry: they are written as 2-decimal fractions so every quarter-batch tick
+  // is visible on the counter.
   const traysRemainderRef = useRef<number>(0);
-  const batchesRemainderRef = useRef<number>(0);
   // One-shot per run: when the operator never entered staged dough (counter is
   // 0 at that counter's first tick), seed it with the suggested staging so the
   // countdown has something to count down from. Without this the crew that
@@ -200,7 +201,6 @@ export function useAutoTrack({
     batchLastMsRef.current = 0;
     lastExpectedCasesRef.current = -1;
     traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
     traySeededRef.current = false;
     batchSeededRef.current = false;
   }, []);
@@ -426,20 +426,21 @@ export function useAutoTrack({
             }
           }
           if (!batchSeededThisTick) {
-            const batchesExact = (durationMin * calc.ppm) / calc.perBatch + batchesRemainderRef.current;
-            const batchesConsumed = Math.floor(batchesExact);
-            batchesRemainderRef.current = batchesExact - batchesConsumed;
-            delta -= batchesConsumed;
+            // Fractional consumption, written directly (2 decimals) so the
+            // operator SEES the counter fluctuate every quarter-batch tick
+            // instead of thinking it's frozen until a whole batch drops.
+            delta -= (durationMin * calc.ppm) / calc.perBatch;
           }
         }
       }
 
       if (!batchSeededThisTick && delta !== 0) {
         // Production never pushes past the stepper max (3) — but must never
-        // clamp an already-higher value DOWN either.
+        // clamp an already-higher value DOWN either. Rounded to 2 decimals so
+        // the fractional drain shows cleanly (e.g. 1.75, 1.5).
         let next = v.batchesReady + delta;
         if (delta > 0) next = Math.min(next, Math.max(v.batchesReady, 3));
-        next = Math.max(0, next);
+        next = Math.max(0, Math.round(next * 100) / 100);
         if (next !== v.batchesReady) {
           form.setValue("batchesReady", next, { shouldDirty: true });
         }

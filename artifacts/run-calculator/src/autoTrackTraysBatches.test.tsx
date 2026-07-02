@@ -70,8 +70,8 @@ describe("auto-track tray/batch up/down tracking", () => {
     // First tick assumes one tray-period duration: one tray consumed;
     // production is armed half a period out (t0+18s), no write yet.
     expect(values.traysOnLine).toBe(49);
-    // Batches: first quarter-batch tick = 0.25 -> floors to 0, remainder carried.
-    expect(values.batchesReady).toBe(10);
+    // Batches: first quarter-batch tick drains 0.25 visibly (2-decimal write).
+    expect(values.batchesReady).toBe(9.75);
 
     // Half a tray period later the press finishes a tray: count goes UP.
     now = new Date(t0 + 18 * 1000);
@@ -141,17 +141,18 @@ describe("auto-track tray/batch up/down tracking", () => {
       { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV({ batchesReady: 1 }) } },
     );
 
-    expect(values.batchesReady).toBe(1);
+    // Mount tick drains the first visible quarter batch.
+    expect(values.batchesReady).toBe(0.75);
 
     // One full batch-time later (600/100 = 6 min) the mixer finishes a batch.
-    // Consumption over the same jump is capped at 2 quarter-periods (0.5 batch,
-    // carried as remainder), so the net move is +1.
+    // Consumption over the same jump is capped at 2 quarter-periods (0.5), so
+    // the net move is +1 - 0.5 = +0.5.
     rerender({
       nowTime: new Date(t0 + 360 * 1000),
       elapsedBatchSec: 10 * 60 + 360,
       v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
     });
-    expect(values.batchesReady).toBe(2);
+    expect(values.batchesReady).toBe(1.25);
   });
 
   it("production +1 never clamps a higher-than-max value down", () => {
@@ -174,17 +175,20 @@ describe("auto-track tray/batch up/down tracking", () => {
       { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV({ batchesReady: 10 }) } },
     );
 
+    // Mount tick drains a visible quarter batch first.
+    expect(values.batchesReady).toBe(9.75);
+
     rerender({
       nowTime: new Date(t0 + 360 * 1000),
       elapsedBatchSec: 10 * 60 + 360,
-      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: 10 }),
+      v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
     });
-    // +1 would exceed the cap; consumption remainder (0.5) hasn't completed a
-    // batch — value must stay untouched, never clamped down to 3.
-    expect(values.batchesReady).toBe(10);
+    // Net delta is +0.5 (mixer +1, drain -0.5) which would push further over
+    // the 3-batch cap — the clamp must hold the value, never slam it to 3.
+    expect(values.batchesReady).toBe(9.75);
   });
 
-  it("carries the quarter-batch remainder so batches drop once per full batch", () => {
+  it("drains batches fractionally — 0.25 per quarter-batch tick, visibly", () => {
     const { form, values } = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
     const t0 = 1_700_000_000_000;
 
@@ -202,19 +206,20 @@ describe("auto-track tray/batch up/down tracking", () => {
       { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60, v: makeV() } },
     );
 
-    // Mount tick = 0.25 batch remainder, no write yet.
-    expect(values.batchesReady).toBe(10);
+    // Mount tick writes the first visible 0.25 drop.
+    expect(values.batchesReady).toBe(9.75);
 
-    // Quarter-batch ticks at 90s intervals: 0.5, 0.75, then 1.0 -> one batch
-    // consumed on the 4th tick (t0 + 270s).
-    for (const sec of [90, 180, 270]) {
+    // Quarter-batch ticks at 90s intervals keep stepping down by 0.25 so the
+    // operator sees movement: 9.5, 9.25, then 9 after a full batch elapsed.
+    const expected = [9.5, 9.25, 9];
+    [90, 180, 270].forEach((sec, i) => {
       rerender({
         nowTime: new Date(t0 + sec * 1000),
         elapsedBatchSec: 10 * 60 + sec,
         v: makeV({ traysOnLine: values.traysOnLine, batchesReady: values.batchesReady }),
       });
-    }
-    expect(values.batchesReady).toBe(9);
+      expect(values.batchesReady).toBe(expected[i]);
+    });
   });
 
   it("applies only ONE tick on mount — reset effects must not re-arm the same tick", () => {
@@ -244,7 +249,8 @@ describe("auto-track tray/batch up/down tracking", () => {
     rerender({ nowTime: new Date(t0 + 1000) });
     rerender({ nowTime: new Date(t0 + 2000) });
     expect(values.traysOnLine).toBe(49);
-    expect(values.batchesReady).toBe(10);
+    // Batches took exactly one visible quarter-tick on mount, nothing more.
+    expect(values.batchesReady).toBe(9.75);
   });
 
   it("advances cases once per case-time tick and rolls the skid from the same total", () => {
@@ -382,7 +388,7 @@ describe("auto-track tray/batch up/down tracking", () => {
     // Manual 50 stays the baseline: no jump to the 30-tray suggestion, and the
     // first tick still consumes one tray exactly like before the seed existed.
     expect(values.traysOnLine).toBe(49);
-    expect(values.batchesReady).toBe(10);
+    expect(values.batchesReady).toBe(9.75);
   });
 
   it("resumes decrementing after the 1-min suppression window expires", () => {
