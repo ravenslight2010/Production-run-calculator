@@ -58,3 +58,14 @@ the count build up FROM the entered number — which the incremental delta model
 already does (`target = curTotal + delta`, tunnel-offset output). Do NOT remove
 the tunnel offset for a "primed" line; an attempt to credit output immediately
 on a primed line was explicitly rejected by the user.
+
+## Effect declaration order: resets BEFORE the bucket-write effect
+
+React runs effects in declaration order. The baseline-reset effects (runId /
+auto-track toggle / run-stopped) must be declared BEFORE the bucket-write
+effect. With write-first ordering, the mount pass wrote a bucket, the resets
+then wiped the bookkeeping refs — losing the fractional tray/batch remainder
+(freezing slow-depleting batches) — and re-armed the SAME bucket to fire again
+on the next tick (double tray decrement). Mobile always had reset-first; web
+was fixed to match. Guarded by the web auto-track tray/batch test suite
+(single-bucket-on-mount + remainder-carry cases).

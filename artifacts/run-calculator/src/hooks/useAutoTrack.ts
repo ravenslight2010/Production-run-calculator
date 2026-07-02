@@ -126,6 +126,48 @@ export function useAutoTrack({
     elapsedBatchSec,
   ]);
 
+  // Baseline resets are declared BEFORE the bucket-write effect below on purpose:
+  // React runs effects in declaration order, so on mount (and on runId/toggle
+  // changes) the refs are reset FIRST and the write effect then fires exactly once
+  // with clean baselines. With the old order (write first, resets after), the
+  // mount pass wrote a bucket, the resets then wiped the bookkeeping (losing the
+  // fractional tray/batch remainder carry) and re-armed the SAME bucket to fire
+  // again on the next tick — double-decrementing trays and freezing slow-depleting
+  // batches whose per-bucket consumption is < 1 unit.
+
+  // Reset bucket bookkeeping when the run stops so the next run starts fresh.
+  useEffect(() => {
+    if (runStatus === "pending" || runStatus === "ended") {
+      lastBucketTimeMsRef.current = 0;
+      lastAutoMinBucketRef.current = -1;
+      lastExpectedCasesRef.current = -1;
+      traysRemainderRef.current = 0;
+      batchesRemainderRef.current = 0;
+    }
+  }, [runStatus]);
+
+  // Re-baseline when the active run changes (switching runs / first mount) so the
+  // incremental delta is never computed against another run's numbers, and a run
+  // we switch or reload into is not double-counted.
+  useEffect(() => {
+    lastBucketTimeMsRef.current = 0;
+    lastAutoMinBucketRef.current = -1;
+    lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
+  }, [runId]);
+
+  // Re-baseline when auto-track is toggled on so the first bucket after re-enabling
+  // continues from the current value instead of adding all the production that
+  // accumulated while it was off.
+  useEffect(() => {
+    lastBucketTimeMsRef.current = 0;
+    lastAutoMinBucketRef.current = -1;
+    lastExpectedCasesRef.current = -1;
+    traysRemainderRef.current = 0;
+    batchesRemainderRef.current = 0;
+  }, [autoTrackProgress]);
+
   // Apply expected values once per 5-minute bucket while running.
   useEffect(() => {
     if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
@@ -221,39 +263,6 @@ export function useAutoTrack({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nowTime]);
-
-  // Reset bucket bookkeeping when the run stops so the next run starts fresh.
-  useEffect(() => {
-    if (runStatus === "pending" || runStatus === "ended") {
-      lastBucketTimeMsRef.current = 0;
-      lastAutoMinBucketRef.current = -1;
-      lastExpectedCasesRef.current = -1;
-      traysRemainderRef.current = 0;
-      batchesRemainderRef.current = 0;
-    }
-  }, [runStatus]);
-
-  // Re-baseline when the active run changes (switching runs / first mount) so the
-  // incremental delta is never computed against another run's numbers, and a run
-  // we switch or reload into is not double-counted.
-  useEffect(() => {
-    lastBucketTimeMsRef.current = 0;
-    lastAutoMinBucketRef.current = -1;
-    lastExpectedCasesRef.current = -1;
-    traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
-  }, [runId]);
-
-  // Re-baseline when auto-track is toggled on so the first bucket after re-enabling
-  // continues from the current value instead of adding all the production that
-  // accumulated while it was off.
-  useEffect(() => {
-    lastBucketTimeMsRef.current = 0;
-    lastAutoMinBucketRef.current = -1;
-    lastExpectedCasesRef.current = -1;
-    traysRemainderRef.current = 0;
-    batchesRemainderRef.current = 0;
-  }, [autoTrackProgress]);
 
   return {
     autoTrackProgress,
