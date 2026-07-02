@@ -6302,8 +6302,8 @@ export default function Home() {
         </div>
 
         {/* Run name + status */}
-        <div className="flex items-center gap-4">
-          <h1 className="text-5xl font-black tracking-tight">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+        <div className="flex items-center gap-4 flex-wrap">
+          <h1 className="text-5xl font-black tracking-tight break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
           {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
           {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
           {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
@@ -6367,7 +6367,7 @@ export default function Home() {
         {dayState.runs[dayState.currentIndex + 1] && (
           <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-muted/20 border border-border/50 text-muted-foreground">
             <ArrowRight className="w-4 h-4 shrink-0" />
-            <span className="text-sm font-semibold">Next: {runLabel(dayState.runs[dayState.currentIndex + 1])}</span>
+            <span className="text-sm font-semibold min-w-0 truncate">Next: {runLabel(dayState.runs[dayState.currentIndex + 1])}</span>
             {nextRunDieType && nextRunDieType !== v.dieType && (
               <span className="ml-2 text-xs font-bold text-amber-400">⚠ Die change → {nextRunDieType}</span>
             )}
@@ -6393,7 +6393,7 @@ export default function Home() {
           <span className="text-2xl font-black tabular-nums">{fmtClock(nowTime.getTime())}</span>
         </div>
 
-        <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+        <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
 
         {/* Big countdown */}
         {runStatus === "running" && calc.timePerBatchSec > 0 && doughSubTab !== "crusts" ? (
@@ -6538,7 +6538,7 @@ export default function Home() {
 
         {/* Run name + status */}
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
           {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
           {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
           {runStatus === "ended" && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold uppercase">Ended</span>}
@@ -6631,7 +6631,7 @@ export default function Home() {
           : "bg-card border-border"
         }`}>
           <div className="flex items-center gap-4 flex-wrap">
-            <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+            <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
             {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
             {runStatus === "running" && <span className="px-3 py-1 rounded-full bg-emerald-600/20 border border-emerald-600/40 text-emerald-400 text-sm font-bold uppercase">Running</span>}
             {runStatus === "paused" && <span className="px-3 py-1 rounded-full bg-yellow-600/20 border border-yellow-600/40 text-yellow-400 text-sm font-bold uppercase">Paused</span>}
@@ -6709,7 +6709,7 @@ export default function Home() {
                       <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">#{dayState.currentIndex + i + 2}</span>
                       {dieChange && <span className="text-xs font-bold text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Die change</span>}
                     </div>
-                    <p className="text-2xl font-black leading-tight">{runLabel(run)}</p>
+                    <p className="text-2xl font-black leading-tight break-words min-w-0">{runLabel(run)}</p>
                     {vals.dieType && <span className="self-start px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border/50 text-muted-foreground">{vals.dieType}</span>}
                     <div className="flex gap-4 mt-auto">
                       {s.totalCases > 0 && <div><p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cases</p><p className="text-xl font-black tabular-nums">{fmtComma(s.totalCases)}</p></div>}
@@ -6747,7 +6747,7 @@ export default function Home() {
 
         {/* Run name + status */}
         <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-4xl font-black">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
+          <h1 className="text-4xl font-black break-words min-w-0">{currentRun ? runLabel(currentRun) : "No Active Run"}</h1>
           {v.dieType && <span className="px-3 py-1 rounded-full bg-muted/40 border border-border text-muted-foreground text-sm font-bold">{v.dieType}</span>}
           {v.casesNeeded > 0 && (
             <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
@@ -6857,8 +6857,8 @@ export default function Home() {
             const isDone = !!run.endedAt;
             return (
               <div key={run.id} className={`rounded-2xl border p-6 flex flex-col gap-3 ${isCurr ? "bg-primary/10 border-primary/40" : isDone ? "bg-emerald-950/20 border-emerald-700/30" : "bg-card border-border/50"}`}>
-                <div className="flex items-center gap-3">
-                  <p className="text-2xl font-black">{runLabel(run)}</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <p className="text-2xl font-black break-words min-w-0">{runLabel(run)}</p>
                   {vals.dieType && <span className="px-2 py-0.5 rounded text-xs font-bold bg-muted/50 border border-border text-muted-foreground">{vals.dieType}</span>}
                   <span className={`ml-auto text-xs font-bold uppercase px-2 py-0.5 rounded-full ${isCurr ? "bg-primary/20 text-primary" : isDone ? "bg-emerald-700/30 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
                     {isCurr ? "Current" : isDone ? "Done" : "Upcoming"}
@@ -6959,7 +6959,7 @@ export default function Home() {
             {/* Header */}
             <header className="flex justify-between items-center px-5 pt-5 pb-2 shrink-0">
               <div className="flex flex-col gap-1.5">
-                <span className="text-lg font-bold" style={{ color: "rgba(255,255,255,0.75)" }}>
+                <span className="text-lg font-bold break-words min-w-0" style={{ color: "rgba(255,255,255,0.75)" }}>
                   {currentRun ? runLabel(currentRun) : "No Active Run"}
                 </span>
                 <span className="flex items-center gap-1.5 self-start px-2.5 py-1 rounded-full text-[10px] font-bold tracking-widest" style={{ background: badge, color: badgeText }}>
@@ -7173,7 +7173,7 @@ export default function Home() {
               {/* Run name */}
               <div>
                 <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Current Run</p>
-                <p className="text-2xl font-bold">{runLabel(currentRun)}</p>
+                <p className="text-2xl font-bold break-words min-w-0">{runLabel(currentRun)}</p>
               </div>
               {/* Cases */}
               {v.casesNeeded > 0 ? (
@@ -7498,7 +7498,7 @@ export default function Home() {
                             className="flex-1 border border-primary rounded px-2 py-0.5 text-sm bg-background focus:outline-none"
                           />
                         ) : (
-                          <span className="text-sm flex-1">{item}</span>
+                          <span className="text-sm flex-1 min-w-0 break-words">{item}</span>
                         )}
                         {isProt
                           ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
@@ -8374,7 +8374,7 @@ export default function Home() {
                             <div key={b} className="flex items-center">
                               <button
                                 type="button"
-                                className={`flex-1 text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
+                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
                                 onMouseDown={() => { setRunBrandFlavor(b, currentRun?.flavor ?? ""); setShowBrandDrop(false); }}
                               >
                                 {b}
@@ -8400,7 +8400,7 @@ export default function Home() {
                             setShowBrandDrop(false);
                           }}
                         >
-                          <Plus className="w-3 h-3" /> Add "{brandInput.trim()}"
+                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{brandInput.trim()}"</span>
                         </button>
                       )}
                     </div>
@@ -8455,7 +8455,7 @@ export default function Home() {
                             <div key={f} className="flex items-center">
                               <button
                                 type="button"
-                                className={`flex-1 text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
+                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
                                 onMouseDown={() => { setRunBrandFlavor(currentRun?.brand ?? "", f); setShowFlavorDrop(false); }}
                               >
                                 {f}
@@ -8481,7 +8481,7 @@ export default function Home() {
                             setShowFlavorDrop(false);
                           }}
                         >
-                          <Plus className="w-3 h-3" /> Add "{flavorInput.trim()}"
+                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{flavorInput.trim()}"</span>
                         </button>
                       )}
                     </div>
@@ -10417,7 +10417,7 @@ export default function Home() {
                                 <div className="space-y-1">
                                   {run.items.map((it, ii) => (
                                     <div key={ii} className="flex items-baseline justify-between gap-2 text-sm">
-                                      <span className="text-sky-200/90 truncate">
+                                      <span className="text-sky-200/90 min-w-0 truncate">
                                         {it.name}
                                         <span className="ml-1.5 text-[11px] text-sky-400/70">pull {it.daysEarly}d early</span>
                                       </span>
@@ -10814,7 +10814,7 @@ export default function Home() {
                               {group.runs.map((run, ri) => (
                                 <div key={ri} className="rounded-md border border-emerald-800/40 bg-emerald-950/20 p-3">
                                   <div className="flex items-baseline justify-between gap-2 mb-2">
-                                    <div className="font-semibold text-sm text-emerald-100 truncate">
+                                    <div className="font-semibold text-sm text-emerald-100 min-w-0 truncate">
                                       {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
                                     </div>
                                     <div className="text-xs text-emerald-300/80 whitespace-nowrap tabular-nums">
@@ -12249,7 +12249,7 @@ export default function Home() {
                         <CardHeader className="pb-2 pt-4 px-5">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 flex-wrap">
-                          <CardTitle className="text-base font-semibold">{runLabel(run)}</CardTitle>
+                          <CardTitle className="text-base font-semibold break-words min-w-0">{runLabel(run)}</CardTitle>
                           {vals.dieType && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-muted/50 border border-border/50 text-muted-foreground">
                               {vals.dieType}
@@ -13346,7 +13346,7 @@ export default function Home() {
                                 <div key={i} className="py-1 pl-5">
                                   <div className="flex items-center gap-2">
                                     <span className="w-4 h-4 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-bold shrink-0">{i + 1}</span>
-                                    <span className="text-xs font-medium truncate flex-1">
+                                    <span className="text-xs font-medium truncate flex-1 min-w-0">
                                       {run.brand}{run.flavor ? ` — ${run.flavor}` : ""}
                                     </span>
                                     {run.casesNeeded > 0 && (
@@ -13578,7 +13578,7 @@ export default function Home() {
                     <button type="button" onClick={() => setScheduleView("editor")} className="text-muted-foreground hover:text-foreground -ml-1 mr-0.5">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <h2 className="text-base font-bold flex-1">
+                    <h2 className="text-base font-bold flex-1 min-w-0 truncate">
                       {(() => { const r = scheduleEditorRuns.find(r => r.id === scheduleAdvancedRunId); return r?.brand ? `${r.brand}${r.flavor ? ` / ${r.flavor}` : ""} — Settings` : "Advanced Settings"; })()}
                     </h2>
                     <button type="button" onClick={() => setShowScheduleDialog(false)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
