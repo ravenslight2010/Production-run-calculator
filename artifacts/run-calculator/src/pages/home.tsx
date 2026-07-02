@@ -1510,7 +1510,10 @@ function NumField({
   );
 }
 
-const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
+// How long a manual stepper edit holds off auto-track writes. Must stay at
+// 10 minutes (mobile parity) — a shorter window lets auto-track eat manual
+// tray/batch corrections within a minute of the operator typing them.
+const AUTO_SUPPRESS_MS = 10 * 60 * 1000;
 
 function StepperField({
   control,
@@ -6325,6 +6328,10 @@ export default function Home() {
     calc,
     v,
     form,
+    // Cast/wall display screens are read-only viewers: they must never run
+    // auto-track writes, or their decrements sync back and clobber the
+    // operator's manual tray/batch edits on every other device.
+    disabled: screenMode !== null,
   });
 
   const currentBatchNum = calc.timePerBatchSec > 0 ? Math.floor(elapsedBatchSec / calc.timePerBatchSec) : 0;

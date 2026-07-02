@@ -318,4 +318,40 @@ describe("auto-track tray/batch decrement", () => {
     rerender({ nowTime: now, elapsedBatchSec: elapsed, v });
     expect(values.traysOnLine).toBeLessThan(49);
   });
+
+  it("disabled (cast screens) never writes — no decrement, no seed", () => {
+    // Wall display screens pass disabled:true; they must never mutate the
+    // counters or their decrements sync back over the operator's manual edits.
+    const withValues = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 50, batchesReady: 10 });
+    const untouched = makeForm({ skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0 });
+    const t0 = 1_700_000_000_000;
+
+    for (const { form, values, writes, start } of [
+      { ...withValues, start: { traysOnLine: 50, batchesReady: 10 } },
+      { ...untouched, start: { traysOnLine: 0, batchesReady: 0 } },
+    ]) {
+      const { rerender } = renderHook(
+        (props: { nowTime: Date; elapsedBatchSec: number }) =>
+          useAutoTrack({
+            runId: "run-1",
+            runStatus: "running",
+            nowTime: props.nowTime,
+            elapsedBatchSec: props.elapsedBatchSec,
+            calc: baseCalc,
+            v: makeV(start),
+            form,
+            disabled: true,
+          }),
+        { initialProps: { nowTime: new Date(t0), elapsedBatchSec: 10 * 60 } },
+      );
+
+      // Mount tick + several tray periods: nothing may be written.
+      for (const sec of [36, 72, 108, 270]) {
+        rerender({ nowTime: new Date(t0 + sec * 1000), elapsedBatchSec: 10 * 60 + sec });
+      }
+      expect(writes).toEqual({});
+      expect(values.traysOnLine).toBe(start.traysOnLine);
+      expect(values.batchesReady).toBe(start.batchesReady);
+    }
+  });
 });

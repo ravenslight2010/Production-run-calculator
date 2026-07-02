@@ -50,6 +50,13 @@ interface AutoTrackParams {
   calc: AutoTrackCalc;
   v: AutoTrackValues;
   form: UseFormReturn<FormValues>;
+  /**
+   * Hard-disable all auto-track WRITES (cast/wall display screens). A passive
+   * display must never decrement trays/batches or seed staging — its writes
+   * get pushed through live sync with fresh stamps and clobber the operator's
+   * manual edits on every other device.
+   */
+  disabled?: boolean;
 }
 
 interface AutoTrackResult {
@@ -107,6 +114,7 @@ export function useAutoTrack({
   calc,
   v,
   form,
+  disabled = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
   const autoSuppressUntilRef = useRef<number>(0);
@@ -232,7 +240,7 @@ export function useAutoTrack({
 
   // Apply expected values whenever a counter's own production-paced tick is due.
   useEffect(() => {
-    if (!autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
+    if (disabled || !autoTrackProgress || runStatus !== "running" || !autoTrackSuggestion) return;
 
     const nowMs = nowTime.getTime();
     // While the manual-edit suppression window is open, keep baselines current
