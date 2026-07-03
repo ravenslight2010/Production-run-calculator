@@ -1927,33 +1927,53 @@ router.post(
       knowledge,
     );
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        // Parsing echoes the whole workbook chunk back as structured JSON, so
-        // output scales with input: a chunk carrying ~240 spec profiles
-        // overflowed 32768 output tokens → truncated non-JSON → empty result.
-        // Use the model's full 64k output budget for this route.
-        max_completion_tokens: 65536,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-parse-spec-sheet call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
+    // The model occasionally truncates/malforms its JSON mid-response even for
+    // small sheets. One bounded retry absorbs that transient flakiness so the
+    // user's import doesn't silently come back empty. Each attempt is a paid
+    // call, so the cap stays at 2 total (1 retry) — a systematically failing
+    // model at most doubles cost, and the empty-result fallback still applies
+    // once attempts are exhausted.
+    const PARSE_SPEC_MAX_ATTEMPTS = 2;
     let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-parse-spec-sheet non-JSON response");
+    let parsedOk = false;
+    let content = "";
+    for (let attempt = 1; attempt <= PARSE_SPEC_MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          // Parsing echoes the whole workbook chunk back as structured JSON, so
+          // output scales with input: a chunk carrying ~240 spec profiles
+          // overflowed 32768 output tokens → truncated non-JSON → empty result.
+          // Use the model's full 64k output budget for this route.
+          max_completion_tokens: 65536,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        content = response.choices[0]?.message?.content ?? "";
+      } catch (err) {
+        req.log.error({ err, attempt }, "ai-parse-spec-sheet call failed");
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
+
+      try {
+        raw = JSON.parse(content);
+        parsedOk = true;
+        if (attempt > 1) {
+          req.log.info({ attempt }, "ai-parse-spec-sheet retry recovered a valid response");
+        }
+        break;
+      } catch {
+        req.log.warn(
+          { attempt, maxAttempts: PARSE_SPEC_MAX_ATTEMPTS, contentLength: content.length, content: content.slice(0, 200) },
+          "ai-parse-spec-sheet non-JSON response",
+        );
+      }
+    }
+    if (!parsedOk) {
       res.json({
         profiles: [],
         recipes: [],
