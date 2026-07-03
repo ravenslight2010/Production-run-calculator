@@ -9,9 +9,16 @@ import {
   inventoryLocationsTable,
   inventorySettingsTable,
   qualityChecksTable,
+  dailySyncTable,
   type InventoryLot,
   type InventoryLocation,
 } from "@workspace/db";
+import {
+  computeRunConsumptionLines,
+  applySubstitutions,
+  type RunLinesInput,
+  type IngredientSubstitution,
+} from "@workspace/inventory-math";
 import {
   CreateInventoryItemBody,
   UpdateInventoryItemBody,
@@ -1056,6 +1063,53 @@ router.post("/inventory/adjust", async (req, res): Promise<void> => {
   res.json(await loadItemResponse(itemId));
 });
 
+// Mirrors artifacts/run-calculator's DEFAULT_PEP_TYPES (each app owns its own
+// copy by design — see lib/inventory-math). Only used server-side to recompute
+// the EXPECTED consumption for a run so we can validate what the client
+// claims to have consumed; never surfaced to clients.
+const SERVER_DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];
+
+// `/inventory/consume` is reachable to any authenticated user, but its request
+// body is NOT trusted for what actually gets deducted (see below) — only for
+// WHICH run to finalize. We defend by treating the synced day-state
+// (server-persisted per date+scope in `daily_sync`) as the source of truth for
+// "which runs exist and what do they actually need": the referenced runId
+// must appear in some day's `dayState.runs` for this scope, and the amounts
+// applied come ONLY from the shared, pure `computeRunConsumptionLines` formula
+// (the SAME formula the clients use) run against that run's own stored
+// settings + substitutions. Scanning all of a scope's daily_sync rows is
+// acceptable here: it's one JSONB row per calendar day, so even years of
+// history stay small.
+async function findExpectedConsumptionForRun(
+  runId: string,
+  scope: ReturnType<typeof currentScope>,
+): Promise<Map<string, number> | null> {
+  const rows = await db
+    .select({ data: dailySyncTable.data })
+    .from(dailySyncTable)
+    .where(eq(dailySyncTable.scope, scope));
+  for (const row of rows) {
+    const data = row.data as {
+      dayState?: { runs?: Array<{ id?: string }>; substitutions?: IngredientSubstitution[] };
+      runValues?: Record<string, unknown>;
+    } | null;
+    const runs = data?.dayState?.runs ?? [];
+    if (!runs.some((r) => r?.id === runId)) continue;
+    const vals = data?.runValues?.[runId];
+    if (!vals || typeof vals !== "object") continue;
+    const substitutions = data?.dayState?.substitutions ?? [];
+    const effective = substitutions.length
+      ? applySubstitutions(vals as Record<string, unknown>, substitutions)
+      : vals;
+    const expectedLines = computeRunConsumptionLines(
+      effective as unknown as RunLinesInput,
+      SERVER_DEFAULT_PEP_TYPES,
+    );
+    return new Map(expectedLines.map((l) => [l.itemKey, l.qty]));
+  }
+  return null;
+}
+
 // Claim + drawdown + ledger all run in one transaction. The unique runId
 // marker is written even for zero-consume runs, so a later restock + re-consume
 // of the same run can't double-deduct, and onConflictDoNothing makes the claim
@@ -1119,12 +1173,28 @@ router.post("/inventory/consume", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { runId, lines } = parsed.data;
+  const { runId } = parsed.data;
   if (!runId) {
     res.status(400).json({ error: "runId required" });
     return;
   }
-  const result = await consumeRun(runId, lines);
+  // The client-supplied `lines` are NEVER trusted for what actually gets drawn
+  // down — that would let an attacker request an arbitrary subset (or none) of
+  // a real run's materials, or split an over-consume across many duplicate
+  // lines. Instead we look up the run in the server-persisted day-state and
+  // derive the ONLY lines this endpoint will ever apply from that trusted
+  // state, via the same shared formula the clients use. A caller can affect
+  // WHICH real run gets finalized, never HOW MUCH gets deducted.
+  const expected = await findExpectedConsumptionForRun(runId, currentScope());
+  if (!expected) {
+    res.status(403).json({ error: "runId does not match a known scheduled run" });
+    return;
+  }
+  const authoritativeLines: ConsumeLine[] = [...expected.entries()].map(([itemKey, qty]) => ({
+    itemKey,
+    qty,
+  }));
+  const result = await consumeRun(runId, authoritativeLines);
   if (!result.applied) {
     res.json({ applied: false, consumed: 0 });
     return;

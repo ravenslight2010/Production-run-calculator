@@ -13,6 +13,8 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import { sql } from "drizzle-orm";
 import {
   describe,
@@ -23,6 +25,7 @@ import {
   beforeEach,
 } from "vitest";
 import pg from "pg";
+import express, { type Express } from "express";
 
 // Filled in by beforeAll once the throwaway DB exists and the module is loaded.
 type DbModule = typeof import("@workspace/db");
@@ -34,6 +37,7 @@ let inventoryLotsTable: DbModule["inventoryLotsTable"];
 let inventoryLedgerTable: DbModule["inventoryLedgerTable"];
 let inventoryConsumedRunsTable: DbModule["inventoryConsumedRunsTable"];
 let inventoryLocationsTable: DbModule["inventoryLocationsTable"];
+let dailySyncTable: DbModule["dailySyncTable"];
 let consumeRun: InvModule["consumeRun"];
 let drawDown: InvModule["drawDown"];
 let adjustInventory: InvModule["adjustInventory"];
@@ -43,6 +47,8 @@ let transferStock: InvModule["transferStock"];
 let adminPool: pg.Pool;
 let testDbName: string;
 let originalDatabaseUrl: string | undefined;
+let server: Server;
+let baseUrl: string;
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 
@@ -83,14 +89,33 @@ beforeAll(async () => {
   inventoryLedgerTable = dbMod.inventoryLedgerTable;
   inventoryConsumedRunsTable = dbMod.inventoryConsumedRunsTable;
   inventoryLocationsTable = dbMod.inventoryLocationsTable;
+  dailySyncTable = dbMod.dailySyncTable;
   consumeRun = invMod.consumeRun;
   drawDown = invMod.drawDown;
   adjustInventory = invMod.adjustInventory;
   mergeInventoryItems = invMod.mergeInventoryItems;
   transferStock = invMod.transferStock;
+
+  // Spin up the real /inventory/consume route (no requireAuth in front of it
+  // here — that gate is covered elsewhere; this exercises the route's own
+  // business-rule validation added to close the arbitrary-runId/qty flaw).
+  const app: Express = express();
+  app.use(express.json({ limit: "10mb" }));
+  app.use((req, _res, next) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (req as any).log = { info() {}, warn() {}, error() {}, debug() {} };
+    next();
+  });
+  app.use("/api", invMod.default);
+  await new Promise<void>((resolve) => {
+    server = app.listen(0, () => resolve());
+  });
+  const addr = server.address() as AddressInfo;
+  baseUrl = `http://127.0.0.1:${addr.port}`;
 }, 60_000);
 
 afterAll(async () => {
+  if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   // Close the app pool so the database has no open connections, then drop it.
   if (pool) await pool.end();
   if (adminPool) {
@@ -976,5 +1001,133 @@ describe("inventory transfer against a real database", () => {
     expect(result.transferred).toBe(4);
     const cells = await lotsForItem(itemId);
     expect(cells.filter((l) => l.locationId === cold).reduce((a, l) => a + l.qtyRemaining, 0)).toBe(4);
+  });
+});
+
+// A minimal RunLinesInput-shaped run whose only non-zero material is dough:
+// doughRecipe totals 50 lbs, doughballWeightOz 8 -> effective yield
+// (50*16)/8 = 100 pizzas/batch. casesNeeded 10 * pizzasPerCase 12 = 120 total
+// pizzas -> ceil(120/100) = 2 dough batches expected.
+const MINIMAL_RUN_VALS = {
+  casesNeeded: 10,
+  pizzasPerCase: 12,
+  casesPerLayer: 0,
+  frontlineRecipe: [],
+  sauceBarrelLbs: 0,
+  sauceOzPerPizza: 0,
+  app1OzPerPizza: 0, app1BatchLbs: 0, app1Type: "", app1CheeseRecipe: [],
+  app2OzPerPizza: 0, app2BatchLbs: 0, app2Type: "", app2CheeseRecipe: [],
+  app3OzPerPizza: 0, app3BatchLbs: 0, app3Type: "", app3CheeseRecipe: [],
+  app4OzPerPizza: 0, app4BatchLbs: 0, app4Type: "", app4CheeseRecipe: [],
+  pep1OzPerPizza: 0, pep1Sticks: 0, pep1BatchLbs: 0, pep1Type: "",
+  pep2OzPerPizza: 0, pep2Sticks: 0, pep2BatchLbs: 0, pep2Type: "",
+  crustsPerCycle: 0, cycleSpeed: 0, speedAdjustment: 0,
+  doughRecipe: [{ ingredient: "Flour", lbs: 50 }],
+  doughballWeightOz: 8,
+  doughBatchYield: 100,
+  cartoned: "no",
+};
+
+async function seedDaySyncRun(runId: string, vals: unknown): Promise<void> {
+  await db.insert(dailySyncTable).values({
+    date: "2026-07-03",
+    scope: "live",
+    data: {
+      dayState: { runs: [{ id: runId, brand: "Test", flavor: "Cheese" }] },
+      runValues: { [runId]: vals },
+    },
+  });
+}
+
+describe("POST /api/inventory/consume — server-side authorization of client-supplied runs", () => {
+  beforeEach(async () => {
+    await db.execute(sql`TRUNCATE ${dailySyncTable} RESTART IDENTITY CASCADE`);
+  });
+
+  it("rejects a runId that doesn't match any known scheduled run", async () => {
+    const itemId = await makeItem("ingredient:Dough:batches");
+    await addLot(itemId, 100);
+
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "attacker-made-up-run",
+        lines: [{ itemKey: "ingredient:Dough:batches", qty: 99 }],
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(await onHand(itemId)).toBe(100); // untouched
+  });
+
+  it("ignores an inflated client-claimed quantity and only deducts the run's real requirement", async () => {
+    const itemId = await makeItem("ingredient:Dough:batches");
+    await addLot(itemId, 100);
+    await seedDaySyncRun("run-legit-1", MINIMAL_RUN_VALS);
+
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "run-legit-1",
+        lines: [{ itemKey: "ingredient:Dough:batches", qty: 99 }], // expected is 2
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await onHand(itemId)).toBe(98); // only the real 2 batches were deducted, not 99
+  });
+
+  it("ignores a client-claimed itemKey the run's recipe never actually touches", async () => {
+    const itemId = await makeItem("ingredient:Cheese:lbs");
+    await addLot(itemId, 100);
+    await seedDaySyncRun("run-legit-2", MINIMAL_RUN_VALS);
+
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "run-legit-2",
+        lines: [{ itemKey: "ingredient:Cheese:lbs", qty: 1 }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await onHand(itemId)).toBe(100); // cheese isn't part of this run's recipe, so untouched
+  });
+
+  it("ignores an attempt to split an over-consume across many duplicate lines for the same item", async () => {
+    const itemId = await makeItem("ingredient:Dough:batches");
+    await addLot(itemId, 100);
+    await seedDaySyncRun("run-legit-dup", MINIMAL_RUN_VALS);
+
+    // Expected total for this run is 2, regardless of how the client shapes its
+    // (untrusted) lines — the server always derives amounts itself.
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "run-legit-dup",
+        lines: Array.from({ length: 50 }, () => ({ itemKey: "ingredient:Dough:batches", qty: 2 })),
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await onHand(itemId)).toBe(98); // only the real 2 batches were deducted
+  });
+
+  it("allows consumption that matches what the run's own recipe requires", async () => {
+    const itemId = await makeItem("ingredient:Dough:batches");
+    await addLot(itemId, 100);
+    await seedDaySyncRun("run-legit-3", MINIMAL_RUN_VALS);
+
+    const res = await fetch(`${baseUrl}/api/inventory/consume`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "run-legit-3",
+        lines: [{ itemKey: "ingredient:Dough:batches", qty: 2 }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ applied: true, consumed: 1 });
+    expect(await onHand(itemId)).toBe(98);
   });
 });
