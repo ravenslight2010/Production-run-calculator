@@ -552,12 +552,12 @@ export const getChangePasswordUrl = () => {
 }
 
 /**
- * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced.
+ * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced. Changing the password invalidates every previously-issued session token (including the one used for this request), so a fresh token is returned and must replace the caller's stored session.
  * @summary Change the signed-in user's password
  */
-export const changePassword = async (changePasswordCredentials: ChangePasswordCredentials, options?: RequestInit): Promise<void> => {
+export const changePassword = async (changePasswordCredentials: ChangePasswordCredentials, options?: RequestInit): Promise<AuthResponse> => {
 
-  return customFetch<void>(getChangePasswordUrl(),
+  return customFetch<AuthResponse>(getChangePasswordUrl(),
   {
     ...options,
     method: 'POST',

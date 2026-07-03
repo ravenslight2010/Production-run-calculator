@@ -22,6 +22,7 @@ import {
   isUsernameAvailable,
   updateUserPassword,
 } from "../lib/users";
+import { invalidateUserSessions } from "../lib/userValidity";
 import { createResetRequest, resetPasswordWithCode } from "../lib/passwordResets";
 import { createRoleForNewUser, getStaffMember } from "../lib/roles";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -57,13 +58,24 @@ const authRateLimit = rateLimit({
 // out of band via STAFF_SIGNUP_CODE and handed to legitimate new hires. If the
 // operator hasn't configured one, sign-up is closed entirely rather than
 // silently left open.
-function accessCodeMatches(supplied: string): boolean {
-  const expected = process.env.STAFF_SIGNUP_CODE;
+function timingSafeCodeMatches(supplied: string, expected: string | undefined): boolean {
   if (!expected) return false;
   const a = Buffer.from(supplied);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+// A sign-up may present EITHER the ordinary shared staff code, or the
+// separate, narrower INITIAL_MANAGER_ACCESS_CODE bootstrap secret (see
+// isDesignatedInitialManager in lib/roles.ts) — the intended first
+// administrator only needs to know their own bootstrap code, not the
+// general-staff one, to get past this gate.
+function accessCodeMatches(supplied: string): boolean {
+  return (
+    timingSafeCodeMatches(supplied, process.env.STAFF_SIGNUP_CODE) ||
+    timingSafeCodeMatches(supplied, process.env.INITIAL_MANAGER_ACCESS_CODE)
+  );
 }
 
 function setSessionCookie(
@@ -80,12 +92,15 @@ function setSessionCookie(
 }
 
 // Create a staff account and start a session. Requires a valid facility
-// access code (STAFF_SIGNUP_CODE) — see accessCodeMatches above. The very
-// first account ever created becomes a manager (bootstrap); every later
-// account defaults to operator. createRoleForNewUser resolves the bootstrap
-// role and inserts inside one Postgres advisory-locked transaction so two
-// concurrent sign-ups can't both observe "no manager yet" and both become
-// manager.
+// access code (STAFF_SIGNUP_CODE) — see accessCodeMatches above. Note that
+// this shared code is deliberately NOT sufficient on its own to decide who
+// becomes manager: bootstrap also requires the SAME access-code field to match
+// the separate INITIAL_MANAGER_ACCESS_CODE secret AND the username to match
+// INITIAL_MANAGER_USERNAME (see createRoleForNewUser / resolveBootstrapRole /
+// isDesignatedInitialManager in lib/roles.ts); everyone else, including the
+// very first sign-up, defaults to operator. createRoleForNewUser inserts
+// inside one Postgres advisory-locked transaction so two concurrent sign-ups
+// can't race the bootstrap decision.
 router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
   const parsed = SignUpBody.safeParse(req.body);
   if (!parsed.success) {
@@ -102,7 +117,7 @@ router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
     res.status(409).json({ error: "That username is already taken." });
     return;
   }
-  await createRoleForNewUser(created.user.id);
+  await createRoleForNewUser(created.user.id, username, accessCode);
   const token = signToken(created.user.id);
   setSessionCookie(res, token);
   res.status(201).json({ token, user: await getStaffMember(created.user.id) });
@@ -163,6 +178,12 @@ router.post("/auth/sign-out", (_req, res): void => {
 // Change the signed-in user's password. Gated by requireAuth (this router is
 // otherwise mounted publicly, before the global auth gate). The current
 // password is verified against the stored hash before it is replaced.
+//
+// Changing the password invalidates every session token issued before this
+// moment (see requireAuth's password-change fence) — including the token used
+// to authenticate this very request — so a fresh token must be minted and
+// handed back, exactly like sign-in, or the caller would be logged out by
+// their own password change.
 router.post(
   "/auth/change-password",
   requireAuth,
@@ -179,7 +200,10 @@ router.post(
       return;
     }
     await updateUserPassword(user.id, newPassword);
-    res.status(204).end();
+    invalidateUserSessions(user.id);
+    const token = signToken(user.id);
+    setSessionCookie(res, token);
+    res.json({ token, user: await getStaffMember(user.id) });
   },
 );
 

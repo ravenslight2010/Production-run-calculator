@@ -152,13 +152,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [qc]);
 
-  // Changing a password doesn't rotate the session, so there's nothing to
-  // refresh client-side — callers just surface success/failure.
+  // Changing a password invalidates every previously-issued session token —
+  // including the one that authenticated this very request — so the server
+  // mints and returns a fresh one. Apply it the same way sign-in does or the
+  // user would be logged out by their own password change.
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
-      await changePasswordRequest(currentPassword, newPassword);
+      const { user } = await changePasswordRequest(currentPassword, newPassword);
+      resetCacheTo(user);
     },
-    [],
+    [resetCacheTo],
   );
 
   // Persist the "Get Started" dismissal server-side, then write the updated

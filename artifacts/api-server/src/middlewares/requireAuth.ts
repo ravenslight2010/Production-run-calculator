@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE, verifyToken } from "../lib/auth";
 import { getSessionBoundaryMs } from "../lib/sessionBoundary";
-import { userExists } from "../lib/userValidity";
+import { getUserSecurityState } from "../lib/userValidity";
 import { isSandboxUser } from "../lib/sandbox";
 import { runWithScope, type Scope } from "../lib/requestScope";
 
@@ -70,7 +70,23 @@ export async function requireAuth(
   // Removed-staff fence: tokens are stateless, so a deleted user's still-valid
   // token would otherwise keep working until it expires. Reject the request the
   // moment the account no longer exists (cached read; evicted on deletion).
-  if (!(await userExists(verified.sub))) {
+  //
+  // Password-change fence: tokens are stateless, so replacing a password (self
+  // change, manager reset, or forgotten-password relay) would otherwise leave
+  // any already-issued token — including one held by an attacker — working
+  // until it naturally expires. Reject any token whose entire issuance second
+  // is at or before the account's last password change (same `iat`-vs-boundary
+  // slack rationale as the daily-reset fence above), so recovering an account
+  // also cuts off whoever else was using it.
+  const security = await getUserSecurityState(verified.sub);
+  if (!security.exists) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  if (
+    security.passwordChangedAtMs > 0 &&
+    (verified.iat + 1) * 1000 <= security.passwordChangedAtMs
+  ) {
     res.status(401).json({ error: "Unauthorized" });
     return;
   }

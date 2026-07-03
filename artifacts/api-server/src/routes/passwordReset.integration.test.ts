@@ -31,6 +31,7 @@ import express, { type Express } from "express";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import pg from "pg";
 import {
+  hashPassword,
   hashResetCode,
   newResetCode,
   newUserId,
@@ -139,6 +140,12 @@ afterAll(async () => {
   process.env.DATABASE_URL = originalDatabaseUrl;
 }, 30_000);
 
+// A narrowly-scoped role holding ONLY approve-password-resets (mirrors a
+// real "help desk" style role a manager might create), used to prove an
+// approver can never leverage a reset to reach a peer's higher privileges.
+const APPROVER_ROLE = "reset-approver";
+const APPROVER = "approver-1";
+
 beforeEach(async () => {
   // The user-existence cache is module-level and outlives a single test.
   clearUserValidityCache();
@@ -148,16 +155,22 @@ beforeEach(async () => {
   // Seed the role catalog so requireCapability can resolve each user's role to a
   // capability set (a manager with no seeded roles would resolve to zero caps).
   await seedRoles();
-  // A manager (issues codes) and an operator (forgets their password). Seeding
-  // rows directly bypasses the first-user bootstrap so each test starts from a
-  // known roster.
+  await db
+    .insert(rolesTable)
+    .values({ name: APPROVER_ROLE, capabilities: ["approve-password-resets"], builtin: false });
+  // A manager (issues codes), an operator (forgets their password), and a
+  // narrowly-scoped approver used by the privilege-boundary tests below.
+  // Seeding rows directly bypasses the first-user bootstrap so each test
+  // starts from a known roster.
   await db.insert(usersTable).values([
     { id: MANAGER, username: "manager", passwordHash: "x" },
     { id: OPERATOR, username: "operator", passwordHash: "x" },
+    { id: APPROVER, username: "approver", passwordHash: "x" },
   ]);
   await db.insert(userRolesTable).values([
     { userId: MANAGER, role: "manager" },
     { userId: OPERATOR, role: "operator" },
+    { userId: APPROVER, role: APPROVER_ROLE },
   ]);
 });
 
@@ -431,5 +444,171 @@ describe("manager-only gating on reset administration", () => {
   it("allows the manager to list pending requests (200)", async () => {
     const res = await req(MANAGER, "GET", "/api/password-reset-requests");
     expect(res.status).toBe(200);
+  });
+});
+
+describe("an approver can never use a reset to reach a higher-privileged account", () => {
+  // A narrowly-scoped approver (only approve-password-resets) must not be able
+  // to approve, decline, or even see a pending reset for a manager — doing so
+  // would let them mint a code that fully hands over the manager's account,
+  // which is strictly more powerful than the approver's own role.
+  it("excludes a manager's pending request from the approver's list", async () => {
+    await req(null, "POST", "/api/auth/forgot-password", { username: "manager" });
+    const res = await req(APPROVER, "GET", "/api/password-reset-requests");
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as Array<{ userId: string }>;
+    expect(list.find((r) => r.userId === MANAGER)).toBeUndefined();
+  });
+
+  it("still includes an operator's pending request (peer/lesser privilege) in the approver's list", async () => {
+    await req(null, "POST", "/api/auth/forgot-password", { username: "operator" });
+    const res = await req(APPROVER, "GET", "/api/password-reset-requests");
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as Array<{ userId: string }>;
+    expect(list.find((r) => r.userId === OPERATOR)).toBeDefined();
+  });
+
+  it("rejects the approver both approving and declining a manager's reset with 403 and issues no code", async () => {
+    // Seeded directly (not via forgot-password) to keep this file's shared
+    // authRateLimit budget headroom for the other tests below.
+    const pendingId = newUserId();
+    await db.insert(passwordResetRequestsTable).values({
+      id: pendingId,
+      userId: MANAGER,
+      status: "pending",
+    });
+
+    const approveRes = await req(
+      APPROVER,
+      "POST",
+      `/api/password-reset-requests/${pendingId}/approve`,
+    );
+    expect(approveRes.status).toBe(403);
+
+    const [afterApprove] = await db
+      .select()
+      .from(passwordResetRequestsTable)
+      .where(eq(passwordResetRequestsTable.id, pendingId));
+    expect(afterApprove.status).toBe("pending");
+    expect(afterApprove.codeHash).toBeNull();
+
+    const declineRes = await req(
+      APPROVER,
+      "POST",
+      `/api/password-reset-requests/${pendingId}/decline`,
+    );
+    expect(declineRes.status).toBe(403);
+
+    const [afterDecline] = await db
+      .select()
+      .from(passwordResetRequestsTable)
+      .where(eq(passwordResetRequestsTable.id, pendingId));
+    expect(afterDecline.status).toBe("pending");
+  });
+
+  it("still allows the approver to approve an operator's (peer) reset", async () => {
+    const pendingId = newUserId();
+    await db.insert(passwordResetRequestsTable).values({
+      id: pendingId,
+      userId: OPERATOR,
+      status: "pending",
+    });
+
+    const res = await req(APPROVER, "POST", `/api/password-reset-requests/${pendingId}/approve`);
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("password changes and resets invalidate existing sessions", () => {
+  // Any path that replaces a password must fence off tokens minted before the
+  // change — otherwise a stolen token keeps working forever, defeating the
+  // point of changing the password.
+  it("self-service change-password revokes the old token but returns a fresh working one", async () => {
+    await db
+      .update(usersTable)
+      .set({ passwordHash: hashPassword("old-password") })
+      .where(eq(usersTable.id, OPERATOR));
+    const oldToken = signToken(OPERATOR);
+
+    // Confirm the old token works before the change.
+    const before = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(before.status).toBe(200);
+
+    // The revocation fence compares whole-second `iat` against the change
+    // timestamp with a deliberate +1s grace (see requireAuth), so a token
+    // minted in the very same wall-clock second as the change is tolerated —
+    // wait past that second so this test exercises the realistic "old,
+    // already-in-use session" case rather than that same-second edge.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const changeRes = await fetch(`${baseUrl}/api/auth/change-password`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${oldToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ currentPassword: "old-password", newPassword: "new-password" }),
+    });
+    expect(changeRes.status).toBe(200);
+    const body = (await changeRes.json()) as { token: string };
+    expect(typeof body.token).toBe("string");
+    expect(body.token).not.toBe(oldToken);
+
+    // The pre-change token is now rejected...
+    const afterOld = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(afterOld.status).toBe(401);
+
+    // ...but the freshly issued token works.
+    const afterNew = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${body.token}` },
+    });
+    expect(afterNew.status).toBe(200);
+  });
+
+  it("a manager-issued password reset (PUT /users/:id/password) revokes the target's existing session", async () => {
+    const oldToken = signToken(OPERATOR);
+    const before = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(before.status).toBe(200);
+
+    // See the same-second grace note above.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const resetRes = await req(MANAGER, "PUT", `/api/users/${OPERATOR}/password`, {
+      newPassword: "manager-set-password",
+    });
+    expect(resetRes.status).toBe(204);
+
+    const after = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(after.status).toBe(401);
+  });
+
+  it("completing a self-serve reset with a code revokes the account's existing session", async () => {
+    const code = newResetCode();
+    await seedApprovedRequest(code, FUTURE());
+    const oldToken = signToken(OPERATOR);
+    const before = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(before.status).toBe(200);
+
+    // See the same-second grace note above.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const res = await req(null, "POST", "/api/auth/reset-password", {
+      username: "operator",
+      code,
+      newPassword: "brand-new-secret",
+    });
+    expect(res.status).toBe(204);
+
+    const after = await fetch(`${baseUrl}/api/me`, {
+      headers: { authorization: `Bearer ${oldToken}` },
+    });
+    expect(after.status).toBe(401);
   });
 });

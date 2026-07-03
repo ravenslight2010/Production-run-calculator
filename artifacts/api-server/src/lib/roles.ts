@@ -1,7 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
-import { revokeUser } from "./userValidity";
+import { revokeUser, invalidateUserSessions } from "./userValidity";
 import { getSandboxCopiedAt, isSandboxCopyStale } from "./sandbox";
 
 // ---------------------------------------------------------------------------
@@ -205,6 +206,39 @@ async function manageStaffHolders(): Promise<string[]> {
 // carry no meaning beyond being a stable, collision-free constant.
 const BOOTSTRAP_LOCK_KEY: [number, number] = [0x5354_4646, 0x424f_4f54]; // "STFF" "BOOT"
 
+// Whether this newly-created account is the designated first administrator.
+// STAFF_SIGNUP_CODE is a shared onboarding secret handed to every ordinary new
+// hire, so it must never be the thing that decides who becomes manager —
+// anyone who knows (or leaks, or reuses from a former job) that one code could
+// otherwise race to sign up first and seize full admin control on a fresh
+// deployment. Bootstrap requires TWO separate, narrower facts that only the
+// real administrator should have, both configured out of band by the operator
+// (e.g. as Replit secrets):
+//   - INITIAL_MANAGER_USERNAME: the exact username the administrator will
+//     register with.
+//   - INITIAL_MANAGER_ACCESS_CODE: a distinct secret code, checked
+//     timing-safely against the access code supplied at sign-up.
+// A username alone is guessable/predictable (e.g. "admin"), so requiring it in
+// isolation would let anyone holding the shared STAFF_SIGNUP_CODE simply
+// register that guessed username and still seize manager. Requiring a SEPARATE
+// unguessable code closes that gap: knowing the ordinary staff code is never
+// sufficient on its own. If either value is unset or doesn't match, bootstrap
+// can never grant manager and the operator must promote someone by hand (e.g.
+// via the database), which fails closed instead of leaving any exploitable
+// path.
+function isDesignatedInitialManager(username: string, suppliedAccessCode: string): boolean {
+  const expectedUsername = process.env.INITIAL_MANAGER_USERNAME;
+  const expectedCode = process.env.INITIAL_MANAGER_ACCESS_CODE;
+  if (!expectedUsername || !expectedUsername.trim()) return false;
+  if (!expectedCode || !expectedCode.trim()) return false;
+  if (username.trim().toLowerCase() !== expectedUsername.trim().toLowerCase()) return false;
+
+  const supplied = Buffer.from(suppliedAccessCode);
+  const expected = Buffer.from(expectedCode);
+  if (supplied.length !== expected.length) return false;
+  return timingSafeEqual(supplied, expected);
+}
+
 // Decide + assign a user's role inside one Postgres-transaction-scoped
 // advisory lock, so the "is anyone already a manager?" read and the role
 // INSERT are atomic across concurrent requests. Without this lock, two
@@ -213,13 +247,23 @@ const BOOTSTRAP_LOCK_KEY: [number, number] = [0x5354_4646, 0x424f_4f54]; // "STF
 // deliberately by firing concurrent sign-ups at a brand-new deployment.
 // pg_advisory_xact_lock blocks other callers until this transaction commits
 // (releasing the lock), so the read here always sees any prior winner's
-// committed insert before deciding.
-async function resolveBootstrapRole(userId: string): Promise<Role> {
+// committed insert before deciding. Beyond the race guard, the role granted is
+// also gated on isDesignatedInitialManager — see its comment for why the
+// staff sign-up code alone must never be sufficient to become manager.
+async function resolveBootstrapRole(
+  userId: string,
+  username: string,
+  suppliedAccessCode: string,
+): Promise<Role> {
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(${BOOTSTRAP_LOCK_KEY[0]}, ${BOOTSTRAP_LOCK_KEY[1]})`,
     );
-    const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
+    const role: Role =
+      (await manageStaffHolders()).length === 0 &&
+      isDesignatedInitialManager(username, suppliedAccessCode)
+        ? "manager"
+        : "operator";
     await tx
       .insert(userRolesTable)
       .values({ userId, role })
@@ -230,10 +274,16 @@ async function resolveBootstrapRole(userId: string): Promise<Role> {
 
 // Resolve the current user's role, creating their row on first sight.
 //
-// Bootstrap rule: the very first user (when no one holds manage-staff yet)
-// becomes the manager so a fresh install has an admin without any out-of-band
-// setup. The role row is normally created at sign-up; this keeps a race-safe
-// fallback for any user row that predates its role row.
+// Bootstrap rule: only the operator-designated INITIAL_MANAGER_USERNAME +
+// INITIAL_MANAGER_ACCESS_CODE pair (see isDesignatedInitialManager) can become
+// manager on a database with no existing admin; everyone else defaults to
+// operator. The role row is normally created at sign-up (where the supplied
+// access code is available); this is a race-safe fallback for any user row
+// that predates its role row, and can never grant the bootstrap manager role
+// itself since there is no access code to check here — it can only ever
+// resolve to "operator" once the database already has no path to bootstrap
+// (a prior sign-up already decided that, or none did and this path fails
+// closed too).
 export async function getOrCreateUserRole(userId: string): Promise<{ role: Role }> {
   const [existing] = await db
     .select({ role: userRolesTable.role })
@@ -241,7 +291,11 @@ export async function getOrCreateUserRole(userId: string): Promise<{ role: Role 
     .where(eq(userRolesTable.userId, userId));
   if (existing) return { role: existing.role };
 
-  const role = await resolveBootstrapRole(userId);
+  const [user] = await db
+    .select({ username: usersTable.username })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  const role = await resolveBootstrapRole(userId, user?.username ?? "", "");
 
   const [row] = await db
     .select({ role: userRolesTable.role })
@@ -250,11 +304,21 @@ export async function getOrCreateUserRole(userId: string): Promise<{ role: Role 
   return { role: row?.role ?? role };
 }
 
-// Assign a role at account creation. First account (no admin yet) becomes the
-// manager; everyone after defaults to operator. See resolveBootstrapRole for
-// the race-safety guarantee.
-export async function createRoleForNewUser(userId: string): Promise<Role> {
-  return resolveBootstrapRole(userId);
+// Assign a role at account creation. Only the operator-designated
+// INITIAL_MANAGER_USERNAME + INITIAL_MANAGER_ACCESS_CODE pair can become the
+// bootstrap manager; everyone else defaults to operator. `suppliedAccessCode`
+// is the sign-up request's access code (the same field checked against the
+// shared STAFF_SIGNUP_CODE) — passing it through lets bootstrap require a
+// SEPARATE secret from the ordinary staff code without adding a new sign-up
+// field. See resolveBootstrapRole for the race-safety guarantee and
+// isDesignatedInitialManager for why the shared staff sign-up code alone can
+// never grant this.
+export async function createRoleForNewUser(
+  userId: string,
+  username: string,
+  suppliedAccessCode: string,
+): Promise<Role> {
+  return resolveBootstrapRole(userId, username, suppliedAccessCode);
 }
 
 export async function getStaffMember(userId: string): Promise<StaffMember> {
@@ -414,7 +478,30 @@ export async function resetUserPassword(
     return { ok: false, status: 404, error: "User not found" };
   }
   await updateUserPassword(targetUserId, newPassword);
+  // A password reset is exactly the moment we must assume the old password
+  // (and any token minted under it) may be compromised — that's the whole
+  // point of a recovery reset. Evict the cache immediately so a session the
+  // locked-out user (or whoever locked them out) already holds stops working
+  // on its very next request instead of riding out the cache TTL.
+  invalidateUserSessions(targetUserId);
   return { ok: true };
+}
+
+// A password-reset approver only needs the narrow "approve-password-resets"
+// capability, but resetting a user's password is equivalent to fully taking
+// over their account — every capability that user holds. Without this check,
+// a low-privileged approver could relay a reset code for a manager (or any
+// higher-privileged peer) and hand full admin control to whoever redeems it.
+// Mirrors the existing "can't grant a capability you don't have" rule for role
+// assignment (see setUserRole) — you can never elevate someone (including via
+// a password reset) past your own privilege.
+export async function canManagePasswordResetFor(
+  targetUserId: string,
+  actorCapabilities: readonly Capability[],
+): Promise<boolean> {
+  const targetCapabilities = await getUserCapabilities(targetUserId);
+  const actorSet = new Set(actorCapabilities);
+  return targetCapabilities.every((cap) => actorSet.has(cap));
 }
 
 // Remove a staff member entirely. The role row is removed via the ON DELETE

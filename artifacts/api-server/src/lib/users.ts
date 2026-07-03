@@ -30,14 +30,18 @@ export async function getUserById(id: string): Promise<User | undefined> {
 }
 
 // Replaces a user's stored password hash with a fresh scrypt hash of the new
-// password. Callers must verify the current password first.
+// password. Callers must verify the current password first. Also bumps
+// `passwordChangedAt` so requireAuth's password-change fence can reject any
+// session token issued before this moment — callers that need an
+// already-signed-in session to keep working (e.g. self-service change) must
+// mint and hand back a fresh token themselves; see routes/auth.ts.
 export async function updateUserPassword(
   id: string,
   newPassword: string,
 ): Promise<void> {
   await db
     .update(usersTable)
-    .set({ passwordHash: hashPassword(newPassword) })
+    .set({ passwordHash: hashPassword(newPassword), passwordChangedAt: new Date() })
     .where(eq(usersTable.id, id));
 }
 

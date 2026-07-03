@@ -1,0 +1,15 @@
+---
+name: Password-change session invalidation
+description: How password changes/resets fence off old session tokens, the same-second iat grace edge case, and the reset-approver privilege boundary.
+---
+
+Password changes (self-service `/auth/change-password`, manager `PUT /users/:id/password`, and code-based `/auth/reset-password`) all call `invalidateUserSessions(userId)` in `lib/userValidity.ts`, which bumps a cached `passwordChangedAtMs` watermark. `requireAuth` rejects any token whose `iat` predates that watermark.
+
+**Same-second grace window.** The fence compares `(verified.iat + 1) * 1000 <= passwordChangedAtMs` (mirrors the pre-existing daily-reset boundary check, see `daily-reset-auth-boundary.md`). Because `iat` has whole-second granularity, a token minted in the *same wall-clock second* as the invalidation is deliberately tolerated. This is a pre-existing, accepted tradeoff (avoids punishing legitimate same-second token reissue) — not a gap worth closing. **How to apply:** integration tests asserting "old token now rejected" must insert a real ~1.1s delay between minting the old token and triggering the password change, or the test will flake/fail on the grace window rather than the fence.
+
+**Self-service change-password must reissue a token.** Since it invalidates the very token used to authenticate the request, the route re-signs and returns a fresh token/cookie (like sign-in) — otherwise a user would log themselves out by changing their own password. Admin-driven resets (manager reset, code-based reset) don't need this since the actor isn't using the target's session.
+
+**`passwordChangedAt` must default to null, never `defaultNow()`.** The fencing column was first added as `notNull().defaultNow()`, which stamps every row (including brand-new accounts) with an insert-time value. That silently fenced any legacy/pre-existing token whose fallback `iat` (process start time) predates the user's row — even though the account's password was never actually changed. Fixed by making the column nullable with no default; `userValidity.ts` already treated a missing value as "never changed" (`passwordChangedAtMs = 0`), so only an explicit `updateUserPassword` call should ever set it.
+   **Why:** account creation is not a password change; conflating the two breaks any token minted before a user's row existed for reasons unrelated to a real security event (e.g. the daily-reset legacy-token fallback).
+
+**Reset-approver privilege boundary.** A reset approver only needs the narrow `approve-password-resets` capability, but approving mints a code that fully hands over the target account. `canManagePasswordResetFor(targetUserId, actorCapabilities)` in `lib/roles.ts` requires the target's full capability set to be a subset of the actor's — mirrors the existing "can't assign a role with capabilities you don't have" rule for `setUserRole`. Applied to both the list (an approver never even sees a higher-privileged pending request) and the approve/decline actions (403 if attempted directly by id).

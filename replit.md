@@ -11,6 +11,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - `pnpm --filter @workspace/scripts run verify-large-spec-import` — manual real-AI check that huge spec imports survive chunking with no data loss; run after any AI model change (needs API server up + manager creds; see script header)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Security-relevant env: `STAFF_SIGNUP_CODE` — shared code gating public sign-up (fails closed if unset); `INITIAL_MANAGER_USERNAME` + `INITIAL_MANAGER_ACCESS_CODE` — BOTH must match (exact username, and the access code supplied at sign-up) for a database with no existing manager to bootstrap that account as manager (fails closed if either is unset, i.e. no auto-manager). `INITIAL_MANAGER_ACCESS_CODE` is also independently accepted in place of `STAFF_SIGNUP_CODE` to pass the basic sign-up gate. See `.agents/memory/signup-bootstrap-hardening.md`.
 
 ## Stack
 

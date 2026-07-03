@@ -210,8 +210,8 @@ router.get(
   "/password-reset-requests",
   requireLiveScope,
   requireCapability("approve-password-resets"),
-  async (_req, res): Promise<void> => {
-    res.json(await listPendingResetRequests());
+  async (req, res): Promise<void> => {
+    res.json(await listPendingResetRequests((req.capabilities ?? []) as Capability[]));
   },
 );
 
@@ -227,7 +227,7 @@ router.post(
       res.status(400).json({ error: "Invalid request id" });
       return;
     }
-    const result = await approveResetRequest(id);
+    const result = await approveResetRequest(id, (req.capabilities ?? []) as Capability[]);
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;
@@ -252,7 +252,7 @@ router.post(
       res.status(400).json({ error: "Invalid request id" });
       return;
     }
-    const result = await declineResetRequest(id);
+    const result = await declineResetRequest(id, (req.capabilities ?? []) as Capability[]);
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;

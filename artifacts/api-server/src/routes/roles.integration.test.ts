@@ -1099,6 +1099,113 @@ describe("guided tour completion", () => {
   });
 });
 
+describe("bootstrap manager assignment (INITIAL_MANAGER_USERNAME)", () => {
+  // STAFF_SIGNUP_CODE is a shared onboarding secret handed to every ordinary
+  // new hire, so it must never be sufficient on its own to become the first
+  // manager on a fresh deployment — anyone who has it (or leaks/reuses it)
+  // could otherwise race to sign up first and seize full admin control.
+  // INITIAL_MANAGER_USERNAME is the separate, narrower secret that actually
+  // decides who becomes the bootstrap manager.
+  const ORIGINAL_CODE = process.env.STAFF_SIGNUP_CODE;
+  const ORIGINAL_INITIAL_MANAGER = process.env.INITIAL_MANAGER_USERNAME;
+  const ORIGINAL_INITIAL_MANAGER_CODE = process.env.INITIAL_MANAGER_ACCESS_CODE;
+  const BOOTSTRAP_CODE = "super-secret-bootstrap-code-not-the-staff-code";
+
+  beforeEach(async () => {
+    // Start from a truly empty roster (the outer beforeEach above already
+    // seeded MANAGER/OPERATOR/etc.) so these tests exercise the real
+    // "first user on a fresh database" bootstrap path.
+    await db.execute(
+      sql`TRUNCATE ${userRolesTable}, ${usersTable} RESTART IDENTITY CASCADE`,
+    );
+  });
+
+  afterAll(() => {
+    process.env.STAFF_SIGNUP_CODE = ORIGINAL_CODE;
+    process.env.INITIAL_MANAGER_USERNAME = ORIGINAL_INITIAL_MANAGER;
+    process.env.INITIAL_MANAGER_ACCESS_CODE = ORIGINAL_INITIAL_MANAGER_CODE;
+  });
+
+  it("does NOT grant manager to the first sign-up when INITIAL_MANAGER_USERNAME/CODE are unset (fails closed)", async () => {
+    delete process.env.INITIAL_MANAGER_USERNAME;
+    delete process.env.INITIAL_MANAGER_ACCESS_CODE;
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "sneaky-first-user",
+      password: "first-password",
+      accessCode: ORIGINAL_CODE,
+    });
+    expect(res.status).toBe(201);
+    const [row] = await db.select({ role: userRolesTable.role }).from(userRolesTable);
+    expect(row?.role).toBe("operator");
+  });
+
+  it("does NOT grant manager to the first sign-up when the username doesn't match INITIAL_MANAGER_USERNAME (even with the right code)", async () => {
+    process.env.INITIAL_MANAGER_USERNAME = "real-admin";
+    process.env.INITIAL_MANAGER_ACCESS_CODE = BOOTSTRAP_CODE;
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "attacker",
+      password: "first-password",
+      accessCode: BOOTSTRAP_CODE,
+    });
+    expect(res.status).toBe(201);
+    const [row] = await db.select({ role: userRolesTable.role }).from(userRolesTable);
+    expect(row?.role).toBe("operator");
+  });
+
+  it("does NOT grant manager to the first sign-up when the username matches but only the shared staff code is supplied", async () => {
+    // This is the exact escalation the reviewer flagged: knowing (or guessing)
+    // the intended admin's username plus the ordinary, widely-shared staff
+    // sign-up code must NOT be enough on its own.
+    process.env.INITIAL_MANAGER_USERNAME = "real-admin";
+    process.env.INITIAL_MANAGER_ACCESS_CODE = BOOTSTRAP_CODE;
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "real-admin",
+      password: "first-password",
+      accessCode: ORIGINAL_CODE,
+    });
+    expect(res.status).toBe(201);
+    const [row] = await db.select({ role: userRolesTable.role }).from(userRolesTable);
+    expect(row?.role).toBe("operator");
+  });
+
+  it("grants manager to the first sign-up when BOTH the username matches INITIAL_MANAGER_USERNAME (case-insensitive) and the access code matches INITIAL_MANAGER_ACCESS_CODE", async () => {
+    process.env.INITIAL_MANAGER_USERNAME = "Real-Admin";
+    process.env.INITIAL_MANAGER_ACCESS_CODE = BOOTSTRAP_CODE;
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "real-admin",
+      password: "first-password",
+      accessCode: BOOTSTRAP_CODE,
+    });
+    expect(res.status).toBe(201);
+    const [row] = await db.select({ role: userRolesTable.role }).from(userRolesTable);
+    expect(row?.role).toBe("manager");
+  });
+
+  it("does not grant manager to a SECOND sign-up even if it matches INITIAL_MANAGER_USERNAME/CODE (one bootstrap winner)", async () => {
+    process.env.INITIAL_MANAGER_USERNAME = "real-admin";
+    process.env.INITIAL_MANAGER_ACCESS_CODE = BOOTSTRAP_CODE;
+    const first = await req(null, "POST", "/api/auth/sign-up", {
+      username: "real-admin",
+      password: "first-password",
+      accessCode: BOOTSTRAP_CODE,
+    });
+    expect(first.status).toBe(201);
+
+    const second = await req(null, "POST", "/api/auth/sign-up", {
+      username: "real-admin-2",
+      password: "first-password",
+      accessCode: BOOTSTRAP_CODE,
+    });
+    expect(second.status).toBe(201);
+    const rows = await db
+      .select({ role: userRolesTable.role })
+      .from(userRolesTable)
+      .orderBy(userRolesTable.userId);
+    const managerCount = rows.filter((r) => r.role === "manager").length;
+    expect(managerCount).toBe(1);
+  });
+});
+
 describe("sign-up access code gate", () => {
   // Public self-registration must require the shared facility access code
   // (STAFF_SIGNUP_CODE) or it exposes internal factory data to anyone who

@@ -90,7 +90,7 @@ export const SignInResponse = zod.object({
 
 
 /**
- * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced.
+ * Updates the signed-in user's password. The current password must be provided and is verified before the stored scrypt hash is replaced. Changing the password invalidates every previously-issued session token (including the one used for this request), so a fresh token is returned and must replace the caller's stored session.
  * @summary Change the signed-in user's password
  */
 export const changePasswordBodyCurrentPasswordMax = 200;
@@ -103,6 +103,22 @@ export const changePasswordBodyNewPasswordMax = 200;
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
   "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
+})
+
+export const ChangePasswordResponse = zod.object({
+  "token": zod.string(),
+  "user": zod.object({
+  "userId": zod.string(),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
+  "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
+})
 })
 
 

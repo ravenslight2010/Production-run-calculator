@@ -12,6 +12,8 @@ import {
   RESET_CODE_TTL_MS,
 } from "./auth";
 import { findUserByUsername, updateUserPassword } from "./users";
+import { invalidateUserSessions } from "./userValidity";
+import { canManagePasswordResetFor, type Capability } from "./roles";
 
 // Pending requests older than this are treated as expired: they drop off the
 // manager's list automatically so stale, never-actioned asks don't pile up.
@@ -53,7 +55,15 @@ export async function createResetRequest(username: string): Promise<void> {
 
 // Staff waiting for a manager to approve a reset (newest first). Requests older
 // than PENDING_REQUEST_TTL_MS are considered expired and excluded.
-export async function listPendingResetRequests(): Promise<PendingResetRequest[]> {
+//
+// Filtered down to requests the caller is actually allowed to act on: an
+// approver only holding "approve-password-resets" (e.g. a supervisor) must
+// never even see — let alone approve — a reset for someone with capabilities
+// they don't hold themselves (e.g. a manager), since approving mints a code
+// that fully hands over that account. See canManagePasswordResetFor.
+export async function listPendingResetRequests(
+  actorCapabilities: readonly Capability[],
+): Promise<PendingResetRequest[]> {
   const cutoff = new Date(Date.now() - PENDING_REQUEST_TTL_MS);
   const rows = await db
     .select({
@@ -71,12 +81,17 @@ export async function listPendingResetRequests(): Promise<PendingResetRequest[]>
       ),
     )
     .orderBy(sql`${passwordResetRequestsTable.createdAt} desc`);
-  return rows.map((r) => ({
-    id: r.id,
-    userId: r.userId,
-    username: r.username,
-    requestedAt: r.requestedAt.toISOString(),
-  }));
+  const allowed = await Promise.all(
+    rows.map((r) => canManagePasswordResetFor(r.userId, actorCapabilities)),
+  );
+  return rows
+    .filter((_, i) => allowed[i])
+    .map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      username: r.username,
+      requestedAt: r.requestedAt.toISOString(),
+    }));
 }
 
 export type ApproveResult =
@@ -85,7 +100,10 @@ export type ApproveResult =
 
 // Approve a pending request: mint a single-use relay code, store only its hash
 // plus an expiry, and return the plaintext (the sole time it is ever exposed).
-export async function approveResetRequest(id: string): Promise<ApproveResult> {
+export async function approveResetRequest(
+  id: string,
+  actorCapabilities: readonly Capability[],
+): Promise<ApproveResult> {
   const [request] = await db
     .select()
     .from(passwordResetRequestsTable)
@@ -105,6 +123,14 @@ export async function approveResetRequest(id: string): Promise<ApproveResult> {
     .where(eq(usersTable.id, request.userId));
   if (!user) {
     return { ok: false, status: 404, error: "No pending request with that id" };
+  }
+
+  // Approving mints a code that fully resets — and thus hands over — the
+  // target account. An approver may only act on accounts whose capabilities
+  // are entirely covered by their own; otherwise a narrowly-scoped approver
+  // could escalate by relaying a manager (or peer) reset code to themselves.
+  if (!(await canManagePasswordResetFor(request.userId, actorCapabilities))) {
+    return { ok: false, status: 403, error: "Not authorized to reset this account" };
   }
 
   const code = newResetCode();
@@ -135,7 +161,29 @@ export type DeclineResult =
 // list without ever issuing a code. The update is guarded on status "pending"
 // so an already-approved, used, or concurrently-declined request can't be
 // declined out from under another action.
-export async function declineResetRequest(id: string): Promise<DeclineResult> {
+export async function declineResetRequest(
+  id: string,
+  actorCapabilities: readonly Capability[],
+): Promise<DeclineResult> {
+  const [request] = await db
+    .select({ userId: passwordResetRequestsTable.userId })
+    .from(passwordResetRequestsTable)
+    .where(
+      and(
+        eq(passwordResetRequestsTable.id, id),
+        eq(passwordResetRequestsTable.status, "pending"),
+      ),
+    );
+  if (!request) {
+    return { ok: false, status: 404, error: "No pending request with that id" };
+  }
+  // Declining reveals which accounts have a pending reset; keep it to the same
+  // authorization boundary as approving so an approver can't probe/act on
+  // accounts outside their own capability scope.
+  if (!(await canManagePasswordResetFor(request.userId, actorCapabilities))) {
+    return { ok: false, status: 403, error: "Not authorized to reset this account" };
+  }
+
   const declined = await db
     .update(passwordResetRequestsTable)
     .set({ status: "declined" })
@@ -206,6 +254,9 @@ export async function resetPasswordWithCode(
   if (claimed.length === 0) return invalid;
 
   await updateUserPassword(user.id, newPassword);
+  // Same rationale as resetUserPassword: this reset is the recovery moment
+  // itself, so evict the cache immediately rather than waiting out the TTL.
+  invalidateUserSessions(user.id);
   return { ok: true };
 }
 

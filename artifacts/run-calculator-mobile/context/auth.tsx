@@ -247,13 +247,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [revalidate]);
 
-  // Changing a password doesn't rotate the session token, so the stored token
-  // stays valid — nothing to update locally beyond surfacing success/failure.
+  // Changing a password invalidates every previously-issued session token —
+  // including the one that authenticated this very request — so the server
+  // mints and returns a fresh one. Apply it the same way sign-in does or the
+  // stored token would stop working on the very next request.
   const changePassword = useCallback(
     async (currentPassword: string, newPassword: string) => {
-      await changePasswordRequest(currentPassword, newPassword);
+      const { token, user } = await changePasswordRequest(
+        currentPassword,
+        newPassword,
+      );
+      await applyToken(token);
+      setMe(user);
     },
-    [],
+    [applyToken],
   );
 
   // Persist the "Get Started" dismissal server-side, then update the in-memory
