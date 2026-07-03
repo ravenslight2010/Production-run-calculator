@@ -20,7 +20,11 @@ the failure mode is an import that "succeeds" but loses data (truncated output
   chunk through the REAL `/ai/parse-spec-sheet`, merges with
   `mergeParsedSpecImports`, asserts zero loss (profiles, recipes, rows,
   targets). Needs the API server up + a manager account
-  (`VERIFY_USERNAME`/`VERIFY_PASSWORD`). Last full pass: 2026-07-03 (also
+  (`VERIFY_USERNAME`/`VERIFY_PASSWORD`). Last full pass: 2026-07-03, with the
+  server-side truncated-reply retry live on `/ai/parse-spec-sheet` — 240
+  profiles + 90 recipes, zero loss, no retry needed (all chunks valid first
+  attempt; retry occurrences would log `ai-parse-spec-sheet non-JSON response`
+  then `retry recovered`). (Same date also
   live-verified recipe-name grounding: paraphrase "Ultra Thin Dough Recipe" +
   punctuation variant "Aldos Sauce" snapped to known names, partial-overlap
   name kept + flagged as likely duplicate, genuinely new recipe untouched).
@@ -33,9 +37,11 @@ the failure mode is an import that "succeeds" but loses data (truncated output
   the factory already has (`known.sauceNames`) must import with NO false
   "not found on the sheet" warning; a control re-sanitize WITHOUT the known
   list must warn; a scripted paraphrase must still warn/snap. Last full pass
-  (2 consecutive): 2026-07-03. The model occasionally truncates JSON mid-note
-  even on tiny outputs — the harness retries a malformed-JSON response up to
-  3× (the real route fails safe with an empty result instead).
+  (2 consecutive + 1 more on 2026-07-03 post-route-retry): 2026-07-03. The
+  model occasionally truncates JSON mid-note even on tiny outputs — the
+  harness retries a malformed-JSON response up to 3×; the real route now also
+  retries once server-side (2 attempts total) before failing safe with an
+  empty result.
 
 **Why:** a repeatable check is the only defense against "model changed, big
 imports quietly drop data"; the harness caught a real loss on its first run
