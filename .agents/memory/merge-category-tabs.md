@@ -29,8 +29,9 @@ merges ingredient names on every tab.)
   merge. (2) The dough/frontline/cheese preset union on sync-receive MUST filter
   tombstoned keys (`dropTombstonedPresetKeys`), or a stale peer resurrects the
   folded-away recipe-name preset. Selection-field re-pointing alone is not enough.
-- **AI "Suggested merges"** shown only on the Ingredients tab (recipe-name tabs have
-  no learned-alias path).
+- **AI "Suggested merges"** are scoped per active tab (`mergeSuggestScope`): each
+  tab scans its own universe (recipe-name tabs scan their name lists, Ingredients
+  scans the ingredient pool). Recipe-name tabs still have no learned-alias path.
 - **Stray mix names in `ingredientTypes`:** real user data has recipe/mix NAMES (containing
   the word "mix") dumped into `ingredientTypes` with spellings that match NO recipe-name
   list, so exact-match exclusion can't hide them. `isStrayMixName` (mergeRecipeNames.ts)
