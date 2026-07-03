@@ -11,7 +11,12 @@ import {
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import { buildDiscrepancies } from "@/specImport";
-import { profileExistsForImport, recipeExistsForImport } from "@/storage";
+import {
+  profileExistsForImport,
+  recipeExistsForImport,
+  specImportRecipeDisplayKind,
+  type SpecImportDisplayKind,
+} from "@/storage";
 import ReviewBadge from "./ReviewBadge";
 
 type Props = {
@@ -48,14 +53,23 @@ type RecipeItem = {
   key: string;
   orig: ParsedRecipe;
   name: string;
-  kind: ParsedRecipe["kind"];
+  /**
+   * Category shown/edited in the review. "mix" is a display-level split of the
+   * cheese parse kind: it commits as `kind: "cheese"` with
+   * `forcedCategory: "mix"` so the name registers under the Mixes category.
+   */
+  kind: SpecImportDisplayKind;
   brand: string;
   flavor: string;
   include: boolean;
   tombstoned: boolean;
 };
 
-const KINDS: ParsedRecipe["kind"][] = ["dough", "sauce", "cheese"];
+const KINDS: SpecImportDisplayKind[] = ["dough", "sauce", "cheese", "mix"];
+
+/** The underlying parse kind for a display kind ("mix" is stored as cheese). */
+const parseKindOf = (k: SpecImportDisplayKind): ParsedRecipe["kind"] =>
+  k === "mix" ? "cheese" : k;
 
 function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
   const kept = prepared.parsed.profiles.map((p, i) => ({
@@ -82,7 +96,7 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
     key: `rk${i}`,
     orig: r,
     name: r.name ?? "",
-    kind: r.kind,
+    kind: specImportRecipeDisplayKind(r),
     brand: r.brand ?? "",
     flavor: r.flavor ?? "",
     include: true,
@@ -92,7 +106,7 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
     key: `rs${i}`,
     orig: r,
     name: r.name ?? "",
-    kind: r.kind,
+    kind: specImportRecipeDisplayKind(r),
     brand: r.brand ?? "",
     flavor: r.flavor ?? "",
     include: false,
@@ -181,7 +195,12 @@ export default function SpecImportDialog({
     const outRecipes = recipes
       .filter((r) => r.include)
       .map((r): ParsedRecipe => {
-        const out: ParsedRecipe = { ...r.orig, name: r.name.trim(), kind: r.kind };
+        const out: ParsedRecipe = { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
+        // Cheese-vs-mix is a display split of the same parse kind — record the
+        // user's pick so applySpecImport routes by it instead of the heuristic.
+        if (r.kind === "mix") out.forcedCategory = "mix";
+        else if (r.kind === "cheese") out.forcedCategory = "cheese";
+        else delete out.forcedCategory;
         const b = r.brand.trim();
         const f = r.flavor.trim();
         if (b) out.brand = b;
@@ -659,7 +678,7 @@ function RecipeRow({
   flavorsByBrand: Record<string, string[]>;
   onToggle: () => void;
   onName: (v: string) => void;
-  onKind: (v: ParsedRecipe["kind"]) => void;
+  onKind: (v: SpecImportDisplayKind) => void;
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
 }) {
@@ -669,12 +688,14 @@ function RecipeRow({
   const candidate: ParsedRecipe = {
     ...item.orig,
     name,
-    kind: item.kind,
+    kind: parseKindOf(item.kind),
     ...(brand ? { brand } : {}),
     ...(flavor ? { flavor } : {}),
   };
   const issue = recipeApplyIssue(candidate);
-  const isNew = !name || !recipeExistsForImport(item.kind, name);
+  // Mixes live in the same preset library as cheese recipes (only the NAME
+  // list differs), so existence checks use the underlying parse kind.
+  const isNew = !name || !recipeExistsForImport(parseKindOf(item.kind), name);
   const rowsPreview = recipeRowsPreview(item.orig);
   // Which products this recipe will actually attach to when applied. If empty,
   // the recipe name lands in the library but shows up on NO run — the silent
@@ -720,7 +741,7 @@ function RecipeRow({
             />
             <select
               value={item.kind}
-              onChange={(e) => onKind(e.target.value as ParsedRecipe["kind"])}
+              onChange={(e) => onKind(e.target.value as SpecImportDisplayKind)}
               aria-label={`Type for recipe ${item.orig.name || "(unnamed)"}`}
               data-testid={`spec-recipe-kind-${item.key}`}
               className="shrink-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground capitalize"

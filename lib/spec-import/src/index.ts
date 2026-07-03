@@ -62,6 +62,15 @@ export type ParsedRecipe = {
   doughballOz?: number;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
   app?: number;
+  /**
+   * Cheese only: explicit user override of the Mix-vs-Cheese category set in
+   * the import review (the AI/parsers only know dough/sauce/cheese; pre-blended
+   * topping mixes arrive as `kind: "cheese"` and are normally routed to the
+   * Mixes category by a name heuristic at apply time). When present, this wins
+   * over the heuristic: "mix" forces the name into the Mixes list, "cheese"
+   * forces it to stay under Cheese. Absent = use the heuristic.
+   */
+  forcedCategory?: "mix" | "cheese";
   rows: RecipeRow[];
 };
 

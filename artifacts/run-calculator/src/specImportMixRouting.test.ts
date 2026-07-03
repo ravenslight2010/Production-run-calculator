@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   applySpecImport,
   specImportCheeseRecipeIsMix,
+  specImportRecipeDisplayKind,
   loadCheeseRecipePresets,
   loadProfile,
   loadList,
@@ -74,6 +75,34 @@ describe("specImportCheeseRecipeIsMix", () => {
     const userMixes = new Set(["lucia's morning melt parisian"]);
     expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 2)).toBe(true);
     expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 1)).toBe(true);
+  });
+});
+
+describe("specImportRecipeDisplayKind", () => {
+  it("returns the parse kind for dough/sauce and heuristic-based mix/cheese for cheese", () => {
+    const rows = [
+      { ingredient: "A", lbs: 1 },
+      { ingredient: "B", lbs: 2 },
+    ];
+    expect(specImportRecipeDisplayKind({ kind: "dough", name: "Thin Crust", rows })).toBe("dough");
+    expect(specImportRecipeDisplayKind({ kind: "cheese", name: "White Fajita Mix", rows })).toBe("mix");
+    expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("cheese");
+  });
+
+  it("forcedCategory beats both the heuristic and the user Mix list", () => {
+    saveList(MIX_RECIPE_NAMES_KEY, ["cheese blend"]);
+    const rows = [
+      { ingredient: "A", lbs: 1 },
+      { ingredient: "B", lbs: 2 },
+    ];
+    expect(
+      specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", forcedCategory: "cheese", rows }),
+    ).toBe("cheese");
+    expect(
+      specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", forcedCategory: "mix", rows }),
+    ).toBe("mix");
+    // No override: the user Mix list wins via the heuristic.
+    expect(specImportRecipeDisplayKind({ kind: "cheese", name: "Cheese Blend", rows })).toBe("mix");
   });
 });
 
@@ -142,6 +171,23 @@ describe("applySpecImport mix routing", () => {
     expect(loadCheeseRecipePresets()["Cheese Blend"]).toEqual([
       { ingredient: "Mozzarella", lbs: 30 },
     ]);
+  });
+
+  it("forcedCategory:'mix' overrides the heuristic: a cheese-looking name routes to Mix", () => {
+    const parsed = importWithCheeseKindRecipe("Aldo's Cheese Mix");
+    parsed.recipes[0].forcedCategory = "mix";
+    applySpecImport(parsed);
+    expect(loadList(MIX_RECIPE_NAMES_KEY, [])).toContain("Aldo's Cheese Mix");
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).not.toContain("Aldo's Cheese Mix");
+  });
+
+  it("forcedCategory:'cheese' overrides the heuristic AND the user Mix list", () => {
+    saveList(MIX_RECIPE_NAMES_KEY, ["white fajita mix"]);
+    const parsed = importWithCheeseKindRecipe("White Fajita Mix");
+    parsed.recipes[0].forcedCategory = "cheese";
+    applySpecImport(parsed);
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).toContain("White Fajita Mix");
+    expect(loadList(MIX_RECIPE_NAMES_KEY, [])).not.toContain("White Fajita Mix");
   });
 
   it("registers the mix's ingredients into the cheese ingredient pool", () => {

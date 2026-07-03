@@ -2133,6 +2133,26 @@ export function specImportCheeseRecipeIsMix(
   return ingredientCount >= 2 && /\bmix\b/.test(t) && !/cheese/i.test(t);
 }
 
+/** Kind shown in the import review UI: the three parse kinds plus "mix". */
+export type SpecImportDisplayKind = ParsedRecipe["kind"] | "mix";
+
+/**
+ * The category the import review should DISPLAY for a parsed recipe: the parse
+ * kind, except cheese-kind recipes that would route to the Mixes category at
+ * apply time (explicit user override first, then the same heuristic
+ * applySpecImport uses) show as "mix" so the selector reflects what will
+ * actually happen on commit.
+ */
+export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayKind {
+  if (r.kind !== "cheese") return r.kind;
+  if (r.forcedCategory === "mix") return "mix";
+  if (r.forcedCategory === "cheese") return "cheese";
+  const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
+  return specImportCheeseRecipeIsMix(r.name ?? "", userMixNamesLower, r.rows?.length ?? 0)
+    ? "mix"
+    : "cheese";
+}
+
 /**
  * Apply a (already-canonicalized) parsed spec-sheet import to local storage.
  * Profiles and recipes overwrite existing entries of the same brand+flavor /
@@ -2161,8 +2181,14 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   // category instead (see specImportCheeseRecipeIsMix) — decide once up front
   // so the tombstone-clear and the name-list registration below stay in step.
   const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
-  const routesToMix = (r: ParsedRecipe): boolean =>
-    r.kind === "cheese" && specImportCheeseRecipeIsMix(r.name, userMixNamesLower, r.rows.length);
+  const routesToMix = (r: ParsedRecipe): boolean => {
+    if (r.kind !== "cheese") return false;
+    // Explicit review-time override (the "mix"/"cheese" pick in the import
+    // dialog's category selector) always wins over the name heuristic.
+    if (r.forcedCategory === "mix") return true;
+    if (r.forcedCategory === "cheese") return false;
+    return specImportCheeseRecipeIsMix(r.name, userMixNamesLower, r.rows.length);
+  };
 
   for (const r of parsed.recipes) {
     const name = r.name.trim();
