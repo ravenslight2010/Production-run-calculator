@@ -125,6 +125,7 @@
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.
 - [Mobile require-cycle init](mobile-require-cycle-init.md) — Metro require cycles silently make module-scope constants undefined at init (blank Expo web app); read shared constants lazily.
 - [HMR dual-context crash](hmr-context-split.md) — provider files must export ONLY components (Fast Refresh rule) or HMR splits the module into two contexts; auth context lives in a hook-only module + dev globalThis singleton.
+- [One-time data purge](one-time-data-purge.md) — DB truncate alone resurrects via additive sync; need marker-guarded local wipes in BOTH apps + marker bump AFTER the truncate; keep users/roles/user_roles.
 - [Mobile module TDZ cycle](mobile-module-tdz-cycle.md) — module-scope consts derived from imports in the RunContext import cycle TDZ-crash the real Expo web build (tests pass); use lazy getters.
 - [Headless e2e fallback](headless-e2e-fallback.md) — when the runTest tester never reaches the app, self-drive headless Chromium (temp-dir puppeteer-core) against $REPLIT_DEV_DOMAIN; gotchas inside.
 - [First-load sync form heal](sync-first-load-form-heal.md) — fresh-device sync apply misses the live form (stale dayStateRef); heal effect on currentRunId with empty-over-populated + recent-edit guards.

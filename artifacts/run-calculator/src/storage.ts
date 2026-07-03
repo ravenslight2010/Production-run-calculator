@@ -1577,6 +1577,32 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
 
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 
+const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260703b";
+/**
+ * One-time full local wipe (2026-07-03): the user asked for a one-time purge of
+ * all factory data back to a fresh clean state. The server database is purged
+ * separately (accounts/roles kept); this clears every `run-calc*` localStorage
+ * key on the device so the client can't re-upload its old copy through the
+ * additive live-sync union. Clearing the seed/migration markers on purpose
+ * makes the app behave like a brand-new install (built-in seeds re-run).
+ * Guarded by its own marker so it runs exactly once per device.
+ */
+export function applyOneTimeLocalWipeIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    if (localStorage.getItem(LOCAL_WIPE_KEY)) return;
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("run-calc") && k !== LOCAL_WIPE_KEY) doomed.push(k);
+    }
+    for (const k of doomed) localStorage.removeItem(k);
+    localStorage.setItem(LOCAL_WIPE_KEY, "1");
+  } catch {
+    /* storage unavailable — nothing to wipe */
+  }
+}
+
 /**
  * One-time cleanup: recipe names that ended up in BOTH the Cheese and the Mix
  * recipe-name lists (spec imports seed cheese-mix names into `cheeseRecipeNames`

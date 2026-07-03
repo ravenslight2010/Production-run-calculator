@@ -85,6 +85,11 @@ import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMerg
 import { saveAiCorrections } from "./aiCorrections";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
+// One-time full local wipe marker (user-requested 2026-07-03 data purge) —
+// see the boot effect below. Must NOT start with a prefix the wipe removes
+// before it is re-set… it does start with "run-calc", so the wipe explicitly
+// excludes it from the removal list.
+const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260703b";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 // One-time marker for backfilling die sizes onto existing brand/flavor profiles.
@@ -1914,7 +1919,30 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   revalidateRef.current = revalidate;
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
+    // One-time full local wipe (user-requested 2026-07-03 data purge): clear
+    // every `run-calc*` AsyncStorage key — the saved app state AND the seed
+    // markers — so the app boots like a fresh install and can't re-upload its
+    // old data through the additive live-sync union. Runs BEFORE the state
+    // load below, and the seed effect is gated on `bootDone`, so the seeds
+    // re-run against the blank slate in their usual ordered flow. Fail-safe:
+    // any storage error skips the wipe and boots normally.
+    const wipeOnceThenLoad = async (): Promise<string | null> => {
+      try {
+        const done = await AsyncStorage.getItem(LOCAL_WIPE_KEY);
+        if (!done) {
+          const keys = await AsyncStorage.getAllKeys();
+          const doomed = keys.filter(
+            (k) => k.startsWith("run-calc") && k !== LOCAL_WIPE_KEY,
+          );
+          if (doomed.length > 0) await AsyncStorage.multiRemove(doomed);
+          await AsyncStorage.setItem(LOCAL_WIPE_KEY, "1");
+        }
+      } catch {
+        /* fail-safe: never block boot on the wipe */
+      }
+      return AsyncStorage.getItem(STORAGE_KEY);
+    };
+    wipeOnceThenLoad()
       .then((raw) => {
       if (raw) {
         try {

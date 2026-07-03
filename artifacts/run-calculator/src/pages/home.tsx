@@ -113,6 +113,7 @@ import {
   applySpecProfilesSeedIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixCheeseOverlapDedupeIfNeeded,
+  applyOneTimeLocalWipeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   deleteProfilesForBrand,
   deleteProfileEntry,
@@ -377,6 +378,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+// One-time full local wipe (user-requested 2026-07-03 data purge). MUST run
+// before every seed/migration below so they re-run against the blank slate,
+// and before any sync starts so the old local copy can't re-upload itself.
+applyOneTimeLocalWipeIfNeeded();
 
 applyMixSeedIfNeeded();
 applyMixSeedV14IfNeeded();
