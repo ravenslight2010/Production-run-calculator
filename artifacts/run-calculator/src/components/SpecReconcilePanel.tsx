@@ -324,54 +324,102 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
           </p>
         ) : (
           <div className="space-y-2">
-            {sheets.map((s) => (
-              <div
-                key={s.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3"
-                data-testid={`spec-sheet-${s.id}`}
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <div className="truncate text-sm font-medium">{s.label}</div>
-                    {latestSpecIds.has(s.id) ? (
-                      <Badge variant="secondary">Latest</Badge>
-                    ) : (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        Previous version
-                      </span>
-                    )}
+            {sheets.map((s) => {
+              const warnings = Array.isArray(s.data?.warnings) ? s.data.warnings : [];
+              const warnKey = `warnings\0${s.id}`;
+              const warnExpanded = expandedKeys.has(warnKey);
+              return (
+                <div
+                  key={s.id}
+                  className="rounded-md border border-border p-3 space-y-2"
+                  data-testid={`spec-sheet-${s.id}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="truncate text-sm font-medium">{s.label}</div>
+                        {latestSpecIds.has(s.id) ? (
+                          <Badge variant="secondary">Latest</Badge>
+                        ) : (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            Previous version
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Imported {fmtDate(s.createdAt)}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleAiCheck(s)}
+                        disabled={busyId !== null || checkingAll}
+                        data-testid={`button-check-spec-${s.id}`}
+                      >
+                        {busyId === s.id ? "Checking…" : "AI summary"}
+                      </Button>
+                      <ConfirmDeleteButton
+                        onConfirm={() => handleDelete(s.id)}
+                        title="Delete this saved spec sheet?"
+                        description="This removes the saved spec sheet. This can't be undone."
+                      >
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busyId !== null || checkingAll}
+                          data-testid={`button-delete-spec-${s.id}`}
+                        >
+                          Delete
+                        </Button>
+                      </ConfirmDeleteButton>
+                    </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    Imported {fmtDate(s.createdAt)}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleAiCheck(s)}
-                    disabled={busyId !== null || checkingAll}
-                    data-testid={`button-check-spec-${s.id}`}
-                  >
-                    {busyId === s.id ? "Checking…" : "AI summary"}
-                  </Button>
-                  <ConfirmDeleteButton
-                    onConfirm={() => handleDelete(s.id)}
-                    title="Delete this saved spec sheet?"
-                    description="This removes the saved spec sheet. This can't be undone."
-                  >
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId !== null || checkingAll}
-                      data-testid={`button-delete-spec-${s.id}`}
+
+                  {/* Flavor corrections captured at import time ride along on the
+                      saved parse (ParsedSpecImport.warnings) so they stay visible
+                      when a manager re-opens the sheet later. Same amber styling
+                      as the import review dialog. */}
+                  {warnings.length > 0 && (
+                    <div
+                      className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+                      data-testid={`spec-sheet-warnings-${s.id}`}
                     >
-                      Delete
-                    </Button>
-                  </ConfirmDeleteButton>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 text-left text-amber-600"
+                        onClick={() => toggleExpand(warnKey)}
+                        data-testid={`button-spec-sheet-warnings-${s.id}`}
+                      >
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="flex-1 text-xs font-medium">
+                          {warnings.length} flavor name{warnings.length === 1 ? " was" : "s were"}{" "}
+                          corrected or flagged at import
+                        </span>
+                        {warnExpanded ? (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                      </button>
+                      {warnExpanded && (
+                        <ul className="mt-1.5 space-y-1">
+                          {warnings.map((w, i) => (
+                            <li key={i} className="text-xs">
+                              <span className="font-medium text-foreground">
+                                {w.brand} — {w.flavor}
+                              </span>
+                              <span className="block text-amber-700">{w.message}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

@@ -1241,6 +1241,9 @@ export default function MasterDataScreen() {
   const [savedSheets, setSavedSheets] = useState<SavedSpecSheet[]>([]);
   const [sheetsLoading, setSheetsLoading] = useState(true);
   const [sheetBusyId, setSheetBusyId] = useState<number | null>(null);
+  // Sheets whose import-time flavor-correction warnings are expanded (parity
+  // with the web SpecReconcilePanel amber callout toggle).
+  const [warnExpandedIds, setWarnExpandedIds] = useState<Set<number>>(new Set());
   const [reconResult, setReconResult] = useState<SpecReconcileResult | null>(null);
   const [reconError, setReconError] = useState<string | null>(null);
   const [reconAllEntries, setReconAllEntries] = useState<MobileRecipeEntry[] | null>(null);
@@ -1730,6 +1733,71 @@ export default function MasterDataScreen() {
                 <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
                   Imported {new Date(s.createdAt).toLocaleString()}
                 </Text>
+                {/* Flavor corrections captured at import time ride along on the
+                    saved parse (ParsedSpecImport.warnings) so they stay visible
+                    when a manager re-opens the sheet later. Same amber styling
+                    as the import review modal; parity with web SpecReconcilePanel. */}
+                {Array.isArray(s.data?.warnings) && s.data.warnings.length > 0 ? (
+                  <View
+                    style={{
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      padding: 8,
+                      gap: 6,
+                      backgroundColor: "rgba(245,158,11,0.12)",
+                      borderColor: "rgba(245,158,11,0.4)",
+                    }}
+                  >
+                    <Pressable
+                      onPress={() =>
+                        setWarnExpandedIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id);
+                          else next.add(s.id);
+                          return next;
+                        })
+                      }
+                      style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+                    >
+                      <Feather name="alert-triangle" size={13} color={colors.warning} />
+                      <Text
+                        style={{
+                          flex: 1,
+                          fontSize: 12,
+                          fontFamily: FONTS.medium,
+                          color: colors.warning,
+                        }}
+                      >
+                        {s.data.warnings.length} flavor name
+                        {s.data.warnings.length === 1 ? " was" : "s were"} corrected or
+                        flagged at import
+                      </Text>
+                      <Feather
+                        name={warnExpandedIds.has(s.id) ? "chevron-down" : "chevron-right"}
+                        size={14}
+                        color={colors.warning}
+                      />
+                    </Pressable>
+                    {warnExpandedIds.has(s.id)
+                      ? s.data.warnings.map((w, i) => (
+                          <View key={i} style={{ gap: 1 }}>
+                            <Text
+                              style={{
+                                fontSize: 12,
+                                fontFamily: FONTS.medium,
+                                color: colors.foreground,
+                              }}
+                            >
+                              {w.brand} — {w.flavor}
+                            </Text>
+                            <Text style={{ fontSize: 12, color: colors.warning }}>
+                              {w.message}
+                            </Text>
+                          </View>
+                        ))
+                      : null}
+                  </View>
+                ) : null}
                 <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                   <Pressable
                     onPress={() => handleCheckSheet(s.id)}

@@ -78,6 +78,12 @@ summary of an already-computed diff.
   server derives `scope` itself (never trust a client scope).
 - Auto-save snapshot is wired into `commitSpecImport` on both apps (best-effort;
   a save failure must not break the import).
+- **Import-time flavor corrections stay visible on saved sheets:** the structured
+  `ParsedSpecImport.warnings` ({brand, flavor, message}[]) ride along in the saved
+  `data` jsonb, and both saved-sheet viewers (web SpecReconcilePanel, mobile
+  master-data cross-reference section) render them as a collapsed-by-default amber
+  callout per sheet (same styling as the import review). Guard with
+  `Array.isArray(data?.warnings)` — legacy snapshots have no warnings field.
 - Integration test (`savedSpecSheets.integration.test.ts`) drives scope via a
   test-only `x-test-scope` header wrapping each request in `runWithScope`
   (live/sandbox) — real scope comes from the authed user via AsyncLocalStorage,
