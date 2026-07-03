@@ -459,3 +459,21 @@ Any change to one app's order/logic must land in the other verbatim.
   the original so the note still surfaces. One retry per chunk stays under the
   10/min parse rate limit for realistic imports (≤8 chunks/file).
 - Web+mobile identical (only `knownInput` vs `store.known` differ).
+
+## Profile BRAND grounding backstop (mirrors flavor grounding, looser)
+- `sanitizeParsedSpecImport` grounds profile `brand` names against the workbook
+  cells + `grounding.knownBrands` (server passes `known.brands` in
+  `sanitizeParseSpecSheet`). Paraphrased brands snap back ("Corrected brand …"
+  note); no confident match → kept + "was not found on the sheet" warning.
+- **Looser than the flavor check on purpose — the prompt REQUIRES some brand
+  transforms:** a token-SUBSET of a single cell counts as grounded (covers
+  dropped generic trailers like "Pizzas"), and digit-leading tokens ("7in") are
+  ignored entirely (size folds can come from a different cell than the header).
+  Snapping to a raw cell strips generic trailers (`stripGenericBrandTrailers`)
+  so it returns the product-line name the prompt would have produced.
+- **Consequence:** a COLLAPSED brand (bare "Basha" from a qualified header) is
+  still grounded (its tokens are a subset of the header cell) — this backstop
+  catches paraphrase/invention, not collapse; collapse is handled by the prompt
+  + match-import sibling guard. In tests without `knownBrands`, a real brand
+  absent from the sheet gets flagged — pass the brand in `sourceText` or
+  `knownBrands` when writing grounding tests.

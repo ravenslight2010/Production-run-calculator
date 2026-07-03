@@ -629,7 +629,7 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
         recipes: [],
       },
       {},
-      { sourceText: "BUFFALO   CHICKEN\t2.5\t4\n" },
+      { sourceText: "ALDO'S\nBUFFALO   CHICKEN\t2.5\t4\n" },
     );
     expect(out.profiles[0].flavor).toBe("Buffalo-Chicken");
     expect(out.note).toBeUndefined();
@@ -686,6 +686,154 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
       { sourceText: workbook },
     );
     expect(out.note).toContain("Could not parse the second sheet.");
+    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+  });
+});
+
+describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
+  const workbook =
+    "BASHA'S ULTRA THIN CRUST PIZZAS\tSPECS\n" +
+    "Flavor\tSauce oz\tCheese oz\n" +
+    "Cheese\t3\t4\n" +
+    "Pepperoni\t3\t4.5\n";
+
+  it("snaps a paraphrased brand back to the brand written on the sheet", () => {
+    // The model paraphrased "Ultra Thin" into "Ultra Slim" — the snapped result
+    // comes from the header cell with the generic trailing "Pizzas" stripped.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Basha's Ultra Slim Crust", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].brand).toBe("BASHA'S ULTRA THIN CRUST");
+    expect(out.note).toContain(
+      'Corrected brand "Basha\'s Ultra Slim Crust" to "BASHA\'S ULTRA THIN CRUST"',
+    );
+  });
+
+  it("prefers a KNOWN brand over a raw sheet cell when both could snap", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Basha's Ultra Slim Crust", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook, knownBrands: ["Basha's Ultra Thin Crust"] },
+    );
+    expect(out.profiles[0].brand).toBe("Basha's Ultra Thin Crust");
+  });
+
+  it("does NOT flag the required drop of generic trailing words like 'Pizzas'", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Basha's Ultra Thin Crust", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].brand).toBe("Basha's Ultra Thin Crust");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("does NOT flag a size legitimately folded into the brand", () => {
+    // The prompt REQUIRES folding a size like 7in into the brand; the size may
+    // sit in a different cell than the brand header — never false-flag it.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Lowes 7in", flavor: "Pepperoni" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: "LOWES PIZZAS\tSPECS\nSize\t7in\nPepperoni\t3\t4.5\n" },
+    );
+    expect(out.profiles[0].brand).toBe("Lowes 7in");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("counts a token-subset match against a single sheet cell as grounded", () => {
+    // Word-order / partial transforms of one header cell are legitimate.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Basha's Crust", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].brand).toBe("Basha's Crust");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("keeps a KNOWN brand even when it is absent from the source text", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Hannaford", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook, knownBrands: ["Hannaford"] },
+    );
+    expect(out.profiles[0].brand).toBe("Hannaford");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("flags (keeps + notes) an invented brand with no plausible sheet match", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Mission Foods", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    // Never dropped (no data loss), but never silently accepted either.
+    expect(out.profiles).toHaveLength(1);
+    expect(out.profiles[0].brand).toBe("Mission Foods");
+    expect(out.note).toContain('Brand "Mission Foods" was not found');
+  });
+
+  it("is case/punctuation-insensitive when checking the sheet for the brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "basha's ultra-thin crust", flavor: "Cheese" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].brand).toBe("basha's ultra-thin crust");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("leaves brands untouched when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [{ brand: "Totally Invented Brand Co", flavor: "Cheese" }],
+      recipes: [],
+    });
+    expect(out.profiles[0].brand).toBe("Totally Invented Brand Co");
+    expect(out.note).toBeUndefined();
+  });
+
+  it("grounds a corrected brand+flavor together (both backstops in one pass)", () => {
+    const wb =
+      "ALDO'S PIZZAS\tSPECS\n" +
+      "Cheese\t3\t4\n" +
+      "Buffalo Chicken\t2.5\t4\n";
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo Premium", flavor: "BBQ Chicken" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: wb, knownBrands: ["Aldo's"], knownFlavors: ["Buffalo Chicken"] },
+    );
+    expect(out.profiles[0].brand).toBe("Aldo's");
+    expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
+    expect(out.note).toContain('Corrected brand "Aldo Premium" to "Aldo\'s"');
     expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
   });
 });

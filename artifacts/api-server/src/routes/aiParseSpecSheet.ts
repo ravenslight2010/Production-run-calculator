@@ -63,6 +63,9 @@ export function sanitizeParseSpecSheet(raw: unknown, input?: ParseSpecSheetInput
         knownFlavors: Object.values(input.known?.flavorsByBrand ?? {})
           .flat()
           .filter((f): f is string => typeof f === "string" && f.length > 0),
+        knownBrands: (input.known?.brands ?? []).filter(
+          (b): b is string => typeof b === "string" && b.length > 0,
+        ),
       }
     : {};
   return sanitizeParsedSpecImport(raw, {}, grounding);

@@ -669,6 +669,7 @@ export type SpecImportLimits = {
 export type SpecImportGrounding = {
   sourceText?: string;
   knownFlavors?: string[];
+  knownBrands?: string[];
 };
 
 const DEFAULT_SPEC_LIMITS: Required<SpecImportLimits> = {
@@ -824,17 +825,18 @@ export type ProfileFlavorGroundingCtx = {
   knownInSource: ReadonlyArray<string>;
 };
 
-/** Build the profile-flavor grounding context from the raw grounding input.
- * Returns undefined when there is no source text to check against (no grounding
- * -> profiles are kept as-is, preserving prior behavior). Pure. */
-export function buildProfileFlavorGrounding(
-  grounding: SpecImportGrounding,
+/** Shared builder for name-grounding contexts (flavors AND brands): splits the
+ * flattened workbook text into per-cell phrases and normalizes the caller's
+ * known-name list the same way. Returns undefined when there is no source text
+ * to check against. Pure. */
+function buildNameGroundingCtx(
+  sourceText: string | undefined,
+  knownNames: string[] | undefined,
 ): ProfileFlavorGroundingCtx | undefined {
-  const src = grounding.sourceText;
-  if (!src) return undefined;
+  if (!sourceText) return undefined;
   const seen = new Set<string>();
   const cells: { original: string; normalized: string }[] = [];
-  for (const raw of src.split(/[\t\n\r]+/)) {
+  for (const raw of sourceText.split(/[\t\n\r]+/)) {
     const original = raw.trim();
     if (!original) continue;
     const normalized = normalizePhrase(original);
@@ -842,21 +844,38 @@ export function buildProfileFlavorGrounding(
     seen.add(normalized);
     cells.push({ original, normalized });
   }
-  // Normalize known flavors the same way as source cells so punctuation/spacing
+  // Normalize known names the same way as source cells so punctuation/spacing
   // variants ("Buffalo-Chicken" vs known "Buffalo Chicken") still count as known.
   const knownFlavorSet =
-    grounding.knownFlavors && grounding.knownFlavors.length
-      ? new Set(grounding.knownFlavors.map((s) => normalizePhrase(s)).filter(Boolean))
+    knownNames && knownNames.length
+      ? new Set(knownNames.map((s) => normalizePhrase(s)).filter(Boolean))
       : undefined;
   const knownInSource: string[] = [];
-  if (grounding.knownFlavors) {
-    for (const kf of grounding.knownFlavors) {
+  if (knownNames) {
+    for (const kf of knownNames) {
       const norm = normalizePhrase(kf);
       if (!norm) continue;
       if (cells.some((c) => c.normalized.includes(norm))) knownInSource.push(kf.trim());
     }
   }
   return { cells, knownFlavorSet, knownInSource };
+}
+
+/** Build the profile-flavor grounding context from the raw grounding input.
+ * Returns undefined when there is no source text to check against (no grounding
+ * -> profiles are kept as-is, preserving prior behavior). Pure. */
+export function buildProfileFlavorGrounding(
+  grounding: SpecImportGrounding,
+): ProfileFlavorGroundingCtx | undefined {
+  return buildNameGroundingCtx(grounding.sourceText, grounding.knownFlavors);
+}
+
+/** Build the profile-BRAND grounding context: same cell split as flavors but
+ * keyed on `knownBrands`. Returns undefined without source text. Pure. */
+export function buildProfileBrandGrounding(
+  grounding: SpecImportGrounding,
+): ProfileFlavorGroundingCtx | undefined {
+  return buildNameGroundingCtx(grounding.sourceText, grounding.knownBrands);
 }
 
 export type ProfileFlavorGroundResult =
@@ -920,6 +939,101 @@ export function groundProfileFlavor(
   return { kind: "ungrounded" };
 }
 
+/** Generic trailing words the parse prompt REQUIRES the model to drop from a
+ * brand ("Basha's Original Pizzas" -> brand "Basha's Original"). Used both to
+ * accept such transforms as grounded and to clean a cell we snap a brand to. */
+const GENERIC_BRAND_TRAILER_RE = /\s+(pizzas?|recipes?|specs?)\s*$/i;
+
+/** Strip generic trailing words ("Pizzas", "Recipe", "Specs") from a snapped
+ * brand candidate, repeatedly, so snapping to a raw header cell returns the
+ * product-line name the prompt would have produced. Pure. */
+function stripGenericBrandTrailers(s: string): string {
+  let out = s.trim();
+  for (;;) {
+    const next = out.replace(GENERIC_BRAND_TRAILER_RE, "");
+    if (next === out) return out;
+    out = next.trim();
+  }
+}
+
+/** Brand word tokens that should NOT count against grounding: digit-leading
+ * tokens are size/measurement folds the prompt legitimately asks the model to
+ * merge INTO the brand (e.g. "Lowes 7in" from a "Lowes" header plus a size
+ * cell), plus the generic trailers it asks the model to drop. Pure. */
+function brandCheckTokens(brand: string): string[] {
+  return flavorTokens(brand).filter(
+    (t) => !/^\d/.test(t) && !GENERIC_BRAND_TRAILER_RE.test(` ${t}`),
+  );
+}
+
+/**
+ * Grounding backstop for PROFILE brands, mirroring `groundProfileFlavor`: a
+ * paraphrased/collapsed brand (e.g. "Basha's Ultra Slim Crust" for a sheet that
+ * says "Ultra Thin") would silently land profiles under a wrong/new brand and
+ * mint duplicates. Unlike flavors, the prompt REQUIRES some brand transforms —
+ * dropping generic trailing words like "Pizzas" and folding a size like "7in"
+ * into the brand — so the check is looser: a brand is grounded when it is a
+ * known brand, its full phrase appears in a cell, or its word tokens (ignoring
+ * size tokens and generic trailers) are a SUBSET of a single cell's tokens.
+ * Otherwise snap to the nearest known brand or source cell (generic trailers
+ * stripped) by shared tokens; with no confident match it is flagged ungrounded
+ * (kept + warned) — never silently invented. Pure. */
+export function groundProfileBrand(
+  brand: string,
+  ctx: ProfileFlavorGroundingCtx,
+): ProfileFlavorGroundResult {
+  const b = brand.trim();
+  if (!b) return { kind: "grounded" };
+  const phrase = normalizePhrase(b);
+  if (!phrase) return { kind: "grounded" };
+  if (ctx.knownFlavorSet && ctx.knownFlavorSet.has(phrase)) return { kind: "grounded" };
+  if (ctx.cells.some((c) => c.normalized.includes(phrase))) return { kind: "grounded" };
+
+  const toks = brandCheckTokens(b);
+  if (toks.length === 0) return { kind: "grounded" }; // nothing checkable, keep
+  // Legitimate transforms (dropped trailers, folded sizes) leave the brand's
+  // remaining tokens all inside ONE source cell — count that as grounded.
+  for (const c of ctx.cells) {
+    const cellToks = new Set(flavorTokens(c.original));
+    if (toks.every((t) => cellToks.has(t))) return { kind: "grounded" };
+  }
+
+  // Not in the source and not known -> paraphrased/invented. Try to snap to
+  // the nearest brand that IS real, scored by shared word tokens.
+  const tokSet = new Set(toks);
+  const score = (candidate: string): number => {
+    const cToks = brandCheckTokens(candidate);
+    if (cToks.length === 0 || cToks.length > MAX_SNAP_CANDIDATE_TOKENS) return 0;
+    let shared = 0;
+    const seen = new Set<string>();
+    for (const t of cToks) {
+      if (tokSet.has(t) && !seen.has(t)) {
+        seen.add(t);
+        shared++;
+      }
+    }
+    if (shared === 0) return 0;
+    return shared / Math.max(cToks.length, toks.length);
+  };
+
+  let best: { flavor: string; score: number } | undefined;
+  // Known brands present in the source are the safest candidates — scoring
+  // bonus so they win ties against raw cells.
+  for (const kb of ctx.knownInSource) {
+    const s = score(kb);
+    if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: kb, score: s + 0.25 };
+  }
+  for (const c of ctx.cells) {
+    const s = score(c.original);
+    if (s >= 0.5 && (!best || s > best.score)) {
+      const cleaned = stripGenericBrandTrailers(c.original);
+      if (cleaned) best = { flavor: cleaned, score: s };
+    }
+  }
+  if (best) return { kind: "snapped", flavor: best.flavor };
+  return { kind: "ungrounded" };
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -938,6 +1052,7 @@ export function sanitizeParsedSpecImport(
       ? new Set(grounding.knownFlavors.map((s) => s.trim().toLowerCase()).filter(Boolean))
       : undefined;
   const profileCtx = buildProfileFlavorGrounding(grounding);
+  const brandCtx = buildProfileBrandGrounding(grounding);
   const groundingWarnings: string[] = [];
 
   const profiles: ParsedProfile[] = [];
@@ -945,9 +1060,25 @@ export function sanitizeParsedSpecImport(
   for (const p of rawProfiles.slice(0, lim.maxProfiles)) {
     if (!p || typeof p !== "object") continue;
     const o = p as Record<string, unknown>;
-    const brand = clampName(o.brand, lim.maxNameChars);
+    let brand = clampName(o.brand, lim.maxNameChars);
     let flavor = clampName(o.flavor, lim.maxNameChars);
     if (!brand || !flavor) continue;
+    // Grounding backstop for PROFILE brands: a paraphrased or collapsed brand
+    // (e.g. a dropped "Ultra Thin" qualifier) would silently land profiles
+    // under a wrong/new brand and create duplicates instead of updating
+    // existing ones. Snap such a brand to the nearest real one; if no
+    // confident match, keep it but warn — never silently invented.
+    if (brandCtx) {
+      const g = groundProfileBrand(brand, brandCtx);
+      if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
+        groundingWarnings.push(`Corrected brand "${brand}" to "${g.flavor}".`);
+        brand = clampName(g.flavor, lim.maxNameChars);
+      } else if (g.kind === "ungrounded") {
+        groundingWarnings.push(
+          `Brand "${brand}" was not found on the sheet — please verify.`,
+        );
+      }
+    }
     // Grounding backstop for PROFILE flavors: the parse model has paraphrased
     // flavors wholesale (e.g. "Buffalo Chicken" -> "BBQ Chicken"), minting
     // profiles under a name that never appears on the sheet. Snap such an
