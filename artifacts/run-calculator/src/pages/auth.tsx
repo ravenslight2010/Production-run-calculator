@@ -4,7 +4,7 @@ import { Check, Eye, EyeOff, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAuth } from "@/AuthContext";
+import { useAuth } from "@/useAuth";
 import {
   checkUsernameAvailable,
   forgotPasswordRequest,

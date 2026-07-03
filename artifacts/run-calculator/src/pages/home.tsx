@@ -325,7 +325,7 @@ import {
   ClipboardCheck,
   Users,
 } from "lucide-react";
-import { useAuth } from "@/AuthContext";
+import { useAuth } from "@/useAuth";
 import * as XLSX from "xlsx";
 import {
   buildRunExportRow,

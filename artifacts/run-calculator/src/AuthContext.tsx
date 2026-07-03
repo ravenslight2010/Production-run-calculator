@@ -1,10 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   changePasswordRequest,
@@ -18,42 +12,14 @@ import {
   InventoryApiError,
   type StaffMember,
 } from "./inventoryShared";
+import { AuthContext } from "./useAuth";
 
-type AuthContextValue = {
-  me: StaffMember | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  signIn: (username: string, password: string) => Promise<void>;
-  signUp: (
-    username: string,
-    password: string,
-    accessCode: string,
-  ) => Promise<void>;
-  // Shortcut that signs in as the seeded sandbox account ("test"/"test"), which
-  // operates in the isolated sandbox data scope.
-  signInAsTest: () => Promise<void>;
-  signOut: () => Promise<void>;
-  // Drop straight to the signed-out UI without calling the sign-out endpoint.
-  // Used by the daily-reset rollover so the credential survives long enough for
-  // the rollover's own sync push to land (the server boundary then invalidates
-  // it), and by the 401 handler when the session is already gone server-side.
-  forceSignedOut: () => void;
-  // Re-check the session against the server (used when the SSE stream errors,
-  // which can mean the daily reset just signed us out).
-  revalidate: () => void;
-  changePassword: (
-    currentPassword: string,
-    newPassword: string,
-  ) => Promise<void>;
-  // Mark the first-login "Get Started" overview as seen, persisting it
-  // server-side and updating the cached identity so it won't auto-open again.
-  markOnboardingSeen: () => Promise<void>;
-  // Mark the guided tour as completed (user reached its final step), persisting
-  // it server-side and updating the cached identity.
-  markTourCompleted: () => Promise<void>;
-};
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+// NOTE: the raw context object and `useAuth` live in ./useAuth.ts so this file
+// exports ONLY a component. Mixing them here broke React Fast Refresh's
+// boundary rule: an HMR partial reload could instantiate this module twice,
+// giving the mounted Provider and `useAuth` two DIFFERENT context objects and
+// crashing consumers with "useAuth must be used within an AuthProvider".
+// Keep any future non-component exports in ./useAuth.ts (or another module).
 
 // Owns the single source of truth for "who is signed in" via the ["me"] query.
 // The server authenticates the web app through the httpOnly `rc_auth` cookie, so
@@ -198,10 +164,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
-  return ctx;
 }
