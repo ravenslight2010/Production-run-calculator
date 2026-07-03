@@ -851,6 +851,16 @@ export type SpecImportGrounding = {
    * (e.g. "Buffalo Wing Sauce" for a sheet that says "Hot Buffalo Sauce")
    * cannot silently point the profile at a sauce that doesn't exist. */
   knownSauceNames?: string[];
+  /**
+   * Existing recipe names per kind. When provided, a parsed recipe name that
+   * closely matches an existing one (punctuation/case variant, or the same
+   * distinctive words with only generic filler like "recipe"/"mix" differing)
+   * snaps to the existing name — or, when the match is plausible but not
+   * certain, is kept with a structured warning so the review screen flags a
+   * likely duplicate. No list for a kind means recipe names of that kind pass
+   * untouched (back-compat).
+   */
+  knownRecipeNames?: Partial<Record<"dough" | "sauce" | "cheese", string[]>>;
 };
 
 const DEFAULT_SPEC_LIMITS: Required<SpecImportLimits> = {
@@ -1308,6 +1318,111 @@ export function groundProfileSauceName(
   return { kind: "ungrounded" };
 }
 
+// ── Recipe-name grounding (stop paraphrased names minting duplicate recipes) ──
+
+/** Generic filler words that carry no identity within a recipe name of a given
+ * kind — every dough recipe may say "dough"/"mix"/"recipe", so shared filler
+ * must not count as evidence that two names mean the same recipe, and differing
+ * filler must not count against a match. Kind names are all included (a "dough"
+ * token in a sauce name is still filler, not identity). */
+const GENERIC_RECIPE_NAME_TOKENS = new Set([
+  "dough",
+  "doughs",
+  "sauce",
+  "sauces",
+  "cheese",
+  "cheeses",
+  "mix",
+  "mixes",
+  "blend",
+  "blends",
+  "recipe",
+  "recipes",
+  "pizza",
+  "pizzas",
+]);
+
+/** The distinctive word tokens of a recipe name: >=3-char alphanumeric words
+ * minus generic kind/filler words. Pure. */
+function recipeNameTokens(name: string): string[] {
+  return flavorTokens(name).filter((t) => !GENERIC_RECIPE_NAME_TOKENS.has(t));
+}
+
+export type RecipeNameGroundResult =
+  | { kind: "grounded" }
+  | { kind: "snapped"; name: string }
+  | { kind: "flagged"; match: string };
+
+/**
+ * Grounding backstop for RECIPE names: the parse model has been seen
+ * paraphrasing a recipe name that already exists in the factory (e.g. "Thin
+ * Crust Dough" for an existing "Ultra Thin Dough"), which the import then
+ * counts as NEW and silently mints a near-duplicate recipe. Decision:
+ *
+ *   - exact case-insensitive match to a known name → grounded (untouched;
+ *     already counts as an update downstream).
+ *   - same normalized phrase (only punctuation/spacing/case differ) → snap to
+ *     the existing name.
+ *   - identical distinctive-word sets (only generic filler like "recipe"/"mix"
+ *     differs, e.g. "Ultra Thin Dough Recipe" vs "Ultra Thin Dough"), with a
+ *     unique best match → snap to the existing name.
+ *   - high token overlap (>= half the distinctive words shared) → keep the
+ *     name but flag the closest existing recipe so the review screen can warn
+ *     about a likely duplicate.
+ *   - otherwise → grounded (a genuinely new recipe passes untouched).
+ *
+ * Conservative by construction: an empty/blank name, an empty known list, or a
+ * name with no distinctive tokens is never judged. Pure.
+ */
+export function groundRecipeName(
+  name: string,
+  knownNames: ReadonlyArray<string>,
+): RecipeNameGroundResult {
+  const n = name.trim();
+  if (!n || knownNames.length === 0) return { kind: "grounded" };
+  const lower = n.toLowerCase();
+  if (knownNames.some((k) => k.trim().toLowerCase() === lower)) return { kind: "grounded" };
+  const phrase = normalizePhrase(n);
+  if (!phrase) return { kind: "grounded" };
+  for (const k of knownNames) {
+    if (normalizePhrase(k) === phrase) return { kind: "snapped", name: k.trim() };
+  }
+  const toks = recipeNameTokens(n);
+  if (toks.length === 0) return { kind: "grounded" };
+  const tokSet = new Set(toks);
+  let best: { name: string; score: number } | undefined;
+  let bestTied = false;
+  for (const k of knownNames) {
+    const cToks = recipeNameTokens(k);
+    if (cToks.length === 0) continue;
+    let shared = 0;
+    const seen = new Set<string>();
+    for (const t of cToks) {
+      if (tokSet.has(t) && !seen.has(t)) {
+        seen.add(t);
+        shared++;
+      }
+    }
+    if (shared === 0) continue;
+    const score = shared / Math.max(cToks.length, toks.length);
+    if (!best || score > best.score) {
+      best = { name: k.trim(), score };
+      bestTied = false;
+    } else if (
+      score === best.score &&
+      k.trim().toLowerCase() !== best.name.toLowerCase()
+    ) {
+      bestTied = true;
+    }
+  }
+  if (!best || best.score < 0.5) return { kind: "grounded" };
+  // All distinctive words identical both ways and exactly one candidate says
+  // so → confidently the same recipe under a paraphrased label: snap. A tie
+  // (two known names both fully overlap) is ambiguous → flag instead.
+  if (best.score === 1 && !bestTied) return { kind: "snapped", name: best.name };
+  return { kind: "flagged", match: best.name };
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -1502,6 +1617,34 @@ export function sanitizeParsedSpecImport(
       recipe.brand = g.brand;
       for (const message of g.messages) {
         groundingWarnings.push({ brand: g.brand, flavor: "", message });
+      }
+    }
+    // Grounding backstop for the RECIPE's own NAME: a paraphrased name that
+    // already exists in the factory (e.g. "Thin Crust Dough" for an existing
+    // "Ultra Thin Dough") would count as NEW downstream and silently mint a
+    // near-duplicate recipe. Snap a confident variant to the existing name;
+    // flag a plausible-but-uncertain match with a structured warning so the
+    // review screen surfaces the likely duplicate. Exact names and genuinely
+    // new recipes pass untouched; no known list for the kind means no change.
+    const knownRecipeNames = grounding.knownRecipeNames?.[kind];
+    if (name && knownRecipeNames && knownRecipeNames.length) {
+      const g = groundRecipeName(name, knownRecipeNames);
+      if (g.kind === "snapped") {
+        const snapped = clampName(g.name, lim.maxNameChars);
+        if (snapped && snapped.toLowerCase() !== name.toLowerCase()) {
+          groundingWarnings.push({
+            brand: recipe.brand ?? "",
+            flavor: "",
+            message: `Matched ${kind} recipe "${name}" to existing "${g.name}".`,
+          });
+          recipe.name = snapped;
+        }
+      } else if (g.kind === "flagged") {
+        groundingWarnings.push({
+          brand: recipe.brand ?? "",
+          flavor: "",
+          message: `New ${kind} recipe "${name}" closely matches existing "${g.match}" — verify it isn't a duplicate.`,
+        });
       }
     }
     let flavor = clampName(o.flavor, lim.maxNameChars);

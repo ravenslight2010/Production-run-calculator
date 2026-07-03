@@ -2413,6 +2413,12 @@ export interface ParseSpecSheetKnown {
   doughIngredients?: string[];
   sauceIngredients?: string[];
   dieTypes?: string[];
+  /** Existing dough recipe names (grounds paraphrased recipe names) */
+  doughRecipes?: string[];
+  /** Existing sauce recipe names (grounds paraphrased recipe names) */
+  sauceRecipes?: string[];
+  /** Existing cheese recipe names (grounds paraphrased recipe names) */
+  cheeseRecipes?: string[];
 }
 
 export interface ParseSpecSheetInput {

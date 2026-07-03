@@ -1687,7 +1687,10 @@ export const AiParseSpecSheetBody = zod.object({
   "cheeseIngredients": zod.array(zod.string()).optional(),
   "doughIngredients": zod.array(zod.string()).optional(),
   "sauceIngredients": zod.array(zod.string()).optional(),
-  "dieTypes": zod.array(zod.string()).optional()
+  "dieTypes": zod.array(zod.string()).optional(),
+  "doughRecipes": zod.array(zod.string()).optional().describe('Existing dough recipe names (grounds paraphrased recipe names)'),
+  "sauceRecipes": zod.array(zod.string()).optional().describe('Existing sauce recipe names (grounds paraphrased recipe names)'),
+  "cheeseRecipes": zod.array(zod.string()).optional().describe('Existing cheese recipe names (grounds paraphrased recipe names)')
 }).optional().describe('The app\'s known canonical lists, supplied to ground the AI parse.'),
   "aliases": zod.array(zod.object({
   "kind": zod.enum(['brand', 'flavor', 'appType', 'pepType', 'cheeseIngredient', 'doughIngredient', 'sauceIngredient']).describe('Which name-space the mapping lives in'),

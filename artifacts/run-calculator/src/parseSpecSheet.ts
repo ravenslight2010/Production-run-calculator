@@ -30,6 +30,12 @@ export type SpecSheetKnown = {
   doughIngredients?: string[];
   sauceIngredients?: string[];
   dieTypes?: string[];
+  /** Existing recipe names per kind — grounds paraphrased recipe names so a
+   * near-match snaps to (or is flagged against) the existing recipe instead of
+   * importing as a silent near-duplicate. */
+  doughRecipes?: string[];
+  sauceRecipes?: string[];
+  cheeseRecipes?: string[];
 };
 
 export type ParseSpecSheetInput = {

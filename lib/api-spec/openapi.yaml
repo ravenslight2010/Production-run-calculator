@@ -6785,6 +6785,21 @@ components:
           type: array
           items:
             type: string
+        doughRecipes:
+          type: array
+          description: Existing dough recipe names (grounds paraphrased recipe names)
+          items:
+            type: string
+        sauceRecipes:
+          type: array
+          description: Existing sauce recipe names (grounds paraphrased recipe names)
+          items:
+            type: string
+        cheeseRecipes:
+          type: array
+          description: Existing cheese recipe names (grounds paraphrased recipe names)
+          items:
+            type: string
 
     ParseSpecSheetInput:
       type: object

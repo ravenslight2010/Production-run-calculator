@@ -13,6 +13,7 @@ import {
   recipeTargets,
   recipeApplyTargets,
   isCatchAllFlavor,
+  groundRecipeName,
   sanitizeParsedSpecImport,
   summarizeSpecImport,
   mergeParsedSpecImports,
@@ -1415,6 +1416,156 @@ describe("sanitizeParsedSpecImport — RECIPE flavor grounding", () => {
     expect(out.recipes[0].brand).toBe("ALDO'S");
     expect(flavorWarn).toBeDefined();
     expect(flavorWarn!.brand).toBe("ALDO'S");
+  });
+});
+
+describe("groundRecipeName", () => {
+  const known = ["Ultra Thin Dough", "Rising Crust Dough", "Gluten Free Dough"];
+
+  it("passes an exact (case-insensitive) match untouched", () => {
+    expect(groundRecipeName("Ultra Thin Dough", known)).toEqual({ kind: "grounded" });
+    expect(groundRecipeName("ULTRA THIN DOUGH", known)).toEqual({ kind: "grounded" });
+    expect(groundRecipeName("  ultra thin dough  ", known)).toEqual({ kind: "grounded" });
+  });
+
+  it("snaps a punctuation/spacing variant of an existing name", () => {
+    expect(groundRecipeName("Ultra-Thin Dough", known)).toEqual({
+      kind: "snapped",
+      name: "Ultra Thin Dough",
+    });
+  });
+
+  it("snaps when only generic filler words differ (identical distinctive tokens)", () => {
+    expect(groundRecipeName("Ultra Thin Dough Recipe", known)).toEqual({
+      kind: "snapped",
+      name: "Ultra Thin Dough",
+    });
+    expect(groundRecipeName("Ultra Thin Pizza Dough Mix", known)).toEqual({
+      kind: "snapped",
+      name: "Ultra Thin Dough",
+    });
+  });
+
+  it("flags (keeps) a plausible-but-uncertain paraphrase with the closest match", () => {
+    // [thin, crust] vs [ultra, thin] and [rising, crust] both share one of two
+    // distinctive tokens (score 0.5) — plausible, not certain → flag not snap.
+    const res = groundRecipeName("Thin Crust Dough", known);
+    expect(res.kind).toBe("flagged");
+  });
+
+  it("passes a genuinely new recipe name untouched", () => {
+    expect(groundRecipeName("Sourdough Base", known)).toEqual({ kind: "grounded" });
+    expect(groundRecipeName("Whole Wheat Dough", known)).toEqual({ kind: "grounded" });
+  });
+
+  it("never judges with no known names, a blank name, or an all-generic name", () => {
+    expect(groundRecipeName("Ultra-Thin Dough", [])).toEqual({ kind: "grounded" });
+    expect(groundRecipeName("   ", known)).toEqual({ kind: "grounded" });
+    // "Pizza Dough Mix" has no distinctive tokens at all → no judgment.
+    expect(groundRecipeName("Pizza Dough Mix", known)).toEqual({ kind: "grounded" });
+  });
+
+  it("downgrades an ambiguous full-overlap tie to a flag instead of snapping", () => {
+    // Both known names have the identical distinctive token set as the input
+    // once filler is removed — snapping would pick one arbitrarily, so flag.
+    const res = groundRecipeName("Marinara", ["Marinara Sauce", "Marinara Blend"]);
+    expect(res.kind).toBe("flagged");
+  });
+});
+
+describe("sanitizeParsedSpecImport — RECIPE NAME grounding", () => {
+  const doughRecipe = (name: string) => ({
+    kind: "dough",
+    name,
+    brand: "Aldo's",
+    rows: [{ ingredient: "Flour", lbs: 50 }],
+  });
+  const grounding = {
+    knownRecipeNames: { dough: ["Ultra Thin Dough", "Rising Crust Dough"] },
+  };
+
+  it("snaps a filler-only variant to the existing recipe name with a warning", () => {
+    const out = sanitizeParsedSpecImport(
+      { profiles: [], recipes: [doughRecipe("Ultra Thin Dough Recipe")] },
+      {},
+      grounding,
+    );
+    expect(out.recipes[0].name).toBe("Ultra Thin Dough");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Aldo's", flavor: "" });
+    expect(out.warnings![0].message).toBe(
+      'Matched dough recipe "Ultra Thin Dough Recipe" to existing "Ultra Thin Dough".',
+    );
+  });
+
+  it("keeps a plausible near-duplicate but flags it with a structured warning", () => {
+    const out = sanitizeParsedSpecImport(
+      { profiles: [], recipes: [doughRecipe("Thin Crust Dough")] },
+      {},
+      grounding,
+    );
+    expect(out.recipes[0].name).toBe("Thin Crust Dough");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0].message).toBe(
+      'New dough recipe "Thin Crust Dough" closely matches existing "Ultra Thin Dough" — verify it isn\'t a duplicate.',
+    );
+  });
+
+  it("passes exact names and genuinely new recipes untouched, silently", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [doughRecipe("ultra thin dough"), doughRecipe("Sourdough Base")],
+      },
+      {},
+      grounding,
+    );
+    expect(out.recipes.map((r) => r.name)).toEqual(["ultra thin dough", "Sourdough Base"]);
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("only grounds against the recipe's OWN kind list", () => {
+    // A sauce recipe must not snap/flag against known DOUGH names.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "sauce",
+            name: "Ultra Thin Dough Recipe",
+            rows: [{ ingredient: "Tomato Paste", lbs: 50 }],
+          },
+        ],
+      },
+      {},
+      grounding,
+    );
+    expect(out.recipes[0].name).toBe("Ultra Thin Dough Recipe");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("makes no change when no grounding input is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [doughRecipe("Ultra Thin Dough Recipe")],
+    });
+    expect(out.recipes[0].name).toBe("Ultra Thin Dough Recipe");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("a snapped recipe counts as an UPDATE downstream, not a new recipe", () => {
+    const out = sanitizeParsedSpecImport(
+      { profiles: [], recipes: [doughRecipe("Ultra Thin Dough Recipe")] },
+      {},
+      grounding,
+    );
+    const summary = summarizeSpecImport(
+      out,
+      () => false,
+      (kind, name) => kind === "dough" && name === "Ultra Thin Dough",
+    );
+    expect(summary.recipesUpdated).toBe(1);
+    expect(summary.recipesNew).toBe(0);
   });
 });
 

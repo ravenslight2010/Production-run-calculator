@@ -42,7 +42,10 @@ export function validateParseSpecSheetBody(body: unknown): ParseSpecSheetValidat
     (known.cheeseIngredients?.length ?? 0) +
     (known.doughIngredients?.length ?? 0) +
     (known.sauceIngredients?.length ?? 0) +
-    (known.dieTypes?.length ?? 0);
+    (known.dieTypes?.length ?? 0) +
+    (known.doughRecipes?.length ?? 0) +
+    (known.sauceRecipes?.length ?? 0) +
+    (known.cheeseRecipes?.length ?? 0);
   if (knownTotal > MAX_KNOWN_LIST) {
     return { ok: false, status: 400, error: `Too many known names (max ${MAX_KNOWN_LIST})` };
   }
@@ -57,15 +60,23 @@ export function validateParseSpecSheetBody(body: unknown): ParseSpecSheetValidat
 // parsed input lets the sanitizer ground target flavors against the source
 // workbook + known flavors and demote invented ones to whole-brand anchors.
 export function sanitizeParseSpecSheet(raw: unknown, input?: ParseSpecSheetInput): ParsedSpecImport {
+  const names = (list?: string[]) =>
+    (list ?? []).filter((s): s is string => typeof s === "string" && s.length > 0);
   const grounding = input
     ? {
         sourceText: input.workbookText ?? "",
         knownFlavors: Object.values(input.known?.flavorsByBrand ?? {})
           .flat()
           .filter((f): f is string => typeof f === "string" && f.length > 0),
-        knownBrands: (input.known?.brands ?? []).filter(
-          (b): b is string => typeof b === "string" && b.length > 0,
-        ),
+        knownBrands: names(input.known?.brands),
+        // Existing recipe names per kind so a paraphrased recipe name snaps to
+        // (or is flagged against) the factory's existing recipe instead of
+        // silently importing as a near-duplicate.
+        knownRecipeNames: {
+          dough: names(input.known?.doughRecipes),
+          sauce: names(input.known?.sauceRecipes),
+          cheese: names(input.known?.cheeseRecipes),
+        },
       }
     : {};
   return sanitizeParsedSpecImport(raw, {}, grounding);
@@ -217,6 +228,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   list("Dough ingredients", known.doughIngredients);
   list("Sauce ingredients", known.sauceIngredients);
   list("Die types", known.dieTypes);
+  list("Dough recipe names", known.doughRecipes);
+  list("Sauce recipe names", known.sauceRecipes);
+  list("Cheese recipe names", known.cheeseRecipes);
 
   // Drop incoherent (cyclic/chained) learned aliases before handing them to the
   // model, so polluted/contradictory mappings can't make the AI mis-rename and

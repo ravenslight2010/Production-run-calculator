@@ -489,3 +489,31 @@ Any change to one app's order/logic must land in the other verbatim.
   applyNameMatches renames, client canonicalize) must carry + rename warnings
   or row-matching silently breaks after canonicalization.
 >>>>>>> f81de09 (Show flavor-correction warnings prominently on spec-import review (web + mobile))
+
+## Recipe NAME grounding (paraphrased names must not mint duplicate recipes)
+- The parse model can paraphrase an EXISTING recipe name (e.g. "Thin Crust
+  Dough" for the factory's "Ultra Thin Dough"), which downstream counts as NEW
+  and silently mints a near-duplicate recipe. Backstop = pure
+  `groundRecipeName(name, knownNames)` in `@workspace/spec-import`, wired into
+  `sanitizeParsedSpecImport` via `grounding.knownRecipeNames` (per kind:
+  dough/sauce/cheese).
+- Decision ladder (conservative by construction): exact ci-match → untouched;
+  normalized-phrase equal (punctuation/case) → SNAP to existing name (+warning);
+  identical distinctive-token sets after stripping generic filler
+  (dough/sauce/cheese/mix/blend/recipe/pizza + plurals) with a UNIQUE best →
+  SNAP; token overlap ≥0.5 → KEEP name + structured "closely matches existing …
+  verify it isn't a duplicate" warning; else untouched. Ambiguous full-overlap
+  tie → flag, never snap. No known list for a kind / blank / all-generic name =
+  no judgment (back-compat).
+- Known recipe names ride the `ParseSpecSheetKnown` contract as
+  `doughRecipes`/`sauceRecipes`/`cheeseRecipes` (also embedded in the parse
+  prompt so the model reuses names verbatim). Web sends
+  `Object.keys(recipePresetMapForKind(kind))`; mobile sends preset-map keys in
+  `buildSpecStore` (sauce = frontline presets, frontline IS sauce). Keep the
+  three wiring points (OpenAPI known lists, web loadSpecImportKnown, mobile
+  buildSpecStore) in lockstep like the other known lists.
+- **Why snap only at full distinctive-token identity:** a 0.5-overlap pair
+  ("Thin Crust" vs "Ultra Thin") is plausibly a DIFFERENT product line —
+  auto-snapping would overwrite a real recipe; the review warning keeps the
+  human in the loop. Tests in `specImport.test.ts` (groundRecipeName + RECIPE
+  NAME grounding blocks).

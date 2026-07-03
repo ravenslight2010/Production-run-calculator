@@ -1421,6 +1421,12 @@ export default function MasterDataScreen() {
         doughIngredients,
         sauceIngredients: frontlineIngredients,
         dieTypes,
+        // Existing recipe names per kind: lets the server ground a paraphrased
+        // recipe name back to the factory's existing recipe (update, not
+        // duplicate). Mirrors web's loadSpecImportKnown.
+        doughRecipes: Object.keys(doughRecipePresets),
+        sauceRecipes: Object.keys(frontlineRecipePresets),
+        cheeseRecipes: Object.keys(cheeseRecipePresets),
       },
       currentRecipes: presetMapsToReconcileRecipes({
         dough: doughRecipePresets,

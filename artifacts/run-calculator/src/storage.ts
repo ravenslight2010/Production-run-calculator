@@ -1751,6 +1751,9 @@ export function loadSpecImportKnown(): {
   doughIngredients: string[];
   sauceIngredients: string[];
   dieTypes: string[];
+  doughRecipes: string[];
+  sauceRecipes: string[];
+  cheeseRecipes: string[];
 } {
   return {
     brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
@@ -1763,6 +1766,11 @@ export function loadSpecImportKnown(): {
     doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
     sauceIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
     dieTypes: [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])],
+    // Existing recipe names per kind: lets the server ground a paraphrased
+    // recipe name back to the factory's existing recipe (update, not duplicate).
+    doughRecipes: Object.keys(recipePresetMapForKind("dough")),
+    sauceRecipes: Object.keys(recipePresetMapForKind("sauce")),
+    cheeseRecipes: Object.keys(recipePresetMapForKind("cheese")),
   };
 }
 

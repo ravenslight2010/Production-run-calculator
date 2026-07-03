@@ -246,3 +246,71 @@ describe("pepperoni is a pep type, not a cheese recipe", () => {
     expect(isPepperoniOnlyCheeseRecipe([])).toBe(false);
   });
 });
+
+// Regression guard for RECIPE-NAME grounding wiring: known recipe names from
+// ParseSpecSheetKnown must (1) reach the prompt so the model reuses existing
+// names verbatim, and (2) reach the sanitizer grounding so a paraphrased name
+// snaps to (or is flagged against) the existing recipe instead of importing as
+// a silent near-duplicate.
+describe("known recipe names — prompt + grounding wiring", () => {
+  const known = {
+    doughRecipes: ["Ultra Thin Dough"],
+    sauceRecipes: ["Marinara Sauce"],
+    cheeseRecipes: ["Standard Cheese Blend"],
+  };
+
+  it("embeds the per-kind recipe-name lists in the prompt", () => {
+    const { user } = buildParseSpecSheetPrompt(input({ known }));
+    expect(user).toContain("Dough recipe names: Ultra Thin Dough");
+    expect(user).toContain("Sauce recipe names: Marinara Sauce");
+    expect(user).toContain("Cheese recipe names: Standard Cheese Blend");
+  });
+
+  it("forwards known recipe names into sanitizer grounding (snap + flag)", () => {
+    const raw = {
+      profiles: [],
+      recipes: [
+        // Filler-only variant of an existing dough recipe -> snaps.
+        {
+          kind: "dough",
+          name: "Ultra Thin Dough Recipe",
+          rows: [{ ingredient: "Flour", lbs: 50 }],
+        },
+        // Plausible near-duplicate -> kept, but flagged with a warning.
+        {
+          kind: "dough",
+          name: "Thin Crust Dough",
+          rows: [{ ingredient: "Flour", lbs: 40 }],
+        },
+      ],
+    };
+    const out = sanitizeParseSpecSheet(raw, input({ known }));
+    expect(out.recipes[0].name).toBe("Ultra Thin Dough");
+    expect(out.recipes[1].name).toBe("Thin Crust Dough");
+    const messages = (out.warnings ?? []).map((w) => w.message);
+    expect(messages).toContain(
+      'Matched dough recipe "Ultra Thin Dough Recipe" to existing "Ultra Thin Dough".',
+    );
+    expect(
+      messages.some((m) =>
+        m.includes('New dough recipe "Thin Crust Dough" closely matches existing'),
+      ),
+    ).toBe(true);
+  });
+
+  it("makes no recipe-name change without known recipe names (back-compat)", () => {
+    const raw = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "dough",
+          name: "Ultra Thin Dough Recipe",
+          rows: [{ ingredient: "Flour", lbs: 50 }],
+        },
+      ],
+    };
+    const out = sanitizeParseSpecSheet(raw, input());
+    expect(out.recipes[0].name).toBe("Ultra Thin Dough Recipe");
+    expect(out.warnings).toBeUndefined();
+  });
+});

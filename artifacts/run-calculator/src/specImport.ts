@@ -274,6 +274,9 @@ async function parseWorkbookCore(
     doughIngredients: known.doughIngredients,
     sauceIngredients: known.sauceIngredients,
     dieTypes: known.dieTypes,
+    doughRecipes: known.doughRecipes,
+    sauceRecipes: known.sauceRecipes,
+    cheeseRecipes: known.cheeseRecipes,
   };
 
   const rawList: ParsedSpecImport[] = [];
