@@ -24,6 +24,10 @@ import {
   resolveRetriedParsePass,
   RETRY_MIN_CHUNK_CHARS,
   SPEC_ALIAS_KINDS,
+  findTruncatedCells,
+  formatTruncatedCellsNote,
+  PROMPT_MAX_CELL_CHARS,
+  TRUNCATED_NOTE_MAX_LOCATIONS,
   type ParsedSpecImport,
   type SheetGrid,
   type SpecImportAlias,
@@ -1078,6 +1082,91 @@ describe("SPEC_ALIAS_KINDS", () => {
     expect(SPEC_ALIAS_KINDS).toContain("brand");
     expect(SPEC_ALIAS_KINDS).toContain("cheeseIngredient");
     expect(new Set(SPEC_ALIAS_KINDS).size).toBe(SPEC_ALIAS_KINDS.length);
+  });
+});
+
+describe("findTruncatedCells", () => {
+  it("returns empty when every cell fits under the clamp", () => {
+    const grids: SheetGrid[] = [{ name: "S1", rows: [["short", "also short"], ["ok"]] }];
+    expect(findTruncatedCells(grids)).toEqual([]);
+  });
+
+  it("reports the sheet, 1-based row, kept preview, and cut length for oversized cells", () => {
+    const long = "x".repeat(PROMPT_MAX_CELL_CHARS + 25);
+    const grids: SheetGrid[] = [
+      { name: "Specs", rows: [["fine"], ["fine", long], ["fine"]] },
+    ];
+    const found = findTruncatedCells(grids);
+    expect(found).toHaveLength(1);
+    expect(found[0].sheet).toBe("Specs");
+    expect(found[0].row).toBe(2);
+    expect(found[0].preview).toBe("x".repeat(PROMPT_MAX_CELL_CHARS));
+    expect(found[0].cutChars).toBe(25);
+  });
+
+  it("mirrors the prompt path's whitespace collapse (a padded cell that cleans short is NOT truncated)", () => {
+    // Raw length is way over the clamp, but the prompt path collapses runs of
+    // whitespace first — detection must agree or it would cry wolf.
+    const padded = `a${" ".repeat(200)}b`;
+    const grids: SheetGrid[] = [{ name: "S1", rows: [[padded]] }];
+    expect(findTruncatedCells(grids)).toEqual([]);
+    // And a cell that stays long AFTER collapsing is still caught.
+    const dense = Array.from({ length: 40 }, (_, i) => `w${i}`).join(" ");
+    expect(dense.replace(/\s+/g, " ").length).toBeGreaterThan(PROMPT_MAX_CELL_CHARS);
+    expect(findTruncatedCells([{ name: "S1", rows: [[dense]] }])).toHaveLength(1);
+  });
+
+  it("ignores cells beyond the column cap (those are dropped, not truncated)", () => {
+    const long = "y".repeat(PROMPT_MAX_CELL_CHARS + 5);
+    const row = [...Array.from({ length: 60 }, () => "c"), long]; // col 61 > maxCols 60
+    expect(findTruncatedCells([{ name: "S1", rows: [row] }])).toEqual([]);
+  });
+
+  it("respects a custom maxCellChars limit", () => {
+    const grids: SheetGrid[] = [{ name: "S1", rows: [["abcdef"]] }];
+    const found = findTruncatedCells(grids, { maxCellChars: 4 });
+    expect(found).toHaveLength(1);
+    expect(found[0].preview).toBe("abcd");
+    expect(found[0].cutChars).toBe(2);
+  });
+
+  it("reports multiple truncated cells across sheets in order", () => {
+    const long = "z".repeat(PROMPT_MAX_CELL_CHARS + 1);
+    const grids: SheetGrid[] = [
+      { name: "A", rows: [[long], ["ok"], [long, long]] },
+      { name: "B", rows: [["ok"], [long]] },
+    ];
+    const found = findTruncatedCells(grids);
+    expect(found.map((t) => `${t.sheet}:${t.row}`)).toEqual(["A:1", "A:3", "A:3", "B:2"]);
+  });
+});
+
+describe("formatTruncatedCellsNote", () => {
+  it("returns null when nothing was truncated", () => {
+    expect(formatTruncatedCellsNote([])).toBeNull();
+  });
+
+  it("names the affected sheet/row in plain language for a single cell", () => {
+    const note = formatTruncatedCellsNote([
+      { sheet: "Specs", row: 4, preview: "…", cutChars: 12 },
+    ]);
+    expect(note).toBe(
+      "1 cell was too long and was shortened before reading — double-check this row: Specs row 4.",
+    );
+  });
+
+  it("dedupes repeated locations and collapses the overflow to +N more", () => {
+    const cells = Array.from({ length: TRUNCATED_NOTE_MAX_LOCATIONS + 3 }, (_, i) => ({
+      sheet: "S",
+      row: i + 1,
+      preview: "…",
+      cutChars: 1,
+    }));
+    // Duplicate location (same sheet+row twice) must not be listed twice.
+    const note = formatTruncatedCellsNote([...cells, { sheet: "S", row: 1, preview: "…", cutChars: 9 }]);
+    expect(note).toContain(`${cells.length + 1} cells were too long`);
+    expect(note).toContain("+3 more");
+    expect(note?.match(/S row 1\b/g)).toHaveLength(1);
   });
 });
 

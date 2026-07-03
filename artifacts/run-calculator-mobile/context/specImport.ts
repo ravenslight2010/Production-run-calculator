@@ -21,6 +21,8 @@ import {
   collectMatchCandidates,
   collectSpecAliases,
   crossFillSpecImport,
+  findTruncatedCells,
+  formatTruncatedCellsNote,
   gridsToPromptText,
   mergeParsedSpecImports,
   recipeTargets,
@@ -40,6 +42,7 @@ import {
   type SpecImportAlias,
   type SpecImportSummary,
   type SpecMatchKnown,
+  type TruncatedCell,
 } from "@workspace/spec-import";
 import {
   reconcileSpecWithRecipes,
@@ -253,6 +256,8 @@ type ParseCore = {
   flagged: SpecFlaggedItem[];
   /** Rows dropped because the workbook was too large to chunk fully. */
   droppedRows: number;
+  /** Cells whose tails were cut by the per-cell prompt clamp (AI never saw them). */
+  truncatedCells: TruncatedCell[];
 };
 
 /**
@@ -273,6 +278,9 @@ async function parseGridsCore(
   if (!chunks.length) {
     throw new Error("That workbook looks empty — nothing to import.");
   }
+  // Cells longer than the per-cell prompt clamp lose their tails before the AI
+  // reads them — detect these up front so the review can warn the user.
+  const truncatedCells = findTruncatedCells(grids);
 
   const rawList: ParsedSpecImport[] = [];
   const flagged: SpecFlaggedItem[] = [];
@@ -324,7 +332,7 @@ async function parseGridsCore(
   const rawMerged = rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList);
   const { parsed, resolved } = canonicalizeParsed(rawMerged, store.known, aliases);
 
-  return { parsed, resolved, flagged, droppedRows };
+  return { parsed, resolved, flagged, droppedRows, truncatedCells };
 }
 
 /**
@@ -491,6 +499,18 @@ function appendDroppedNote(note: string | undefined, droppedRows: number): strin
   return note ? `${note}\n${msg}` : msg;
 }
 
+/** Append the shortened-cells advisory to a parse note when some workbook cells
+ * were longer than the per-cell prompt clamp (their tails never reached the AI).
+ * Mirrors web appendTruncatedNote. */
+function appendTruncatedNote(
+  note: string | undefined,
+  truncatedCells: ReadonlyArray<TruncatedCell>,
+): string | undefined {
+  const msg = formatTruncatedCellsNote(truncatedCells);
+  if (!msg) return note;
+  return note ? `${note}\n${msg}` : msg;
+}
+
 /** Learned aliases are best-effort; proceed without them if the fetch fails. */
 async function loadSpecImportAliases(): Promise<SpecImportAlias[]> {
   try {
@@ -509,11 +529,8 @@ export async function prepareSpecImport(
   store: SpecImportStore,
 ): Promise<SpecImportPrepared> {
   const aliases = await loadSpecImportAliases();
-  const { parsed: rawParsed, resolved, flagged, droppedRows } = await parseGridsCore(
-    grids,
-    store,
-    aliases,
-  );
+  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells } =
+    await parseGridsCore(grids, store, aliases);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
   const { parsed, matchAliases } = await linkParsed(rawParsed, store);
@@ -521,7 +538,10 @@ export async function prepareSpecImport(
   const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
   const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
   const discrepancies = buildDiscrepancies(parsed, store);
-  const note = appendDroppedNote(parsed.note, droppedRows);
+  const note = appendTruncatedNote(
+    appendDroppedNote(parsed.note, droppedRows),
+    truncatedCells,
+  );
 
   return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
 }
@@ -549,6 +569,7 @@ export async function prepareSpecImportMulti(
   const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
   let totalDropped = 0;
+  const allTruncated: TruncatedCell[] = [];
 
   let done = 0;
   for (const grids of gridsList) {
@@ -558,6 +579,11 @@ export async function prepareSpecImportMulti(
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
       totalDropped += core.droppedRows;
+      // Prefix the sheet label with the file so a multi-file review says WHICH
+      // workbook holds the shortened cell.
+      allTruncated.push(
+        ...core.truncatedCells.map((t) => ({ ...t, sheet: `File ${done + 1} ${t.sheet}` })),
+      );
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "Could not read a file.");
     } finally {
@@ -585,7 +611,10 @@ export async function prepareSpecImportMulti(
       `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
     );
   }
-  const note = appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped);
+  const note = appendTruncatedNote(
+    appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped),
+    allTruncated,
+  );
 
   return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
 }

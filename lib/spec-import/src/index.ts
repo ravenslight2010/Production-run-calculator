@@ -519,6 +519,83 @@ function cleanRowCells(row: ReadonlyArray<string>, lim: Required<GridTextLimits>
   return cells;
 }
 
+// ── Truncated-cell detection (pre-import warning) ────────────────────────────
+
+/** One workbook cell whose tail gets cut by the per-cell prompt clamp. */
+export type TruncatedCell = {
+  /** Sheet the cell lives on. */
+  sheet: string;
+  /** 1-based row number within the sheet (as a user would count in Excel). */
+  row: number;
+  /** The kept head of the cell text (what the AI will actually see). */
+  preview: string;
+  /** How many characters get cut off the end. */
+  cutChars: number;
+};
+
+/**
+ * Report every cell that cleanRowCells would truncate when the grids are
+ * flattened to prompt text — i.e. cells whose whitespace-collapsed text is
+ * longer than the per-cell clamp (PROMPT_MAX_CELL_CHARS by default). The AI
+ * never sees a truncated cell's tail and has to guess it, so callers surface
+ * these to the user BEFORE the import is confirmed ("some cells were too long
+ * and were shortened — check these rows"). Detection intentionally mirrors
+ * cleanRowCells exactly (same column cap, same whitespace collapse) so it never
+ * drifts from what the prompt path actually does. Pure.
+ */
+export function findTruncatedCells(
+  grids: ReadonlyArray<SheetGrid>,
+  limits: GridTextLimits = {},
+): TruncatedCell[] {
+  const lim = { ...DEFAULT_LIMITS, ...limits };
+  const out: TruncatedCell[] = [];
+  for (const sheet of grids) {
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      for (const c of row.slice(0, lim.maxCols)) {
+        const s = (c ?? "").toString().replace(/\s+/g, " ").trim();
+        if (s.length > lim.maxCellChars) {
+          out.push({
+            sheet: sheet.name,
+            row: r + 1,
+            preview: s.slice(0, lim.maxCellChars),
+            cutChars: s.length - lim.maxCellChars,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Max sheet/row locations spelled out in the truncated-cells warning before
+ * collapsing to "+N more" (keeps the review note readable for messy sheets). */
+export const TRUNCATED_NOTE_MAX_LOCATIONS = 5;
+
+/**
+ * Plain-language warning for the import review screen when some cells were too
+ * long and got shortened before the AI read them, or null when nothing was
+ * truncated. Lists up to TRUNCATED_NOTE_MAX_LOCATIONS affected sheet/row spots
+ * ("Sheet1 row 4") then collapses the rest to "+N more". Shared by web and
+ * mobile so the wording stays identical (parity). Pure.
+ */
+export function formatTruncatedCellsNote(truncated: ReadonlyArray<TruncatedCell>): string | null {
+  if (!truncated.length) return null;
+  const seen = new Set<string>();
+  const spots: string[] = [];
+  for (const t of truncated) {
+    const label = `${t.sheet} row ${t.row}`;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    spots.push(label);
+  }
+  const shown = spots.slice(0, TRUNCATED_NOTE_MAX_LOCATIONS);
+  const extra = spots.length - shown.length;
+  const where = extra > 0 ? `${shown.join(", ")} +${extra} more` : shown.join(", ");
+  const n = truncated.length;
+  return `${n === 1 ? "1 cell was" : `${n} cells were`} too long and ${n === 1 ? "was" : "were"} shortened before reading — double-check ${spots.length === 1 ? "this row" : "these rows"}: ${where}.`;
+}
+
 /**
  * Flatten parsed sheets into a compact, model-friendly text block. Trailing
  * empty cells are dropped, fully-empty rows are skipped, and everything is
