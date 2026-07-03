@@ -127,3 +127,4 @@
 - [Mobile module TDZ cycle](mobile-module-tdz-cycle.md) — module-scope consts derived from imports in the RunContext import cycle TDZ-crash the real Expo web build (tests pass); use lazy getters.
 - [Headless e2e fallback](headless-e2e-fallback.md) — when the runTest tester never reaches the app, self-drive headless Chromium (temp-dir puppeteer-core) against $REPLIT_DEV_DOMAIN; gotchas inside.
 - [First-load sync form heal](sync-first-load-form-heal.md) — fresh-device sync apply misses the live form (stale dayStateRef); heal effect on currentRunId with empty-over-populated + recent-edit guards.
+- [Seeded placeholder runs](seeded-placeholder-runs.md) — auto-created blank day placeholder is `seeded` + local-only (never pushed, dropped on receive) or fresh devices pile blank runs onto peers; clients must never hold 0 runs.

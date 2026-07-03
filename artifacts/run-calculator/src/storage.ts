@@ -406,7 +406,33 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
 }
 
 export function freshDayState(): DayState {
-  return { runs: [{ id: genId(), brand: "", flavor: "" }], currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {} };
+  // The placeholder run is `seeded`: auto-created, not a user action. While it
+  // stays pristine it is excluded from sync pushes and dropped on receive once
+  // the shared day has real runs (see isPristineSeedRun) — otherwise every
+  // fresh device signing in mid-day adds a blank "Unnamed Run" to every peer's
+  // list via the additive union.
+  return { runs: [{ id: genId(), brand: "", flavor: "", seeded: true }], currentIndex: 0, date: todayStr(), substitutions: [], substitutionLog: [], stagedItems: {} };
+}
+
+// True when a run is still the untouched auto-created placeholder: flagged
+// `seeded` (freshDayState / daily rollover — never New Run, imports, or
+// schedule pull-ups), with blank identity/lifecycle meta AND an all-default
+// value. Such a run is local-only: buildSyncPayload skips it and the
+// sync-receive union drops it once the shared day has real runs. Any user
+// input (brand, notes, Start, a typed value) makes this false and the run
+// syncs normally. `value` is whatever would be pushed for the run (live form
+// for the current run, stored copy otherwise) so mid-typing is respected.
+export function isPristineSeedRun(run: RunMeta, value: unknown): boolean {
+  return (
+    !!run.seeded &&
+    !run.brand &&
+    !run.flavor &&
+    !(run.notes ?? "").trim() &&
+    !run.startedAt &&
+    !run.endedAt &&
+    (run.stoppages ?? []).length === 0 &&
+    deepEqual(value, DEFAULT_VALUES)
+  );
 }
 
 export function loadDayState(): DayState {

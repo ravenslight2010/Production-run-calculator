@@ -335,9 +335,27 @@ export function appStateToPayload(
   const rawMetaById = new Map<string, WebRunMeta>(
     (lastRaw?.dayState?.runs ?? []).map((m) => [m.id, m]),
   );
-  const runs = state.runs.map((run) => runToMeta(run, rawMetaById.get(run.id)));
+  // NEVER push the untouched auto-created placeholder run (app boot / daily
+  // rollover). Every fresh device starts with one, and pushing it lets the
+  // server's additive run-list union pin a blank "Unnamed Run" into every
+  // peer's day list — one per new device that signs in. The run stays
+  // local-only until the user gives it any data (then it's no longer pristine
+  // and syncs normally). Web parity: buildSyncPayload applies the same filter.
+  // runToMeta maps explicit fields only, so the `seeded` flag never travels.
+  const syncedRuns = state.runs.filter((run) => !isPristineSeedRun(run));
+  const runs = syncedRuns.map((run) => runToMeta(run, rawMetaById.get(run.id)));
   const runValues: Record<string, WebFormValues> = {};
-  for (const run of state.runs) runValues[run.id] = runToFormValues(run);
+  for (const run of syncedRuns) runValues[run.id] = runToFormValues(run);
+  // Drop edit stamps for the runs excluded above so a stray stamp can't pair
+  // with an absent value server-side (benign, but keeps the row clean).
+  if (syncedRuns.length !== state.runs.length) {
+    const pushed = new Set(syncedRuns.map((r) => r.id));
+    const upd: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(runValuesUpdatedAt)) {
+      if (pushed.has(id) || !state.runs.some((r) => r.id === id)) upd[id] = ts;
+    }
+    runValuesUpdatedAt = upd;
+  }
 
   // Spread the last remote payload first so web-only fields survive; then
   // override the fields mobile owns.
@@ -522,6 +540,46 @@ export function isEmptyFormValue(fv: WebFormValues | undefined): boolean {
   return deepEqual(fv, EMPTY_FORM_VALUES);
 }
 
+// True when a run is still the untouched auto-created placeholder: flagged
+// `seeded` (app boot / daily rollover — never New Run, reset run, or schedule
+// pull-ups), with blank identity/lifecycle meta AND all-default
+// settings/progress. Such a run is local-only: appStateToPayload skips it and
+// applyPayloadToState drops it once the shared day has real runs. Any user
+// input (brand, notes, Start, a typed value) makes this false and the run
+// syncs normally. Web parity: storage.isPristineSeedRun.
+export function isPristineSeedRun(run: RunState): boolean {
+  return (
+    !!run.seeded &&
+    !run.settings.brand &&
+    !run.settings.flavor &&
+    !(run.settings.notes ?? "").trim() &&
+    !run.startedAt &&
+    !run.endedAt &&
+    (run.stoppages ?? []).length === 0 &&
+    isEmptyFormValue(runToFormValues(run))
+  );
+}
+
+// Fresh local-only placeholder run (mirrors RunContext's makeNewRun + the
+// `seeded` flag). Defined here so applyPayloadToState can re-seed when a merge
+// would otherwise leave the day with ZERO runs — a peer's daily reset now
+// carries an EMPTY run list (its own placeholder is local-only), and a fully
+// tombstoned remote list can drain the union the same way. DEFAULT_SETTINGS /
+// DEFAULT_PROGRESS are only touched at CALL time (never module-eval) because
+// this module sits in a require cycle with RunContext (TDZ gotcha above).
+function freshSeedRun(): RunState {
+  return {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    settings: { ...DEFAULT_SETTINGS },
+    progress: { ...DEFAULT_PROGRESS },
+    stoppages: [],
+    startedAt: undefined,
+    endedAt: undefined,
+    isRunning: false,
+    seeded: true,
+  };
+}
+
 // Translate an incoming payload into a patch for the mobile AppState. Master-data
 // lists are union-merged unconditionally (matches the web app's brand handling).
 // The day's runs/dayState are replaced only when the reset guard accepts them:
@@ -673,14 +731,33 @@ export function applyPayloadToState(
       ? mappedRemote
       : (() => {
           const remoteIds = new Set(remoteRuns.map((m) => m.id));
-          const localOnly = prev.runs.filter((r) => !remoteIds.has(r.id));
+          const localOnly = prev.runs.filter((r) => {
+            if (remoteIds.has(r.id)) return false;
+            // Drop our untouched auto-created placeholder run once the shared
+            // day has real runs — it was never pushed (see appStateToPayload),
+            // and keeping it would leave a stray blank "Unnamed Run" appended
+            // to the adopted day on THIS device. Mid-edit safety: the caller
+            // defers remote applies while the user is actively editing
+            // (EDIT_QUIET_MS), and any typed data makes the run non-pristine.
+            if (remoteRuns.length > 0 && isPristineSeedRun(r)) return false;
+            return true;
+          });
           return [...mappedRemote, ...localOnly].filter(
             (r) => !delRunSet.has(String(r.id).trim().toLowerCase()),
           );
         })();
-    // On a true reset adopt the remote runs wholesale (web parity); same-day, keep
-    // the ≥1-run guard so a transient empty union never wipes our runs.
-    patch.runs = isReset ? mergedRuns : mergedRuns.length > 0 ? mergedRuns : prev.runs;
+    // Never leave the day with zero runs (the UI assumes ≥1). On a true reset
+    // adopt the remote runs wholesale (web parity) but re-seed a local-only
+    // placeholder if the reset arrived with an EMPTY run list (the resetting
+    // peer's own placeholder is local-only now); same-day, keep the ≥1-run
+    // guard so a transient empty union never wipes our runs.
+    patch.runs = isReset
+      ? mergedRuns.length > 0
+        ? mergedRuns
+        : [freshSeedRun()]
+      : mergedRuns.length > 0
+        ? mergedRuns
+        : prev.runs;
     patch.currentIndex = Math.max(0, Math.min(prev.currentIndex, patch.runs.length - 1));
     if (ds.shiftNotes !== undefined) patch.shiftNotes = ds.shiftNotes;
     if (ds.runToTime !== undefined) patch.runToTime = ds.runToTime;

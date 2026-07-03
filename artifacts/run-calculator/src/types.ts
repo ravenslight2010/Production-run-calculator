@@ -256,6 +256,16 @@ export type RunMeta = {
   // peer/server copy (e.g. a refresh moments after pressing Start, before the
   // push landed). Absent stamps fall back to the old remote-wins behavior.
   metaUpdatedAt?: number;
+  // True when this run was AUTO-created as the day's placeholder (fresh device
+  // sign-in, daily rollover) rather than by a user action (New Run / import /
+  // schedule pull-up). While such a run is still pristine (blank brand/flavor/
+  // notes, never started, all-default values) it is LOCAL-ONLY: it is excluded
+  // from every sync push and dropped on receive once the shared day has real
+  // runs — otherwise every fresh device that signs in mid-day adds a blank
+  // "Unnamed Run" to everyone's list via the additive union. The flag is
+  // stripped at the push boundary, so it never travels over the wire; the
+  // moment the run gains any data it stops being pristine and syncs normally.
+  seeded?: boolean;
 };
 
 export type DayState = {

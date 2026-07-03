@@ -82,6 +82,7 @@ import {
   pickCurrentRunPushValue,
   isEmptyOverPopulated,
   shouldHealFormFromStored,
+  isPristineSeedRun,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
   profileKeyIsTombstoned,
@@ -3555,7 +3556,7 @@ export default function Home() {
           // an incoming payload that predates it. The run-deletion tombstone strips
           // ids deleted on a peer so the union can't resurrect them.
           const remoteRuns = payload.dayState.runs;
-          const newRuns = isReset
+          const mergedRuns = isReset
             ? remoteRuns
             : (() => {
                 // Per-run lifecycle LWW: for a run BOTH sides have, keep whichever
@@ -3572,11 +3573,40 @@ export default function Home() {
                   return lr && (lr.metaUpdatedAt ?? 0) > (rr.metaUpdatedAt ?? 0) ? lr : rr;
                 });
                 const remoteIds = new Set(remoteRuns.map(r => r.id));
-                const localOnly = prev.runs.filter(r => !remoteIds.has(r.id));
+                const currentLocalId = prev.runs[prev.currentIndex]?.id;
+                const localOnly = prev.runs.filter(r => {
+                  if (remoteIds.has(r.id)) return false;
+                  // Drop our untouched auto-created placeholder run once the
+                  // shared day has real runs — it was never pushed (see
+                  // buildSyncPayload), and keeping it would leave a stray blank
+                  // "Unnamed Run" appended to the adopted day on THIS device.
+                  // Guards: never drop while the user might be mid-typing into
+                  // it (recent local edit, or the live form already holds
+                  // non-default values for it).
+                  if (
+                    remoteRuns.length > 0 &&
+                    isPristineSeedRun(r, loadRunValues(r.id)) &&
+                    !(
+                      r.id === currentLocalId &&
+                      (Date.now() - lastLocalEditRef.current < 2000 ||
+                        !deepEqual(form.getValues(), DEFAULT_VALUES))
+                    )
+                  ) {
+                    return false;
+                  }
+                  return true;
+                });
                 return [...mergedRemote, ...localOnly].filter(
                   r => !deletedRunSet.has(r.id.trim().toLowerCase()),
                 );
               })();
+          // Never leave the day with zero runs (the UI assumes ≥1). A reset
+          // pushed by a peer now carries an EMPTY run list (its own placeholder
+          // is local-only), and a fully-tombstoned remote list can also drain
+          // the union — seed a fresh local-only placeholder in that case.
+          const newRuns = mergedRuns.length > 0
+            ? mergedRuns
+            : [{ id: genId(), brand: "", flavor: "", seeded: true }];
           const newIndex = Math.max(0, Math.min(prev.currentIndex, newRuns.length - 1));
           // A true daily reset bumps resetAt strictly forward: adopt the remote
           // day's overlays wholesale so the reset's empty maps clear ours. When
@@ -4102,27 +4132,44 @@ export default function Home() {
   function buildSyncPayload(ds: DayState): SyncPayload {
     const curId = ds.runs[ds.currentIndex]?.id;
     const runValues: Record<string, FormValues> = {};
+    const pushRuns: RunMeta[] = [];
     for (const run of ds.runs) {
-      if (run.id === curId) {
-        // The current run is normally pushed from the LIVE form so an in-progress
-        // edit is shared immediately. But the form is transiently all-default
-        // during mount/hydration and right after a programmatic form.reset()
-        // (run switch, daily rollover, sync-apply) before the run's real values
-        // are loaded back in. The stamp map (runValuesUpdatedAt below) is read
-        // independently from localStorage and still carries this run's real edit
-        // time, so a push firing in that window (periodic 30s, SSE-reconnect
-        // re-push, or any schedulePush) would emit an EMPTY value paired with a
-        // REAL stamp — and because the stamps are equal the per-run lost-update
-        // guard on every peer ACCEPTS the empty value, wiping real data on the
-        // shared day-state row (the recurring "I entered it, refreshed, it
-        // vanished" loss). Never push an all-default current-run form over a
-        // populated stored value; fall back to the durable localStorage copy.
-        // Mirrors the autosave [v] effect's guard, applied at the push boundary
-        // so it covers EVERY push path, not just direct edits.
-        runValues[run.id] = pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id));
-      } else {
-        runValues[run.id] = loadRunValues(run.id);
-      }
+      // The current run is normally pushed from the LIVE form so an in-progress
+      // edit is shared immediately. But the form is transiently all-default
+      // during mount/hydration and right after a programmatic form.reset()
+      // (run switch, daily rollover, sync-apply) before the run's real values
+      // are loaded back in. The stamp map (runValuesUpdatedAt below) is read
+      // independently from localStorage and still carries this run's real edit
+      // time, so a push firing in that window (periodic 30s, SSE-reconnect
+      // re-push, or any schedulePush) would emit an EMPTY value paired with a
+      // REAL stamp — and because the stamps are equal the per-run lost-update
+      // guard on every peer ACCEPTS the empty value, wiping real data on the
+      // shared day-state row (the recurring "I entered it, refreshed, it
+      // vanished" loss). Never push an all-default current-run form over a
+      // populated stored value; fall back to the durable localStorage copy.
+      // Mirrors the autosave [v] effect's guard, applied at the push boundary
+      // so it covers EVERY push path, not just direct edits.
+      const value =
+        run.id === curId
+          ? pickCurrentRunPushValue(form.getValues(), loadRunValues(run.id))
+          : loadRunValues(run.id);
+      // NEVER push the untouched auto-created placeholder run. Every fresh
+      // device/browser starts with one (freshDayState), and pushing it lets the
+      // server's additive run-list union pin a blank "Unnamed Run" into every
+      // peer's day list — one per new device that signs in. The run stays
+      // local-only until the user gives it any data (then it's no longer
+      // pristine and syncs normally). The `seeded` flag is stripped below so it
+      // never travels over the wire.
+      if (isPristineSeedRun(run, value)) continue;
+      const { seeded: _seeded, ...meta } = run;
+      pushRuns.push(meta);
+      runValues[run.id] = value;
+    }
+    // Drop edit stamps for runs excluded above so a stray stamp can't pair with
+    // an absent value server-side (benign, but keeps the row clean).
+    const runValuesUpdatedAt = { ...loadRunValuesUpdated() };
+    for (const run of ds.runs) {
+      if (!(run.id in runValues)) delete runValuesUpdatedAt[run.id];
     }
     // Collect brand+flavor profiles from localStorage
     const brandProfiles: Record<string, Partial<FormValues>> = {};
@@ -4137,9 +4184,9 @@ export default function Home() {
       }
     }
     return {
-      dayState: { runs: overlayRunMetaStamps(ds.runs), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
+      dayState: { runs: overlayRunMetaStamps(pushRuns), shiftNotes: ds.shiftNotes, runToTime: dayStateRef.current.runToTime, resetAt: ds.resetAt, date: todayStr(), substitutions: ds.substitutions ?? [], substitutionLog: ds.substitutionLog ?? [], stagedItems: ds.stagedItems ?? {} },
       runValues,
-      runValuesUpdatedAt: loadRunValuesUpdated(),
+      runValuesUpdatedAt,
       brands: loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b)),
       brandFlavors: loadBrandFlavors(),
       ingredientTypes: loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),

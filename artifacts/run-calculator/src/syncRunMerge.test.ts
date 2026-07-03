@@ -168,11 +168,97 @@ describe("applyPayloadToState — additive run-union", () => {
     expect(patch.deletedItems?.runs).toBeUndefined();
   });
 
-  it("adopts an empty remote run list wholesale on reset (web parity; no ≥1 fallback on reset)", () => {
+  it("re-seeds a local-only placeholder when a reset arrives with an empty run list", () => {
+    // A peer's daily reset now carries an EMPTY run list (its own placeholder
+    // is local-only, never pushed). Clients must never hold zero runs, so the
+    // receive path seeds a fresh local-only placeholder instead.
     const stale = localRun("old1");
     const prev = prevState([stale]);
     const payload = payloadWith({ runIds: [], resetAt: 1 });
     const { patch } = mapping.applyPayloadToState(payload, prev, {});
-    expect(patch.runs).toEqual([]); // reset = remote wholesale, even when empty
+    expect(patch.runs).toHaveLength(1);
+    expect(patch.runs[0].seeded).toBe(true); // local-only placeholder
+    expect(patch.runs[0].id).not.toBe("old1"); // stale local run NOT kept
+    expect(patch.runs[0].startedAt).toBeUndefined();
+  });
+});
+
+// A pristine seed run: auto-created placeholder (seeded flag), untouched —
+// blank identity, never started, all-default settings/progress. Matches what
+// INITIAL_STATE / buildNextDayState create (with the stubbed DEFAULTs = {}).
+function pristineSeedRun(id: string): any {
+  return {
+    id,
+    settings: {},
+    progress: {},
+    stoppages: [],
+    startedAt: undefined,
+    endedAt: undefined,
+    isRunning: false,
+    seeded: true,
+  };
+}
+
+describe("pristine placeholder runs stay local-only (the 'Unnamed Run pile-up' fix)", () => {
+  it("appStateToPayload excludes an untouched seeded placeholder from the push", () => {
+    const seed = pristineSeedRun("seed1");
+    const real = localRun("r1");
+    const state = prevState([seed, real]);
+    const payload = mapping.appStateToPayload(state, null, {
+      seed1: 111,
+      r1: 222,
+    });
+    const ids = payload.dayState.runs.map((m: any) => m.id);
+    expect(ids).toEqual(["r1"]); // placeholder never pushed
+    expect(payload.runValues.seed1).toBeUndefined();
+    expect(payload.runValuesUpdatedAt.seed1).toBeUndefined(); // stray stamp dropped
+    expect(payload.runValuesUpdatedAt.r1).toBe(222);
+  });
+
+  it("appStateToPayload DOES push a seeded run once it has any user data", () => {
+    const touched = { ...pristineSeedRun("seed1"), settings: { brand: "Bella" } };
+    const state = prevState([touched]);
+    const payload = mapping.appStateToPayload(state, null, {});
+    expect(payload.dayState.runs.map((m: any) => m.id)).toEqual(["seed1"]);
+    // The seeded flag itself must never travel over the wire.
+    expect(payload.dayState.runs[0].seeded).toBeUndefined();
+  });
+
+  it("isPristineSeedRun is false without the seeded flag (user-created blank run)", () => {
+    const userBlank = { ...pristineSeedRun("u1"), seeded: undefined };
+    expect(mapping.isPristineSeedRun(userBlank)).toBe(false);
+    // ...so appStateToPayload still pushes it (New Run is a deliberate action).
+    const payload = mapping.appStateToPayload(prevState([userBlank]), null, {});
+    expect(payload.dayState.runs.map((m: any) => m.id)).toEqual(["u1"]);
+  });
+
+  it("receive drops our pristine placeholder once the shared day has real runs", () => {
+    // Fresh device signs in mid-day: local has only the auto placeholder; the
+    // shared day already has real runs. Adopt the remote day WITHOUT keeping a
+    // stray blank run.
+    const seed = pristineSeedRun("seed1");
+    const prev = prevState([seed]);
+    const payload = payloadWith({ runIds: ["r1", "r2"] });
+    const { patch } = mapping.applyPayloadToState(payload, prev, {});
+    expect(patch.runs.map((r: any) => r.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("receive keeps the placeholder when the remote day has no runs", () => {
+    const seed = pristineSeedRun("seed1");
+    const prev = prevState([seed]);
+    const payload = payloadWith({ runIds: [] });
+    const { patch, acceptedDay } = mapping.applyPayloadToState(payload, prev, {});
+    expect(acceptedDay).toBe(true);
+    expect(patch.runs.map((r: any) => r.id)).toEqual(["seed1"]); // never 0 runs
+  });
+
+  it("receive keeps a seeded run that gained user data (no longer pristine)", () => {
+    const touched = { ...pristineSeedRun("seed1"), settings: { brand: "Bella" } };
+    const prev = prevState([touched]);
+    const payload = payloadWith({ runIds: ["r1"] });
+    const { patch } = mapping.applyPayloadToState(payload, prev, {});
+    const ids = patch.runs.map((r: any) => r.id);
+    expect(ids).toContain("r1");
+    expect(ids).toContain("seed1"); // real (in-progress) local run survives
   });
 });

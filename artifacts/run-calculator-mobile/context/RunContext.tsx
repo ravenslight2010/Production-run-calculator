@@ -248,6 +248,15 @@ export interface RunState {
   // strictly-newer-stamped copy so a just-started run can't be clobbered back
   // to "unstarted" by a stale peer/server copy (web parity).
   metaUpdatedAt?: number;
+  // True when this run was AUTO-created as the day's placeholder (app boot,
+  // daily rollover) rather than by a user action (New Run / reset run /
+  // schedule pull-up). While it stays pristine (blank brand/flavor/notes, never
+  // started, all-default settings/progress) it is LOCAL-ONLY: excluded from
+  // every sync push and dropped on receive once the shared day has real runs —
+  // otherwise every fresh device signing in mid-day adds a blank "Unnamed Run"
+  // to every peer's list via the additive union (web parity: RunMeta.seeded).
+  // Never travels over the wire; any user input makes the run sync normally.
+  seeded?: boolean;
 }
 
 export interface RunCalc {
@@ -522,7 +531,8 @@ function buildNextDayState(cur: AppState, today: string): AppState {
   };
   return {
     ...cur,
-    runs: [makeNewRun()],
+    // Auto-created placeholder: local-only while pristine (see `seeded`).
+    runs: [{ ...makeNewRun(), seeded: true }],
     currentIndex: 0,
     shiftNotes: "",
     substitutions: [],
@@ -1625,7 +1635,8 @@ interface RunClockValue {
 const RunClockContext = createContext<RunClockValue | null>(null);
 
 const INITIAL_STATE: AppState = {
-  runs: [makeNewRun()],
+  // Auto-created placeholder: local-only while pristine (see `seeded`).
+  runs: [{ ...makeNewRun(), seeded: true }],
   currentIndex: 0,
   shiftNotes: "",
   runToTime: "",
@@ -2608,7 +2619,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     };
     const next: AppState = {
       ...cur,
-      runs: [makeNewRun()],
+      // Auto-created placeholder: local-only while pristine (see `seeded`).
+      runs: [{ ...makeNewRun(), seeded: true }],
       currentIndex: 0,
       shiftNotes: "",
       substitutions: [],
