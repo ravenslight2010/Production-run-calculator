@@ -20,7 +20,10 @@ the failure mode is an import that "succeeds" but loses data (truncated output
   chunk through the REAL `/ai/parse-spec-sheet`, merges with
   `mergeParsedSpecImports`, asserts zero loss (profiles, recipes, rows,
   targets). Needs the API server up + a manager account
-  (`VERIFY_USERNAME`/`VERIFY_PASSWORD`). Last full pass: 2026-07-02.
+  (`VERIFY_USERNAME`/`VERIFY_PASSWORD`). Last full pass: 2026-07-03 (also
+  live-verified recipe-name grounding: paraphrase "Ultra Thin Dough Recipe" +
+  punctuation variant "Aldos Sauce" snapped to known names, partial-overlap
+  name kept + flagged as likely duplicate, genuinely new recipe untouched).
 - `artifacts/api-server/scripts/e2e-spec-roundtrip.ts` — parse-RULE stress
   (small dataset, xlsx round-trip, qualifier brands etc.). Its deterministic
   xlsx write→read→grid half is now also guarded in CI without AI:
