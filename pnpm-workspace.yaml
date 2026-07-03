@@ -157,9 +157,26 @@ overrides:
   "@expo/ngrok-bin>@expo/ngrok-bin-win32-x64": "-"
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
-  esbuild: "0.27.3"
-  # typedoc (via orval devDependency) pulls a vulnerable markdown-it/linkify-it; force the patched version
+  # esbuild <0.28.1 allows arbitrary file read via the dev server on Windows (GHSA-g7r4-m6w7-qqqr)
+  esbuild: "^0.28.1"
+  # typedoc (via orval devDependency) pulls a vulnerable markdown-it/linkify-it; force the patched versions
   linkify-it: "^5.0.2"
+  markdown-it: "^14.2.0"
+  # nested vite (e.g. via vitest) doesn't automatically pick up the workspace catalog version
+  vite: "catalog:"
+  # undici <6.27.0 has multiple advisories (header injection, WS DoS, keep-alive poisoning, SameSite downgrade)
+  "undici@6": "^6.27.0"
+  # uuid <11.1.1 has a missing buffer bounds check when a buffer is provided
+  uuid: "^11.1.1"
+  # js-yaml has a quadratic-complexity DoS in merge key handling; patched per major line
+  "js-yaml@3": "^3.15.0"
+  "js-yaml@4": "^4.2.0"
+  # qs.stringify can crash with a TypeError on malformed comma-format arrays (DoS)
+  qs: "^6.15.2"
+  # postcss has an XSS via unescaped </style> in stringified output
+  postcss: "^8.5.14"
+  # @babel/core allows arbitrary file read via sourceMappingURL comments
+  "@babel/core": "^7.29.6"
 
 allowBuilds:
   esbuild: set this to true or false

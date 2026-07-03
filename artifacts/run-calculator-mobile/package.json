@@ -83,6 +83,6 @@
     "expo-notifications": "~0.32.17",
     "expo-sharing": "~14.0.8",
     "react-native-sse": "^1.2.1",
-    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "xlsx": "npm:@e965/xlsx@^0.20.3"
   }
 }
