@@ -333,6 +333,7 @@ import {
   buildQuickBooksCsv,
   parseRunWorkbook,
   filterImportFromDate,
+  skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
@@ -5797,6 +5798,7 @@ export default function Home() {
     setImportProgress({ done: 0, total: byDate.length });
     let done = 0;
     let failed = 0;
+    let skippedToday = 0;
     let lastErrorDetail = "";
     for (const day of byDate) {
       const date = day.date;
@@ -5814,9 +5816,22 @@ export default function Home() {
       const keptIds = new Set(keptRuns.map(r => r.id));
       const keptRunValues: Record<string, FormValues> = {};
       for (const id of keptIds) if (existingRunValues[id]) keptRunValues[id] = existingRunValues[id];
+      // TODAY only: drop file rows matching runs the floor already started or
+      // finished (they're preserved in keptRuns above), so a re-import that
+      // includes today can't list the same run twice. One already-ran run
+      // consumes one file row; unmatched rows still import normally.
+      let dayRuns = day.runs;
+      if (date === todayStr()) {
+        const alreadyRan = existingRuns
+          .filter(r => r.startedAt || r.endedAt)
+          .map(r => ({ brand: r.brand ?? "", flavor: r.flavor ?? "" }));
+        const skipRes = skipAlreadyRanRuns(dayRuns, alreadyRan);
+        dayRuns = skipRes.rows;
+        skippedToday += skipRes.skipped;
+      }
       const newRuns: RunMeta[] = [];
       const newRunValues: Record<string, FormValues> = {};
-      for (const r of day.runs) {
+      for (const r of dayRuns) {
         const id = genId();
         const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
         const base: FormValues = profile ?? DEFAULT_VALUES;
@@ -5881,16 +5896,18 @@ export default function Home() {
     setShowImportDialog(false);
     setImportResult(null);
     setImportIntoEditor(false);
+    // Tell the user why today's run count may be lower than the file's.
+    const skippedNote = skippedToday > 0 ? ` ${skippedToday} already ran today, skipped.` : "";
     if (failed === 0) {
       toast({
         title: "Import complete",
-        description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.`,
+        description: `Runs imported across ${byDate.length} day${byDate.length === 1 ? "" : "s"}.${skippedNote}`,
       });
     } else {
       toast({
         variant: "destructive",
         title: failed === byDate.length ? "Import failed" : "Import partly failed",
-        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.`,
+        description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.${skippedNote}`,
       });
     }
   }

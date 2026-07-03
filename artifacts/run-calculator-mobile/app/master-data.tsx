@@ -42,6 +42,7 @@ import {
   parseRunWorkbookBase64,
   parseWorkbookObject,
   filterImportFromDate,
+  skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
 import {
@@ -1093,6 +1094,7 @@ export default function MasterDataScreen() {
     undoMasterDataChange,
     addScheduledRun,
     importScheduledRuns,
+    allRuns,
   } = useRun();
   const { isManager, hasCapability } = useMe();
   const mixesQc = useQueryClient();
@@ -1146,6 +1148,7 @@ export default function MasterDataScreen() {
       payload.createBrands.forEach((b) => addListItem("brands", b));
       payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
       let count = 0;
+      let skipped = 0;
       if (payload.multiDay) {
         const byDate = (payload.byDate ?? []).map((day) => ({
           date: day.date,
@@ -1157,8 +1160,21 @@ export default function MasterDataScreen() {
             notes: r.notes,
           })),
         }));
-        count = byDate.reduce((n, d) => n + d.runs.length, 0);
-        importScheduledRuns(byDate);
+        // TODAY only: drop file rows matching live runs already started/ended so
+        // a re-import that includes today can't duplicate work the floor already
+        // did (mirrors web commitMultiDayImport).
+        const alreadyRan = allRuns
+          .filter((r) => r.startedAt || r.endedAt)
+          .map((r) => ({ brand: r.settings.brand, flavor: r.settings.flavor }));
+        const today = todayStr();
+        const effective = byDate.map((day) => {
+          if (day.date !== today) return day;
+          const res = skipAlreadyRanRuns(day.runs, alreadyRan);
+          skipped += res.skipped;
+          return { ...day, runs: res.rows };
+        });
+        count = effective.reduce((n, d) => n + d.runs.length, 0);
+        importScheduledRuns(effective);
       } else {
         payload.runs.forEach((r) => {
           const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
@@ -1177,7 +1193,7 @@ export default function MasterDataScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         "Import complete",
-        `${count} run${count === 1 ? "" : "s"} imported.`,
+        `${count} run${count === 1 ? "" : "s"} imported.${skipped > 0 ? ` ${skipped} already ran today, skipped.` : ""}`,
       );
     } catch (e) {
       Alert.alert(

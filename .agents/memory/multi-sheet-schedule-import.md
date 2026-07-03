@@ -28,6 +28,19 @@ then run rows; subtotal rows have blank brand/flavor and are skipped).
 manual runs and may have already started an imported run; a blind append would
 duplicate on every re-import, and a blind wipe would destroy manual/in-progress work.
 
+## Today's already-ran rows are skipped (user-confirmed)
+When the file includes TODAY, rows matching runs the floor already started or
+finished are dropped one-for-one by brand+flavor (case-insensitive) via the pure
+`skipAlreadyRanRuns` helper in both runExcel copies; unmatched today-rows still
+import. The skipped count is surfaced in the import summary/toast.
+**Why:** the already-ran runs are preserved anyway, so importing their file rows
+duplicated them (once done/in-progress, once as a fresh plan).
+**How to apply:** web applies it inside `commitMultiDayImport` against the synced
+day's `startedAt`/`endedAt` runs; mobile applies it in each `importScheduledRuns`
+CALLER against live `allRuns` — it can't live inside RunContext because
+utils/runExcel imports from RunContext (circular import). A started run is left
+alone; its file row is skipped (no partial-progress reconciliation).
+
 ## Parity note (intentional asymmetry, NOT a bug)
 - Web `commitMultiDayImport` additionally preserves imported runs that are already
   `startedAt`/`endedAt` (don't disturb an in-progress/finished day).

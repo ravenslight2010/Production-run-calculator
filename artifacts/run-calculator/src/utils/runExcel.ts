@@ -435,6 +435,41 @@ export function filterImportFromDate(result: ImportParseResult, fromISO: string)
   };
 }
 
+/**
+ * Drop file rows for TODAY that correspond to runs the floor already started or
+ * finished, so a schedule re-import that includes today can't duplicate work
+ * already done. Matching is by brand+flavor (case-insensitive, trimmed) and
+ * consumes one already-ran run per matched row: if the file lists the same
+ * brand+flavor twice and only one was run, one row still imports. Rows with no
+ * match pass through unchanged. Pure — mirrored VERBATIM web + mobile.
+ */
+export function skipAlreadyRanRuns<T extends { brand: string; flavor: string }>(
+  rows: T[],
+  ranRuns: { brand: string; flavor: string }[],
+): { rows: T[]; skipped: number } {
+  const keyOf = (brand: string, flavor: string) =>
+    `${(brand ?? "").trim().toLowerCase()}|||${(flavor ?? "").trim().toLowerCase()}`;
+  // Count of not-yet-consumed already-ran runs per brand+flavor key.
+  const remaining = new Map<string, number>();
+  for (const r of ranRuns) {
+    const key = keyOf(r.brand, r.flavor);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const kept: T[] = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const key = keyOf(row.brand, row.flavor);
+    const n = remaining.get(key) ?? 0;
+    if (n > 0) {
+      remaining.set(key, n - 1);
+      skipped++;
+    } else {
+      kept.push(row);
+    }
+  }
+  return { rows: kept, skipped };
+}
+
 // ---------------------------------------------------------------------------
 // Fuzzy matching (Levenshtein) for brand/flavor mapping
 // ---------------------------------------------------------------------------

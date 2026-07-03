@@ -193,6 +193,7 @@ import {
   workbookIsSchedule,
   parseWorkbookObject,
   filterImportFromDate,
+  skipAlreadyRanRuns,
   isNumericLikeCell,
 } from "@/utils/runExcel";
 
@@ -447,5 +448,100 @@ describe("filterImportFromDate", () => {
     const invalid = out.errors.filter((e) => e.message.startsWith("Invalid Units"));
     expect(invalid).toHaveLength(1);
     expect(invalid[0].date).toBe("2026-06-29");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// skipAlreadyRanRuns — today's file rows vs already started/finished runs
+// ---------------------------------------------------------------------------
+//
+// Guards the "don't duplicate today's runs on re-import" rule: file rows for
+// today matching a run the floor already started/ended are dropped one-for-one.
+// Mirrored verbatim web <-> mobile, so testing the web copy guards both.
+
+describe("skipAlreadyRanRuns", () => {
+  const row = (brand: string, flavor: string, casesPlanned = 10) => ({
+    brand,
+    flavor,
+    casesPlanned,
+  });
+
+  it("skips a file row matching an already-ran run and keeps the rest", () => {
+    const out = skipAlreadyRanRuns(
+      [row("Acme", "Cheese"), row("Acme", "Pepperoni")],
+      [{ brand: "Acme", flavor: "Cheese" }],
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.rows.map((r) => r.flavor)).toEqual(["Pepperoni"]);
+  });
+
+  it("matches brand+flavor case-insensitively and trimmed", () => {
+    const out = skipAlreadyRanRuns(
+      [row("  ACME ", " cheese ")],
+      [{ brand: "acme", flavor: "Cheese" }],
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.rows).toHaveLength(0);
+  });
+
+  it("consumes one already-ran run per matched row (duplicate file rows)", () => {
+    // File lists the same brand+flavor twice; only one was run → one imports.
+    const out = skipAlreadyRanRuns(
+      [row("Acme", "Cheese", 5), row("Acme", "Cheese", 7)],
+      [{ brand: "Acme", flavor: "Cheese" }],
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0].casesPlanned).toBe(7);
+  });
+
+  it("skips both duplicate file rows when two matching runs already ran", () => {
+    const out = skipAlreadyRanRuns(
+      [row("Acme", "Cheese"), row("Acme", "Cheese")],
+      [
+        { brand: "Acme", flavor: "Cheese" },
+        { brand: "acme", flavor: "cheese" },
+      ],
+    );
+    expect(out.skipped).toBe(2);
+    expect(out.rows).toHaveLength(0);
+  });
+
+  it("passes all rows through when nothing already ran", () => {
+    const rows = [row("Acme", "Cheese"), row("Beta", "Veggie")];
+    const out = skipAlreadyRanRuns(rows, []);
+    expect(out.skipped).toBe(0);
+    expect(out.rows).toEqual(rows);
+  });
+
+  it("does not skip on brand-only or flavor-only matches", () => {
+    const out = skipAlreadyRanRuns(
+      [row("Acme", "Cheese")],
+      [
+        { brand: "Acme", flavor: "Pepperoni" },
+        { brand: "Beta", flavor: "Cheese" },
+      ],
+    );
+    expect(out.skipped).toBe(0);
+    expect(out.rows).toHaveLength(1);
+  });
+
+  it("treats empty flavor as its own key", () => {
+    const out = skipAlreadyRanRuns(
+      [row("Acme", ""), row("Acme", "Cheese")],
+      [{ brand: "Acme", flavor: "" }],
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.rows.map((r) => r.flavor)).toEqual(["Cheese"]);
+  });
+
+  it("preserves row order and extra fields on kept rows", () => {
+    const rows = [
+      { brand: "A", flavor: "x", casesPlanned: 1, notes: "n1" },
+      { brand: "B", flavor: "y", casesPlanned: 2, notes: "n2" },
+      { brand: "C", flavor: "z", casesPlanned: 3, notes: "n3" },
+    ];
+    const out = skipAlreadyRanRuns(rows, [{ brand: "B", flavor: "y" }]);
+    expect(out.rows).toEqual([rows[0], rows[2]]);
   });
 });

@@ -5,6 +5,7 @@ import * as Haptics from "expo-haptics";
 import React from "react";
 import {
   Platform,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,6 +35,7 @@ import {
   parseRunWorkbookBase64,
   parseWorkbookObject,
   filterImportFromDate,
+  skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
 import { shareShiftReport } from "@/utils/shiftReport";
@@ -380,7 +382,27 @@ export default function SummaryScreen() {
           notes: r.notes,
         })),
       }));
-      importScheduledRuns(byDate);
+      // TODAY only: drop file rows matching live runs already started/ended so
+      // a re-import that includes today can't duplicate work the floor already
+      // did (mirrors web commitMultiDayImport).
+      const alreadyRan = allRuns
+        .filter((r) => r.startedAt || r.endedAt)
+        .map((r) => ({ brand: r.settings.brand, flavor: r.settings.flavor }));
+      let skipped = 0;
+      const today = todayStr();
+      const effective = byDate.map((day) => {
+        if (day.date !== today) return day;
+        const res = skipAlreadyRanRuns(day.runs, alreadyRan);
+        skipped += res.skipped;
+        return { ...day, runs: res.rows };
+      });
+      importScheduledRuns(effective);
+      if (skipped > 0) {
+        Alert.alert(
+          "Some runs skipped",
+          `${skipped} run${skipped === 1 ? "" : "s"} already ran today, skipped.`,
+        );
+      }
     } else {
       payload.runs.forEach((r) => {
         const dieType = brandProfiles[profileKey(r.brand, r.flavor)]?.dieType ?? "";
