@@ -123,3 +123,4 @@
 - [xlsx audit false positive](xlsx-audit-false-positive.md) — CDN-sourced xlsx is patched but still flagged since SheetJS abandoned the npm name; alias to npm:@e965/xlsx to clear scanners.
 - [Password-change session invalidation](password-change-session-invalidation.md) — invalidateUserSessions fences tokens by iat vs passwordChangedAt (same-second grace); approver privilege boundary via canManagePasswordResetFor.
 - [HMR dual-context crash](hmr-context-split.md) — provider files must export ONLY components (Fast Refresh rule) or HMR splits the module into two contexts; auth context lives in a hook-only module + dev globalThis singleton.
+- [Mobile module TDZ cycle](mobile-module-tdz-cycle.md) — module-scope consts derived from imports in the RunContext import cycle TDZ-crash the real Expo web build (tests pass); use lazy getters.

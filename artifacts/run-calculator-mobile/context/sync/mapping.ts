@@ -501,18 +501,27 @@ function deepEqual(a: unknown, b: unknown): boolean {
 // runToFormValues ignores the id, so this is deterministic. Used to detect the
 // empty-value-with-real-stamp corruption on receive (web parity with
 // DEFAULT_VALUES / isEmptyOverPopulated).
-const EMPTY_FORM_VALUES: WebFormValues = runToFormValues({
-  id: "",
-  settings: DEFAULT_SETTINGS,
-  progress: DEFAULT_PROGRESS,
-  stoppages: [],
-  startedAt: undefined,
-  endedAt: undefined,
-  isRunning: false,
-});
+// Computed lazily: this module and RunContext import each other, so reading
+// DEFAULT_SETTINGS/DEFAULT_PROGRESS at module-evaluation time hits the TDZ
+// (RunContext hasn't finished evaluating yet) and crashes the app at startup.
+let emptyFormValuesCache: WebFormValues | null = null;
+function getEmptyFormValues(): WebFormValues {
+  if (!emptyFormValuesCache) {
+    emptyFormValuesCache = runToFormValues({
+      id: "",
+      settings: DEFAULT_SETTINGS,
+      progress: DEFAULT_PROGRESS,
+      stoppages: [],
+      startedAt: undefined,
+      endedAt: undefined,
+      isRunning: false,
+    });
+  }
+  return emptyFormValuesCache;
+}
 
 export function isEmptyFormValue(fv: WebFormValues | undefined): boolean {
-  return fv !== undefined && deepEqual(fv, EMPTY_FORM_VALUES);
+  return fv !== undefined && deepEqual(fv, getEmptyFormValues());
 }
 
 // Translate an incoming payload into a patch for the mobile AppState. Master-data
