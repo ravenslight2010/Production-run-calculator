@@ -2068,10 +2068,26 @@ export interface AppendConversationInput {
 }
 
 /**
- * A learned mapping from a merged-away ingredient name to the kept name.
+ * Which merge tab a suggestion/alias/denial belongs to, so pools never leak across tabs. Defaults to "ingredient" for backward compatibility.
+ */
+export type MergeSuggestCategory = typeof MergeSuggestCategory[keyof typeof MergeSuggestCategory];
+
+
+export const MergeSuggestCategory = {
+  ingredient: 'ingredient',
+  mixes: 'mixes',
+  dough: 'dough',
+  sauce: 'sauce',
+  cheese: 'cheese',
+  brand: 'brand',
+  flavor: 'flavor',
+} as const;
+
+/**
+ * A learned mapping from a merged-away name to the kept name.
  */
 export interface MergeAlias {
-  /** The ingredient name that was merged away (matched case-insensitively) */
+  /** The name that was merged away (matched case-insensitively) */
   externalName: string;
   /** The canonical name it was folded into */
   canonicalName: string;
@@ -2084,10 +2100,13 @@ export interface MergeAliasList {
 export interface SaveMergeAliasesInput {
   /** The batch of merge aliases to upsert */
   aliases: MergeAlias[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand this batch is scoped to. */
+  brand?: string;
 }
 
 /**
- * An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).
+ * An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).
  */
 export interface DeniedMerge {
   /** One name of the denied pair */
@@ -2103,6 +2122,9 @@ export interface DeniedMergeList {
 export interface SaveDeniedMergesInput {
   /** The batch of denied pairs to add or remove */
   pairs: DeniedMerge[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand this batch is scoped to. */
+  brand?: string;
 }
 
 export interface MergedAwayList {
@@ -2340,6 +2362,9 @@ export interface SuggestMergesInput {
   names: string[];
   /** Learned merge aliases to ground the suggestions */
   aliases?: MergeAlias[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand `names` was scoped to — used only to tailor the AI prompt's wording. */
+  brand?: string;
 }
 
 export interface MergeSuggestion {
@@ -2750,4 +2775,26 @@ export const ListQualityChecksStatus = {
   warn: 'warn',
   fail: 'fail',
 } as const;
+
+export type ListMergeAliasesParams = {
+/**
+ * Which merge tab's pool to scope the alias list to. Defaults to "ingredient" for backward compatibility.
+ */
+category?: MergeSuggestCategory;
+/**
+ * When category is "flavor", scopes the alias list to a single brand's flavor pool. Ignored for every other category.
+ */
+brand?: string;
+};
+
+export type ListDeniedMergesParams = {
+/**
+ * Which merge tab's pool to scope the denied-pair list to. Defaults to "ingredient" for backward compatibility.
+ */
+category?: MergeSuggestCategory;
+/**
+ * When category is "flavor", scopes the denied-pair list to a single brand's flavor pool. Ignored for every other category.
+ */
+brand?: string;
+};
 

@@ -9,14 +9,20 @@ import { z } from "zod/v4";
 // Shared factory-wide across all signed-in users, exactly like learned
 // spec-import aliases and photo aliases.
 //
-// Unlike spec-import aliases this table is FLAT (no kind/context): the mergeable
-// universe is a single de-duplicated pool of ingredient + die names, matched
-// case-insensitively on `externalName`. `externalName` is the merged-away name;
-// `canonicalName` is the name that was kept. `scope` isolates the sandbox
-// account's aliases from live.
+// The mergeable universe is matched case-insensitively on `externalName` within
+// a `category` ("ingredient" | "mixes" | "dough" | "sauce" | "cheese" | "brand" |
+// "flavor") so a learned alias from one merge tab never leaks into another
+// tab's pool. `category` defaults to "ingredient" for backward compatibility
+// with rows written before categories existed. `brand` further scopes
+// "flavor" rows to the single brand their flavor list belongs to (null for
+// every other category — a flavor name can legitimately repeat across
+// brands). `externalName` is the merged-away name; `canonicalName` is the name
+// that was kept. `scope` isolates the sandbox account's aliases from live.
 export const mergeAliasesTable = pgTable("merge_aliases", {
   id: serial("id").primaryKey(),
   scope: text("scope").notNull().default("live"),
+  category: text("category").notNull().default("ingredient"),
+  brand: text("brand"),
   externalName: text("external_name").notNull(),
   canonicalName: text("canonical_name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

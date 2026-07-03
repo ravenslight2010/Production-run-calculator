@@ -56,7 +56,10 @@ export function validateSuggestMergesBody(body: unknown): SuggestMergesValidatio
     return { ok: false, status: 400, error: `Too many aliases (max ${MAX_MERGE_ALIASES})` };
   }
 
-  return { ok: true, data: { ...data, names, aliases } };
+  const category = data.category ?? "ingredient";
+  const brand = (data.brand ?? "").trim().slice(0, MAX_MERGE_NAME_LEN) || undefined;
+
+  return { ok: true, data: { ...data, names, aliases, category, brand } };
 }
 
 // The model returns structured JSON but is not trustworthy — the lib's
@@ -66,26 +69,73 @@ export function sanitizeSuggestMerges(raw: unknown, names: string[]): MergeSugge
   return sanitizeMergeSuggestions(raw, names);
 }
 
+// Per-category wording for the "what kind of thing are these names" + "what
+// counts as a duplicate" part of the prompt. Keeps the shared structure
+// (clusters, canonical pick, verbatim names, read-only) identical across
+// categories while tailoring the domain framing and example duplicates so the
+// model doesn't try to fold, say, two genuinely different dough recipes just
+// because their names are made of overlapping words.
+const CATEGORY_FRAMING: Record<string, { subject: string; examples: string }> = {
+  ingredient: {
+    subject: "ingredient and cutter-die NAMES (one flat, already-deduplicated list)",
+    examples:
+      '"Mozz" / "Mozzarella", "Peperoni" / "Pepperoni", "Tomato Sauce" / "Tomato  sauce"',
+  },
+  mixes: {
+    subject: "pre-blended MIX recipe NAMES (one flat, already-deduplicated list)",
+    examples: '"4Hands Club Mix" / "4 Hands Club Mix", "Aldos Cheese Mix" / "Aldo\'s Cheese Mix"',
+  },
+  dough: {
+    subject: "DOUGH recipe NAMES (one flat, already-deduplicated list)",
+    examples: '"Thin Crust" / "Thin  Crust", "NY Style" / "New York Style"',
+  },
+  sauce: {
+    subject: "SAUCE recipe NAMES (one flat, already-deduplicated list)",
+    examples: '"Marinara" / "Marinara Sauce", "BBQ" / "Barbecue"',
+  },
+  cheese: {
+    subject: "CHEESE-mix recipe NAMES (one flat, already-deduplicated list)",
+    examples: '"Mozz Blend" / "Mozzarella Blend", "3 Cheese" / "Three Cheese"',
+  },
+  brand: {
+    subject: "pizza BRAND NAMES (one flat, already-deduplicated list)",
+    examples: '"Pizza Hut" / "PizzaHut", "Tonys" / "Tony\'s"',
+  },
+  flavor: {
+    subject: "FLAVOR NAMES for a single pizza brand (one flat, already-deduplicated list)",
+    examples: '"Pepperoni" / "Pepperoni Classic", "BBQ Chkn" / "BBQ Chicken"',
+  },
+};
+
 // Shape the validated input into a compact, model-friendly prompt. Heavy shaping
 // lives server-side (contract-first design) so both clients stay thin/identical.
 export function buildSuggestMergesPrompt(input: SuggestMergesInput): {
   system: string;
   user: string;
 } {
+  const framing = CATEGORY_FRAMING[input.category ?? "ingredient"] ?? CATEGORY_FRAMING.ingredient;
+  const sameThing =
+    input.category === "brand"
+      ? "SAME brand"
+      : input.category === "flavor"
+        ? "SAME flavor (all within the one brand shown below — never compare across brands)"
+        : "SAME real-world thing";
+  const brandNote =
+    input.category === "flavor" && input.brand
+      ? ` All names below belong to the brand "${input.brand}".`
+      : "";
+
   const system =
-    "You help a frozen-pizza factory app de-duplicate its ingredient list. You " +
-    "are given the app's full pool of ingredient and cutter-die NAMES (one flat, " +
-    "already-deduplicated list). Find clusters of names that clearly refer to the " +
-    "SAME real-world thing — typos, abbreviations, spacing/case/punctuation " +
-    "variants, singular/plural, or obvious synonyms (e.g. \"Mozz\" / \"Mozzarella\", " +
-    "\"Peperoni\" / \"Pepperoni\", \"Tomato Sauce\" / \"Tomato  sauce\"). For each " +
+    `You help a frozen-pizza factory app de-duplicate its ${framing.subject}.${brandNote} ` +
+    `Find clusters of names that clearly refer to the ${sameThing} — typos, ` +
+    "abbreviations, spacing/case/punctuation variants, singular/plural, or obvious " +
+    `synonyms (e.g. ${framing.examples}). For each ` +
     "cluster pick the single best canonical name to KEEP — prefer the most " +
     "complete, correctly-spelled, conventional spelling that already appears in " +
     "the list — and list the OTHER names in that cluster as the ones to merge " +
-    "away. Be conservative: only group names you are confident are the same " +
-    "ingredient. Do NOT group genuinely different ingredients (e.g. different " +
-    "cheeses, different pepperoni cuts) just because the words overlap. Every " +
-    "name you output (target and sources) MUST be copied VERBATIM from the " +
+    "away. Be conservative: only group names you are confident are the same. " +
+    "Do NOT group genuinely different things just because the words overlap. " +
+    "Every name you output (target and sources) MUST be copied VERBATIM from the " +
     "provided list — never invent or alter a name. Omit a name entirely if it has " +
     "no duplicate. This is read-only; the user reviews every suggestion before " +
     "anything is merged.";

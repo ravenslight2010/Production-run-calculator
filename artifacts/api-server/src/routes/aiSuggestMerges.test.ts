@@ -148,6 +148,57 @@ describe("sanitizeSuggestMerges — untrusted AI output", () => {
   });
 });
 
+describe("validateSuggestMergesBody — category/brand scoping", () => {
+  it("defaults category to ingredient and leaves brand undefined when omitted", () => {
+    const result = validateSuggestMergesBody({ names: ["Mozzarella"] });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.category).toBe("ingredient");
+      expect(result.data.brand).toBeUndefined();
+    }
+  });
+
+  it("accepts each recipe-name and brand/flavor category", () => {
+    for (const category of ["mixes", "dough", "sauce", "cheese", "brand", "flavor"] as const) {
+      const result = validateSuggestMergesBody({ names: ["Thin Crust"], category });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.data.category).toBe(category);
+    }
+  });
+
+  it("keeps brand only for the flavor category, trimmed and length-capped", () => {
+    const long = "b".repeat(MAX_MERGE_NAME_LEN + 20);
+    const flavorResult = validateSuggestMergesBody({
+      names: ["Pepperoni"],
+      category: "flavor",
+      brand: `  ${long}  `,
+    });
+    expect(flavorResult.ok).toBe(true);
+    if (flavorResult.ok) expect(flavorResult.data.brand?.length).toBe(MAX_MERGE_NAME_LEN);
+  });
+});
+
+describe("buildSuggestMergesPrompt — category framing", () => {
+  it("uses distinct per-category subject framing (not the ingredient default)", () => {
+    const input = validateSuggestMergesBody({ names: ["Thin Crust"], category: "dough" });
+    if (!input.ok) throw new Error("setup failed");
+    const { system } = buildSuggestMergesPrompt(input.data);
+    expect(system).toContain("DOUGH recipe NAMES");
+  });
+
+  it("scopes the flavor prompt to the given brand and never compares across brands", () => {
+    const input = validateSuggestMergesBody({
+      names: ["Pepperoni"],
+      category: "flavor",
+      brand: "Tony's",
+    });
+    if (!input.ok) throw new Error("setup failed");
+    const { system } = buildSuggestMergesPrompt(input.data);
+    expect(system).toContain('belong to the brand "Tony\'s"');
+    expect(system).toContain("never compare across brands");
+  });
+});
+
 describe("buildSuggestMergesPrompt", () => {
   it("includes a non-empty system prompt and lists every name", () => {
     const input = validateSuggestMergesBody({ names: ["Mozzarella", "Mozz"] });

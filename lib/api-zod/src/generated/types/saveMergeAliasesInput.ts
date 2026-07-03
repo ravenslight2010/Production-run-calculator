@@ -6,8 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MergeAlias } from './mergeAlias';
+import type { MergeSuggestCategory } from './mergeSuggestCategory';
 
 export interface SaveMergeAliasesInput {
   /** The batch of merge aliases to upsert */
   aliases: MergeAlias[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand this batch is scoped to. */
+  brand?: string;
 }

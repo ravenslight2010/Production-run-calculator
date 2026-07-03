@@ -15,6 +15,24 @@
 // (`run-calculator/src/mergeSuggest.ts`) and mobile
 // (`run-calculator-mobile/context/mergeSuggest.ts`) glue, kept at parity.
 
+/**
+ * Which merge tab a suggestion/alias/denial belongs to. Scoping by category
+ * keeps each tab's name pool independent — a denial or learned alias from one
+ * tab (e.g. a dough recipe name) never leaks into another tab's suggestions
+ * (e.g. ingredients). "flavor" is additionally scoped to a single brand (see
+ * callers) since the same flavor name can legitimately repeat across brands.
+ * Defaults to "ingredient" everywhere for backward compatibility with rows
+ * written before categories existed.
+ */
+export type MergeSuggestCategory =
+  | "ingredient"
+  | "mixes"
+  | "dough"
+  | "sauce"
+  | "cheese"
+  | "brand"
+  | "flavor";
+
 /** A learned mapping: a merged-away name -> the canonical name kept. */
 export type MergeAlias = {
   externalName: string;

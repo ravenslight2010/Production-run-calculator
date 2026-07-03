@@ -20,17 +20,34 @@ import {
   type MergeAlias,
   type MergeSuggestion,
   type DeniedMerge,
+  type MergeSuggestCategory,
 } from "@workspace/merge-suggest";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
 
-export type { MergeAlias, MergeSuggestion, DeniedMerge };
+export type { MergeAlias, MergeSuggestion, DeniedMerge, MergeSuggestCategory };
 
 /** A merge suggestion plus its (optional) reviewer-AI verdict. */
 export type ReviewedMergeSuggestion = MergeSuggestion & { review?: ReviewVerdict };
 
-export async function fetchMergeAliases(): Promise<MergeAlias[]> {
-  const res = await fetch("/api/merge-aliases", {
+/**
+ * Shared query-string helper: every category/brand-scoped endpoint takes an
+ * optional `category` (defaults server-side to "ingredient") and, only for
+ * "flavor", a `brand` that scopes the pool to one brand's flavors.
+ */
+function scopeParams(category?: MergeSuggestCategory, brand?: string): string {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (category === "flavor" && brand) params.set("brand", brand);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export async function fetchMergeAliases(
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<MergeAlias[]> {
+  const res = await fetch(`/api/merge-aliases${scopeParams(category, brand)}`, {
     headers: { "x-client-id": inventoryClientId() },
   });
   if (!res.ok) throw new Error(`List merge aliases failed (${res.status})`);
@@ -38,7 +55,11 @@ export async function fetchMergeAliases(): Promise<MergeAlias[]> {
   return data.aliases ?? [];
 }
 
-export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
+export async function saveMergeAliases(
+  aliases: MergeAlias[],
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<void> {
   if (aliases.length === 0) return;
   const res = await fetch("/api/merge-aliases", {
     method: "POST",
@@ -46,7 +67,11 @@ export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ aliases }),
+    body: JSON.stringify({
+      aliases,
+      ...(category ? { category } : {}),
+      ...(category === "flavor" && brand ? { brand } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`Save merge aliases failed (${res.status})`);
 }
@@ -56,8 +81,11 @@ export async function saveMergeAliases(aliases: MergeAlias[]): Promise<void> {
  * an unordered {nameA, nameB} the user said should never be suggested together.
  * Server-persisted and shared like merge aliases.
  */
-export async function fetchDeniedMerges(): Promise<DeniedMerge[]> {
-  const res = await fetch("/api/denied-merges", {
+export async function fetchDeniedMerges(
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<DeniedMerge[]> {
+  const res = await fetch(`/api/denied-merges${scopeParams(category, brand)}`, {
     headers: { "x-client-id": inventoryClientId() },
   });
   if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
@@ -70,7 +98,12 @@ export async function fetchDeniedMerges(): Promise<DeniedMerge[]> {
  * the unordered pairs that pair the kept target with each source and POST them.
  * Idempotent server-side. No-op when the suggestion has no usable source.
  */
-export async function denyMerge(target: string, sources: string[]): Promise<void> {
+export async function denyMerge(
+  target: string,
+  sources: string[],
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<void> {
   const pairs = collectDeniedPairs(target, sources);
   if (pairs.length === 0) return;
   const res = await fetch("/api/denied-merges", {
@@ -79,7 +112,11 @@ export async function denyMerge(target: string, sources: string[]): Promise<void
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ pairs }),
+    body: JSON.stringify({
+      pairs,
+      ...(category ? { category } : {}),
+      ...(category === "flavor" && brand ? { brand } : {}),
+    }),
   });
   if (!res.ok) throw new Error(`Save denied merges failed (${res.status})`);
 }
@@ -140,6 +177,8 @@ export async function deleteMergedAwayNames(names: string[]): Promise<void> {
 async function requestAiSuggestMerges(
   names: string[],
   aliases: MergeAlias[],
+  category?: MergeSuggestCategory,
+  brand?: string,
 ): Promise<ReviewedMergeSuggestion[]> {
   const res = await fetch("/api/ai/suggest-merges", {
     method: "POST",
@@ -147,7 +186,12 @@ async function requestAiSuggestMerges(
       "Content-Type": "application/json",
       "x-client-id": inventoryClientId(),
     },
-    body: JSON.stringify({ names, aliases }),
+    body: JSON.stringify({
+      names,
+      aliases,
+      ...(category ? { category } : {}),
+      ...(category === "flavor" && brand ? { brand } : {}),
+    }),
   });
   if (!res.ok) {
     let detail = "";
@@ -174,10 +218,14 @@ export type MergeSuggestResult = {
  * (not a manager, rate-limited, offline) the remembered suggestions are still
  * returned so the feature degrades gracefully. Never throws.
  */
-export async function suggestMerges(names: string[]): Promise<MergeSuggestResult> {
+export async function suggestMerges(
+  names: string[],
+  category?: MergeSuggestCategory,
+  brand?: string,
+): Promise<MergeSuggestResult> {
   let aliases: MergeAlias[] = [];
   try {
-    aliases = await fetchMergeAliases();
+    aliases = await fetchMergeAliases(category, brand);
   } catch {
     aliases = [];
   }
@@ -185,13 +233,13 @@ export async function suggestMerges(names: string[]): Promise<MergeSuggestResult
   // showing — AI or remembered-only — so an ignored pair never comes back.
   let denied: DeniedMerge[] = [];
   try {
-    denied = await fetchDeniedMerges();
+    denied = await fetchDeniedMerges(category, brand);
   } catch {
     denied = [];
   }
   const remembered = suggestionsFromAliases(names, aliases);
   try {
-    const ai = await requestAiSuggestMerges(names, aliases);
+    const ai = await requestAiSuggestMerges(names, aliases, category, brand);
     // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
     // so re-attach each AI group's verdict to the merged result by target name.
     const reviewByTarget = new Map<string, ReviewVerdict>();

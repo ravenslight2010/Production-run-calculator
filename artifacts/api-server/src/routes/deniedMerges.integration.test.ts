@@ -102,25 +102,29 @@ beforeEach(async () => {
 
 type Pair = { nameA: string; nameB: string };
 
-async function list(): Promise<Pair[]> {
-  const res = await fetch(`${baseUrl}/api/denied-merges`);
+async function list(category?: string, brand?: string): Promise<Pair[]> {
+  const qs = new URLSearchParams();
+  if (category) qs.set("category", category);
+  if (brand) qs.set("brand", brand);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const res = await fetch(`${baseUrl}/api/denied-merges${suffix}`);
   expect(res.status).toBe(200);
   return ((await res.json()) as { denied: Pair[] }).denied;
 }
 
-async function add(pairs: Pair[]): Promise<Response> {
+async function add(pairs: Pair[], category?: string, brand?: string): Promise<Response> {
   return fetch(`${baseUrl}/api/denied-merges`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pairs }),
+    body: JSON.stringify({ pairs, ...(category ? { category } : {}), ...(brand ? { brand } : {}) }),
   });
 }
 
-async function remove(pairs: Pair[]): Promise<Response> {
+async function remove(pairs: Pair[], category?: string, brand?: string): Promise<Response> {
   return fetch(`${baseUrl}/api/denied-merges`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pairs }),
+    body: JSON.stringify({ pairs, ...(category ? { category } : {}), ...(brand ? { brand } : {}) }),
   });
 }
 
@@ -169,6 +173,45 @@ describe("denied-merges routes", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nope: true }),
     });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("denied-merges routes — category/brand scoping", () => {
+  it("scopes denials per category: a pair denied on one tab doesn't suppress it on another", async () => {
+    await add([{ nameA: "Thin Crust", nameB: "Thin  Crust" }], "dough");
+    expect(await list("dough")).toEqual([{ nameA: "thin  crust", nameB: "thin crust" }]);
+    expect(await list("sauce")).toEqual([]);
+    expect(await list()).toEqual([]); // default "ingredient" category is unaffected
+  });
+
+  it("defaults to the ingredient category when none is given", async () => {
+    await add([{ nameA: "Mozz", nameB: "Mozzarella" }]);
+    expect(await list("ingredient")).toEqual([{ nameA: "mozz", nameB: "mozzarella" }]);
+  });
+
+  it("scopes flavor denials per brand: same pair denied for one brand doesn't suppress another", async () => {
+    await add([{ nameA: "BBQ", nameB: "Barbecue" }], "flavor", "Tony's");
+    expect(await list("flavor", "Tony's")).toEqual([{ nameA: "barbecue", nameB: "bbq" }]);
+    expect(await list("flavor", "Domino's")).toEqual([]);
+  });
+
+  it("DELETE only removes the pair within its own category/brand scope", async () => {
+    await add([{ nameA: "BBQ", nameB: "Barbecue" }], "flavor", "Tony's");
+    await add([{ nameA: "BBQ", nameB: "Barbecue" }], "flavor", "Domino's");
+    await remove([{ nameA: "BBQ", nameB: "Barbecue" }], "flavor", "Tony's");
+    expect(await list("flavor", "Tony's")).toEqual([]);
+    expect(await list("flavor", "Domino's")).toEqual([{ nameA: "barbecue", nameB: "bbq" }]);
+  });
+
+  it("rejects an unrecognized category value with 400", async () => {
+    const res = await add([{ nameA: "Mozz", nameB: "Mozzarella" }], "not-a-real-category");
+    expect(res.status).toBe(400);
+    expect(await list("ingredient")).toEqual([]);
+  });
+
+  it("GET rejects an unrecognized category query param with 400 instead of silently defaulting", async () => {
+    const res = await fetch(`${baseUrl}/api/denied-merges?category=not-a-real-category`);
     expect(res.status).toBe(400);
   });
 });

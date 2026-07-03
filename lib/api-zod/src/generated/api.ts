@@ -1759,9 +1759,11 @@ export const AiParseSpecSheetResponse = zod.object({
 export const AiSuggestMergesBody = zod.object({
   "names": zod.array(zod.string()).describe('The full pool of mergeable ingredient\/die names to cluster'),
   "aliases": zod.array(zod.object({
-  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
-}).describe('A learned mapping from a merged-away ingredient name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions')
+}).describe('A learned mapping from a merged-away name to the kept name.')).optional().describe('Learned merge aliases to ground the suggestions'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand `names` was scoped to — used only to tailor the AI prompt\'s wording.')
 })
 
 export const AiSuggestMergesResponse = zod.object({
@@ -1783,30 +1785,37 @@ export const AiSuggestMergesResponse = zod.object({
  * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
  * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
  */
+export const ListMergeAliasesQueryParams = zod.object({
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the alias list to. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.coerce.string().optional().describe('When category is \"flavor\", scopes the alias list to a single brand\'s flavor pool. Ignored for every other category.')
+})
+
 export const ListMergeAliasesResponse = zod.object({
   "aliases": zod.array(zod.object({
-  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
-}).describe('A learned mapping from a merged-away ingredient name to the kept name.'))
+}).describe('A learned mapping from a merged-away name to the kept name.'))
 })
 
 
 /**
- * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName) are updated; new ones are inserted. Available to any signed-in user.
+ * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName, within the same category/brand) are updated; new ones are inserted. Available to any signed-in user.
  * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
  */
 export const SaveMergeAliasesBody = zod.object({
   "aliases": zod.array(zod.object({
-  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
-}).describe('A learned mapping from a merged-away ingredient name to the kept name.')).describe('The batch of merge aliases to upsert')
+}).describe('A learned mapping from a merged-away name to the kept name.')).describe('The batch of merge aliases to upsert'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const SaveMergeAliasesResponse = zod.object({
   "aliases": zod.array(zod.object({
-  "externalName": zod.string().describe('The ingredient name that was merged away (matched case-insensitively)'),
+  "externalName": zod.string().describe('The name that was merged away (matched case-insensitively)'),
   "canonicalName": zod.string().describe('The canonical name it was folded into')
-}).describe('A learned mapping from a merged-away ingredient name to the kept name.'))
+}).describe('A learned mapping from a merged-away name to the kept name.'))
 })
 
 
@@ -1814,30 +1823,37 @@ export const SaveMergeAliasesResponse = zod.object({
  * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
  * @summary List denied (ignored) ingredient-merge pairs
  */
+export const ListDeniedMergesQueryParams = zod.object({
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab\'s pool to scope the denied-pair list to. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.coerce.string().optional().describe('When category is \"flavor\", scopes the denied-pair list to a single brand\'s flavor pool. Ignored for every other category.')
+})
+
 export const ListDeniedMergesResponse = zod.object({
   "denied": zod.array(zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
-}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+}).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
 })
 
 
 /**
- * Persists a batch of unordered name pairs the user denied. Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
+ * Persists a batch of unordered name pairs the user denied, scoped to a category (and brand, for flavors). Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
  * @summary Save denied (ignored) ingredient-merge pairs
  */
 export const SaveDeniedMergesBody = zod.object({
   "pairs": zod.array(zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
-}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove')
+}).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const SaveDeniedMergesResponse = zod.object({
   "denied": zod.array(zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
-}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+}).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
 })
 
 
@@ -1849,14 +1865,16 @@ export const DeleteDeniedMergesBody = zod.object({
   "pairs": zod.array(zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
-}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove')
+}).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).')).describe('The batch of denied pairs to add or remove'),
+  "category": zod.enum(['ingredient', 'mixes', 'dough', 'sauce', 'cheese', 'brand', 'flavor']).optional().describe('Which merge tab a suggestion\/alias\/denial belongs to, so pools never leak across tabs. Defaults to \"ingredient\" for backward compatibility.'),
+  "brand": zod.string().optional().describe('When category is \"flavor\", the single brand this batch is scoped to.')
 })
 
 export const DeleteDeniedMergesResponse = zod.object({
   "denied": zod.array(zod.object({
   "nameA": zod.string().describe('One name of the denied pair'),
   "nameB": zod.string().describe('The other name of the denied pair')
-}).describe('An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
+}).describe('An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).'))
 })
 
 

@@ -7,7 +7,7 @@
  */
 
 /**
- * An unordered pair of ingredient names the user told the app to never propose merging together (matched case-insensitively, either direction).
+ * An unordered pair of names the user told the app to never propose merging together (matched case-insensitively, either direction).
  */
 export interface DeniedMerge {
   /** One name of the denied pair */

@@ -7,10 +7,10 @@
  */
 
 /**
- * A learned mapping from a merged-away ingredient name to the kept name.
+ * A learned mapping from a merged-away name to the kept name.
  */
 export interface MergeAlias {
-  /** The ingredient name that was merged away (matched case-insensitively) */
+  /** The name that was merged away (matched case-insensitively) */
   externalName: string;
   /** The canonical name it was folded into */
   canonicalName: string;

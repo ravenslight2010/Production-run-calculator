@@ -70,7 +70,9 @@ import type {
   InventorySettings,
   LabelVerifyInput,
   LabelVerifyResult,
+  ListDeniedMergesParams,
   ListInventoryLedgerParams,
+  ListMergeAliasesParams,
   ListQualityChecksParams,
   MarkCycleCountCountedInput,
   MatchImportInput,
@@ -4396,21 +4398,28 @@ export const useAiSuggestMerges = <TError = ErrorType<void>,
       return useMutation(getAiSuggestMergesMutationOptions(options));
     }
 
-export const getListMergeAliasesUrl = () => {
+export const getListMergeAliasesUrl = (params?: ListMergeAliasesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/merge-aliases`
+  return stringifiedParams.length > 0 ? `/api/merge-aliases?${stringifiedParams}` : `/api/merge-aliases`
 }
 
 /**
  * Returns every learned merge alias — a saved mapping from an ingredient name that was merged away to the canonical name it was folded into. Clients supply these to the AI suggester and surface remembered suggestions deterministically. Available to any signed-in user.
  * @summary List learned ingredient-merge aliases (merged-away name -> kept name)
  */
-export const listMergeAliases = async ( options?: RequestInit): Promise<MergeAliasList> => {
+export const listMergeAliases = async (params?: ListMergeAliasesParams, options?: RequestInit): Promise<MergeAliasList> => {
 
-  return customFetch<MergeAliasList>(getListMergeAliasesUrl(),
+  return customFetch<MergeAliasList>(getListMergeAliasesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4423,23 +4432,23 @@ export const listMergeAliases = async ( options?: RequestInit): Promise<MergeAli
 
 
 
-export const getListMergeAliasesQueryKey = () => {
+export const getListMergeAliasesQueryKey = (params?: ListMergeAliasesParams,) => {
     return [
-    `/api/merge-aliases`
+    `/api/merge-aliases`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListMergeAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListMergeAliasesQueryOptions = <TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(params?: ListMergeAliasesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListMergeAliasesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListMergeAliasesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMergeAliases>>> = ({ signal }) => listMergeAliases({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMergeAliases>>> = ({ signal }) => listMergeAliases(params, { signal, ...requestOptions });
 
 
 
@@ -4457,11 +4466,11 @@ export type ListMergeAliasesQueryError = ErrorType<unknown>
  */
 
 export function useListMergeAliases<TData = Awaited<ReturnType<typeof listMergeAliases>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: ListMergeAliasesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listMergeAliases>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListMergeAliasesQueryOptions(options)
+  const queryOptions = getListMergeAliasesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4483,7 +4492,7 @@ export const getSaveMergeAliasesUrl = () => {
 }
 
 /**
- * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName) are updated; new ones are inserted. Available to any signed-in user.
+ * Persists a batch of merged-away -> kept name mappings recorded when a merge is confirmed. Existing aliases (matched case-insensitively on externalName, within the same category/brand) are updated; new ones are inserted. Available to any signed-in user.
  * @summary Save learned ingredient-merge aliases (case-insensitive upsert)
  */
 export const saveMergeAliases = async (saveMergeAliasesInput: SaveMergeAliasesInput, options?: RequestInit): Promise<MergeAliasList> => {
@@ -4546,21 +4555,28 @@ export const useSaveMergeAliases = <TError = ErrorType<void>,
       return useMutation(getSaveMergeAliasesMutationOptions(options));
     }
 
-export const getListDeniedMergesUrl = () => {
+export const getListDeniedMergesUrl = (params?: ListDeniedMergesParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/denied-merges`
+  return stringifiedParams.length > 0 ? `/api/denied-merges?${stringifiedParams}` : `/api/denied-merges`
 }
 
 /**
  * Returns every denied merge pair — an unordered pair of ingredient names the user explicitly told the app to never propose merging together. The merge suggester filters these out of both AI and remembered suggestions. Available to any signed-in user.
  * @summary List denied (ignored) ingredient-merge pairs
  */
-export const listDeniedMerges = async ( options?: RequestInit): Promise<DeniedMergeList> => {
+export const listDeniedMerges = async (params?: ListDeniedMergesParams, options?: RequestInit): Promise<DeniedMergeList> => {
 
-  return customFetch<DeniedMergeList>(getListDeniedMergesUrl(),
+  return customFetch<DeniedMergeList>(getListDeniedMergesUrl(params),
   {
     ...options,
     method: 'GET'
@@ -4573,23 +4589,23 @@ export const listDeniedMerges = async ( options?: RequestInit): Promise<DeniedMe
 
 
 
-export const getListDeniedMergesQueryKey = () => {
+export const getListDeniedMergesQueryKey = (params?: ListDeniedMergesParams,) => {
     return [
-    `/api/denied-merges`
+    `/api/denied-merges`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListDeniedMergesQueryOptions = <TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListDeniedMergesQueryOptions = <TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(params?: ListDeniedMergesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListDeniedMergesQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListDeniedMergesQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeniedMerges>>> = ({ signal }) => listDeniedMerges({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDeniedMerges>>> = ({ signal }) => listDeniedMerges(params, { signal, ...requestOptions });
 
 
 
@@ -4607,11 +4623,11 @@ export type ListDeniedMergesQueryError = ErrorType<unknown>
  */
 
 export function useListDeniedMerges<TData = Awaited<ReturnType<typeof listDeniedMerges>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: ListDeniedMergesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDeniedMerges>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getListDeniedMergesQueryOptions(options)
+  const queryOptions = getListDeniedMergesQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -4633,7 +4649,7 @@ export const getSaveDeniedMergesUrl = () => {
 }
 
 /**
- * Persists a batch of unordered name pairs the user denied. Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
+ * Persists a batch of unordered name pairs the user denied, scoped to a category (and brand, for flavors). Pairs are normalized (trimmed, lowercased, sorted) and deduped; a pair that already exists is left as-is. Available to any signed-in user.
  * @summary Save denied (ignored) ingredient-merge pairs
  */
 export const saveDeniedMerges = async (saveDeniedMergesInput: SaveDeniedMergesInput, options?: RequestInit): Promise<DeniedMergeList> => {

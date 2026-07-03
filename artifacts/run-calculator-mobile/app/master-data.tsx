@@ -57,7 +57,8 @@ import {
   type MergeMap,
 } from "@/context/mergeIngredients";
 import { scoreNameMatch } from "@/context/inventoryShared";
-import { suggestMerges, denyMerge, type ReviewedMergeSuggestion } from "@/context/mergeSuggest";
+import { suggestMerges, saveMergeAliases, denyMerge, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "@/context/mergeSuggest";
+import { collectMergeAliases } from "@workspace/merge-suggest";
 import ReviewBadge from "@/components/ReviewBadge";
 import {
   prepareSpecImport,
@@ -351,6 +352,38 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category, bfMode, bfBrand, brands, brandFlavors, pepTypes, dieTypes, doughIngredients, frontlineIngredients, cheeseIngredients]);
 
+  // Which merge-suggest category/brand/pool the AI scan and learned-alias
+  // memory should use for the currently active tab. Each tab scans and stores
+  // ONLY its own name pool (`universe`, already scoped above), except
+  // "ingredients" which keeps scanning the cross-category `fullUniverse`
+  // (unchanged prior behavior). Web parity — mobile's per-tab pools are
+  // ingredient-scoped rather than recipe-name-scoped (see universe above),
+  // which is an intentional, pre-existing platform difference; only the
+  // scan/apply/deny wiring is aligned here.
+  const suggestScope = React.useMemo((): {
+    category: MergeSuggestCategory;
+    brand?: string;
+    universe: string[];
+  } => {
+    switch (category) {
+      case "mixes":
+        return { category: "mixes", universe };
+      case "dough":
+        return { category: "dough", universe };
+      case "sauce":
+        return { category: "sauce", universe };
+      case "cheese":
+        return { category: "cheese", universe };
+      case "brandflavor":
+        return bfMode === "brands"
+          ? { category: "brand", universe }
+          : { category: "flavor", brand: bfBrand, universe };
+      case "ingredients":
+      default:
+        return { category: "ingredient", universe: fullUniverse };
+    }
+  }, [category, bfMode, bfBrand, universe, fullUniverse]);
+
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. Rank by best similarity to any selected source (or the typed target);
   // fall back to alphabetical. Reuses the shared name-similarity helper.
@@ -416,12 +449,24 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   // directly through the same destructive merge path.
   const suggest = async (importTriggered = false) => {
     if (!importTriggered) setFromImport(false);
+    // The import-triggered auto-scan always lands on (and scans) the
+    // Ingredients tab — use `fullUniverse` directly rather than
+    // `suggestScope`, since `setCategory("ingredients")` in the caller effect
+    // hasn't re-rendered yet and the scope memo would still reflect whatever
+    // tab was active before.
+    const scope = importTriggered
+      ? { category: "ingredient" as const, universe: fullUniverse }
+      : suggestScope;
     setSuggestBusy(true);
     setSuggestError("");
     setSuggestNote("");
     setSuggestRan(true);
     try {
-      const { suggestions: out, usedAi, error: err } = await suggestMerges(fullUniverse);
+      const { suggestions: out, usedAi, error: err } = await suggestMerges(
+        scope.universe,
+        scope.category,
+        scope.brand,
+      );
       setSuggestions(out);
       if (!usedAi && err) {
         setSuggestError(`AI unavailable (${err}). Showing previously-merged suggestions only.`);
@@ -466,11 +511,11 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setError("");
     setConfirming(false);
     setFromImport(false);
-    // AI suggestions span every category, so snap against the FULL universe and
-    // drop onto Ingredients so the loaded rows are visible. Mirrors web.
-    setCategory("ingredients");
+    // Suggestions shown are always scoped to the currently active tab (each
+    // scan uses that tab's own pool), so snap names against that same pool —
+    // never force a tab switch.
     const canon = (n: string) =>
-      fullUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+      suggestScope.universe.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
     const tgt = canon(s.target);
     const seen = new Set<string>();
     const srcs: string[] = [];
@@ -492,7 +537,12 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setBusy(true);
     setError("");
     try {
-      await mergeIngredients(srcs, s.target);
+      if (category === "brandflavor") {
+        if (bfMode === "brands") mergeBrands(srcs, s.target);
+        else mergeFlavors(bfBrand, srcs, s.target);
+      } else {
+        await mergeIngredients(srcs, s.target, suggestScope.category);
+      }
       reset();
       // Drop just this suggestion so the user can keep working through the rest
       // of the list (web parity).
@@ -505,15 +555,16 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   };
 
   // Ignore a suggested group: persist {target, source} pairs as denied so the
-  // suggester never proposes them again (factory-wide), then drop it locally.
-  // Best-effort persistence — the suggestion is hidden either way (web parity).
+  // suggester never proposes them again (factory-wide, scoped to the active
+  // tab's category/brand), then drop it locally. Best-effort persistence — the
+  // suggestion is hidden either way (web parity).
   const ignoreSuggestion = async (s: ReviewedMergeSuggestion) => {
     const srcs = s.sources.filter((n) => n !== s.target);
     if (srcs.length === 0) return;
     setFromImport(false);
     setSuggestions((prev) => prev.filter((x) => x !== s));
     try {
-      await denyMerge(s.target, srcs);
+      await denyMerge(s.target, srcs, suggestScope.category, suggestScope.brand);
     } catch {
       // Non-fatal: hidden for this session; may reappear later if it didn't persist.
     }
@@ -535,7 +586,7 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
         if (bfMode === "brands") mergeBrands(sources, target);
         else mergeFlavors(bfBrand, sources, target);
       } else {
-        await mergeIngredients(sources, target);
+        await mergeIngredients(sources, target, suggestScope.category);
       }
       reset();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -637,6 +688,10 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
                     if (m === bfMode) return;
                     setBfMode(m);
                     reset();
+                    setSuggestions([]);
+                    setSuggestRan(false);
+                    setSuggestError("");
+                    setSuggestNote("");
                     if (m === "flavors" && !bfBrand && brands.length > 0) setBfBrand(brands[0]);
                   }}
                   style={({ pressed }) => [
@@ -680,6 +735,10 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
                         onPress={() => {
                           setBfBrand(b);
                           reset();
+                          setSuggestions([]);
+                          setSuggestRan(false);
+                          setSuggestError("");
+                          setSuggestNote("");
                         }}
                         style={[
                           styles.targetChip,
@@ -715,9 +774,13 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
           : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away, then the one to keep. Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
       </Text>
 
-      {/* AI + learned-memory suggestions: scan the whole (cross-category) list for
-          duplicate groups. Hidden on the brand/flavor tab (no learned-alias path). */}
-      {category !== "brandflavor" && fullUniverse.length > 0 ? (
+      {/* AI + learned-memory suggestions: scan the ACTIVE tab's own name pool
+          for duplicate groups (Ingredients keeps scanning the cross-category
+          fullUniverse, unchanged). Hidden on Flavors mode until a brand is
+          picked (no scoped pool yet) and whenever the active pool is empty.
+          Web parity. */}
+      {suggestScope.universe.length > 0 &&
+      !(category === "brandflavor" && bfMode === "flavors" && !bfBrand.trim()) ? (
       <View
         style={[
           styles.suggestBox,

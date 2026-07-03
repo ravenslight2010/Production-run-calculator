@@ -235,7 +235,7 @@ import {
   type Allergen,
   type AllergenSequenceItem,
 } from "@workspace/allergen";
-import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion } from "../mergeSuggest";
+import { suggestMerges, saveMergeAliases, denyMerge, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type ReviewedMergeSuggestion, type MergeSuggestCategory } from "../mergeSuggest";
 import { saveAiCorrections } from "../aiCorrections";
 import ReviewBadge from "../components/ReviewBadge";
 
@@ -2580,6 +2580,37 @@ export default function Home() {
   const isRecipeNameCategory =
     mergeCategory === "dough" || mergeCategory === "sauce" || mergeCategory === "cheese" || mergeCategory === "mixes";
 
+  // Which merge-suggest category/brand/pool the AI scan and learned-alias
+  // memory should use for the currently active tab. Each tab scans and stores
+  // ONLY its own name pool so a suggestion, alias, or denial never leaks across
+  // tabs. "ingredients" intentionally keeps scanning the cross-category
+  // mergeFullUniverse (unchanged prior behavior); every recipe-name tab scans
+  // just its own recipe-name list (mergeUniverse, already scoped); Brand/Flavor
+  // scans brands or one brand's flavors depending on the active sub-mode.
+  const mergeSuggestScope = useMemo((): {
+    category: MergeSuggestCategory;
+    brand?: string;
+    universe: string[];
+  } => {
+    switch (mergeCategory) {
+      case "mixes":
+        return { category: "mixes", universe: mergeUniverse };
+      case "dough":
+        return { category: "dough", universe: mergeUniverse };
+      case "sauce":
+        return { category: "sauce", universe: mergeUniverse };
+      case "cheese":
+        return { category: "cheese", universe: mergeUniverse };
+      case "brandflavor":
+        return mergeBfMode === "brands"
+          ? { category: "brand", universe: mergeUniverse }
+          : { category: "flavor", brand: mergeBfBrand, universe: mergeUniverse };
+      case "ingredients":
+      default:
+        return { category: "ingredient", universe: mergeFullUniverse };
+    }
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, mergeUniverse, mergeFullUniverse]);
+
   // Same universe, ordered closest-match-first so likely duplicates surface at the
   // top. When sources are selected, rank by best similarity to any selected
   // source; otherwise fall back to similarity against the typed target; otherwise
@@ -2712,12 +2743,24 @@ export default function Home() {
   // "Apply" merges it directly through the same destructive merge path.
   async function handleSuggestMerges(fromImport = false) {
     if (!fromImport) setMergeFromImport(false);
+    // The import-triggered auto-scan always lands on (and scans) the
+    // Ingredients tab — read from the closured `mergeFullUniverse` directly
+    // rather than `mergeSuggestScope`, since `setMergeCategory("ingredients")`
+    // in the caller effect hasn't re-rendered yet and the scope memo would
+    // still reflect whatever tab was active before.
+    const scope = fromImport
+      ? { category: "ingredient" as const, universe: mergeFullUniverse }
+      : mergeSuggestScope;
     setMergeSuggestBusy(true);
     setMergeSuggestError("");
     setMergeSuggestNote("");
     setMergeSuggestRan(true);
     try {
-      const { suggestions, usedAi, error } = await suggestMerges(mergeFullUniverse);
+      const { suggestions, usedAi, error } = await suggestMerges(
+        scope.universe,
+        scope.category,
+        scope.brand,
+      );
       setMergeSuggestions(suggestions);
       if (!usedAi && error) {
         setMergeSuggestError(
@@ -2760,12 +2803,12 @@ export default function Home() {
     setMergeError("");
     setMergeConfirming(false);
     setMergeFromImport(false);
-    // AI suggestions span every category, so snap against the FULL universe (not
-    // the current tab's scoped list) and drop the picker onto Ingredients so the
-    // loaded rows are visible.
-    setMergeCategory("ingredients");
+    // Suggestions shown are always scoped to the currently active tab (each
+    // scan uses that tab's own pool), so snap names against that same pool —
+    // never force a tab switch.
     const canon = (n: string) =>
-      mergeFullUniverse.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ?? n.trim();
+      mergeSuggestScope.universe.find((u) => u.toLowerCase() === n.trim().toLowerCase()) ??
+      n.trim();
     const tgt = canon(s.target);
     const seen = new Set<string>();
     const srcs: string[] = [];
@@ -2790,7 +2833,11 @@ export default function Home() {
     const sources = s.sources.filter((n) => n !== s.target);
     if (sources.length === 0) return;
     setMergeFromImport(false);
-    const ok = await handleApplyMerge(sources, s.target);
+    const ok = mergeCategory === "brandflavor"
+      ? await handleApplyBrandFlavorMerge(sources, s.target)
+      : isRecipeNameCategory
+      ? await handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory, sources, s.target)
+      : await handleApplyMerge(sources, s.target);
     if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
   }
 
@@ -2803,8 +2850,9 @@ export default function Home() {
     if (sources.length === 0) return;
     setMergeFromImport(false);
     setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    const scope = mergeSuggestScope;
     try {
-      await denyMerge(s.target, sources);
+      await denyMerge(s.target, sources, scope.category, scope.brand);
     } catch {
       // Non-fatal: the suggestion is already hidden for this session; it may
       // reappear on a later scan if the deny didn't persist.
@@ -3010,10 +3058,13 @@ export default function Home() {
   // Apply a brand or flavor merge from the manual picker, then push the merged
   // payload (with its tombstones) immediately so an incoming sync-pull can't
   // re-add the merged-away names via the additive union — mirrors handleApplyMerge.
-  async function handleApplyBrandFlavorMerge(): Promise<boolean> {
-    const map = buildMergeMap(mergeSources, mergeTarget);
+  async function handleApplyBrandFlavorMerge(
+    sourcesArg?: string[],
+    targetArg?: string,
+  ): Promise<boolean> {
+    const map = buildMergeMap(sourcesArg ?? mergeSources, targetArg ?? mergeTarget);
     const srcs = Object.keys(map);
-    const tgt = mergeTarget.trim();
+    const tgt = (targetArg ?? mergeTarget).trim();
     if (srcs.length === 0) {
       setMergeError("Pick at least one source and a different target.");
       return false;
@@ -3028,6 +3079,19 @@ export default function Home() {
     try {
       if (mergeBfMode === "brands") mergeBrands(srcs, tgt);
       else mergeFlavors(mergeBfBrand, srcs, tgt);
+      // Persist the confirmed merge as a learned alias, scoped to this
+      // category ("brand", or "flavor" scoped to the one brand it happened
+      // within) so it feeds the AI suggester and "previously merged" list for
+      // this tab only — never leaking into another brand's flavor pool.
+      try {
+        await saveMergeAliases(
+          collectMergeAliases(srcs, tgt),
+          mergeBfMode === "brands" ? "brand" : "flavor",
+          mergeBfMode === "flavors" ? mergeBfBrand : undefined,
+        );
+      } catch {
+        // Non-fatal: the merge itself already succeeded; learning is additive.
+      }
       try {
         await fetch(`/api/sync/today?today=${todayStr()}`, {
           method: "PUT",
@@ -3062,16 +3126,22 @@ export default function Home() {
   // inventory — it only re-points recipe-name selection fields, folds the name
   // list + recipe presets, and tombstones the merged-away names. Mirrors
   // handleApplyMerge's snapshot → rewrite → refresh → push → note flow.
-  async function handleApplyRecipeNameMerge(category: RecipeNameMergeCategory): Promise<boolean> {
+  async function handleApplyRecipeNameMerge(
+    category: RecipeNameMergeCategory,
+    sourcesArg?: string[],
+    targetArg?: string,
+  ): Promise<boolean> {
+    const sourcesAll = sourcesArg ?? mergeSources;
+    const tgt = targetArg ?? mergeTarget;
     // Guardrail: on the Mixes tab only user-added names are mergeable away —
     // factory-preset mix names would be re-seeded, so silently drop them.
     const rawSources = category === "mixes"
-      ? mergeSources.filter((s) => mixRecipeNames.includes(s))
-      : mergeSources;
-    const map = buildMergeMap(rawSources, mergeTarget);
+      ? sourcesAll.filter((s) => mixRecipeNames.includes(s))
+      : sourcesAll;
+    const map = buildMergeMap(rawSources, tgt);
     if (Object.keys(map).length === 0) {
       setMergeError(
-        category === "mixes" && mergeSources.length > 0
+        category === "mixes" && sourcesAll.length > 0
           ? "Factory mix recipes can't be merged away — pick a user-added recipe as the source."
           : "Pick at least one source and a different target.",
       );
@@ -3084,6 +3154,14 @@ export default function Home() {
       // Rewrite every localStorage surface, then refresh React state in place so
       // the merged data shows immediately and the sync push carries it.
       const affectedRunIds = applyRecipeNameMerge(category, map);
+      // Persist the confirmed merge as a learned alias scoped to this recipe-
+      // name category so it feeds the AI suggester and "previously merged"
+      // list for this tab's own pool only.
+      try {
+        await saveMergeAliases(collectMergeAliases(Object.keys(map), tgt), category);
+      } catch {
+        // Non-fatal: the merge itself already succeeded; learning is additive.
+      }
       // Advance the edit stamp on every run the merge re-pointed, so the push
       // below strictly wins the per-run lost-update guard on the server and every
       // peer. Without this, a stale remote payload carrying the pre-merge recipe
@@ -3115,7 +3193,7 @@ export default function Home() {
         category === "mixes" ? "mix" : category === "sauce" ? "sauce" : category;
       noteChange(
         "merge",
-        `Merged ${label} recipe ${Object.keys(map).map((s) => `"${s}"`).join(", ")} into "${mergeTarget.trim()}"`,
+        `Merged ${label} recipe ${Object.keys(map).map((s) => `"${s}"`).join(", ")} into "${tgt.trim()}"`,
         before,
       );
       setMergeBusy(false);
@@ -8360,6 +8438,10 @@ export default function Home() {
                                 if (m === mergeBfMode) return;
                                 setMergeBfMode(m);
                                 resetMergeForm();
+                                setMergeSuggestions([]);
+                                setMergeSuggestRan(false);
+                                setMergeSuggestError("");
+                                setMergeSuggestNote("");
                                 if (m === "flavors" && !mergeBfBrand && brands.length > 0) setMergeBfBrand(brands[0]);
                               }}
                               className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeBfMode === m ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
@@ -8372,7 +8454,14 @@ export default function Home() {
                             <select
                               value={mergeBfBrand}
                               disabled={mergeBusy}
-                              onChange={e => { setMergeBfBrand(e.target.value); resetMergeForm(); }}
+                              onChange={e => {
+                                setMergeBfBrand(e.target.value);
+                                resetMergeForm();
+                                setMergeSuggestions([]);
+                                setMergeSuggestRan(false);
+                                setMergeSuggestError("");
+                                setMergeSuggestNote("");
+                              }}
                               className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
                             >
                               <option value="">Select a brand…</option>
@@ -8393,11 +8482,15 @@ export default function Home() {
                         : "Combine duplicate or similar ingredients into one. Pick the ingredient(s) to merge away (sources), then the one to keep (target). Every recipe, list, preset, profile, run, template and history entry is updated, and inventory stock is folded into the target. This can't be undone."}
                     </p>
 
-                    {/* AI + learned-memory suggestions: scan the whole (cross-
-                        category) ingredient list for duplicate groups. Only shown
-                        on the Ingredients tab — the recipe-name and brand/flavor
-                        tabs merge different data with no learned-alias path. */}
-                    {mergeCategory === "ingredients" && mergeFullUniverse.length > 0 && (
+                    {/* AI + learned-memory suggestions: each tab scans ONLY its own
+                        name pool (mergeSuggestScope.universe) — Ingredients scans
+                        the full cross-category ingredient list, every recipe-name
+                        tab scans just its own recipe names, and Brand/Flavor scans
+                        brands or one brand's flavors depending on the sub-mode.
+                        Suggestions, applies, and denials are all scoped the same
+                        way so nothing leaks across tabs. */}
+                    {mergeSuggestScope.universe.length > 0 &&
+                      !(mergeCategory === "brandflavor" && mergeBfMode === "flavors" && !mergeBfBrand) && (
                       <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>

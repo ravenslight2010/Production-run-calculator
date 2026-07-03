@@ -81,7 +81,7 @@ import {
 } from "./mergeIngredients";
 import { collectMergeAliases } from "@workspace/merge-suggest";
 import { moveEntries } from "@workspace/schedule-move";
-import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames } from "./mergeSuggest";
+import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type MergeSuggestCategory } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
@@ -1594,7 +1594,7 @@ interface RunContextValue {
   renameBrand: (oldName: string, newName: string) => void;
   renameFlavor: (brand: string, oldFlavor: string, newFlavor: string) => void;
   // Merge ingredient names into one canonical target across all surfaces.
-  mergeIngredients: (sources: string[], target: string) => Promise<void>;
+  mergeIngredients: (sources: string[], target: string, category?: MergeSuggestCategory) => Promise<void>;
   mergeBrands: (sources: string[], target: string) => void;
   mergeFlavors: (brand: string, sources: string[], target: string) => void;
   // Local-only master-data edit history + per-entry undo (rolls back to point).
@@ -3585,7 +3585,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   // local state so the two stores can't drift apart. Mirrors the web flow in
   // `run-calculator/src/pages/home.tsx`.
   const mergeIngredients = useCallback(
-    async (sources: string[], target: string) => {
+    async (sources: string[], target: string, category?: MergeSuggestCategory) => {
       const map: MergeMap = buildMergeMap(sources, target);
       if (Object.keys(map).length === 0) return;
 
@@ -3690,7 +3690,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       // effort): feeds the AI suggester next time and powers "previously
       // merged" suggestions. Non-fatal — the merge itself already succeeded.
       try {
-        await saveMergeAliases(collectMergeAliases(sources, target));
+        await saveMergeAliases(collectMergeAliases(sources, target), category);
       } catch {
         // ignore: learning is additive, the merge stands either way.
       }
@@ -3751,6 +3751,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persistNow(next);
         return next;
       });
+      // Persist the confirmed merge as a learned "brand" alias (best effort):
+      // feeds the AI suggester next time and powers "previously merged"
+      // suggestions on the Brand/Flavor tab. Non-fatal — the merge itself
+      // already succeeded. Web parity.
+      void saveMergeAliases(collectMergeAliases(sources, tgt), "brand").catch(() => {});
     },
     [persistNow],
   );
@@ -3793,6 +3798,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persistNow(next);
         return next;
       });
+      // Persist the confirmed merge as a learned "flavor" alias scoped to this
+      // brand (best effort) — mirrors mergeBrands / web parity.
+      void saveMergeAliases(collectMergeAliases(sources, tgt), "flavor", b).catch(() => {});
     },
     [persistNow],
   );

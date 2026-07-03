@@ -1464,7 +1464,7 @@ paths:
               $ref: "#/components/schemas/SuggestMergesInput"
       responses:
         "200":
-          description: Suggested merge groups (advisory only)
+          description: Suggested merge groups (advisory only) — scoped to the request's category
           content:
             application/json:
               schema:
@@ -1484,9 +1484,26 @@ paths:
         ingredient name that was merged away to the canonical name it was folded
         into. Clients supply these to the AI suggester and surface remembered
         suggestions deterministically. Available to any signed-in user.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: >-
+            Which merge tab's pool to scope the alias list to. Defaults to
+            "ingredient" for backward compatibility.
+          schema:
+            $ref: "#/components/schemas/MergeSuggestCategory"
+        - name: brand
+          in: query
+          required: false
+          description: >-
+            When category is "flavor", scopes the alias list to a single
+            brand's flavor pool. Ignored for every other category.
+          schema:
+            type: string
       responses:
         "200":
-          description: All learned merge aliases
+          description: All learned merge aliases in the requested category
           content:
             application/json:
               schema:
@@ -1498,8 +1515,8 @@ paths:
       description: >-
         Persists a batch of merged-away -> kept name mappings recorded when a
         merge is confirmed. Existing aliases (matched case-insensitively on
-        externalName) are updated; new ones are inserted. Available to any
-        signed-in user.
+        externalName, within the same category/brand) are updated; new ones
+        are inserted. Available to any signed-in user.
       requestBody:
         required: true
         content:
@@ -1526,9 +1543,26 @@ paths:
         the user explicitly told the app to never propose merging together. The
         merge suggester filters these out of both AI and remembered suggestions.
         Available to any signed-in user.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: >-
+            Which merge tab's pool to scope the denied-pair list to. Defaults
+            to "ingredient" for backward compatibility.
+          schema:
+            $ref: "#/components/schemas/MergeSuggestCategory"
+        - name: brand
+          in: query
+          required: false
+          description: >-
+            When category is "flavor", scopes the denied-pair list to a
+            single brand's flavor pool. Ignored for every other category.
+          schema:
+            type: string
       responses:
         "200":
-          description: All denied merge pairs
+          description: All denied merge pairs in the requested category
           content:
             application/json:
               schema:
@@ -1538,9 +1572,10 @@ paths:
       tags: [deniedMerges]
       summary: Save denied (ignored) ingredient-merge pairs
       description: >-
-        Persists a batch of unordered name pairs the user denied. Pairs are
-        normalized (trimmed, lowercased, sorted) and deduped; a pair that already
-        exists is left as-is. Available to any signed-in user.
+        Persists a batch of unordered name pairs the user denied, scoped to a
+        category (and brand, for flavors). Pairs are normalized (trimmed,
+        lowercased, sorted) and deduped; a pair that already exists is left
+        as-is. Available to any signed-in user.
       requestBody:
         required: true
         content:
@@ -6137,16 +6172,23 @@ components:
           items:
             $ref: "#/components/schemas/ConversationTurn"
 
+    MergeSuggestCategory:
+      type: string
+      description: >-
+        Which merge tab a suggestion/alias/denial belongs to, so pools never
+        leak across tabs. Defaults to "ingredient" for backward compatibility.
+      enum: [ingredient, mixes, dough, sauce, cheese, brand, flavor]
+
     MergeAlias:
       type: object
-      description: A learned mapping from a merged-away ingredient name to the kept name.
+      description: A learned mapping from a merged-away name to the kept name.
       required:
         - externalName
         - canonicalName
       properties:
         externalName:
           type: string
-          description: The ingredient name that was merged away (matched case-insensitively)
+          description: The name that was merged away (matched case-insensitively)
         canonicalName:
           type: string
           description: The canonical name it was folded into
@@ -6171,12 +6213,17 @@ components:
           description: The batch of merge aliases to upsert
           items:
             $ref: "#/components/schemas/MergeAlias"
+        category:
+          $ref: "#/components/schemas/MergeSuggestCategory"
+        brand:
+          type: string
+          description: When category is "flavor", the single brand this batch is scoped to.
 
     DeniedMerge:
       type: object
       description: >-
-        An unordered pair of ingredient names the user told the app to never
-        propose merging together (matched case-insensitively, either direction).
+        An unordered pair of names the user told the app to never propose
+        merging together (matched case-insensitively, either direction).
       required:
         - nameA
         - nameB
@@ -6208,6 +6255,11 @@ components:
           description: The batch of denied pairs to add or remove
           items:
             $ref: "#/components/schemas/DeniedMerge"
+        category:
+          $ref: "#/components/schemas/MergeSuggestCategory"
+        brand:
+          type: string
+          description: When category is "flavor", the single brand this batch is scoped to.
 
     MergedAwayList:
       type: object
@@ -6663,6 +6715,13 @@ components:
           description: Learned merge aliases to ground the suggestions
           items:
             $ref: "#/components/schemas/MergeAlias"
+        category:
+          $ref: "#/components/schemas/MergeSuggestCategory"
+        brand:
+          type: string
+          description: >-
+            When category is "flavor", the single brand `names` was scoped
+            to — used only to tailor the AI prompt's wording.
 
     MergeSuggestion:
       type: object

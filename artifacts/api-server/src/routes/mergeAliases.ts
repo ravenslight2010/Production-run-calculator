@@ -1,22 +1,38 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, mergeAliasesTable, type MergeAlias as MergeAliasRow } from "@workspace/db";
 import { SaveMergeAliasesBody } from "@workspace/api-zod";
 import { currentScope } from "../lib/requestScope";
-import { mergeAliasKey } from "@workspace/merge-suggest";
+import { mergeAliasKey, type MergeSuggestCategory } from "@workspace/merge-suggest";
 
 const router: IRouter = Router();
 
-// Learned ingredient-merge aliases: persisted mappings from a merged-away
-// ingredient name to the canonical name it was folded into, contributed
-// automatically whenever a merge is confirmed. The AI merge-suggester and the
-// local "previously merged" suggestions reuse them. All routes sit behind the
-// router-level requireAuth, so any signed-in user (operators included) can read
-// and contribute — intentionally NOT manager-gated, matching the import/spec
+// Learned merge aliases: persisted mappings from a merged-away name to the
+// canonical name it was folded into, contributed automatically whenever a
+// merge is confirmed. The AI merge-suggester and the local "previously
+// merged" suggestions reuse them. All routes sit behind the router-level
+// requireAuth, so any signed-in user (operators included) can read and
+// contribute — intentionally NOT manager-gated, matching the import/spec
 // alias precedent.
+//
+// Every alias is scoped to a `category` (which merge tab it came from), so a
+// learned alias never leaks into an unrelated tab's suggestions. "flavor"
+// rows are additionally scoped to a single `brand` (a flavor name can
+// legitimately repeat across brands). Rows written before categories existed
+// default to category "ingredient" (see schema), matching every pre-existing
+// caller that never sent one.
 
 const MAX_BATCH = 1000;
 const MAX_NAME_LEN = 200;
+const CATEGORIES: MergeSuggestCategory[] = [
+  "ingredient",
+  "mixes",
+  "dough",
+  "sauce",
+  "cheese",
+  "brand",
+  "flavor",
+];
 
 type AliasRow = {
   externalName: string;
@@ -27,17 +43,50 @@ function toApiAlias(row: MergeAliasRow): AliasRow {
   return { externalName: row.externalName, canonicalName: row.canonicalName };
 }
 
-async function listAll(): Promise<AliasRow[]> {
+function parseCategory(raw: unknown): MergeSuggestCategory {
+  const c = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (CATEGORIES as string[]).includes(c) ? (c as MergeSuggestCategory) : "ingredient";
+}
+
+// Strict variant for GET query params: an unrecognized category is a caller
+// error (bad query string), not an implicit "ingredient" — unlike the POST/
+// DELETE body paths, which go through the zod enum first and so can only
+// ever see an already-valid value or `undefined`.
+function parseCategoryStrict(raw: unknown): MergeSuggestCategory | null {
+  if (raw === undefined) return "ingredient";
+  const c = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (CATEGORIES as string[]).includes(c) ? (c as MergeSuggestCategory) : null;
+}
+
+function parseBrand(category: MergeSuggestCategory, raw: unknown): string | null {
+  if (category !== "flavor") return null;
+  const b = typeof raw === "string" ? raw.trim().slice(0, MAX_NAME_LEN) : "";
+  return b || null;
+}
+
+async function listAll(category: MergeSuggestCategory, brand: string | null): Promise<AliasRow[]> {
   const rows = await db
     .select()
     .from(mergeAliasesTable)
-    .where(eq(mergeAliasesTable.scope, currentScope()));
+    .where(
+      and(
+        eq(mergeAliasesTable.scope, currentScope()),
+        eq(mergeAliasesTable.category, category),
+        brand ? eq(mergeAliasesTable.brand, brand) : isNull(mergeAliasesTable.brand),
+      ),
+    );
   return rows.map(toApiAlias);
 }
 
 router.get("/merge-aliases", async (req: Request, res: Response) => {
+  const category = parseCategoryStrict(req.query.category);
+  if (category === null) {
+    res.status(400).json({ error: "Invalid category" });
+    return;
+  }
   try {
-    const aliases = await listAll();
+    const brand = parseBrand(category, req.query.brand);
+    const aliases = await listAll(category, brand);
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to list merge aliases");
@@ -51,6 +100,9 @@ router.post("/merge-aliases", async (req: Request, res: Response) => {
     res.status(400).json({ error: "Invalid input" });
     return;
   }
+
+  const category = parseCategory(parsed.data.category);
+  const brand = parseBrand(category, parsed.data.brand);
 
   // Normalize, bound, and drop degenerate/self-referential entries up front.
   const incoming: AliasRow[] = [];
@@ -68,7 +120,13 @@ router.post("/merge-aliases", async (req: Request, res: Response) => {
       const existing = await db
         .select()
         .from(mergeAliasesTable)
-        .where(eq(mergeAliasesTable.scope, currentScope()));
+        .where(
+          and(
+            eq(mergeAliasesTable.scope, currentScope()),
+            eq(mergeAliasesTable.category, category),
+            brand ? eq(mergeAliasesTable.brand, brand) : isNull(mergeAliasesTable.brand),
+          ),
+        );
       const byKey = new Map<string, MergeAliasRow>();
       for (const row of existing) {
         byKey.set(mergeAliasKey(row.externalName), row);
@@ -96,11 +154,11 @@ router.post("/merge-aliases", async (req: Request, res: Response) => {
       if (inserts.length > 0) {
         await db
           .insert(mergeAliasesTable)
-          .values(inserts.map((a) => ({ ...a, scope: currentScope() })));
+          .values(inserts.map((a) => ({ ...a, scope: currentScope(), category, brand })));
       }
     }
 
-    const aliases = await listAll();
+    const aliases = await listAll(category, brand);
     res.json({ aliases });
   } catch (err) {
     req.log.error({ err }, "failed to save merge aliases");

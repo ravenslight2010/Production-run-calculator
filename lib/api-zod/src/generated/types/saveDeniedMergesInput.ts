@@ -6,8 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DeniedMerge } from './deniedMerge';
+import type { MergeSuggestCategory } from './mergeSuggestCategory';
 
 export interface SaveDeniedMergesInput {
   /** The batch of denied pairs to add or remove */
   pairs: DeniedMerge[];
+  category?: MergeSuggestCategory;
+  /** When category is "flavor", the single brand this batch is scoped to. */
+  brand?: string;
 }
