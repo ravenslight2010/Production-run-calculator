@@ -92,3 +92,14 @@ confirm `grep -c "location.reload()"` is 0 and the suppressed-debug line appears
 **Why not just serve a production build:** `vite preview` would also remove the client, but it
 kills hot-reload for ongoing dev and needs a rebuild per change — the plugin keeps dev
 ergonomics while stopping the disruptive reloads. Dev-only, no parity impact (mobile = Metro).
+
+## Residual reloads after reload-suppression = browser killing a frozen/OOM tab
+With vite reload suppression confirmed working ("full page reload suppressed" in
+console) and no sandbox reset / crash incident in server logs, a fresh page load
+mid-import (aborted in-flight parse-spec-sheet POST, statusCode null) points at the
+BROWSER killing the tab: mass import parsed up to 10 workbooks synchronously
+back-to-back with all file bytes held via Promise.all. Mitigations (web+mobile):
+sequential per-file reads, a setTimeout(0) yield between file parses, and releasing
+each buffer in the loop's finally. The user's place is also protected now: web
+activeTab persists in localStorage (whitelist-validated) so any reload restores the
+tab instead of bouncing to Run.

@@ -618,6 +618,10 @@ export async function prepareSpecImportMulti(
     // positional label when the caller didn't pass filenames).
     const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
+      // Yield to the event loop between files: workbook parsing is synchronous
+      // and CPU-heavy, and back-to-back parses on a big batch can freeze the
+      // tab long enough for the browser to kill the page mid-import.
+      await new Promise((r) => setTimeout(r, 0));
       const grids = await readWorkbookGrids(buffers[i]);
       const core = await parseWorkbookCore(grids, known, aliases);
       parsedList.push(core.parsed);
@@ -633,6 +637,9 @@ export async function prepareSpecImportMulti(
       failedNames.push(label);
       errors.push(`${label}: ${msg}`);
     } finally {
+      // Release the raw file bytes (parsed or failed) so a 10-file batch
+      // doesn't hold every workbook in memory for the whole import.
+      buffers[i] = new ArrayBuffer(0);
       onProgress?.(i + 1, buffers.length);
     }
   }

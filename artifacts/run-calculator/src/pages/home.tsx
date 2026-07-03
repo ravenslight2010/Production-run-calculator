@@ -1547,6 +1547,27 @@ function NumField({
 // tracking should pick right back up from it, not go quiet for 10 minutes).
 const AUTO_SUPPRESS_MS = 1 * 60 * 1000;
 
+// Persisted last-active tab so an unexpected reload restores the user's place.
+const ACTIVE_TAB_STORAGE_KEY = "run-calc-active-tab";
+const VALID_TABS = new Set([
+  "run",
+  "setup",
+  "dough",
+  "sauce",
+  "frontline",
+  "packaging",
+  "warehouse",
+  "inventory",
+  "mixes",
+  "ai",
+  "incidents",
+  "downtime",
+  "quality",
+  "staff",
+  "stoppages",
+  "summary",
+]);
+
 function StepperField({
   control,
   name,
@@ -2197,7 +2218,24 @@ export default function Home() {
   const { fields: doughFields, append: appendDough, remove: removeDough, replace: replaceDough } = useFieldArray({ control: form.control, name: "doughRecipe" });
   const { fields: frontlineFields, append: appendFrontline, remove: removeFrontline, replace: replaceFrontline } = useFieldArray({ control: form.control, name: "frontlineRecipe" });
 
-  const [activeTab, setActiveTab] = useState("run");
+  // Remember the last tab so an unexpected page reload (browser refresh, dev
+  // preview reconnect, tab crash during a heavy import) puts the user back
+  // where they were instead of bouncing them to the Run tab.
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_TAB_STORAGE_KEY);
+      return saved && VALID_TABS.has(saved) ? saved : "run";
+    } catch {
+      return "run";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, activeTab);
+    } catch {
+      // Storage full/unavailable — losing tab restore is fine.
+    }
+  }, [activeTab]);
   // Manager-only nav badge: pending password reset requests awaiting approval.
   const pendingResetCount = usePendingResetCount();
   // Manager-only nav badge: reported issues / crashes not yet reviewed.
@@ -5870,10 +5908,13 @@ export default function Home() {
     try {
       // Read each workbook independently so one unreadable file doesn't sink the
       // batch — prepareSpecImportMulti skips unparseable buffers and throws only
-      // if every file failed.
-      const buffers = await Promise.all(
-        files.map((f) => f.arrayBuffer().catch(() => new ArrayBuffer(0))),
-      );
+      // if every file failed. Reads run one at a time (not Promise.all) to keep
+      // peak memory low on a big batch — reading many workbooks at once can
+      // freeze or crash the browser tab mid-import.
+      const buffers: ArrayBuffer[] = [];
+      for (const f of files) {
+        buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      }
       const prepared =
         buffers.length === 1
           ? await prepareSpecImport(buffers[0])
@@ -5948,9 +5989,12 @@ export default function Home() {
     setPremixImportLoading(true);
     setShowPremixImport(true);
     try {
-      const buffers = await Promise.all(
-        files.map((f) => f.arrayBuffer().catch(() => new ArrayBuffer(0))),
-      );
+      // Sequential reads (not Promise.all) to keep peak memory low on a big
+      // batch — reading many workbooks at once can freeze/crash the tab.
+      const buffers: ArrayBuffer[] = [];
+      for (const f of files) {
+        buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      }
       const prepared = await preparePremixImport(
         buffers,
         (done, total) => setPremixImportProgress(total > 1 ? { done, total } : null),

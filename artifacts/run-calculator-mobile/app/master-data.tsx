@@ -98,7 +98,7 @@ import { useColors } from "@/hooks/useColors";
 import { useMe } from "@/hooks/useRole";
 import { useQueryClient } from "@tanstack/react-query";
 import { FONTS } from "@/constants/fonts";
-import type { ParsedRecipe } from "@workspace/spec-import";
+import type { ParsedRecipe, SheetGrid } from "@workspace/spec-import";
 
 function tap() {
   Haptics.selectionAsync();
@@ -1676,10 +1676,14 @@ export default function MasterDataScreen() {
       } else {
         // Read each workbook independently so one unreadable file doesn't sink
         // the batch — prepareSpecImportMulti skips empties and throws only if
-        // every file failed.
-        const settled = await Promise.all(
-          assets.map((a) => readGrids(a.uri).catch(() => [])),
-        );
+        // every file failed. Reads run one at a time (not Promise.all) with a
+        // yield between files so a big batch can't freeze/crash the app while
+        // parsing workbooks back-to-back.
+        const settled: SheetGrid[][] = [];
+        for (const a of assets) {
+          await new Promise((r) => setTimeout(r, 0));
+          settled.push(await readGrids(a.uri).catch(() => []));
+        }
         prepared = await prepareSpecImportMulti(
           settled,
           store,
@@ -1770,10 +1774,13 @@ export default function MasterDataScreen() {
           : readWorkbookGridsFromBase64(await Promise.resolve(new File(uri).base64()));
       // Read each workbook independently so one unreadable file doesn't sink the
       // batch — preparePremixImport skips empties and throws only if every file
-      // failed.
-      const settled = await Promise.all(
-        assets.map((a) => readGrids(a.uri).catch(() => [])),
-      );
+      // failed. Sequential reads with a yield between files so a big batch
+      // can't freeze/crash the app while parsing workbooks back-to-back.
+      const settled: SheetGrid[][] = [];
+      for (const a of assets) {
+        await new Promise((r) => setTimeout(r, 0));
+        settled.push(await readGrids(a.uri).catch(() => []));
+      }
       const prepared = await preparePremixImport(
         settled,
         buildPremixStore(),
