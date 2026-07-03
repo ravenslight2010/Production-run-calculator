@@ -221,6 +221,32 @@ describe("conversion + summary", () => {
     expect(merged).toHaveLength(2);
   });
 
+  it("merge keeps on-hand amount, enabled flag, and custom notes the sheet cannot carry", () => {
+    const mixes = parsePremixWorkbook([HANNAFORD]).map(
+      (p) => premixToMix(groundPremix(p, KNOWN, []).mix)!,
+    );
+    const existing = {
+      ...mixes[0],
+      amountAlreadyMade: 75.5,
+      enabled: false,
+      notes: "Mix cold\nPull 9 Days Early", // stale pull line + custom note
+    };
+    const merged = mergePremixIntoMixes([existing], mixes);
+    const updated = merged.find((m) => m.id === mixes[0].id)!;
+    // Sheet-less fields survive the re-import...
+    expect(updated.amountAlreadyMade).toBe(75.5);
+    expect(updated.enabled).toBe(false);
+    // ...custom note lines are kept, while the pull-note line follows the
+    // IMPORT (stale "9 days" line replaced by whatever the sheet now says).
+    const importedPull = (mixes[0].notes ?? "").trim();
+    expect(updated.notes).toBe(
+      importedPull ? `Mix cold\n${importedPull}` : "Mix cold",
+    );
+    // Sheet-carried fields still come from the import.
+    expect(updated.batchSize).toBe(mixes[0].batchSize);
+    expect(updated.components).toEqual(mixes[0].components);
+  });
+
   it("builds per-mix review candidates tagged new vs update", () => {
     const mixes = parsePremixWorkbook([HANNAFORD]).map(
       (p) => premixToMix(groundPremix(p, KNOWN, []).mix)!,

@@ -505,9 +505,38 @@ export function summarizePremixImport(
   return { total: mixes.length, created, updated };
 }
 
+// A "Pull N Days Early" note line (the only note the sheet format carries).
+// Mirrors DAYS_EARLY_RE but matches anywhere so it can classify note lines.
+const PULL_NOTE_LINE_RE = /pull\s+(?:old\s+mix\s+)?\d+\s+days?\s+(?:early|prior|ahead|before)/i;
+
 /**
- * Upsert imported mixes into the existing list by id (imported wins). Returns a
- * new array; existing mixes not in the import are preserved. Pure.
+ * Merge notes for an id-matched update. The sheet format only ever carries the
+ * "Pull N Days Early" line, so custom notes on the existing mix (e.g. "Mix
+ * cold") must survive a re-import. Policy: keep the existing mix's non-pull
+ * note lines, and take the pull-note line from the IMPORT (it reflects the
+ * sheet's current daysEarly — including its absence when daysEarly is now 0).
+ */
+function mergeMixNotes(existingNotes: string | undefined, importedNotes: string | undefined): string {
+  const customLines = (existingNotes ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !PULL_NOTE_LINE_RE.test(l));
+  const importedLines = (importedNotes ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(
+      (l) => l && !customLines.some((c) => c.toLowerCase() === l.toLowerCase()),
+    );
+  return [...customLines, ...importedLines].join("\n");
+}
+
+/**
+ * Upsert imported mixes into the existing list by id (imported wins on the
+ * fields the sheet carries). The premix sheet format does NOT carry a mix's
+ * on-hand amount (`amountAlreadyMade`), its `enabled` flag, or free-form custom
+ * notes — so on an id-matched update those are kept from the existing mix
+ * instead of being reset by the import (see mergeMixNotes for the note policy).
+ * Existing mixes not in the import are preserved. Pure.
  */
 export function mergePremixIntoMixes(
   existing: ReadonlyArray<Mix>,
@@ -515,6 +544,21 @@ export function mergePremixIntoMixes(
 ): Mix[] {
   const byId = new Map<string, Mix>();
   for (const m of existing) byId.set(m.id, m);
-  for (const m of imported) byId.set(m.id, m);
+  for (const m of imported) {
+    const prev = byId.get(m.id);
+    if (!prev) {
+      byId.set(m.id, m);
+      continue;
+    }
+    const merged: Mix = {
+      ...m,
+      amountAlreadyMade: prev.amountAlreadyMade,
+      enabled: prev.enabled,
+    };
+    const notes = mergeMixNotes(prev.notes, m.notes);
+    if (notes) merged.notes = notes;
+    else delete merged.notes;
+    byId.set(m.id, merged);
+  }
   return [...byId.values()];
 }

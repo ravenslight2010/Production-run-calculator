@@ -17,6 +17,7 @@ import { normalizeMix } from "@workspace/mixes";
 import {
   buildPremixCandidates,
   groundPremix,
+  mergePremixIntoMixes,
   parsePremixWorkbook,
   premixId,
   premixToMix,
@@ -224,6 +225,54 @@ describe("mix export survives a real .xlsx round-trip through the premix importe
     expect(byName.get("Topping Blend")?.notes).toBe("Pull 3 Days Early");
     expect(byName.get("Ultra Cheese Blend")?.notes).toBe("Pull 2 Days Early");
     expect(byName.get("Bobo's Deluxe Veggie Mix")?.notes).toBeUndefined();
+  });
+
+  it("merging the re-import preserves on-hand amounts, disabled status, and custom notes", () => {
+    // The sheet format does NOT carry amountAlreadyMade, enabled, or free-form
+    // custom notes — so the merge must keep them from the existing mixes
+    // instead of letting the re-import silently reset them.
+    const existing: Mix[] = originals.map((m) => {
+      if (m.name === "Bobo's Deluxe Veggie Mix") {
+        // Disabled, with on-hand stock and a custom note (no pull note).
+        return { ...m, amountAlreadyMade: 120.5, enabled: false, notes: "Mix cold" };
+      }
+      if (m.name === "Topping Blend") {
+        // Custom note ALONGSIDE the pull note (daysEarly 3 → exported line).
+        return { ...m, amountAlreadyMade: 42, notes: "Mix cold\nPull 3 Days Early" };
+      }
+      // "Ultra Cheese Blend" keeps its plain pull note; "Bobo's Deluxe Mix"
+      // stays untouched (no notes, defaults).
+      return { ...m };
+    });
+
+    const merged = mergePremixIntoMixes(existing, recovered);
+    expect(merged).toHaveLength(originals.length);
+    const byName = new Map(merged.map((m) => [m.name, m]));
+
+    const veggie = byName.get("Bobo's Deluxe Veggie Mix")!;
+    expect(veggie.amountAlreadyMade).toBe(120.5);
+    expect(veggie.enabled).toBe(false);
+    expect(veggie.notes).toBe("Mix cold");
+
+    const topping = byName.get("Topping Blend")!;
+    expect(topping.amountAlreadyMade).toBe(42);
+    expect(topping.enabled).toBe(true);
+    // Custom line survives; the pull line comes from the import (not doubled).
+    expect(topping.notes).toBe("Mix cold\nPull 3 Days Early");
+    expect(topping.daysEarly).toBe(3);
+
+    const ultra = byName.get("Ultra Cheese Blend")!;
+    expect(ultra.notes).toBe("Pull 2 Days Early");
+
+    const plain = byName.get("Bobo's Deluxe Mix")!;
+    expect(plain.amountAlreadyMade).toBe(0);
+    expect(plain.enabled).toBe(true);
+    expect(plain.notes).toBeUndefined();
+
+    // Sheet-carried fields still come from the import (quantities untouched).
+    expect(merged.map(projection).sort(byId)).toEqual(
+      originals.map(projection).sort(byId),
+    );
   });
 
   it("negative control: layout regressions ARE caught by this guard", () => {
