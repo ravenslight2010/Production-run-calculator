@@ -2078,18 +2078,25 @@ function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaul
  * its name under the Mixes category instead of Cheese. The AI importer only
  * knows dough/sauce/cheese, so pre-blended topping mixes ("White Fajita Mix",
  * "Garlic Chicken Mix") arrive as `kind: "cheese"` — routing happens here at
- * apply time. A name is a mix when the user already keeps it in the Mix list,
- * or when it contains the standalone word "mix" without mentioning cheese
- * (the same split applyStrayMixRecategorizeIfNeeded uses). Everything else —
- * ingredient rows, the shared cheese/mix preset map, and the applicator-slot
- * profile tie — is identical for both categories, so only the NAME list (and
- * its tombstone namespace) differs.
+ * apply time. A name is a mix when the user already keeps it in the Mix list
+ * (their categorization always wins — filing it under Cheese would recreate
+ * the mix/cheese duplicate), or when it contains the standalone word "mix"
+ * without mentioning cheese (the same split applyStrayMixRecategorizeIfNeeded
+ * uses) AND it actually blends 2+ ingredients — a single-ingredient table is
+ * not a mix no matter what its label says, so it stays under Cheese. Everything
+ * else — ingredient rows, the shared cheese/mix preset map, and the
+ * applicator-slot profile tie — is identical for both categories, so only the
+ * NAME list (and its tombstone namespace) differs.
  */
-export function specImportCheeseRecipeIsMix(name: string, userMixNamesLower: ReadonlySet<string>): boolean {
+export function specImportCheeseRecipeIsMix(
+  name: string,
+  userMixNamesLower: ReadonlySet<string>,
+  ingredientCount: number,
+): boolean {
   const t = name.trim().toLowerCase();
   if (!t) return false;
   if (userMixNamesLower.has(t)) return true;
-  return /\bmix\b/.test(t) && !/cheese/i.test(t);
+  return ingredientCount >= 2 && /\bmix\b/.test(t) && !/cheese/i.test(t);
 }
 
 /**
@@ -2121,7 +2128,7 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   // so the tombstone-clear and the name-list registration below stay in step.
   const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
   const routesToMix = (r: ParsedRecipe): boolean =>
-    r.kind === "cheese" && specImportCheeseRecipeIsMix(r.name, userMixNamesLower);
+    r.kind === "cheese" && specImportCheeseRecipeIsMix(r.name, userMixNamesLower, r.rows.length);
 
   for (const r of parsed.recipes) {
     const name = r.name.trim();

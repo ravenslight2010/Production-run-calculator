@@ -55,20 +55,25 @@ function importWithCheeseKindRecipe(name: string): ParsedSpecImport {
 
 describe("specImportCheeseRecipeIsMix", () => {
   const none = new Set<string>();
-  it("classifies standalone-word 'mix' names without 'cheese' as mixes", () => {
-    expect(specImportCheeseRecipeIsMix("White Fajita Mix", none)).toBe(true);
-    expect(specImportCheeseRecipeIsMix("Garlic Chicken Mix", none)).toBe(true);
-    expect(specImportCheeseRecipeIsMix("Club Mix (With Chicken)", none)).toBe(true);
+  it("classifies standalone-word 'mix' names without 'cheese' as mixes (2+ ingredients)", () => {
+    expect(specImportCheeseRecipeIsMix("White Fajita Mix", none, 2)).toBe(true);
+    expect(specImportCheeseRecipeIsMix("Garlic Chicken Mix", none, 5)).toBe(true);
+    expect(specImportCheeseRecipeIsMix("Club Mix (With Chicken)", none, 3)).toBe(true);
   });
   it("keeps cheese-mentioning and non-mix names as cheese", () => {
-    expect(specImportCheeseRecipeIsMix("Aldo's Cheese Mix", none)).toBe(false);
-    expect(specImportCheeseRecipeIsMix("Cheese Blend", none)).toBe(false);
-    expect(specImportCheeseRecipeIsMix("Premixed Blend", none)).toBe(false);
-    expect(specImportCheeseRecipeIsMix("", none)).toBe(false);
+    expect(specImportCheeseRecipeIsMix("Aldo's Cheese Mix", none, 3)).toBe(false);
+    expect(specImportCheeseRecipeIsMix("Cheese Blend", none, 3)).toBe(false);
+    expect(specImportCheeseRecipeIsMix("Premixed Blend", none, 3)).toBe(false);
+    expect(specImportCheeseRecipeIsMix("", none, 3)).toBe(false);
   });
-  it("treats any name already in the user Mix list as a mix", () => {
+  it("does NOT make a mix out of a single-ingredient recipe, whatever its label", () => {
+    expect(specImportCheeseRecipeIsMix("White Fajita Mix", none, 1)).toBe(false);
+    expect(specImportCheeseRecipeIsMix("Garlic Chicken Mix", none, 0)).toBe(false);
+  });
+  it("treats any name already in the user Mix list as a mix (even single-ingredient)", () => {
     const userMixes = new Set(["lucia's morning melt parisian"]);
-    expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes)).toBe(true);
+    expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 2)).toBe(true);
+    expect(specImportCheeseRecipeIsMix("Lucia's Morning Melt Parisian", userMixes, 1)).toBe(true);
   });
 });
 
@@ -111,6 +116,14 @@ describe("applySpecImport mix routing", () => {
     applySpecImport(importWithCheeseKindRecipe("White Fajita Mix"));
     const deleted = loadDeletedItems();
     expect(deleted["mixRecipeNames"] ?? []).not.toContain("white fajita mix");
+  });
+
+  it("files a single-ingredient 'mix'-named recipe under Cheese, not Mix", () => {
+    const parsed = importWithCheeseKindRecipe("Diced Red Fajita Mix");
+    parsed.recipes[0].rows = [{ ingredient: "Diced Red Peppers", lbs: 12 }];
+    applySpecImport(parsed);
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).toContain("Diced Red Fajita Mix");
+    expect(loadList(MIX_RECIPE_NAMES_KEY, [])).not.toContain("Diced Red Fajita Mix");
   });
 
   it("does not cross-populate name lists when one import carries both a cheese recipe and a mix", () => {
