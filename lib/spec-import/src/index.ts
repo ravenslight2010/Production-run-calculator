@@ -129,6 +129,115 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
   return result;
 }
 
+// ── Embedded applicator blends (deterministic unpack) ───────────────────────
+//
+// Many spec grids pack a full blend recipe INSIDE one applicator cell — a mix
+// name followed by number+ingredient pairs, e.g. "Aldo's Cheese Mix 1.75
+// Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan". The AI prompt asks
+// the model to split these (clean name → applicator type, pairs → cheese
+// recipe), but model compliance is probabilistic; this pass runs AFTER
+// sanitization and deterministically unpacks any composition the model left
+// embedded, so no import ever lands a raw blend string as an applicator type.
+
+/** A blend composition parsed out of a single applicator-type string. */
+export type EmbeddedBlend = { name: string; rows: RecipeRow[] };
+
+const BLEND_PAIR_RE = /(\d+(?:\.\d+)?)\s+([A-Za-z][^,()]*)/g;
+
+/**
+ * Parse an applicator-type string that embeds a blend composition. Returns the
+ * clean mix name plus its ingredient rows, or null when the string is a plain
+ * type name. Guards against false positives: needs 2+ number+ingredient pairs
+ * (a lone "Lowes 7in" or supplier code never qualifies), per-part numbers must
+ * be plausible lbs ratios (0 < n <= 100 — product codes like 28501 are
+ * skipped), and the leading name must be non-trivial. Pure.
+ */
+export function parseEmbeddedBlend(type: string): EmbeddedBlend | null {
+  const text = (type ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  BLEND_PAIR_RE.lastIndex = 0;
+  let firstIdx: number | null = null;
+  const rows: RecipeRow[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = BLEND_PAIR_RE.exec(text))) {
+    const lbs = Number(m[1]);
+    const ingredient = m[2].replace(/[\s,;:.–-]+$/g, "").trim();
+    if (!Number.isFinite(lbs) || lbs <= 0 || lbs > 100) continue;
+    if (ingredient.length < 3 || !/[A-Za-z]{3}/.test(ingredient)) continue;
+    if (firstIdx === null) firstIdx = m.index;
+    rows.push({ ingredient, lbs });
+  }
+  if (firstIdx === null || rows.length < 2) return null;
+  const name = text
+    .slice(0, firstIdx)
+    .replace(/[\s,;:(–-]+$/g, "")
+    .trim();
+  if (name.length < 4) return null;
+  return { name, rows };
+}
+
+/**
+ * Deterministically unpack every embedded applicator blend in a parsed import:
+ * the applicator's `type` becomes the clean mix name and the composition is
+ * emitted ONCE as a cheese-kind library recipe (apply-time routing then files
+ * "mix"-named ones under the Mix category). A clean name the AI already
+ * emitted a cheese recipe for is reused, never duplicated; the same base name
+ * with a DIFFERENT composition becomes a distinct "(variant N)" recipe.
+ *
+ * IMPORTANT: run this ONCE over the fully MERGED workbook parse (after
+ * mergeParsedSpecImports), never per chunk — variant naming is only consistent
+ * within a single pass, and a per-chunk pass would let two chunks emit the same
+ * base name for different compositions, which the later-wins recipe merge then
+ * collapses into one (losing a variant and mislinking applicators). Pure.
+ */
+export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): ParsedSpecImport {
+  // Every taken cheese-recipe name (pre-existing AND newly generated) so a
+  // generated variant name can never silently collide with either.
+  const takenCheese = new Set(
+    parsed.recipes.filter((r) => r.kind === "cheese").map((r) => r.name.trim().toLowerCase()),
+  );
+  const added: ParsedRecipe[] = [];
+  const variantsByBase = new Map<string, ParsedRecipe[]>();
+  const sameRows = (a: RecipeRow[], b: RecipeRow[]) =>
+    a.length === b.length &&
+    a.every(
+      (x, i) =>
+        x.ingredient.toLowerCase() === b[i].ingredient.toLowerCase() &&
+        Math.abs(x.lbs - b[i].lbs) < 1e-9,
+    );
+
+  const profiles = parsed.profiles.map((p) => ({
+    ...p,
+    applicators: p.applicators.map((a) => {
+      const blend = parseEmbeddedBlend(a.type);
+      if (!blend) return a;
+      const baseLower = blend.name.toLowerCase();
+      const variants = variantsByBase.get(baseLower) ?? [];
+      // Same composition already extracted in this pass → reuse its name.
+      const match = variants.find((v) => sameRows(v.rows, blend.rows));
+      if (match) return { ...a, type: match.name };
+      // The AI already emitted a cheese recipe under this clean name (and no
+      // extracted variant claimed it) — trust its version, just clean the type.
+      if (variants.length === 0 && takenCheese.has(baseLower)) {
+        return { ...a, type: blend.name };
+      }
+      // New composition: base name if free, else the next free "(variant N)".
+      let name = blend.name;
+      for (let n = 2; takenCheese.has(name.trim().toLowerCase()); n++) {
+        name = `${blend.name} (variant ${n})`;
+      }
+      const rec: ParsedRecipe = { kind: "cheese", name, rows: blend.rows };
+      added.push(rec);
+      takenCheese.add(name.trim().toLowerCase());
+      variants.push(rec);
+      variantsByBase.set(baseLower, variants);
+      return { ...a, type: name };
+    }),
+  }));
+
+  return { ...parsed, profiles, recipes: [...parsed.recipes, ...added] };
+}
+
 /**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated

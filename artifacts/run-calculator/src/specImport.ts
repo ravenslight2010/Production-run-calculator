@@ -19,6 +19,7 @@ import {
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
+  extractEmbeddedApplicatorBlends,
   formatOverflowColumnsNote,
   formatTruncatedCellsNote,
   gridSanityIssue,
@@ -336,7 +337,13 @@ async function parseWorkbookCore(
     throw new Error("That workbook looks empty — nothing to import.");
   }
 
-  const rawMerged = rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList);
+  // Deterministic safety net over the MERGED workbook: unpack any blend
+  // composition the AI left embedded in an applicator cell (clean name → type,
+  // number+ingredient pairs → ONE cheese recipe). Must run post-merge, never
+  // per chunk — see extractEmbeddedApplicatorBlends.
+  const rawMerged = extractEmbeddedApplicatorBlends(
+    rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList),
+  );
   const { parsed, resolved } = canonicalizeParsed(rawMerged, known, aliases);
 
   return { parsed, resolved, flagged, droppedRows, truncatedCells, overflowRows };

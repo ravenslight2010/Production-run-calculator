@@ -567,3 +567,12 @@ number+ingredient pairs → one cheese-kind recipe.
 - **How to apply:** keep the EMBEDDED BLENDS prompt section; don't lower the
   cell clamp; tests sizing "long cell" fixtures must be clamp-relative
   (build to > PROMPT_MAX_CELL_CHARS), never hardcode 80/240.
+- **Prompt compliance is probabilistic — a deterministic unpacker is the real
+  guarantee.** `extractEmbeddedApplicatorBlends` in the lib parses any
+  composition the model leaves embedded (clean name → type, pairs → one
+  cheese recipe; "(variant N)" for same base name w/ different composition).
+- **The unpacker MUST run once over the MERGED workbook parse, never per
+  chunk** (so NOT in the server's per-chunk sanitize): per-chunk extraction
+  lets two chunks emit the same base name for different compositions, and the
+  later-wins recipe merge then collapses one variant and mislinks applicator
+  types. Both clients call it at `rawMerged` before `canonicalizeParsed`.

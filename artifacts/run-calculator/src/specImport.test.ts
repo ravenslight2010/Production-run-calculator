@@ -31,6 +31,8 @@ import {
   formatOverflowColumnsNote,
   PROMPT_MAX_CELL_CHARS,
   TRUNCATED_NOTE_MAX_LOCATIONS,
+  parseEmbeddedBlend,
+  extractEmbeddedApplicatorBlends,
   type ParsedSpecImport,
   type SheetGrid,
   type SpecImportAlias,
@@ -2466,6 +2468,146 @@ describe("AI parse-pass retry rule", () => {
     });
     it("a retry that returns results but carries a failure note is still rejected", () => {
       expect(resolveRetriedParsePass(notedPass, notedButPartialPass)).toBe(notedPass);
+    });
+  });
+});
+
+describe("embedded applicator blends (deterministic unpack)", () => {
+  const ALDOS = "Aldo's Cheese Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan";
+  const FAJITA =
+    "White Fajita Mix (0.375 Red Pepper Strips Blanched, 0.375 Green Pepper Strips, 0.25 Onion Strips)";
+
+  describe("parseEmbeddedBlend", () => {
+    it("extracts name and number+ingredient rows", () => {
+      const b = parseEmbeddedBlend(ALDOS);
+      expect(b?.name).toBe("Aldo's Cheese Mix");
+      expect(b?.rows).toEqual([
+        { ingredient: "Pizella", lbs: 1.75 },
+        { ingredient: "Part Skim Mozzarella", lbs: 1.0 },
+        { ingredient: "Grated Parmesan", lbs: 0.1 },
+      ]);
+    });
+    it("handles parenthesized compositions (name kept clean of the paren)", () => {
+      const b = parseEmbeddedBlend(FAJITA);
+      expect(b?.name).toBe("White Fajita Mix");
+      expect(b?.rows.length).toBe(3);
+      expect(b?.rows[0]).toEqual({ ingredient: "Red Pepper Strips Blanched", lbs: 0.375 });
+    });
+    it("leaves plain types and supplier codes alone", () => {
+      expect(parseEmbeddedBlend("Pepperoni")).toBeNull();
+      expect(parseEmbeddedBlend("Diced Pepperoni (Sugardale - 02032)")).toBeNull();
+      expect(parseEmbeddedBlend("Bacon (Tri Meats - TM3514U or C&F - 001ANUB40)")).toBeNull();
+      // Single pair never qualifies (sizes, one-off numbers).
+      expect(parseEmbeddedBlend("Lowes 7in Crust")).toBeNull();
+      // Big numbers are product codes, not lbs parts.
+      expect(parseEmbeddedBlend("Chicken Diced House of Raeford 28501 or 28502 something")).toBeNull();
+    });
+    it("survives a truncated trailing pair", () => {
+      const b = parseEmbeddedBlend("Basha's Cheese Mix 2.0 Whole Milk Mozzarella, 1.0 Provolone, 0.");
+      expect(b?.name).toBe("Basha's Cheese Mix");
+      expect(b?.rows.length).toBe(2);
+    });
+  });
+
+  describe("extractEmbeddedApplicatorBlends", () => {
+    const prof = (apps: string[]): ParsedSpecImport["profiles"][number] => ({
+      brand: "B",
+      flavor: apps[0] ?? "F",
+      applicators: apps.map((type) => ({ type, ozPerPizza: 5 })),
+      pepperonis: [],
+    });
+
+    it("cleans the applicator type and emits ONE cheese recipe shared across profiles", () => {
+      const out = extractEmbeddedApplicatorBlends({
+        profiles: [
+          { ...prof([ALDOS]), flavor: "Cheese" },
+          { ...prof([ALDOS]), flavor: "Pepperoni" },
+        ],
+        recipes: [],
+      });
+      expect(out.profiles.map((p) => p.applicators[0].type)).toEqual([
+        "Aldo's Cheese Mix",
+        "Aldo's Cheese Mix",
+      ]);
+      const cheese = out.recipes.filter((r) => r.kind === "cheese");
+      expect(cheese.length).toBe(1);
+      expect(cheese[0].name).toBe("Aldo's Cheese Mix");
+      expect(cheese[0].rows.length).toBe(3);
+    });
+
+    it("reuses an AI-emitted recipe of the same clean name instead of duplicating", () => {
+      const out = extractEmbeddedApplicatorBlends({
+        profiles: [prof([ALDOS])],
+        recipes: [
+          { kind: "cheese", name: "Aldo's Cheese Mix", rows: [{ ingredient: "Pizella", lbs: 2 }] },
+        ],
+      });
+      expect(out.profiles[0].applicators[0].type).toBe("Aldo's Cheese Mix");
+      expect(out.recipes.filter((r) => r.kind === "cheese").length).toBe(1);
+      expect(out.recipes[0].rows).toEqual([{ ingredient: "Pizella", lbs: 2 }]);
+    });
+
+    it("same base name with a different composition becomes a distinct variant", () => {
+      const other = "Aldo's Cheese Mix 2.0 Pizella, 0.5 Part Skim Mozzarella";
+      const out = extractEmbeddedApplicatorBlends({
+        profiles: [prof([ALDOS]), { ...prof([other]), flavor: "Deluxe" }],
+        recipes: [],
+      });
+      const names = out.recipes.map((r) => r.name);
+      expect(names).toContain("Aldo's Cheese Mix");
+      expect(names).toContain("Aldo's Cheese Mix (variant 2)");
+      expect(out.profiles[1].applicators[0].type).toBe("Aldo's Cheese Mix (variant 2)");
+    });
+
+    it("same lbs vector but different ingredients still becomes a distinct variant", () => {
+      const a = "House Blend Mix 1.0 Mozzarella, 0.5 Provolone";
+      const b = "House Blend Mix 1.0 Cheddar, 0.5 Monterey Jack";
+      const out = extractEmbeddedApplicatorBlends({
+        profiles: [prof([a]), { ...prof([b]), flavor: "Other" }],
+        recipes: [],
+      });
+      const cheese = out.recipes.filter((r) => r.kind === "cheese");
+      expect(cheese.length).toBe(2);
+      expect(new Set(cheese.map((r) => r.name)).size).toBe(2);
+      expect(out.profiles[0].applicators[0].type).not.toBe(out.profiles[1].applicators[0].type);
+    });
+
+    it("cross-chunk variants survive when extraction runs AFTER the raw chunk merge", () => {
+      // Two chunks of one workbook, same base name, different compositions —
+      // the real import path merges raw chunks first, then extracts once.
+      const chunkA: ParsedSpecImport = {
+        profiles: [{ ...prof([ALDOS]), flavor: "Cheese" }],
+        recipes: [],
+      };
+      const chunkB: ParsedSpecImport = {
+        profiles: [
+          { ...prof(["Aldo's Cheese Mix 2.0 Pizella, 0.5 Part Skim Mozzarella"]), flavor: "Deluxe" },
+        ],
+        recipes: [],
+      };
+      const out = extractEmbeddedApplicatorBlends(mergeParsedSpecImports([chunkA, chunkB]));
+      const cheese = out.recipes.filter((r) => r.kind === "cheese");
+      expect(cheese.length).toBe(2);
+      const typeByFlavor = new Map(out.profiles.map((p) => [p.flavor, p.applicators[0].type]));
+      expect(typeByFlavor.get("Cheese")).toBe("Aldo's Cheese Mix");
+      expect(typeByFlavor.get("Deluxe")).toBe("Aldo's Cheese Mix (variant 2)");
+      // Each applicator's type resolves to the recipe with ITS composition.
+      const byName = new Map(cheese.map((r) => [r.name, r.rows]));
+      expect(byName.get("Aldo's Cheese Mix")?.length).toBe(3);
+      expect(byName.get("Aldo's Cheese Mix (variant 2)")?.length).toBe(2);
+    });
+
+    it("leaves plain applicator types and existing recipes untouched", () => {
+      const input: ParsedSpecImport = {
+        profiles: [prof(["Pepperoni", "Diced Pepperoni (Sugardale - 02032)"])],
+        recipes: [{ kind: "dough", name: "Thin", rows: [] }],
+      };
+      const out = extractEmbeddedApplicatorBlends(input);
+      expect(out.profiles[0].applicators.map((a) => a.type)).toEqual([
+        "Pepperoni",
+        "Diced Pepperoni (Sugardale - 02032)",
+      ]);
+      expect(out.recipes).toEqual(input.recipes);
     });
   });
 });

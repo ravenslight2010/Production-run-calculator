@@ -85,6 +85,10 @@ export function sanitizeParseSpecSheet(raw: unknown, input?: ParseSpecSheetInput
         knownSauceNames: names(input.known?.sauceNames),
       }
     : {};
+  // NOTE: embedded applicator blends are deliberately NOT unpacked here — this
+  // sanitizer runs per chunk, and per-chunk extraction can collide same-named
+  // variants across chunks. Clients run extractEmbeddedApplicatorBlends() once
+  // over the MERGED workbook parse instead (see prepareSpecImport in each app).
   return sanitizeParsedSpecImport(raw, {}, grounding);
 }
 
