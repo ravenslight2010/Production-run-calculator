@@ -365,7 +365,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
-import { noteBreadcrumb } from "@/reloadBreadcrumbs";
+import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -1742,6 +1742,22 @@ export default function Home() {
   // reactive effect would reload the whole page out from under the user right as
   // they select files. Latching on the first identity makes this a load-time-only
   // concern, so an in-session refetch can never relaunch the app.
+  //
+  // Separate from the sandbox latch below: if the PREVIOUS page was torn down
+  // while a file picker was open (the preview frame can restart the app when
+  // focus moves to the OS picker), tell the user what happened instead of
+  // leaving them on a silently restarted screen with their file selection gone.
+  useEffect(() => {
+    const last = getLastActionBeforeLoad();
+    if (last && (last.includes("picker opening") || last.includes("file(s) selected"))) {
+      toast({
+        title: "The screen restarted during your import",
+        description:
+          "Your place was saved, but the files you were picking were lost — please select them again. If this keeps happening, open the app in its own browser tab for big imports.",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const autoSandboxResetRef = useRef(false);
   useEffect(() => {
     if (autoSandboxResetRef.current || !me) return;
@@ -5900,7 +5916,7 @@ export default function Home() {
   async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []).slice(0, MAX_SPEC_IMPORT_FILES);
     e.target.value = "";
-    noteBreadcrumb(`spec import: ${files.length} file(s) selected`);
+    noteBreadcrumb(files.length > 0 ? `spec import: ${files.length} file(s) selected` : "spec import: picker canceled");
     if (files.length === 0) return;
     setSpecImportPrepared(null);
     setSpecImportError(null);
@@ -5982,9 +5998,9 @@ export default function Home() {
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
   async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    noteBreadcrumb(`premix import: ${e.target.files?.length ?? 0} file(s) selected`);
     const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
+    noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
     setPremixImportPrepared(null);
     setPremixImportError(null);

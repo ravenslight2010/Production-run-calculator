@@ -103,3 +103,16 @@ sequential per-file reads, a setTimeout(0) yield between file parses, and releas
 each buffer in the loop's finally. The user's place is also protected now: web
 activeTab persists in localStorage (whitelist-validated) so any reload restores the
 tab instead of bouncing to Run.
+
+## Third cause (proven by breadcrumbs): the canvas/preview iframe re-navigates while the OS file picker is open
+Breadcrumb evidence (sessionStorage crumbs + pagehide + navigation type): user clicks
+Import → picker opens → ~6s later pagehide fires and the app comes back as a fresh
+"navigate" load with NO app code involved (sandbox reset never fired, vite reload
+stripped, buttons type=button). The parent frame re-navigates the embedded app when
+focus moves to the OS picker — outside app control. Mitigations: activeTab
+persistence restores the user's place, a time-bounded (2min) one-shot toast explains
+the interruption (crumbs are CONSUMED on load to prevent replay; canceled pickers
+write a distinct "picker canceled" crumb so they can't false-positive), and the
+reliable workaround is running big imports in the app's own browser tab, not the
+canvas iframe. Breadcrumb module src/reloadBreadcrumbs.ts stays in prod (console +
+sessionStorage only, HMR-guarded init).
