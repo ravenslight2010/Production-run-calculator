@@ -2,7 +2,8 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React from "react";
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { showConfirm } from "@/utils/notify";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CardSection, SectionHeader } from "@/components/UI";
 import { FONTS } from "@/constants/fonts";
@@ -157,21 +158,16 @@ export default function SettingsScreen() {
         {/* Reset */}
         <Pressable
           onPress={() => {
-            Alert.alert(
-              "Reset This Run",
-              `Reset "${runLabel(run, runIndex)}" to defaults? This clears its settings and progress.`,
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Reset",
-                  style: "destructive",
-                  onPress: () => {
-                    resetRun();
-                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                  },
-                },
-              ],
-            );
+            showConfirm({
+              title: "Reset This Run",
+              message: `Reset "${runLabel(run, runIndex)}" to defaults? This clears its settings and progress.`,
+              confirmText: "Reset",
+              destructive: true,
+              onConfirm: () => {
+                resetRun();
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+              },
+            });
           }}
           style={({ pressed }) => [
             styles.resetBtn,

@@ -13,6 +13,11 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
   alert text in mobile runTest plans. Assert the **behavioral** signal instead:
   blocked → run does not start (a "Start Run" button is still present, no Pause/End);
   allowed → tapping Start replaces it with running controls (Pause/End/timer).
+  App code must never call `Alert.alert` directly — route info alerts through
+  `showNote()` and button confirmations through `showConfirm()` in
+  `utils/notify.ts` (native: real Alert; web: `window.alert`/`window.confirm`).
+  On web these are NATIVE browser dialogs — Playwright must handle the dialog
+  event (accept/dismiss), they won't appear in the page body either.
 
 - **Production rules need a reload after login.** Rules are fetched via React Query
   with the bearer token (key `productionRules`, staleTime ~30s, refetchInterval ~60s).

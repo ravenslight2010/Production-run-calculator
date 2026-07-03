@@ -4,7 +4,8 @@ import { reloadAppAsync } from "expo";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { showConfirm } from "@/utils/notify";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
@@ -147,14 +148,13 @@ export default function TabLayout() {
     await reloadAppAsync().catch(() => {});
   };
   const doSandboxReset = () => {
-    Alert.alert(
-      "Reset sandbox",
-      "This replaces all sandbox data with a fresh copy of the live data. Live data is not affected. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Reset", style: "destructive", onPress: () => void runSandboxReset() },
-      ],
-    );
+    showConfirm({
+      title: "Reset sandbox",
+      message: "This replaces all sandbox data with a fresh copy of the live data. Live data is not affected. Continue?",
+      confirmText: "Reset",
+      destructive: true,
+      onConfirm: () => void runSandboxReset(),
+    });
   };
 
   // Automatic sandbox refresh: when the server reports the sandbox copy is stale

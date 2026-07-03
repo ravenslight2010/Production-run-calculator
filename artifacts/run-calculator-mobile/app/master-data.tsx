@@ -6,7 +6,6 @@ import { Stack } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -45,7 +44,7 @@ import {
   skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
-import { showNote } from "@/utils/notify";
+import { showConfirm, showNote } from "@/utils/notify";
 import {
   buildCaseUpdateOffers,
   promptCaseUpdates,
@@ -1221,7 +1220,7 @@ export default function MasterDataScreen() {
       setImportResult(result);
       setImportOpen(true);
     } catch {
-      Alert.alert(
+      showNote(
         "Couldn't read that file",
         "The spreadsheet couldn't be read. Check the format and try again.",
       );
@@ -1319,21 +1318,16 @@ export default function MasterDataScreen() {
     const warn = hasMerge
       ? "\n\nNote: this reverses the ingredient names and lists, but does NOT un-fold any inventory stock that was combined by a merge. Re-check stock in Inventory."
       : "";
-    Alert.alert(
-      "Undo change",
-      `Undo "${entry.description}"${tail}?${warn}`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Undo",
-          style: "destructive",
-          onPress: () => {
-            undoMasterDataChange(entry.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-        },
-      ],
-    );
+    showConfirm({
+      title: "Undo change",
+      message: `Undo "${entry.description}"${tail}?${warn}`,
+      confirmText: "Undo",
+      destructive: true,
+      onConfirm: () => {
+        undoMasterDataChange(entry.id);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      },
+    });
   };
 
   // ── Excel spec-sheet import (manager only; mirrors the web header action) ──
@@ -1460,25 +1454,24 @@ export default function MasterDataScreen() {
   }
 
   function handleDeleteSheet(id: number) {
-    Alert.alert("Delete saved spec sheet?", "This removes the saved snapshot.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          setSheetBusyId(id);
-          try {
-            const next = await deleteSpecSheet(id);
-            setSavedSheets(next);
-            if (reconResult?.specSheetId === id) setReconResult(null);
-          } catch {
-            setReconError("Couldn't delete that spec sheet.");
-          } finally {
-            setSheetBusyId(null);
-          }
-        },
+    showConfirm({
+      title: "Delete saved spec sheet?",
+      message: "This removes the saved snapshot.",
+      confirmText: "Delete",
+      destructive: true,
+      onConfirm: async () => {
+        setSheetBusyId(id);
+        try {
+          const next = await deleteSpecSheet(id);
+          setSavedSheets(next);
+          if (reconResult?.specSheetId === id) setReconResult(null);
+        } catch {
+          setReconError("Couldn't delete that spec sheet.");
+        } finally {
+          setSheetBusyId(null);
+        }
       },
-    ]);
+    });
   }
 
   // Build the store the orchestration glue needs from live context (web reads
@@ -1638,7 +1631,7 @@ export default function MasterDataScreen() {
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setReconSignal((c) => c + 1);
-      Alert.alert(
+      showNote(
         "Spec sheet imported",
         importedRecipes
           ? "Brands, flavors, and recipes have been added."
@@ -1725,7 +1718,7 @@ export default function MasterDataScreen() {
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
+      showNote(
         "Premix sheet imported",
         `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
       );

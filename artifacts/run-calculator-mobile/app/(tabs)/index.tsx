@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { showConfirm, showNote } from "@/utils/notify";
 import {
   Card,
   MetricCard,
@@ -1012,7 +1012,7 @@ export default function CalculatorScreen() {
                       const anyChecklist = blockingViolations.some(
                         (x) => (x.checklist ?? []).length > 0,
                       );
-                      Alert.alert(
+                      showNote(
                         "Can't start run",
                         `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}:\n\n` +
                           blockingViolations.map((x) => `• ${x.message}`).join("\n") +
@@ -1152,21 +1152,16 @@ export default function CalculatorScreen() {
           setShowRunPicker(false);
         }}
         onDelete={(i) => {
-          Alert.alert(
-            "Delete Run",
-            `Delete "${runLabel(allRuns[i], i)}"?`,
-            [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Delete",
-                style: "destructive",
-                onPress: () => {
-                  deleteRun(i);
-                  setShowRunPicker(false);
-                },
-              },
-            ],
-          );
+          showConfirm({
+            title: "Delete Run",
+            message: `Delete "${runLabel(allRuns[i], i)}"?`,
+            confirmText: "Delete",
+            destructive: true,
+            onConfirm: () => {
+              deleteRun(i);
+              setShowRunPicker(false);
+            },
+          });
         }}
       />
 

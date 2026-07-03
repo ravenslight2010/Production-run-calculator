@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -12,6 +11,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { showConfirm, showNote } from "@/utils/notify";
 import { Card, Button } from "@/components/UI";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
@@ -112,7 +112,7 @@ export default function RolesManager() {
     mutationFn: (name: string) => deleteRoleRequest(name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["roles"] }),
     onError: (e) =>
-      Alert.alert("Could not delete", serverMessage(e, "Could not delete role.")),
+      showNote("Could not delete", serverMessage(e, "Could not delete role.")),
   });
 
   const reassignMutation = useMutation({
@@ -123,7 +123,7 @@ export default function RolesManager() {
       qc.invalidateQueries({ queryKey: ["me"] });
     },
     onError: (e) =>
-      Alert.alert("Could not change role", serverMessage(e, "Could not change role.")),
+      showNote("Could not change role", serverMessage(e, "Could not change role.")),
   });
 
   function openRoleEditor(target: RoleDefinition | "new") {
@@ -167,18 +167,13 @@ export default function RolesManager() {
   }
 
   function confirmDeleteRole(role: RoleDefinition) {
-    Alert.alert(
-      "Delete role?",
-      `This permanently removes the ${roleLabel(role.name)} role. You can't delete a role that is still assigned to someone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => deleteRoleMutation.mutate(role.name),
-        },
-      ],
-    );
+    showConfirm({
+      title: "Delete role?",
+      message: `This permanently removes the ${roleLabel(role.name)} role. You can't delete a role that is still assigned to someone.`,
+      confirmText: "Delete",
+      destructive: true,
+      onConfirm: () => deleteRoleMutation.mutate(role.name),
+    });
   }
 
   // Built-in roles can't be renamed; the manager role must keep manage-staff.

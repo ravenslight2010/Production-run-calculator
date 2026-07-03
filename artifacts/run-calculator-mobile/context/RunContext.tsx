@@ -1,9 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
-  Alert,
   AppState as RNAppState,
   type AppStateStatus as RNAppStateStatus,
 } from "react-native";
+import { showNote } from "@/utils/notify";
 import { MIX_SEED } from "@/data/mixSeed";
 import {
   SPEC_BRANDS,
@@ -3576,7 +3576,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         const summary = skipped
           .map((s) => `• ${s.fromKey} → ${s.toKey} (${s.reason ?? "unknown"})`)
           .join("\n");
-        Alert.alert(
+        showNote(
           "Some stock wasn't folded",
           `These inventory items weren't folded into the target:\n\n${summary}\n\n` +
             "Ingredient names were still merged everywhere else. Check these items' stock in Inventory.",

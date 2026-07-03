@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { showConfirm, showNote } from "@/utils/notify";
 import { Card, Button } from "@/components/UI";
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
@@ -104,7 +104,7 @@ export default function StaffRolesCard() {
       qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
     },
     onError: (e) =>
-      Alert.alert(
+      showNote(
         "Could not approve",
         serverMessage(e, "Could not approve request."),
       ),
@@ -116,25 +116,20 @@ export default function StaffRolesCard() {
       qc.invalidateQueries({ queryKey: ["passwordResetRequests"] });
     },
     onError: (e) =>
-      Alert.alert(
+      showNote(
         "Could not decline",
         serverMessage(e, "Could not decline request."),
       ),
   });
 
   function confirmDecline(reqItem: PasswordResetRequestItem) {
-    Alert.alert(
-      "Decline reset request?",
-      `This removes ${reqItem.username}'s request without issuing a code.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Decline",
-          style: "destructive",
-          onPress: () => declineMutation.mutate(reqItem.id),
-        },
-      ],
-    );
+    showConfirm({
+      title: "Decline reset request?",
+      message: `This removes ${reqItem.username}'s request without issuing a code.`,
+      confirmText: "Decline",
+      destructive: true,
+      onConfirm: () => declineMutation.mutate(reqItem.id),
+    });
   }
 
   const roleMutation = useMutation({
@@ -162,7 +157,7 @@ export default function StaffRolesCard() {
     mutationFn: (userId: string) => deleteStaffMember(userId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["staff"] }),
     onError: (e) =>
-      Alert.alert("Could not remove", serverMessage(e, "Could not remove staff member.")),
+      showNote("Could not remove", serverMessage(e, "Could not remove staff member.")),
   });
 
   const staff: StaffMember[] = data ?? [];
@@ -190,18 +185,13 @@ export default function StaffRolesCard() {
   }
 
   function confirmRemove(member: StaffMember) {
-    Alert.alert(
-      "Remove staff member?",
-      `This permanently removes ${member.name || member.userId}. They will lose access immediately and this cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => removeMutation.mutate(member.userId),
-        },
-      ],
-    );
+    showConfirm({
+      title: "Remove staff member?",
+      message: `This permanently removes ${member.name || member.userId}. They will lose access immediately and this cannot be undone.`,
+      confirmText: "Remove",
+      destructive: true,
+      onConfirm: () => removeMutation.mutate(member.userId),
+    });
   }
 
   const pendingRequests = resetRequestsQuery.data ?? [];
