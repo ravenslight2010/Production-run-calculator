@@ -116,3 +116,14 @@ write a distinct "picker canceled" crumb so they can't false-positive), and the
 reliable workaround is running big imports in the app's own browser tab, not the
 canvas iframe. Breadcrumb module src/reloadBreadcrumbs.ts stays in prod (console +
 sessionStorage only, HMR-guarded init).
+
+## Same-family symptom: one-letter typing / keyboard dismissal in the canvas iframe on mobile
+Report: during import review, typing in a name closes the phone keyboard after ONE
+letter and that letter is committed as the name. App side fully ruled out (stable
+row keys pk/rk-i, top-level ProfileRow/RecipeRow components, no key on the dialogs,
+no .focus()/.blur() callers, prepared set once after parse so no mid-edit rebuild).
+Mechanism matches the picker teardown: the phone keyboard opening resizes the
+viewport, the parent canvas re-layouts and pulls focus off the embedded app.
+Do NOT hunt for an app bug on these canvas-only symptoms — the answer is "run the
+app in its own browser tab"; the app cannot defend against parent-frame focus theft
+(programmatic refocus won't reopen a mobile keyboard without a user gesture).
