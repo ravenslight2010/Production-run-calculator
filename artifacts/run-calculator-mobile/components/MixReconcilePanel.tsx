@@ -45,7 +45,14 @@ function fmtDate(ms: number): string {
   }
 }
 
-export default function MixReconcilePanel({ isManager }: { isManager: boolean }) {
+export default function MixReconcilePanel({
+  isManager,
+  refreshSignal = 0,
+}: {
+  isManager: boolean;
+  /** Bump to re-fetch the saved sheet lists (e.g. right after an import saves one). */
+  refreshSignal?: number;
+}) {
   const colors = useColors();
   const qc = useQueryClient();
   const [premixSheets, setPremixSheets] = React.useState<SavedPremixSheet[]>([]);
@@ -75,9 +82,12 @@ export default function MixReconcilePanel({ isManager }: { isManager: boolean })
     }
   }
 
+  // Re-fetch on mount AND whenever an import commits a new saved sheet — the
+  // import buttons live nearby, so without the signal the lists go stale and a
+  // just-imported sheet looks like it "didn't save".
   React.useEffect(() => {
     void refresh();
-  }, []);
+  }, [refreshSignal]);
 
   async function handleCheckPremix(s: SavedPremixSheet) {
     setBusyKey(`premix-${s.id}`);

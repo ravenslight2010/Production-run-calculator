@@ -1441,6 +1441,9 @@ export default function MasterDataScreen() {
   const [reconAllBusy, setReconAllBusy] = useState(false);
   // Bumped after a spec sheet import to auto-run the cross-reference.
   const [reconSignal, setReconSignal] = useState(0);
+  // Bumped after ANY sheet-saving import (spec or premix) so the Mix
+  // Monitoring panel re-fetches its saved-sheet lists instead of going stale.
+  const [sheetListSignal, setSheetListSignal] = useState(0);
   const prevReconSignalRef = useRef(0);
 
   const refreshSavedSheets = useCallback(async () => {
@@ -1710,6 +1713,7 @@ export default function MasterDataScreen() {
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setReconSignal((c) => c + 1);
+      setSheetListSignal((c) => c + 1);
       showNote(
         "Spec sheet imported",
         importedRecipes
@@ -1798,6 +1802,9 @@ export default function MasterDataScreen() {
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void mixesQc.invalidateQueries({ queryKey: ["mixes"] });
+      // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
+      // sheet snapshot shows up immediately.
+      setSheetListSignal((c) => c + 1);
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -2322,7 +2329,7 @@ export default function MasterDataScreen() {
 
             <SectionHeader title="Mix Monitoring" />
             <CardSection>
-              <MixReconcilePanel isManager={isManager} />
+              <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} />
             </CardSection>
 
             <SectionHeader title="Ask about Mixes" />

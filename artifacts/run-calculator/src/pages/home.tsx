@@ -2466,6 +2466,9 @@ export default function Home() {
   // Bumped after a spec sheet import so SpecReconcilePanel auto-runs the
   // cross-reference against the newly saved sheet.
   const [specReconcileSignal, setSpecReconcileSignal] = useState(0);
+  // Bumped after ANY sheet-saving import (spec or premix) so the Mix
+  // Monitoring panel re-fetches its saved-sheet lists instead of going stale.
+  const [sheetListSignal, setSheetListSignal] = useState(0);
   // True when the merge review was opened automatically by an import, so we can
   // show a one-line explainer of why the user landed here.
   const [mergeFromImport, setMergeFromImport] = useState(false);
@@ -5915,6 +5918,7 @@ export default function Home() {
       if (importedRecipes) setMergeCheckRequest((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
+      setSheetListSignal((c) => c + 1);
       toast({
         title: "Spec sheet imported",
         description: importedRecipes
@@ -5977,6 +5981,9 @@ export default function Home() {
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      // Refresh the Mix Monitoring saved-sheet lists so the just-saved premix
+      // sheet snapshot shows up immediately.
+      setSheetListSignal((c) => c + 1);
       setShowPremixImport(false);
       setPremixImportPrepared(null);
       const parts = [
@@ -8821,7 +8828,7 @@ export default function Home() {
                         ...pepTypes,
                       ]}
                     />
-                    <MixReconcilePanel isManager={isManager} />
+                    <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} />
                     <MixAssistChat />
                   </div>
                 )}

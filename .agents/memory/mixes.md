@@ -48,3 +48,10 @@ The planner needs, per scheduled run: `pizzas` and `cases`.
   grouping on trimmed brand, alpha sort, no-brand last, in-group name sort) so web+mobile
   can't drift. Add Mix clears search and pre-opens the no-brand group + new editor
   (client-generated id survives the save round-trip, so expansion is stable).
+
+## Saved-sheet list refresh (staleness gotcha)
+MixReconcilePanel (web + mobile) fetches its premix/spec saved-sheet lists in local state,
+not react-query. Any flow that saves a new sheet (spec import, premix import) must bump the
+parent `sheetListSignal` passed as `refreshSignal`, or the just-saved sheet looks like it
+"didn't save" (import buttons render right above the panel, which stays mounted). If a new
+import path is added, wire it into the same signal — or migrate the lists to react-query keys.
