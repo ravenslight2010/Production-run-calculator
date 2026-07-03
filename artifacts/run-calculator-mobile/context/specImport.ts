@@ -21,7 +21,9 @@ import {
   collectMatchCandidates,
   collectSpecAliases,
   crossFillSpecImport,
+  findOverflowColumnRows,
   findTruncatedCells,
+  formatOverflowColumnsNote,
   formatTruncatedCellsNote,
   gridsToPromptText,
   mergeParsedSpecImports,
@@ -42,6 +44,7 @@ import {
   type SpecImportAlias,
   type SpecImportSummary,
   type SpecMatchKnown,
+  type OverflowColumnRow,
   type TruncatedCell,
 } from "@workspace/spec-import";
 import {
@@ -258,6 +261,8 @@ type ParseCore = {
   droppedRows: number;
   /** Cells whose tails were cut by the per-cell prompt clamp (AI never saw them). */
   truncatedCells: TruncatedCell[];
+  /** Rows with non-empty cells past the column cap (dropped entirely, AI never saw them). */
+  overflowRows: OverflowColumnRow[];
 };
 
 /**
@@ -281,6 +286,9 @@ async function parseGridsCore(
   // Cells longer than the per-cell prompt clamp lose their tails before the AI
   // reads them — detect these up front so the review can warn the user.
   const truncatedCells = findTruncatedCells(grids);
+  // Sibling silent-loss path: rows wider than the column cap lose those extra
+  // cells ENTIRELY (not just their tails) — warn about those too. Mirrors web.
+  const overflowRows = findOverflowColumnRows(grids);
 
   const rawList: ParsedSpecImport[] = [];
   const flagged: SpecFlaggedItem[] = [];
@@ -332,7 +340,7 @@ async function parseGridsCore(
   const rawMerged = rawList.length === 1 ? rawList[0] : mergeParsedSpecImports(rawList);
   const { parsed, resolved } = canonicalizeParsed(rawMerged, store.known, aliases);
 
-  return { parsed, resolved, flagged, droppedRows, truncatedCells };
+  return { parsed, resolved, flagged, droppedRows, truncatedCells, overflowRows };
 }
 
 /**
@@ -511,6 +519,18 @@ function appendTruncatedNote(
   return note ? `${note}\n${msg}` : msg;
 }
 
+/** Append the dropped-columns advisory to a parse note when some rows had
+ * non-empty cells past the column cap — those cells never reached the AI.
+ * Mirrors web appendOverflowNote. */
+function appendOverflowNote(
+  note: string | undefined,
+  overflowRows: ReadonlyArray<OverflowColumnRow>,
+): string | undefined {
+  const msg = formatOverflowColumnsNote(overflowRows);
+  if (!msg) return note;
+  return note ? `${note}\n${msg}` : msg;
+}
+
 /** Learned aliases are best-effort; proceed without them if the fetch fails. */
 async function loadSpecImportAliases(): Promise<SpecImportAlias[]> {
   try {
@@ -529,7 +549,7 @@ export async function prepareSpecImport(
   store: SpecImportStore,
 ): Promise<SpecImportPrepared> {
   const aliases = await loadSpecImportAliases();
-  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells } =
+  const { parsed: rawParsed, resolved, flagged, droppedRows, truncatedCells, overflowRows } =
     await parseGridsCore(grids, store, aliases);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
@@ -538,9 +558,9 @@ export async function prepareSpecImport(
   const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
   const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
   const discrepancies = buildDiscrepancies(parsed, store);
-  const note = appendTruncatedNote(
-    appendDroppedNote(parsed.note, droppedRows),
-    truncatedCells,
+  const note = appendOverflowNote(
+    appendTruncatedNote(appendDroppedNote(parsed.note, droppedRows), truncatedCells),
+    overflowRows,
   );
 
   return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
@@ -570,6 +590,7 @@ export async function prepareSpecImportMulti(
   const errors: string[] = [];
   let totalDropped = 0;
   const allTruncated: TruncatedCell[] = [];
+  const allOverflow: OverflowColumnRow[] = [];
 
   let done = 0;
   for (const grids of gridsList) {
@@ -583,6 +604,9 @@ export async function prepareSpecImportMulti(
       // workbook holds the shortened cell.
       allTruncated.push(
         ...core.truncatedCells.map((t) => ({ ...t, sheet: `File ${done + 1} ${t.sheet}` })),
+      );
+      allOverflow.push(
+        ...core.overflowRows.map((o) => ({ ...o, sheet: `File ${done + 1} ${o.sheet}` })),
       );
     } catch (err) {
       errors.push(err instanceof Error ? err.message : "Could not read a file.");
@@ -611,9 +635,12 @@ export async function prepareSpecImportMulti(
       `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
     );
   }
-  const note = appendTruncatedNote(
-    appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped),
-    allTruncated,
+  const note = appendOverflowNote(
+    appendTruncatedNote(
+      appendDroppedNote(noteParts.length ? noteParts.join("\n") : undefined, totalDropped),
+      allTruncated,
+    ),
+    allOverflow,
   );
 
   return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };

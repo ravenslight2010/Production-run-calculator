@@ -26,6 +26,8 @@ import {
   SPEC_ALIAS_KINDS,
   findTruncatedCells,
   formatTruncatedCellsNote,
+  findOverflowColumnRows,
+  formatOverflowColumnsNote,
   PROMPT_MAX_CELL_CHARS,
   TRUNCATED_NOTE_MAX_LOCATIONS,
   type ParsedSpecImport,
@@ -1349,6 +1351,98 @@ describe("formatTruncatedCellsNote", () => {
     expect(note).toContain(`${cells.length + 1} cells were too long`);
     expect(note).toContain("+3 more");
     expect(note?.match(/S row 1\b/g)).toHaveLength(1);
+  });
+});
+
+describe("findOverflowColumnRows", () => {
+  const wideRow = (cols: number, extra: string[]) => [
+    ...Array.from({ length: cols }, () => "c"),
+    ...extra,
+  ];
+
+  it("returns empty when no row exceeds the column cap", () => {
+    const grids: SheetGrid[] = [
+      { name: "S1", rows: [["a", "b"], Array.from({ length: 60 }, () => "x")] },
+    ];
+    expect(findOverflowColumnRows(grids)).toEqual([]);
+  });
+
+  it("reports the sheet, 1-based row, and dropped-cell count past the cap", () => {
+    const grids: SheetGrid[] = [
+      { name: "Specs", rows: [["fine"], wideRow(60, ["lost1", "lost2"]), ["fine"]] },
+    ];
+    const found = findOverflowColumnRows(grids);
+    expect(found).toEqual([{ sheet: "Specs", row: 2, droppedCells: 2 }]);
+  });
+
+  it("ignores empty and whitespace-only cells past the cap (mirrors the prompt path's cleanup)", () => {
+    const grids: SheetGrid[] = [
+      { name: "S1", rows: [wideRow(60, ["", "   ", "\t \n"])] },
+    ];
+    expect(findOverflowColumnRows(grids)).toEqual([]);
+    // But a row mixing blank and real overflow cells counts only the real ones.
+    const mixed = findOverflowColumnRows([
+      { name: "S1", rows: [wideRow(60, ["", "real", "  ", "also real"])] },
+    ]);
+    expect(mixed).toEqual([{ sheet: "S1", row: 1, droppedCells: 2 }]);
+  });
+
+  it("respects a custom maxCols limit", () => {
+    const grids: SheetGrid[] = [{ name: "S1", rows: [["a", "b", "c"]] }];
+    expect(findOverflowColumnRows(grids, { maxCols: 2 })).toEqual([
+      { sheet: "S1", row: 1, droppedCells: 1 },
+    ]);
+    expect(findOverflowColumnRows(grids, { maxCols: 3 })).toEqual([]);
+  });
+
+  it("reports multiple overflowing rows across sheets in order", () => {
+    const grids: SheetGrid[] = [
+      { name: "A", rows: [wideRow(60, ["x"]), ["ok"], wideRow(60, ["y", "z"])] },
+      { name: "B", rows: [["ok"], wideRow(60, ["w"])] },
+    ];
+    expect(findOverflowColumnRows(grids)).toEqual([
+      { sheet: "A", row: 1, droppedCells: 1 },
+      { sheet: "A", row: 3, droppedCells: 2 },
+      { sheet: "B", row: 2, droppedCells: 1 },
+    ]);
+  });
+
+  it("stays disjoint from findTruncatedCells (a long cell past the cap is overflow, not truncation)", () => {
+    const long = "y".repeat(PROMPT_MAX_CELL_CHARS + 5);
+    const grids: SheetGrid[] = [{ name: "S1", rows: [wideRow(60, [long])] }];
+    expect(findTruncatedCells(grids)).toEqual([]);
+    expect(findOverflowColumnRows(grids)).toEqual([{ sheet: "S1", row: 1, droppedCells: 1 }]);
+  });
+});
+
+describe("formatOverflowColumnsNote", () => {
+  it("returns null when nothing overflowed", () => {
+    expect(formatOverflowColumnsNote([])).toBeNull();
+  });
+
+  it("names the affected sheet/row in plain language for a single dropped cell", () => {
+    const note = formatOverflowColumnsNote([{ sheet: "Specs", row: 4, droppedCells: 1 }]);
+    expect(note).toBe(
+      "1 cell sits past column 60 and was not read at all — move that data into the first 60 columns and re-import, or double-check this row: Specs row 4.",
+    );
+  });
+
+  it("sums dropped cells across rows and collapses excess locations to +N more", () => {
+    const rows = Array.from({ length: TRUNCATED_NOTE_MAX_LOCATIONS + 3 }, (_, i) => ({
+      sheet: "S",
+      row: i + 1,
+      droppedCells: 2,
+    }));
+    const note = formatOverflowColumnsNote(rows);
+    expect(note).toContain(`${rows.length * 2} cells sit past column 60`);
+    expect(note).toContain("were not read at all");
+    expect(note).toContain("+3 more");
+  });
+
+  it("reflects a custom column cap in the wording", () => {
+    const note = formatOverflowColumnsNote([{ sheet: "S", row: 1, droppedCells: 3 }], 10);
+    expect(note).toContain("past column 10");
+    expect(note).toContain("first 10 columns");
   });
 });
 

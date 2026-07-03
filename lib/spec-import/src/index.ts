@@ -596,6 +596,79 @@ export function formatTruncatedCellsNote(truncated: ReadonlyArray<TruncatedCell>
   return `${n === 1 ? "1 cell was" : `${n} cells were`} too long and ${n === 1 ? "was" : "were"} shortened before reading — double-check ${spots.length === 1 ? "this row" : "these rows"}: ${where}.`;
 }
 
+// ── Overflow-column detection (pre-import warning) ───────────────────────────
+
+/** One sheet row holding non-empty cells past the column cap — those cells are
+ * dropped entirely before the AI reads the workbook. */
+export type OverflowColumnRow = {
+  /** Sheet the row lives on. */
+  sheet: string;
+  /** 1-based row number within the sheet (as a user would count in Excel). */
+  row: number;
+  /** How many non-empty cells in this row sit past the column cap. */
+  droppedCells: number;
+};
+
+/**
+ * Report every row with non-empty cells beyond the column cap (maxCols,
+ * 60 by default) — the sibling of findTruncatedCells for the OTHER silent-loss
+ * path: cleanRowCells slices each row to maxCols, so a wide user-authored
+ * layout (e.g. one flavor per column) loses whole columns and the AI never
+ * sees them at all. Callers surface these to the user BEFORE the import is
+ * confirmed. "Non-empty" mirrors cleanRowCells' whitespace collapse so a cell
+ * of pure whitespace past the cap doesn't trigger a false warning. Pure.
+ */
+export function findOverflowColumnRows(
+  grids: ReadonlyArray<SheetGrid>,
+  limits: GridTextLimits = {},
+): OverflowColumnRow[] {
+  const lim = { ...DEFAULT_LIMITS, ...limits };
+  const out: OverflowColumnRow[] = [];
+  for (const sheet of grids) {
+    for (let r = 0; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      let dropped = 0;
+      for (const c of row.slice(lim.maxCols)) {
+        const s = (c ?? "").toString().replace(/\s+/g, " ").trim();
+        if (s.length > 0) dropped++;
+      }
+      if (dropped > 0) {
+        out.push({ sheet: sheet.name, row: r + 1, droppedCells: dropped });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Plain-language warning for the import review screen when some rows had data
+ * past the column cap that was dropped entirely (never reached the AI), or
+ * null when nothing overflowed. Lists up to TRUNCATED_NOTE_MAX_LOCATIONS
+ * affected sheet/row spots then collapses the rest to "+N more" — same shape
+ * as formatTruncatedCellsNote. Shared by web and mobile so the wording stays
+ * identical (parity). Pure.
+ */
+export function formatOverflowColumnsNote(
+  overflow: ReadonlyArray<OverflowColumnRow>,
+  maxCols: number = DEFAULT_LIMITS.maxCols,
+): string | null {
+  if (!overflow.length) return null;
+  const seen = new Set<string>();
+  const spots: string[] = [];
+  let cells = 0;
+  for (const o of overflow) {
+    cells += o.droppedCells;
+    const label = `${o.sheet} row ${o.row}`;
+    if (seen.has(label)) continue;
+    seen.add(label);
+    spots.push(label);
+  }
+  const shown = spots.slice(0, TRUNCATED_NOTE_MAX_LOCATIONS);
+  const extra = spots.length - shown.length;
+  const where = extra > 0 ? `${shown.join(", ")} +${extra} more` : shown.join(", ");
+  return `${cells === 1 ? "1 cell sits" : `${cells} cells sit`} past column ${maxCols} and ${cells === 1 ? "was" : "were"} not read at all — move that data into the first ${maxCols} columns and re-import, or double-check ${spots.length === 1 ? "this row" : "these rows"}: ${where}.`;
+}
+
 /**
  * Flatten parsed sheets into a compact, model-friendly text block. Trailing
  * empty cells are dropped, fully-empty rows are skipped, and everything is
