@@ -5,7 +5,6 @@ import * as Haptics from "expo-haptics";
 import React from "react";
 import {
   Platform,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as XLSX from "xlsx";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import { SectionHeader } from "@/components/UI";
+import { showNote } from "@/utils/notify";
 import { FONTS } from "@/constants/fonts";
 import {
   computeCalc,
@@ -398,7 +398,7 @@ export default function SummaryScreen() {
       });
       importScheduledRuns(effective);
       if (skipped > 0) {
-        Alert.alert(
+        showNote(
           "Some runs skipped",
           `${skipped} run${skipped === 1 ? "" : "s"} already ran today, skipped.`,
         );

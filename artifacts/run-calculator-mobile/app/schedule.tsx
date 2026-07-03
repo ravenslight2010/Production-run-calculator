@@ -5,7 +5,6 @@ import * as Haptics from "expo-haptics";
 import { Stack, useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-  Alert,
   Platform,
   Pressable,
   StyleSheet,
@@ -17,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as XLSX from "xlsx";
 import ExcelImportModal, { type ImportCommit } from "@/components/ExcelImportModal";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { showNote } from "@/utils/notify";
 import { CardSection, SectionHeader } from "@/components/UI";
 import { profileKey, todayStr, useRun } from "@/context/RunContext";
 import { useColors } from "@/hooks/useColors";
@@ -195,7 +195,7 @@ export default function ScheduleScreen() {
       });
       importScheduledRuns(effective);
       if (skipped > 0) {
-        Alert.alert(
+        showNote(
           "Some runs skipped",
           `${skipped} run${skipped === 1 ? "" : "s"} already ran today, skipped.`,
         );

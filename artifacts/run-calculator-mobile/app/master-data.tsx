@@ -45,6 +45,7 @@ import {
   skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
+import { showNote } from "@/utils/notify";
 import {
   buildMergeMap,
   countMergeReferences,
@@ -1191,12 +1192,12 @@ export default function MasterDataScreen() {
       setImportOpen(false);
       setImportResult(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert(
+      showNote(
         "Import complete",
         `${count} run${count === 1 ? "" : "s"} imported.${skipped > 0 ? ` ${skipped} already ran today, skipped.` : ""}`,
       );
     } catch (e) {
-      Alert.alert(
+      showNote(
         "Import failed",
         e instanceof Error ? e.message : "Could not import the runs. Please try again.",
       );
