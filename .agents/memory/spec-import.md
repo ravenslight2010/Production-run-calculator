@@ -488,7 +488,6 @@ Any change to one app's order/logic must land in the other verbatim.
 - **How to apply:** every parse-carrying path (merge, tombstone partition,
   applyNameMatches renames, client canonicalize) must carry + rename warnings
   or row-matching silently breaks after canonicalization.
->>>>>>> f81de09 (Show flavor-correction warnings prominently on spec-import review (web + mobile))
 
 ## Recipe NAME grounding (paraphrased names must not mint duplicate recipes)
 - The parse model can paraphrase an EXISTING recipe name (e.g. "Thin Crust
@@ -517,3 +516,18 @@ Any change to one app's order/logic must land in the other verbatim.
   auto-snapping would overwrite a real recipe; the review warning keeps the
   human in the loop. Tests in `specImport.test.ts` (groundRecipeName + RECIPE
   NAME grounding blocks).
+
+## Junk-file pre-AI guard (xlsx never throws on garbage)
+- **`XLSX.read` does NOT throw on non-spreadsheet bytes** — a renamed PDF/image/
+  random binary "reads" as one junk-text sheet, so without a guard the wrong-type
+  pick burns an AI parse call and yields a garbled review instead of the per-file
+  "could not be read … skipped" note.
+- **Fix:** pure `gridSanityIssue(grids)` in `@workspace/spec-import` (empty check +
+  binary heuristics: control-char fraction >2% OR word-like fraction <35% over a
+  ≥16-char sample; tiny legit sheets never judged). Both parse cores (web
+  `parseWorkbookCore`, mobile `parseGridsCore`) throw it BEFORE `splitGridsForPrompt`
+  / the AI call, so single-file shows the message and multi-file emits the skip note.
+- **How to apply:** any new AI-parse entry point that reads a user-picked workbook
+  must call `gridSanityIssue` before the first AI request. Real CSV/text in any
+  language passes; keep thresholds shared-lib only (parity). Tests:
+  `specImportJunkFileGuard.test.ts`.

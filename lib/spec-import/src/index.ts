@@ -669,6 +669,85 @@ export function formatOverflowColumnsNote(
   return `${cells === 1 ? "1 cell sits" : `${cells} cells sit`} past column ${maxCols} and ${cells === 1 ? "was" : "were"} not read at all — move that data into the first ${maxCols} columns and re-import, or double-check ${spots.length === 1 ? "this row" : "these rows"}: ${where}.`;
 }
 
+// ── Junk-file sanity check (pre-AI guard) ────────────────────────────────────
+
+/** Cap on how much cell text gridSanityIssue samples — enough to judge a file
+ * without walking a giant workbook end to end. */
+const SANITY_SAMPLE_MAX_CHARS = 20000;
+/** Below this much sampled text the binary heuristics don't apply (a tiny
+ * legit sheet must never be misflagged; the empty-workbook check still runs). */
+const SANITY_MIN_SAMPLE_CHARS = 16;
+/** Control characters above this fraction of the sample mean binary content —
+ * real spreadsheet text has essentially none, random bytes read as text land
+ * around 10%+. */
+const SANITY_MAX_CONTROL_FRACTION = 0.02;
+/** Word-like characters (letters/digits/whitespace/common punctuation) below
+ * this fraction mean symbol soup, not tabular data — real sheets in any
+ * language sit near 100%. */
+const SANITY_MIN_WORDLIKE_FRACTION = 0.35;
+
+/** Plain-language message for a workbook with no readable rows at all. */
+export const GRID_SANITY_EMPTY_MESSAGE = "That workbook looks empty — nothing to import.";
+/** Plain-language message for a picked file whose bytes aren't spreadsheet
+ * content (renamed PDF/image, random binary, corrupt download). */
+export const GRID_SANITY_JUNK_MESSAGE =
+  "That file doesn't look like a spreadsheet — its content could not be read as rows and columns. Check that you picked a real Excel/CSV file and try again.";
+
+// Letters (any language), digits, whitespace, and the punctuation that shows
+// up in real spreadsheet cells. Anything outside this set counts against the
+// word-like fraction.
+const SANITY_WORDLIKE_RE = /[\p{L}\p{N}\s.,;:!?'"()[\]{}<>/\\|@#$%^&*+=~°_–—-]/u;
+
+function isSanityControlChar(code: number): boolean {
+  // C0 controls minus tab/newline/CR, C1 controls, and the replacement char
+  // (U+FFFD marks bytes that failed to decode at all).
+  if (code < 0x20) return code !== 0x09 && code !== 0x0a && code !== 0x0d;
+  if (code >= 0x7f && code <= 0x9f) return true;
+  return code === 0xfffd;
+}
+
+/**
+ * Cheap pre-AI sanity check that a workbook's grids actually look like
+ * spreadsheet content. The xlsx reader does NOT throw on garbage bytes — a
+ * renamed PDF, an image, or random binary "reads" fine as one junk-text sheet
+ * — so without this guard a wrong-type file silently burns an AI parse call
+ * and produces a garbled review. Returns a plain-language issue string when
+ * the grids are empty (zero non-blank cells) or the sampled cell text looks
+ * like binary junk (too many control characters, or almost no word-like
+ * characters), else null. Real CSV/text content in any language passes.
+ * Shared by web and mobile so the wording and thresholds stay identical
+ * (parity). Pure.
+ */
+export function gridSanityIssue(grids: ReadonlyArray<SheetGrid>): string | null {
+  let total = 0;
+  let control = 0;
+  let wordlike = 0;
+  let hasNonBlank = false;
+
+  outer: for (const sheet of grids) {
+    for (const row of sheet.rows) {
+      for (const cell of row) {
+        const s = (cell ?? "").toString();
+        if (!s) continue;
+        for (const ch of s) {
+          const code = ch.codePointAt(0) ?? 0;
+          if (!hasNonBlank && !/\s/.test(ch)) hasNonBlank = true;
+          total++;
+          if (isSanityControlChar(code)) control++;
+          else if (SANITY_WORDLIKE_RE.test(ch)) wordlike++;
+          if (total >= SANITY_SAMPLE_MAX_CHARS) break outer;
+        }
+      }
+    }
+  }
+
+  if (!hasNonBlank) return GRID_SANITY_EMPTY_MESSAGE;
+  if (total < SANITY_MIN_SAMPLE_CHARS) return null;
+  if (control / total > SANITY_MAX_CONTROL_FRACTION) return GRID_SANITY_JUNK_MESSAGE;
+  if (wordlike / total < SANITY_MIN_WORDLIKE_FRACTION) return GRID_SANITY_JUNK_MESSAGE;
+  return null;
+}
+
 /**
  * Flatten parsed sheets into a compact, model-friendly text block. Trailing
  * empty cells are dropped, fully-empty rows are skipped, and everything is

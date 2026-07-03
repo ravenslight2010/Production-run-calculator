@@ -189,9 +189,10 @@ const MOBILE_PRELUDE = `
 const {
   applyNameMatches, canonicalize, collectMatchCandidates, collectSpecAliases,
   crossFillSpecImport, findOverflowColumnRows, findTruncatedCells,
-  formatOverflowColumnsNote, formatTruncatedCellsNote, gridsToPromptText,
-  mergeParsedSpecImports, recipeTargets, resolveRetriedParsePass,
-  shouldRetryParsePass, splitGridsForPrompt, summarizeSpecImport,
+  formatOverflowColumnsNote, formatTruncatedCellsNote, gridSanityIssue,
+  gridsToPromptText, mergeParsedSpecImports, recipeTargets,
+  resolveRetriedParsePass, shouldRetryParsePass, splitGridsForPrompt,
+  summarizeSpecImport,
 } = globalThis.__SPEC_IMPORT_LIB__;
 const { reconcileSpecWithRecipes, toReconcileRecipes } = globalThis.__SPEC_RECONCILE_LIB__;
 const {

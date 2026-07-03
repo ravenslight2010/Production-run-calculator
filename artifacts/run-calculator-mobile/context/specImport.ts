@@ -25,6 +25,7 @@ import {
   findTruncatedCells,
   formatOverflowColumnsNote,
   formatTruncatedCellsNote,
+  gridSanityIssue,
   gridsToPromptText,
   mergeParsedSpecImports,
   recipeTargets,
@@ -279,6 +280,15 @@ async function parseGridsCore(
   store: SpecImportStore,
   aliases: SpecImportAlias[],
 ): Promise<ParseCore> {
+  // Cheap pre-AI guard: the xlsx reader does NOT throw on garbage bytes (a
+  // renamed PDF/image "reads" as one junk sheet), so reject empty or
+  // binary-junk grids BEFORE burning an AI parse call. In the multi-file path
+  // this throw becomes the per-file "could not be read … skipped" note.
+  // Mirrors web.
+  const sanity = gridSanityIssue(grids);
+  if (sanity) {
+    throw new Error(sanity);
+  }
   const { chunks, droppedRows } = splitGridsForPrompt(grids);
   if (!chunks.length) {
     throw new Error("That workbook looks empty — nothing to import.");
