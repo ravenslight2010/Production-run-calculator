@@ -39,6 +39,11 @@ them back from fragments. Fix: `buildRecipeGrid` wraps a brand's flavors across
 multiple `"Brand: f1, f2"` rows, each under the clamp (importer unions repeated
 brand rows). **How to apply:** any NEW exporter output destined for the AI
 prompt path must keep every single cell under `PROMPT_MAX_CELL_CHARS` or wrap.
+This invariant is now guarded deterministically in CI (no AI):
+`lib/spec-export/src/prompt-roundtrip.test.ts` round-trips the harness's 30×8
+dataset through export → chunk → prompt-text and asserts zero string loss —
+run via the `test:spec-export` workflow. The real-AI harnesses remain the only
+check for MODEL-side limits (output budget, empty-JSON flakiness).
 
 ## Harness gotchas
 - Route rate limit is 10 req/min/user — the harness throttles at 8/min and
