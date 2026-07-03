@@ -3185,6 +3185,10 @@ export default function Home() {
   // ── Schedule future days ────────────────────────────────────────────────────
   const [showScheduleDialog, setShowScheduleDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  // Re-import case-count offers for in-progress runs, awaiting the user's
+  // per-run Accept/Keep choice (null = no dialog). Never auto-applied.
+  const [caseUpdatePrompt, setCaseUpdatePrompt] = useState<{ runId: string; brand: string; flavor: string; from: number; to: number; madeAlready?: number }[] | null>(null);
+  const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const scheduleImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -5982,37 +5986,40 @@ export default function Home() {
     }
     // OFFER (never auto-apply) new case counts for in-progress runs whose
     // skipped file row listed a different planned total than the floor's
-    // current target. Finished runs are never modified.
+    // current target. Finished runs are never modified. The dialog lets the
+    // user Accept/Keep EACH run independently (the office may be right about
+    // one run and wrong about another).
     if (caseUpdateOffers.length > 0) {
-      const lines = caseUpdateOffers
-        .map(o => {
-          const base = `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`;
-          return o.madeAlready != null
-            ? `${base}\n  ⚠ Already made ${o.madeAlready} — the new target of ${o.to} is BELOW that, so this run would show as over target.`
-            : base;
-        })
-        .join("\n");
-      const many = caseUpdateOffers.length > 1;
-      const apply = window.confirm(
-        `The re-imported schedule lists ${many ? "different case counts" : "a different case count"} for ${many ? `${caseUpdateOffers.length} runs that are` : "a run that's"} already going:\n\n${lines}\n\nUpdate the run target${many ? "s" : ""} to the new count${many ? "s" : ""}? The run${many ? "s" : ""} will keep ${many ? "their" : "its"} progress.`,
-      );
-      if (apply) {
-        for (const o of caseUpdateOffers) {
-          if (o.runId === currentRunIdRef.current) {
-            form.setValue("casesNeeded", o.to, { shouldDirty: true });
-            saveRunValues(o.runId, form.getValues());
-          } else {
-            const vals = loadRunValues(o.runId);
-            saveRunValues(o.runId, { ...vals, casesNeeded: o.to });
-          }
-        }
-        schedulePush(dayStateRef.current, 0);
-        toast({
-          title: "Run targets updated",
-          description: `${caseUpdateOffers.length} in-progress run${many ? "s" : ""} updated to the new case count${many ? "s" : ""}.`,
-        });
+      // Runs whose new target is BELOW what's already made default to Keep
+      // (accepting would instantly show the run as over target); all others
+      // default to Accept, matching the old apply-all behavior.
+      setCaseUpdateAccepted(Object.fromEntries(caseUpdateOffers.map(o => [o.runId, o.madeAlready == null])));
+      setCaseUpdatePrompt(caseUpdateOffers);
+    }
+  }
+
+  // Apply the user's per-run choices from the case-update offer dialog.
+  // Accepted runs get the new target through the SAME write paths as any
+  // manual edit (form for the current run, saveRunValues otherwise); runs
+  // marked Keep are untouched.
+  function applyCaseUpdateChoices() {
+    const accepted = (caseUpdatePrompt ?? []).filter(o => caseUpdateAccepted[o.runId]);
+    setCaseUpdatePrompt(null);
+    if (accepted.length === 0) return;
+    for (const o of accepted) {
+      if (o.runId === currentRunIdRef.current) {
+        form.setValue("casesNeeded", o.to, { shouldDirty: true });
+        saveRunValues(o.runId, form.getValues());
+      } else {
+        const vals = loadRunValues(o.runId);
+        saveRunValues(o.runId, { ...vals, casesNeeded: o.to });
       }
     }
+    schedulePush(dayStateRef.current, 0);
+    toast({
+      title: "Run targets updated",
+      description: `${accepted.length} in-progress run${accepted.length === 1 ? "" : "s"} updated to the new case count${accepted.length === 1 ? "" : "s"}.`,
+    });
   }
 
   function printSummary() {
@@ -13172,6 +13179,57 @@ export default function Home() {
           onNavigate={setActiveTab}
           isManager={isManager}
         />
+
+        {/* ── Re-import case-count offer: per-run Accept / Keep ────────────── */}
+        {caseUpdatePrompt && caseUpdatePrompt.length > 0 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-background border border-border rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-bold">Case counts changed</h2>
+                <button type="button" onClick={() => setCaseUpdatePrompt(null)} className="ml-auto text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                The re-imported schedule lists {caseUpdatePrompt.length === 1 ? "a different case count for a run that's" : `different case counts for ${caseUpdatePrompt.length} runs that are`} already going. Choose what to do for each run — progress is kept either way.
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {caseUpdatePrompt.map(o => {
+                  const accepted = !!caseUpdateAccepted[o.runId];
+                  return (
+                    <div key={o.runId} className="flex items-center gap-3 border border-border rounded-md px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate">{`${o.brand} ${o.flavor}`.trim() || "Run"}</div>
+                        <div className="text-xs text-muted-foreground">{o.from} → {o.to} cases</div>
+                        {o.madeAlready != null && (
+                          <div className="text-xs text-orange-400 mt-0.5">⚠ Already made {o.madeAlready} — the new target of {o.to} is below that, so this run would show as over target.</div>
+                        )}
+                      </div>
+                      <div className="flex rounded-md border border-border overflow-hidden shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setCaseUpdateAccepted(prev => ({ ...prev, [o.runId]: true }))}
+                          className={`px-3 py-1.5 text-xs font-semibold transition-colors ${accepted ? "bg-amber-600 text-white" : "text-muted-foreground hover:bg-muted/50"}`}
+                        >
+                          Accept {o.to}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCaseUpdateAccepted(prev => ({ ...prev, [o.runId]: false }))}
+                          className={`px-3 py-1.5 text-xs font-semibold transition-colors border-l border-border ${!accepted ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50"}`}
+                        >
+                          Keep {o.from}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 pt-1 border-t border-border">
+                <button type="button" onClick={() => setCaseUpdatePrompt(null)} className="flex-1 px-4 py-2 rounded-md border border-border text-sm font-semibold text-muted-foreground hover:bg-muted/50 transition-colors">Keep All Current</button>
+                <button type="button" onClick={applyCaseUpdateChoices} className="flex-1 px-4 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors">Apply Choices</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ── Stop / Downtime Dialog ────────────────────────────────────────── */}
         {showStopDialog && (

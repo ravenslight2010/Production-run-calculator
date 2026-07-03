@@ -56,9 +56,13 @@ export function buildCaseUpdateOffers(
 }
 
 /**
- * Offer (never auto-apply) the collected case-count updates. `prefix` lets the
- * caller fold its usual import-summary note into the same alert (RN can't
- * reliably stack two alerts back-to-back on Android).
+ * Offer (never auto-apply) the collected case-count updates, ONE RUN AT A
+ * TIME so the user can accept the office's new count for one run while
+ * keeping the floor's current target on another (mirrors web's per-run
+ * Accept/Keep dialog). `prefix` lets the caller fold its usual import-summary
+ * note into the first prompt (RN can't reliably stack two alerts back-to-back
+ * on Android); follow-up prompts are chained from button presses, which IS
+ * reliable.
  */
 export function promptCaseUpdates(
   offers: CaseUpdateOffer[],
@@ -67,22 +71,35 @@ export function promptCaseUpdates(
 ): void {
   if (offers.length === 0) return;
   const many = offers.length > 1;
-  const lines = offers
-    .map((o) => {
-      const base = `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`;
-      return o.madeAlready != null
-        ? `${base}\n  ⚠ Already made ${o.madeAlready} — the new target of ${o.to} is BELOW that, so this run would show as over target.`
-        : base;
-    })
-    .join("\n");
-  const message = `${prefix}The re-imported schedule lists ${many ? "different case counts" : "a different case count"} for ${many ? `${offers.length} runs that are` : "a run that's"} already going:\n\n${lines}\n\nUpdate the run target${many ? "s" : ""} to the new count${many ? "s" : ""}? Progress is kept.`;
-  // showConfirm renders the styled in-app dialog on web (RN Alert is a silent
-  // no-op there) and the exact two-button Alert.alert on native.
-  showConfirm({
-    title: "Case counts changed",
-    message,
-    confirmText: many ? "Update Targets" : "Update Target",
-    cancelText: "Keep Current",
-    onConfirm: () => offers.forEach(apply),
-  });
+  const intro = `${prefix}The re-imported schedule lists ${many ? "different case counts" : "a different case count"} for ${many ? `${offers.length} runs that are` : "a run that's"} already going.${many ? " Choose for each run whether to update its target or keep the current one." : ""} Progress is kept either way.`;
+  const ask = (i: number) => {
+    if (i < 0 || i >= offers.length) return;
+    const o = offers[i];
+    const name = `${o.brand} ${o.flavor}`.trim() || "run";
+    const step = many ? ` (${i + 1} of ${offers.length})` : "";
+    const madeWarning = o.madeAlready != null
+      ? `\n\n⚠ Already made ${o.madeAlready} — the new target of ${o.to} is BELOW that, so this run would show as over target.`
+      : "";
+    const body = `${i === 0 ? `${intro}\n\n` : ""}${name}: ${o.from} → ${o.to} cases.${madeWarning}\n\nUpdate this run's target to ${o.to}?`;
+    // Latch so a stray double-callback can't double-advance the chain or
+    // re-ask a run.
+    let answered = false;
+    const next = (accept: boolean) => {
+      if (answered) return;
+      answered = true;
+      if (accept) apply(o);
+      ask(i + 1);
+    };
+    // showConfirm renders the styled in-app dialog on web (RN Alert is a
+    // silent no-op there) and the exact two-button Alert.alert on native.
+    showConfirm({
+      title: `Case count changed${step}`,
+      message: body,
+      confirmText: `Update to ${o.to}`,
+      cancelText: `Keep ${o.from}`,
+      onConfirm: () => next(true),
+      onCancel: () => next(false),
+    });
+  };
+  ask(0);
 }
