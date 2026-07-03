@@ -489,6 +489,9 @@ importers:
       '@workspace/cycle-count':
         specifier: workspace:*
         version: link:../../lib/cycle-count
+      '@workspace/downtime-trends':
+        specifier: workspace:*
+        version: link:../../lib/downtime-trends
       '@workspace/fill-missing':
         specifier: workspace:*
         version: link:../../lib/fill-missing
@@ -1041,6 +1044,12 @@ importers:
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
+
+  lib/downtime-trends:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/fill-missing: {}
 

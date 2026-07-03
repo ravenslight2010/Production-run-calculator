@@ -177,6 +177,8 @@ import {
 import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
+import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
+import { detectStallFromDelta } from "@workspace/downtime-trends";
 import QualityHistoryTab from "../components/QualityHistoryTab";
 import ReportIssueDialog from "../components/ReportIssueDialog";
 import GetStartedDialog from "../components/GetStartedDialog";
@@ -299,6 +301,7 @@ import {
   Bookmark,
   BookmarkCheck,
   OctagonX,
+  TrendingDown,
   CircleDot,
   Sparkles,
   CalendarPlus,
@@ -6372,6 +6375,51 @@ export default function Home() {
     isCrust: doughSubTab === "crusts",
   });
 
+  // ── Auto stall detection (advisory) ───────────────────────────────────────
+  // If the run is RUNNING with a real rate, nobody has an open stoppage
+  // logged, and progress falls 10+ minutes behind the expected pace, nudge the
+  // crew to log a stoppage — one tap logs it through the EXISTING logStop
+  // path; nothing is ever written automatically. Episode latch: once shown
+  // (or dismissed), it won't re-fire until the stall actually clears first.
+  // Known blind spot (accepted): with auto-track ON the counters self-advance
+  // at pace, so this only catches stalls in staff-maintained counts.
+  const stallCheck = detectStallFromDelta({
+    running: !!currentRun?.startedAt && !currentRun?.endedAt && !currentRun?.pausedAt,
+    hasOpenStoppage: (currentRun?.stoppages ?? []).some(s => !s.endedAt),
+    ppm: calc.ppm,
+    pizzasPerCase: v.pizzasPerCase,
+    paceDelta: calc.paceDelta,
+  });
+  const [stallPrompt, setStallPrompt] = useState(false);
+  const stallEpisodeShownRef = useRef(false);
+  useEffect(() => {
+    if (stallCheck.stalled) {
+      // Cast/wall display screens are read-only viewers — never nudge there.
+      if (!stallEpisodeShownRef.current && screenMode === null) {
+        stallEpisodeShownRef.current = true;
+        setStallPrompt(true);
+      }
+    } else {
+      stallEpisodeShownRef.current = false;
+      setStallPrompt(false);
+    }
+  }, [stallCheck.stalled, screenMode]);
+  useEffect(() => {
+    stallEpisodeShownRef.current = false;
+    setStallPrompt(false);
+  }, [currentRunId]);
+
+  // ── Downtime trends input (today live + synced 14-day history) ────────────
+  // Today first so the live day-state wins if history ever carries a stale
+  // snapshot of the same date (aggregateDowntime keeps the first occurrence).
+  const downtimeDays = useMemo(
+    () => [
+      { date: todayStr(), runs: dayState.runs },
+      ...history.map(h => ({ date: h.date, runs: h.runs })),
+    ],
+    [history, dayState.runs],
+  );
+
   // ── Screen casting views (early returns) ──────────────────────────────────
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
   const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
@@ -8822,6 +8870,29 @@ export default function Home() {
               );
             })()}
 
+            {/* Auto-detected stall nudge (advisory — never writes on its own) */}
+            {stallPrompt && (
+              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
+                <span>⚠ Line looks stalled — about {stallCheck.behindMinutes} min behind with no stoppage logged</span>
+                <button
+                  type="button"
+                  data-testid="button-stall-log"
+                  className="px-2.5 py-1 rounded-md bg-amber-500 text-black font-bold hover-elevate active-elevate-2"
+                  onClick={() => { logStop("Auto-detected stall", ""); setStallPrompt(false); }}
+                >
+                  Log stoppage
+                </button>
+                <button
+                  type="button"
+                  data-testid="button-stall-dismiss"
+                  className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
+                  onClick={() => setStallPrompt(false)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             {/* Pace gauge + PPM */}
             {calc.paceStatus !== null && (
               <div className={`flex flex-wrap items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
@@ -9155,6 +9226,11 @@ export default function Home() {
                 {isManager && (
                   <DropdownMenuItem onClick={() => setActiveTab("quality")}>
                     <ShieldCheck className="w-4 h-4 mr-2" /> Quality history
+                  </DropdownMenuItem>
+                )}
+                {isManager && (
+                  <DropdownMenuItem onClick={() => setActiveTab("downtime")} data-testid="menu-downtime-trends">
+                    <TrendingDown className="w-4 h-4 mr-2" /> Downtime trends
                   </DropdownMenuItem>
                 )}
                 {(canManageStaff || canApproveResets) && (
@@ -11122,6 +11198,10 @@ export default function Home() {
 
               <TabsContent value="incidents">
                 <IncidentsTab />
+              </TabsContent>
+
+              <TabsContent value="downtime">
+                {isManager && <DowntimeTrendsTab days={downtimeDays} />}
               </TabsContent>
 
               <TabsContent value="quality">
