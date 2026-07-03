@@ -1575,6 +1575,40 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
   } catch {}
 }
 
+const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
+
+/**
+ * One-time cleanup: recipe names that ended up in BOTH the Cheese and the Mix
+ * recipe-name lists (spec imports seed cheese-mix names into `cheeseRecipeNames`
+ * while migrations/user moves put the same names into `mixRecipeNames`). A name
+ * the user keeps under Mixes is a mix, not a cheese recipe — drop the duplicate
+ * Cheese entry so it stops showing up on the Merge tool's "Cheese mixes" tab
+ * and in the Manage Cheese list. The Mix entry is kept; the removed Cheese
+ * entry is tombstoned so the additive live-sync union can't resurrect it, and
+ * any stale Mix tombstone is cleared so the kept name sticks. Preset rows are
+ * untouched (cheese and mix share one preset map keyed by name). Runs once,
+ * guarded by a version marker.
+ */
+export function applyMixCheeseOverlapDedupeIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(DEDUPE_MIX_CHEESE_OVERLAP_KEY)) return;
+  try {
+    const cheese = loadList(CHEESE_RECIPE_NAMES_KEY, []);
+    const mixSet = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
+    const dups = cheese.filter((n) => mixSet.has(n.toLowerCase()));
+    if (dups.length === 0) {
+      localStorage.setItem(DEDUPE_MIX_CHEESE_OVERLAP_KEY, "1");
+      return;
+    }
+    saveList(CHEESE_RECIPE_NAMES_KEY, cheese.filter((n) => !dups.includes(n)));
+    for (const n of dups) {
+      tombstoneDeleted("cheeseRecipeNames", n);
+      clearDeleted("mixRecipeNames", n);
+    }
+    localStorage.setItem(DEDUPE_MIX_CHEESE_OVERLAP_KEY, "1");
+  } catch {}
+}
+
 /**
  * Delete every saved profile (dough + crust) for a brand. Called on brand
  * deletion: dropping the brand from the Brands list and tombstoning it is not

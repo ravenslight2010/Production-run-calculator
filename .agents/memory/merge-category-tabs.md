@@ -97,3 +97,17 @@ merges ingredient names on every tab.)
   the tab row. Empty state MUST render BELOW the tabs, never as an early return.
 - `switchCategory`/`switchMergeCategory` must clear the form + open suggestions so
   nothing leaks across categories; default `bfBrand` to the first brand on entry.
+
+## Cheese/Mix name overlap rule
+A recipe name that lives in the user Mix list is a mix, not a cheese recipe —
+imports seed cheese-mix names into the cheese list while migrations/user moves
+put the same names into mix, producing dual membership that surfaces as "mixes
+showing on the Cheese mixes merge tab."
+- **Why:** cheese and mix share ONE preset map keyed by name, so list membership
+  is the only thing distinguishing the categories; the additive sync union keeps
+  both entries alive unless the cheese one is tombstoned.
+- **How to apply:** a one-time marker-guarded migration removes cheese entries
+  that duplicate user mix names (tombstoning them under `cheeseRecipeNames`),
+  and the merge Cheese universe defensively filters out user mix names at
+  render time. If dups recur from imports, extend the import path, not the
+  marker.

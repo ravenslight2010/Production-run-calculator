@@ -112,6 +112,7 @@ import {
   applyIngredientDedupeMigrationIfNeeded,
   applySpecProfilesSeedIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
+  applyMixCheeseOverlapDedupeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   deleteProfilesForBrand,
   deleteProfileEntry,
@@ -388,6 +389,7 @@ applyDoughSpecsSeedIfNeeded();
 applySauceSpecsSeedIfNeeded();
 applyCheeseSpecsSeedIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
+applyMixCheeseOverlapDedupeIfNeeded();
 purgeOrphanedProfilesIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
@@ -2794,7 +2796,13 @@ export default function Home() {
       case "mixes": return dedupSorted(mixRecipeNames);
       case "dough": return dedupSorted(doughRecipeNames);
       case "sauce": return dedupSorted(frontlineRecipeNames);
-      case "cheese": return dedupSorted(cheeseRecipeNames);
+      case "cheese": {
+        // A name that also lives in the user Mix list is a mix, not a cheese
+        // recipe. The one-time overlap dedupe removes existing duplicates, but
+        // a later import could re-add one — keep the Cheese tab mix-free.
+        const mixNameSet = new Set(mixRecipeNames.map((n) => n.toLowerCase()));
+        return dedupSorted(cheeseRecipeNames.filter((n) => !mixNameSet.has(n.toLowerCase())));
+      }
       case "brandflavor":
         return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
       case "ingredients":
