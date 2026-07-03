@@ -341,6 +341,7 @@ import {
   skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
+import { buildCaseUpdateOffers, defaultCaseUpdateAccepted, caseUpdateWarningLine, type CaseUpdateOffer } from "@/importCaseUpdates";
 import ExcelImportDialog, { type ImportCommit } from "@/components/ExcelImportDialog";
 import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
@@ -3192,7 +3193,7 @@ export default function Home() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   // Re-import case-count offers for in-progress runs, awaiting the user's
   // per-run Accept/Keep choice (null = no dialog). Never auto-applied.
-  const [caseUpdatePrompt, setCaseUpdatePrompt] = useState<{ runId: string; brand: string; flavor: string; from: number; to: number; madeAlready?: number }[] | null>(null);
+  const [caseUpdatePrompt, setCaseUpdatePrompt] = useState<CaseUpdateOffer[] | null>(null);
   const [caseUpdateAccepted, setCaseUpdateAccepted] = useState<Record<string, boolean>>({});
   const [importResult, setImportResult] = useState<ImportParseResult | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -6037,7 +6038,7 @@ export default function Home() {
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
     // auto-applied). Finished runs are never modified.
-    const caseUpdateOffers: { runId: string; brand: string; flavor: string; from: number; to: number; madeAlready?: number }[] = [];
+    const caseUpdateOffers: CaseUpdateOffer[] = [];
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
@@ -6069,30 +6070,10 @@ export default function Home() {
         // A skipped row can still carry news: the re-issued schedule may list a
         // DIFFERENT case count for a run that's already going. Collect an offer
         // for in-progress runs only (finished runs are never modified).
-        for (const m of skipRes.matches) {
-          if (!m.run.inProgress) continue;
-          const planned = Math.round(m.row.casesPlanned ?? NaN);
-          if (!Number.isFinite(planned) || planned <= 0) continue;
-          const vals = m.run.id === currentRunIdRef.current ? form.getValues() : loadRunValues(m.run.id);
-          const current = Number(vals.casesNeeded) || 0;
-          if (planned !== current) {
-            // Flag (but still allow — the office may genuinely cut the run
-            // short) offers whose new target is below what the floor already
-            // produced: accepting makes the run instantly "over target".
-            const made = Math.max(
-              0,
-              Math.round((Number(vals.skidsCompleted) || 0) * (Number(vals.casesPerSkid) || 0) + (Number(vals.casesOnCurrentSkid) || 0)),
-            );
-            caseUpdateOffers.push({
-              runId: m.run.id,
-              brand: m.row.brand,
-              flavor: m.row.flavor,
-              from: current,
-              to: planned,
-              ...(made > planned ? { madeAlready: made } : {}),
-            });
-          }
-        }
+        caseUpdateOffers.push(...buildCaseUpdateOffers(
+          skipRes.matches,
+          (runId) => runId === currentRunIdRef.current ? form.getValues() : loadRunValues(runId),
+        ));
       }
       const newRuns: RunMeta[] = [];
       const newRunValues: Record<string, FormValues> = {};
@@ -6184,7 +6165,7 @@ export default function Home() {
       // Runs whose new target is BELOW what's already made default to Keep
       // (accepting would instantly show the run as over target); all others
       // default to Accept, matching the old apply-all behavior.
-      setCaseUpdateAccepted(Object.fromEntries(caseUpdateOffers.map(o => [o.runId, o.madeAlready == null])));
+      setCaseUpdateAccepted(defaultCaseUpdateAccepted(caseUpdateOffers));
       setCaseUpdatePrompt(caseUpdateOffers);
     }
   }
@@ -13441,8 +13422,8 @@ export default function Home() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold truncate">{`${o.brand} ${o.flavor}`.trim() || "Run"}</div>
                         <div className="text-xs text-muted-foreground">{o.from} → {o.to} cases</div>
-                        {o.madeAlready != null && (
-                          <div className="text-xs text-orange-400 mt-0.5">⚠ Already made {o.madeAlready} — the new target of {o.to} is below that, so this run would show as over target.</div>
+                        {caseUpdateWarningLine(o) != null && (
+                          <div className="text-xs text-orange-400 mt-0.5">{caseUpdateWarningLine(o)}</div>
                         )}
                       </div>
                       <div className="flex rounded-md border border-border overflow-hidden shrink-0">
