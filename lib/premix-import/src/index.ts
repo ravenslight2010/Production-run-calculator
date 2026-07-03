@@ -64,6 +64,13 @@ export type ParsedPremix = {
    * absent or targets no ingredient (e.g. "PULL OLD MIX 2 DAYS PRIOR").
    */
   pullIngredients: string[];
+  /**
+   * Lead time for `pullIngredients` when it differs from the mix's own
+   * `daysEarly` — set when a sheet-level pull ANNOTATION table (a standalone
+   * note + ingredient mini-table beside the mix) was folded into this block.
+   * Absent → the pull uses `daysEarly`.
+   */
+  pullDaysEarly?: number;
   components: ParsedPremixComponent[];
   /** Source worksheet tab (for display / de-dup hints). */
   sheetName: string;
@@ -107,6 +114,10 @@ const STOP_LABEL_RE =
 // "Pull 3 Days Early" / "PULL OLD MIX 2 DAYS PRIOR" → captures the day count.
 const DAYS_EARLY_RE = /pull\s+(?:old\s+mix\s+)?(\d+)\s+days?\s+(?:early|prior|ahead|before)/i;
 
+// Third header column of a pull ANNOTATION mini-table ("Per Pizza | Per
+// Skid/Batch | Total Needed") — real mix blocks never carry this header.
+const TOTAL_NEEDED_RE = /^total\s*needed/i;
+
 // ── Workbook parsing (deterministic) ─────────────────────────────────────────
 
 type Anchor = { row: number; perPizzaCol: number };
@@ -138,11 +149,16 @@ function pickNameFromCell(raw: string): string {
   return "";
 }
 
-/** Scan up to 4 rows above the header for the block's name (ingredient column). */
+/**
+ * Scan up to 4 rows above the header for the block's name (ingredient column).
+ * Skips footer/summary labels ("AMOUNT BEING MIXED", "Amount already made",
+ * ...) — a block anchored below another block's footer must not steal a
+ * summary label as its name.
+ */
 function findBlockName(rows: string[][], headerRow: number, ingredientCol: number): string {
   for (let r = headerRow - 1; r >= 0 && r >= headerRow - 4; r--) {
     const v = pickNameFromCell(cell(rows, r, ingredientCol));
-    if (v) return v;
+    if (v && !STOP_LABEL_RE.test(norm(v))) return v;
   }
   return "";
 }
@@ -179,11 +195,24 @@ function findDaysEarly(
   return { daysEarly: 0, noteRow: null };
 }
 
+type ParsedBlock = {
+  premix: ParsedPremix;
+  /**
+   * True when this block is a pull ANNOTATION mini-table, not a real mix: the
+   * standalone "Pull N Days Early" note sits where the name would be, the
+   * header carries a "Total Needed" column (real mix blocks never do), and no
+   * real name was found. These get folded into the sheet's real mix block.
+   */
+  isPullAnnotation: boolean;
+  ingredientCol: number;
+  anchorRow: number;
+};
+
 function parseBlock(
   grid: SheetGrid,
   anchor: Anchor,
   blockEndCol: number,
-): ParsedPremix | null {
+): ParsedBlock | null {
   const rows = grid.rows;
   const perPizzaCol = anchor.perPizzaCol;
   const perBatchCol = perPizzaCol + 1;
@@ -253,16 +282,29 @@ function parseBlock(
     return true;
   });
 
+  const isPullAnnotation =
+    !name &&
+    daysEarly > 0 &&
+    noteRow != null &&
+    noteRow <= anchor.row &&
+    noteRow >= anchor.row - 4 &&
+    TOTAL_NEEDED_RE.test(cell(rows, anchor.row, perPizzaCol + 2).trim());
+
   return {
-    name,
-    brand: "",
-    flavor: "",
-    batchSize,
-    daysEarly,
-    notes,
-    pullIngredients,
-    components,
-    sheetName: grid.name,
+    premix: {
+      name,
+      brand: "",
+      flavor: "",
+      batchSize,
+      daysEarly,
+      notes,
+      pullIngredients,
+      components,
+      sheetName: grid.name,
+    },
+    isPullAnnotation,
+    ingredientCol,
+    anchorRow: anchor.row,
   };
 }
 
@@ -276,6 +318,7 @@ export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPrem
   const out: ParsedPremix[] = [];
   for (const grid of grids) {
     const anchors = findAnchors(grid.rows);
+    const blocks: ParsedBlock[] = [];
     for (const anchor of anchors) {
       // A block ends where the next block (a later "Per Pizza" header in the
       // SAME row) begins; otherwise it runs to the end of the row width.
@@ -284,7 +327,46 @@ export function parsePremixWorkbook(grids: ReadonlyArray<SheetGrid>): ParsedPrem
         .map((a) => a.perPizzaCol - 1);
       const blockEndCol = sameRowLater.length ? Math.min(...sameRowLater) : Number.MAX_SAFE_INTEGER;
       const block = parseBlock(grid, anchor, blockEndCol);
-      if (block) out.push(block);
+      if (block) blocks.push(block);
+    }
+
+    // Fold pull ANNOTATION mini-tables into the sheet's real mix block (the
+    // closest one by ingredient column) instead of emitting them as phantom
+    // mixes. An annotation-only sheet (no real block) keeps the block as-is so
+    // the pull suggestion still has a carrier in the review UI.
+    const real = blocks.filter((b) => !b.isPullAnnotation);
+    for (const b of real) out.push(b.premix);
+    for (const b of blocks) {
+      if (!b.isPullAnnotation) continue;
+      let target: ParsedBlock | null = null;
+      for (const r of real) {
+        if (
+          !target ||
+          Math.abs(r.ingredientCol - b.ingredientCol) <
+            Math.abs(target.ingredientCol - b.ingredientCol) ||
+          (Math.abs(r.ingredientCol - b.ingredientCol) ===
+            Math.abs(target.ingredientCol - b.ingredientCol) &&
+            r.anchorRow < target.anchorRow)
+        ) {
+          target = r;
+        }
+      }
+      if (!target) {
+        out.push(b.premix);
+        continue;
+      }
+      const pulls = b.premix.pullIngredients.length
+        ? b.premix.pullIngredients
+        : b.premix.components.map((c) => c.ingredient);
+      const seen = new Set(target.premix.pullIngredients.map((i) => i.toLowerCase()));
+      for (const ing of pulls) {
+        const key = ing.toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        target.premix.pullIngredients.push(ing);
+      }
+      if (b.premix.daysEarly > 0) target.premix.pullDaysEarly = b.premix.daysEarly;
+      if (!target.premix.notes && b.premix.notes) target.premix.notes = b.premix.notes;
     }
   }
   return out;
@@ -504,7 +586,8 @@ export function collectPremixFreezerPulls(
 ): Record<string, PremixFreezerPull[]> {
   const out: Record<string, PremixFreezerPull[]> = {};
   for (const p of parsed) {
-    if (p.daysEarly <= 0 || p.pullIngredients.length === 0) continue;
+    const days = p.pullDaysEarly ?? p.daysEarly;
+    if (days <= 0 || p.pullIngredients.length === 0) continue;
     const seen = new Set<string>();
     const pulls: PremixFreezerPull[] = [];
     for (const ing of p.pullIngredients) {
@@ -513,7 +596,7 @@ export function collectPremixFreezerPulls(
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      pulls.push({ ingredient: name, daysEarly: p.daysEarly });
+      pulls.push({ ingredient: name, daysEarly: days });
     }
     if (pulls.length) out[premixId(p)] = pulls;
   }

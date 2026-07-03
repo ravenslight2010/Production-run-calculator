@@ -61,8 +61,20 @@ are parsed DETERMINISTICALLY in the shared lib; AI ONLY disambiguates product na
   candidates, so the dialog attaches "Sets freezer-pull reminder" per row and only applies pulls
   for INCLUDED mixes). `commitPremixImport(..., freezerPulls)` applies them best-effort AFTER the
   mixes commit via `buildFreezerPullUpserts` → returns `{freezerPullCount, warning?}` (never
-  throws; mixes stay applied). **Gotcha:** real sheets sometimes anchor a junk side block (e.g.
-  "AMOUNT BEING MIXED") and the standalone note attaches there — pre-existing parser behavior;
-  the pull still surfaces if that block is included. Web+mobile parity (mobile glue imports from
+  throws; mixes stay applied). Web+mobile parity (mobile glue imports from
   `./freezerPull`); the strip-imports parity harness must stub `__FREEZER_PULL_LIB__` +
   fetch/save freezer-pull stubs.
+
+- **Pull ANNOTATION mini-tables must fold into the real mix, never become a phantom mix.**
+  Real sheets often place a standalone `***Pull N Days Early***` note at the NAME position with
+  its own header row `Per Pizza | Per Skid/Batch | Total Needed` plus one ingredient row — its
+  "Per Pizza" cell creates a phantom anchor that used to parse as a bogus second mix (sometimes
+  stealing a footer label like "AMOUNT BEING MIXED" as its name).
+  **Why:** the review dialog showed junk second mixes and the pull didn't attach to the real mix.
+  **How to apply:** annotation = no name (after `findBlockName` skips STOP labels) + daysEarly>0 +
+  note within the 4-row name window + `Total Needed` at `perPizzaCol+2`. `parsePremixWorkbook`
+  folds it into the closest real block on the sheet (min ingredient-column distance, tie → earlier
+  row): appends its pull ingredients and sets `pullDaysEarly` (never touches the target's own
+  `daysEarly` — that means "MAKE the mix early"). `collectPremixFreezerPulls` uses
+  `pullDaysEarly ?? daysEarly`. Annotation-ONLY sheets (no sibling mix, e.g. a pep-&-jal
+  garlic-sauce sheet) keep the annotation as a carrier mix so the pull still has a home in review.

@@ -161,6 +161,75 @@ describe("parsePremixWorkbook", () => {
     expect(mix.daysEarly).toBe(2);
     expect(mix.pullIngredients).toEqual([]);
   });
+
+  // Some sheets carry a pull ANNOTATION mini-table beside/below the real mix:
+  // a standalone "***Pull N Days Early***" note where a name would sit, then a
+  // "Per Pizza | Per Skid | Total Needed" header and one ingredient row. These
+  // must fold into the real mix as a pull, never become a phantom second mix.
+  it("folds a pull annotation mini-table into the closest real mix (no phantom mix)", () => {
+    const grid: SheetGrid = {
+      name: "Lowes Red Hot",
+      rows: [
+        ["Chicken Mix", "", "", "# OF MIXES", "", "Jalapeno Mix", "", "", "# OF MIXES"],
+        ["", "Per Pizza", "Per Batch", "1", "", "", "Per Pizza", "Per Batch", "1.5"],
+        ["Hot Sauce", "0.07", "2.90", "", "", "Jalapenos", "0.25", "10.35", ""],
+        ["Chicken", "2.43", "100.60", "", "", "Bacon", "0.50", "20.70", ""],
+        ["TOTAL", "2.50", "103.50", "", "", "Total", "0.75", "20.70", ""],
+        [],
+        ["TOTAL AMOUNT NEEDED", "103.50", "", "", "", "AMOUNT NEEDED", "31.05", "", ""],
+        ["Amount already made", "0", "", "", "", "Amount already made", "0", "", ""],
+        ["TOTAL AMOUNT BEING MIXED", "103.50", "", "", "", "AMOUNT BEING MIXED", "31.05", "", ""],
+        [],
+        ["PULL FOR MIX", "", "", "", "", "***Pull 3 Days Early***", "", "", ""],
+        ["Jalapenos", "15.52", "POUNDS", "", "", "", "Per Pizza", "Per Skid", "Total Needed"],
+        ["Hot Sauce", "2.90", "POUNDS", "", "", "Garlic sauce", "2", "90.00", "2 Buckets"],
+      ],
+    };
+    const parsed = parsePremixWorkbook([grid]);
+    expect(parsed.map((p) => p.name)).toEqual(["Chicken Mix", "Jalapeno Mix"]);
+    const jal = parsed[1];
+    // The annotation attaches to the SAME-column mix, not the left one.
+    expect(jal.pullIngredients).toEqual(["Garlic sauce"]);
+    expect(jal.pullDaysEarly).toBe(3);
+    expect(parsed[0].pullIngredients).toEqual([]);
+    // The annotation must never steal a footer label as a phantom mix name.
+    expect(parsed.some((p) => /amount being/i.test(p.name))).toBe(false);
+  });
+
+  it("keeps an annotation-only sheet as a carrier mix (no real block to fold into)", () => {
+    const grid: SheetGrid = {
+      name: "Corner Booth Pep & Jal",
+      rows: [
+        ["***Pull 3 Days Early***", "", "", ""],
+        ["", "Per Pizza", "Per Skid", "Total Needed"],
+        ["Garlic sauce", "4", "180.00", "3 Buckets"],
+        [],
+        ["Total Cases Needed", "48", "", ""],
+      ],
+    };
+    const parsed = parsePremixWorkbook([grid]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].daysEarly).toBe(3);
+    expect(parsed[0].pullIngredients).toEqual(["Garlic sauce"]);
+  });
+
+  it("pull annotation lead time wins over the mix's own daysEarly in the pull list", () => {
+    const grid: SheetGrid = {
+      name: "Bratwurst",
+      rows: [
+        ["Veggie Mix", "", "", "# OF MIXES", "", "***Pull 2 Days Early***", "", "", ""],
+        ["", "Per Pizza", "Per Batch", "1", "", "", "Per Pizza", "Per Batch", "Total Needed"],
+        ["Sauerkraut", "1.30", "60.55", "", "", "Bratwurst", "3.00", "139.73", "140 Pounds"],
+        ["Total", "1.30", "60.55", "", "", "", "", "", ""],
+      ],
+    };
+    const parsed = parsePremixWorkbook([grid]);
+    expect(parsed.map((p) => p.name)).toEqual(["Veggie Mix"]);
+    expect(parsed[0].pullIngredients).toEqual(["Bratwurst"]);
+    expect(parsed[0].pullDaysEarly).toBe(2);
+    const pulls = collectPremixFreezerPulls(parsed);
+    expect(Object.values(pulls)[0]).toEqual([{ ingredient: "Bratwurst", daysEarly: 2 }]);
+  });
 });
 
 const KNOWN: PremixKnown = {
