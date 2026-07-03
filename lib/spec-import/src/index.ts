@@ -1603,6 +1603,15 @@ export function sanitizeParsedSpecImport(
       const type = clampName(ao.type, lim.maxNameChars);
       const ozPerPizza = num(ao.ozPerPizza);
       if (!type) continue;
+      if (ozPerPizza == null) {
+        // A missing oz value silently becoming 0 looks like the sheet SAID
+        // "0 oz" in the review preview. Flag it so the user checks the sheet.
+        groundingWarnings.push({
+          brand,
+          flavor,
+          message: `No oz-per-pizza was read for applicator "${type}" — shown as 0 oz. Please verify against the sheet.`,
+        });
+      }
       applicators.push({ type, ozPerPizza: ozPerPizza ?? 0 });
     }
     const pepperonis: ParsedPepperoni[] = [];
@@ -1612,10 +1621,18 @@ export function sanitizeParsedSpecImport(
       const po = pp as Record<string, unknown>;
       const type = clampName(po.type, lim.maxNameChars);
       if (!type) continue;
+      const ppOz = num(po.ozPerPizza);
+      if (ppOz == null) {
+        groundingWarnings.push({
+          brand,
+          flavor,
+          message: `No oz-per-pizza was read for pepperoni "${type}" — shown as 0 oz. Please verify against the sheet.`,
+        });
+      }
       pepperonis.push({
         type,
         sticks: num(po.sticks) ?? 0,
-        ozPerPizza: num(po.ozPerPizza) ?? 0,
+        ozPerPizza: ppOz ?? 0,
       });
     }
     const profile: ParsedProfile = { brand, flavor, applicators, pepperonis };

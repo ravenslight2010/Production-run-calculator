@@ -531,3 +531,10 @@ Any change to one app's order/logic must land in the other verbatim.
   must call `gridSanityIssue` before the first AI request. Real CSV/text in any
   language passes; keep thresholds shared-lib only (parity). Tests:
   `specImportJunkFileGuard.test.ts`.
+
+## Missing numbers must warn, not silently become 0
+Sanitizer coerces missing applicator/pepperoni oz-per-pizza to 0 (types stay non-null),
+but a silent 0 reads as "the sheet said 0 oz" in the review preview. Any coerced-missing
+numeric must push a structured groundingWarning keyed to the grounded brand+flavor so the
+review screens flag it. Warning headers in all 4 review/saved-sheet UIs say "items" (not
+"flavor names") because warnings now cover more than name corrections.

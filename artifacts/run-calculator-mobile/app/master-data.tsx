@@ -1174,7 +1174,7 @@ export function SpecSheetWarningsCallout({
             color: colors.warning,
           }}
         >
-          {warnings.length} flavor name
+          {warnings.length} item
           {warnings.length === 1 ? " was" : "s were"} corrected or
           flagged at import
         </Text>

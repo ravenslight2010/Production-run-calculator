@@ -180,7 +180,7 @@ export default function SpecImportModal({
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Feather name="alert-triangle" size={14} color={colors.warning} />
                       <Text style={[styles.errorTitle, { color: colors.warning }]}>
-                        {prepared.parsed.warnings.length} flavor name
+                        {prepared.parsed.warnings.length} item
                         {prepared.parsed.warnings.length === 1 ? " was" : "s were"} corrected
                         or flagged
                       </Text>

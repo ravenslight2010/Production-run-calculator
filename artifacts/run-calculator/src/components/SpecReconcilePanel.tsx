@@ -394,7 +394,7 @@ export default function SpecReconcilePanel({ autoCheckSignal = 0 }: Props) {
                       >
                         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                         <span className="flex-1 text-xs font-medium">
-                          {warnings.length} flavor name{warnings.length === 1 ? " was" : "s were"}{" "}
+                          {warnings.length} item{warnings.length === 1 ? " was" : "s were"}{" "}
                           corrected or flagged at import
                         </span>
                         {warnExpanded ? (

@@ -318,14 +318,14 @@ export default function SpecImportDialog({
                   <div className="flex items-center gap-2 text-amber-600">
                     <AlertTriangle className="h-4 w-4" />
                     <span className="text-sm font-medium">
-                      {specWarnings.length} flavor name{specWarnings.length === 1 ? " was" : "s were"}{" "}
+                      {specWarnings.length} item{specWarnings.length === 1 ? " was" : "s were"}{" "}
                       corrected or flagged
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-amber-700">
-                    The AI's reading didn't match the sheet exactly, so the names below were
-                    corrected or flagged for review. Double-check the highlighted products
-                    before applying.
+                    The AI's reading didn't match the sheet exactly, so the items below were
+                    corrected or flagged for review (including any amounts it couldn't read).
+                    Double-check the highlighted products before applying.
                   </p>
                   {unmatchedWarnings.length > 0 && (
                     <ul className="mt-1.5 space-y-0.5">

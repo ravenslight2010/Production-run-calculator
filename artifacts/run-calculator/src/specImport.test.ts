@@ -264,6 +264,33 @@ describe("sanitizeParsedSpecImport", () => {
     expect(p.applicators).toHaveLength(1);
     expect(p.pepperonis[0].sticks).toBe(2);
   });
+  it("warns when an applicator/pepperoni oz-per-pizza was not read (coerced to 0)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "Tombstone", flavor: "Pepperoni",
+          applicators: [{ type: "Cheese" }],
+          pepperonis: [{ type: "Pep", sticks: 2 }] },
+      ],
+      recipes: [],
+    });
+    expect(out.profiles[0].applicators[0].ozPerPizza).toBe(0);
+    expect(out.profiles[0].pepperonis[0].ozPerPizza).toBe(0);
+    const msgs = (out.warnings ?? []).map((w) => w.message);
+    expect(msgs.some((m) => m.includes('applicator "Cheese"'))).toBe(true);
+    expect(msgs.some((m) => m.includes('pepperoni "Pep"'))).toBe(true);
+  });
+  it("does not warn when oz-per-pizza values were read", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "Tombstone", flavor: "Pepperoni",
+          applicators: [{ type: "Cheese", ozPerPizza: 4 }],
+          pepperonis: [{ type: "Pep", sticks: 2, ozPerPizza: 1.5 }] },
+      ],
+      recipes: [],
+    });
+    const msgs = (out.warnings ?? []).map((w) => w.message);
+    expect(msgs.some((m) => m.includes("No oz-per-pizza"))).toBe(false);
+  });
   it("keeps only dough/sauce/cheese recipes with at least one valid row", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
