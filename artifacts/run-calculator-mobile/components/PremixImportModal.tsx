@@ -11,7 +11,11 @@ import {
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { SelectField } from "@/components/UI";
-import { rematchPremixCandidate, type PremixCandidate } from "@workspace/premix-import";
+import {
+  rematchPremixCandidate,
+  type PremixCandidate,
+  type PremixFreezerPull,
+} from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/context/premixImport";
 
@@ -25,7 +29,7 @@ type Props = {
   prepared: PremixImportPrepared | null;
   applying: boolean;
   /** Confirm with the reviewed mixes the manager chose to apply. */
-  onConfirm: (mixesToApply: Mix[]) => void;
+  onConfirm: (mixesToApply: Mix[], freezerPulls: PremixFreezerPull[]) => void;
 };
 
 // Local stable handle for a reviewable mix: a key that survives a re-match (the
@@ -105,8 +109,12 @@ export default function PremixImportModal({
     );
 
   const confirm = () => {
-    const mixes = items.filter((it) => selected.has(it.key)).map((it) => it.candidate.mix);
-    onConfirm(mixes);
+    const included = items.filter((it) => selected.has(it.key));
+    const mixes = included.map((it) => it.candidate.mix);
+    // Freezer-pull settings ride along with their mix's include/exclude pick
+    // (keyed by the ORIGINAL parsed id — a re-match doesn't change the note).
+    const pulls = included.flatMap((it) => prepared?.freezerPulls?.[it.key] ?? []);
+    onConfirm(mixes, pulls);
   };
 
   return (
@@ -290,6 +298,19 @@ export default function PremixImportModal({
                           ]}
                         >
                           {m.notes}
+                        </Text>
+                      ) : null}
+                      {(prepared?.freezerPulls?.[it.key] ?? []).length > 0 ? (
+                        <Text style={[styles.candidateMeta, { color: colors.mutedForeground }]}>
+                          Sets freezer-pull reminder:{" "}
+                          <Text style={{ color: colors.foreground }}>
+                            {(prepared?.freezerPulls?.[it.key] ?? [])
+                              .map(
+                                (p) =>
+                                  `${p.ingredient} (${p.daysEarly} day${p.daysEarly === 1 ? "" : "s"} early)`,
+                              )
+                              .join(", ")}
+                          </Text>
                         </Text>
                       ) : null}
                     </View>

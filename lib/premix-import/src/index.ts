@@ -57,6 +57,13 @@ export type ParsedPremix = {
   daysEarly: number;
   /** Cleaned note line (e.g. "Pull 3 Days Early"), when present. */
   notes?: string;
+  /**
+   * The specific ingredient(s) the "Pull N days early" note points at — either
+   * the note shares the ingredient's own cell, or it sits as a header directly
+   * above the block and flags the first ingredient row. Empty when the note is
+   * absent or targets no ingredient (e.g. "PULL OLD MIX 2 DAYS PRIOR").
+   */
+  pullIngredients: string[];
   components: ParsedPremixComponent[];
   /** Source worksheet tab (for display / de-dup hints). */
   sheetName: string;
@@ -144,7 +151,7 @@ function findDaysEarly(
   rows: string[][],
   startCol: number,
   endCol: number,
-): { daysEarly: number; notes?: string } {
+): { daysEarly: number; notes?: string; noteRow: number | null } {
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r] ?? [];
     const lastCol = Math.min(endCol, row.length);
@@ -161,11 +168,15 @@ function findDaysEarly(
             .split(/\r?\n/)
             .find((l) => DAYS_EARLY_RE.test(l)) ?? raw;
         const notes = line.replace(/\*+/g, "").trim();
-        return { daysEarly: Number.isFinite(days) ? days : 0, notes: notes || undefined };
+        return {
+          daysEarly: Number.isFinite(days) ? days : 0,
+          notes: notes || undefined,
+          noteRow: r,
+        };
       }
     }
   }
-  return { daysEarly: 0 };
+  return { daysEarly: 0, noteRow: null };
 }
 
 function parseBlock(
@@ -182,6 +193,10 @@ function parseBlock(
   const name = findBlockName(rows, anchor.row, ingredientCol);
 
   const components: ParsedPremixComponent[] = [];
+  // Ingredients whose OWN cell carries the "Pull N days early" note (the note
+  // shares the cell, e.g. "***Pull 3 Days Early***\nScrambled Egg").
+  const notedIngredients: string[] = [];
+  let firstComponentIngredient = "";
   let batchSize = 0;
   for (let r = anchor.row + 1; r < rows.length; r++) {
     const label = cell(rows, r, ingredientCol);
@@ -196,16 +211,47 @@ function parseBlock(
     const perPizza = parseNum(cell(rows, r, perPizzaCol));
     const perBatch = parseNum(cell(rows, r, perBatchCol));
     if (perPizza == null && perBatch == null) continue; // not a quantity row
+    // Skip decorative pull-note lines when picking the ingredient name — some
+    // sheets write the note INTO the ingredient's cell above the name.
+    const ingredient = pickNameFromCell(label) || firstLine(label);
     components.push({
-      ingredient: firstLine(label),
+      ingredient,
       perPizza: perPizza ?? 0,
       perBatch: perBatch ?? 0,
     });
+    if (!firstComponentIngredient) firstComponentIngredient = ingredient;
+    if (DAYS_EARLY_RE.test(label)) notedIngredients.push(ingredient);
   }
 
   if (!name && components.length === 0) return null;
 
-  const { daysEarly, notes } = findDaysEarly(rows, ingredientCol, blockEndCol);
+  const { daysEarly, notes, noteRow } = findDaysEarly(rows, ingredientCol, blockEndCol);
+
+  // Which ingredient does the pull note point at?
+  // 1) An ingredient whose own cell carries the note wins.
+  // 2) A standalone note sitting just above the block's header (the sheets put
+  //    it 1 row above "Per Pizza") flags the block's FIRST ingredient row.
+  // 3) Otherwise (note far away, e.g. a bottom "PULL OLD MIX" line, or no note
+  //    at all) no specific ingredient is flagged — daysEarly stays mix-level.
+  let pullIngredients = notedIngredients;
+  if (
+    pullIngredients.length === 0 &&
+    daysEarly > 0 &&
+    noteRow != null &&
+    noteRow <= anchor.row &&
+    noteRow >= anchor.row - 4 &&
+    firstComponentIngredient
+  ) {
+    pullIngredients = [firstComponentIngredient];
+  }
+  // De-dup case-insensitively (a block may repeat the noted ingredient).
+  const seenPull = new Set<string>();
+  pullIngredients = pullIngredients.filter((ing) => {
+    const key = ing.toLowerCase();
+    if (seenPull.has(key)) return false;
+    seenPull.add(key);
+    return true;
+  });
 
   return {
     name,
@@ -214,6 +260,7 @@ function parseBlock(
     batchSize,
     daysEarly,
     notes,
+    pullIngredients,
     components,
     sheetName: grid.name,
   };
@@ -320,11 +367,17 @@ export function groundPremix(
     ingredient: canonicalize(c.ingredient, known.ingredients, aliases, "sauceIngredient").value,
   }));
 
+  // Canonicalize the pull-note ingredient(s) the same way, so a freezer-pull
+  // setting created from the note matches the app's real ingredient name.
+  const pullIngredients = parsed.pullIngredients.map(
+    (ing) => canonicalize(ing, known.ingredients, aliases, "sauceIngredient").value,
+  );
+
   const productResolved =
     !!brand && !!flavor && brandRes.source !== "new" && flavorRes.source !== "new";
 
   return {
-    mix: { ...parsed, brand, flavor, components },
+    mix: { ...parsed, brand, flavor, components, pullIngredients },
     productResolved,
     resolved: [
       { kind: "brand", result: brandRes },
@@ -432,6 +485,39 @@ export function premixToMix(parsed: ParsedPremix): Mix | null {
     components,
     enabled: true,
   });
+}
+
+// ── Freezer-pull suggestions ─────────────────────────────────────────────────
+
+/** One "set this freezer-pull setting" suggestion picked out of a pull note. */
+export type PremixFreezerPull = { ingredient: string; daysEarly: number };
+
+/**
+ * Collect the freezer-pull settings suggested by the parsed pull notes, keyed
+ * by the mix's deterministic id (the same id `premixToMix` gives it, so the
+ * review UI can show/apply them per included mix). Only mixes with a positive
+ * daysEarly AND a specific flagged ingredient produce suggestions; duplicate
+ * blocks with the same id override earlier ones (mirrors the mix de-dup). Pure.
+ */
+export function collectPremixFreezerPulls(
+  parsed: ReadonlyArray<ParsedPremix>,
+): Record<string, PremixFreezerPull[]> {
+  const out: Record<string, PremixFreezerPull[]> = {};
+  for (const p of parsed) {
+    if (p.daysEarly <= 0 || p.pullIngredients.length === 0) continue;
+    const seen = new Set<string>();
+    const pulls: PremixFreezerPull[] = [];
+    for (const ing of p.pullIngredients) {
+      const name = ing.trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pulls.push({ ingredient: name, daysEarly: p.daysEarly });
+    }
+    if (pulls.length) out[premixId(p)] = pulls;
+  }
+  return out;
 }
 
 // ── Import summary + merge ───────────────────────────────────────────────────

@@ -51,3 +51,18 @@ are parsed DETERMINISTICALLY in the shared lib; AI ONLY disambiguates product na
   junk). **Why:** never fork the thresholds/wording — spec + premix importers must reject
   wrong-type picks identically. Mobile maps a failed native read to `[]` grids, which the
   same guard flags as the empty-workbook message.
+
+- **"Pull N Days Early" notes auto-suggest freezer-pull settings.** `parseBlock` extracts
+  `pullIngredients`: an ingredient whose OWN cell embeds the note (name via `pickNameFromCell`,
+  which strips the note line), OR a standalone note within 4 rows above the block anchor flags
+  the block's FIRST component. Notes far away (bottom "PULL OLD MIX" lines) stay mix-level only —
+  no ingredient suggestion. `groundPremix` canonicalizes pulls like components;
+  `collectPremixFreezerPulls(parsed)` keys suggestions by `premixId` (same key as review
+  candidates, so the dialog attaches "Sets freezer-pull reminder" per row and only applies pulls
+  for INCLUDED mixes). `commitPremixImport(..., freezerPulls)` applies them best-effort AFTER the
+  mixes commit via `buildFreezerPullUpserts` → returns `{freezerPullCount, warning?}` (never
+  throws; mixes stay applied). **Gotcha:** real sheets sometimes anchor a junk side block (e.g.
+  "AMOUNT BEING MIXED") and the standalone note attaches there — pre-existing parser behavior;
+  the pull still surfaces if that block is included. Web+mobile parity (mobile glue imports from
+  `./freezerPull`); the strip-imports parity harness must stub `__FREEZER_PULL_LIB__` +
+  fetch/save freezer-pull stubs.

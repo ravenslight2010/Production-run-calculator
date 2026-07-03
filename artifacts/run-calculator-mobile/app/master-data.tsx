@@ -76,6 +76,7 @@ import {
   type PremixImportPrepared,
   type PremixImportStore,
 } from "@/context/premixImport";
+import type { PremixFreezerPull } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
 import {
   fetchSavedSpecSheets,
@@ -1723,21 +1724,30 @@ export default function MasterDataScreen() {
     }
   }
 
-  async function handlePremixImportConfirm(mixesToApply: Mix[]) {
+  async function handlePremixImportConfirm(
+    mixesToApply: Mix[],
+    freezerPulls: PremixFreezerPull[],
+  ) {
     if (!premixPrepared) return;
     setPremixApplying(true);
     try {
-      await commitPremixImport(premixPrepared, mixesToApply);
+      const result = await commitPremixImport(premixPrepared, mixesToApply, freezerPulls);
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void mixesQc.invalidateQueries({ queryKey: ["mixes"] });
       setPremixOpen(false);
       setPremixPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showNote(
-        "Premix sheet imported",
+      const parts = [
         `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
-      );
+      ];
+      if (result.freezerPullCount > 0) {
+        parts.push(
+          `Freezer-pull reminder${result.freezerPullCount === 1 ? "" : "s"} set for ${result.freezerPullCount} ingredient${result.freezerPullCount === 1 ? "" : "s"}.`,
+        );
+      }
+      if (result.warning) parts.push(result.warning);
+      showNote("Premix sheet imported", parts.join(" "));
     } catch (e) {
       setPremixError(
         e instanceof Error ? e.message : "Could not apply the import. Please retry.",

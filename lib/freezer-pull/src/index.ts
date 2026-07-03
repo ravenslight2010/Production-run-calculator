@@ -66,6 +66,62 @@ export function normalizeFreezerPullItem(input: unknown): FreezerPullItem | null
   return item;
 }
 
+// A requested freezer-pull setting (e.g. picked out of a premix sheet's
+// "Pull N days early" note): tag this ingredient with this lead time.
+export interface FreezerPullRequest {
+  ingredient: string;
+  daysEarly: number;
+}
+
+/**
+ * Turn requested settings into the minimal list of items to POST (the server
+ * upserts item-by-item). Matching an EXISTING item (by ingredient,
+ * case-insensitive) keeps its id/scope and updates daysEarly (+ re-enables it);
+ * unmatched requests become new items using the default id convention
+ * (lowercased ingredient). Requests that change nothing are dropped, as are
+ * blank ingredients and non-positive daysEarly. Duplicate requests collapse
+ * onto the LARGEST daysEarly (the safest lead time wins). Pure.
+ */
+export function buildFreezerPullUpserts(
+  existing: ReadonlyArray<FreezerPullItem>,
+  requests: ReadonlyArray<FreezerPullRequest>,
+): FreezerPullItem[] {
+  const byIngredient = new Map<string, FreezerPullItem>();
+  for (const item of existing) {
+    byIngredient.set(item.ingredient.toLowerCase(), item);
+  }
+
+  // Collapse duplicate requests (case-insensitive) onto the largest daysEarly.
+  const wanted = new Map<string, FreezerPullRequest>();
+  for (const req of requests) {
+    const ingredient = req.ingredient.trim();
+    const daysEarly = Math.trunc(req.daysEarly);
+    if (!ingredient || !Number.isFinite(daysEarly) || daysEarly <= 0) continue;
+    const key = ingredient.toLowerCase();
+    const prev = wanted.get(key);
+    if (!prev || daysEarly > prev.daysEarly) {
+      wanted.set(key, { ingredient, daysEarly });
+    }
+  }
+
+  const out: FreezerPullItem[] = [];
+  for (const [key, req] of wanted) {
+    const current = byIngredient.get(key);
+    if (current) {
+      if (current.daysEarly === req.daysEarly && current.enabled) continue; // already set
+      out.push({ ...current, daysEarly: req.daysEarly, enabled: true });
+    } else {
+      out.push({
+        id: key,
+        ingredient: req.ingredient,
+        daysEarly: req.daysEarly,
+        enabled: true,
+      });
+    }
+  }
+  return out;
+}
+
 // Normalize a list, dropping malformed entries and collapsing duplicate
 // ingredient names (case-insensitive) onto the last-seen entry.
 export function normalizeFreezerPullItems(input: unknown): FreezerPullItem[] {

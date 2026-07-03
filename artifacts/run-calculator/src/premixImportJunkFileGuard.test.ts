@@ -34,6 +34,7 @@ import * as XLSX from "xlsx";
 import type { SheetGrid } from "@workspace/spec-import";
 import * as specImportLib from "@workspace/spec-import";
 import * as premixImportLib from "@workspace/premix-import";
+import * as freezerPullLib from "@workspace/freezer-pull";
 
 // ---------------------------------------------------------------------------
 // Web module mocks — the AI matcher stub counts its calls so we can assert
@@ -202,12 +203,14 @@ const MOBILE_PRELUDE = `
 const {
   parsePremixWorkbook, groundPremix, collectPremixAliases, applyPremixMatches,
   premixToMix, premixId, summarizePremixImport, buildPremixCandidates,
-  mergePremixIntoMixes,
+  mergePremixIntoMixes, collectPremixFreezerPulls,
 } = globalThis.__PREMIX_IMPORT_LIB__;
 const { gridSanityIssue } = globalThis.__SPEC_IMPORT_LIB__;
+const { buildFreezerPullUpserts } = globalThis.__FREEZER_PULL_LIB__;
 const {
   fetchSpecImportAliases, saveSpecImportAliases, fetchMixes, saveMixes,
   requestMatchPremix, saveAiCorrections, savePremixSheet, buildPremixSheetLabel,
+  fetchFreezerPullItems, saveFreezerPullItems,
 } = globalThis.__PREMIX_IMPORT_STUBS__;
 `;
 
@@ -248,6 +251,7 @@ async function loadMobilePremixImport(): Promise<MobilePremixImportModule> {
 beforeAll(async () => {
   (globalThis as Record<string, unknown>).__PREMIX_IMPORT_LIB__ = premixImportLib;
   (globalThis as Record<string, unknown>).__SPEC_IMPORT_LIB__ = specImportLib;
+  (globalThis as Record<string, unknown>).__FREEZER_PULL_LIB__ = freezerPullLib;
   (globalThis as Record<string, unknown>).__PREMIX_IMPORT_STUBS__ = {
     fetchSpecImportAliases: async () => [],
     saveSpecImportAliases: async () => {},
@@ -257,6 +261,8 @@ beforeAll(async () => {
     saveAiCorrections: async () => {},
     savePremixSheet: async () => {},
     buildPremixSheetLabel: () => "",
+    fetchFreezerPullItems: async () => [],
+    saveFreezerPullItems: async () => {},
   };
   mobile = await loadMobilePremixImport();
 });
@@ -265,6 +271,7 @@ afterAll(() => {
   if (mobileTempFile && fs.existsSync(mobileTempFile)) fs.rmSync(mobileTempFile);
   delete (globalThis as Record<string, unknown>).__PREMIX_IMPORT_LIB__;
   delete (globalThis as Record<string, unknown>).__SPEC_IMPORT_LIB__;
+  delete (globalThis as Record<string, unknown>).__FREEZER_PULL_LIB__;
   delete (globalThis as Record<string, unknown>).__PREMIX_IMPORT_STUBS__;
 });
 

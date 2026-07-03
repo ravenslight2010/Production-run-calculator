@@ -44,3 +44,10 @@ to pull now with quantities.
   unit = `row.sub ?? ""`.
 - Mobile: `brandProfiles[profileKey]` → `RunSettings` → `RunState` → `computeCalc` →
   `buildRunNeedRows` + `buildRunPackagingRows`.
+
+## Import-driven upserts
+- `buildFreezerPullUpserts(existing, requests)` (same lib) merges pull-note suggestions from the
+  premix importer into the settings: case-insensitive ingredient match KEEPS the existing item's
+  id/scope, re-enables disabled items, drops no-op writes, duplicate requests keep max
+  `daysEarly`; new items get `id = lowercased ingredient`. Server POST upserts by [id, scope] —
+  no server changes were needed. Writes still go through the manage-inventory-gated route.

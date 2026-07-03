@@ -350,6 +350,7 @@ import { exportSpecRecipes, type ExportSelection } from "@/specExport";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
+import type { PremixFreezerPull } from "@workspace/premix-import";
 
 import {
   Form,
@@ -5887,20 +5888,38 @@ export default function Home() {
     }
   }
 
-  async function handlePremixImportConfirm(mixesToApply: Mix[]) {
+  async function handlePremixImportConfirm(
+    mixesToApply: Mix[],
+    freezerPulls: PremixFreezerPull[],
+  ) {
     if (!premixImportPrepared) return;
     setPremixImportApplying(true);
     try {
-      await commitPremixImport(premixImportPrepared, mixesToApply);
+      const result = await commitPremixImport(premixImportPrepared, mixesToApply, freezerPulls);
       // Refresh the shared mixes query so imported mixes appear immediately in
       // the Mixes view and feed the make-day plan without waiting for polling.
       void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       setShowPremixImport(false);
       setPremixImportPrepared(null);
+      const parts = [
+        `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
+      ];
+      if (result.freezerPullCount > 0) {
+        parts.push(
+          `Freezer-pull reminder${result.freezerPullCount === 1 ? "" : "s"} set for ${result.freezerPullCount} ingredient${result.freezerPullCount === 1 ? "" : "s"}.`,
+        );
+      }
       toast({
         title: "Premix sheet imported",
-        description: `${mixesToApply.length} mix${mixesToApply.length === 1 ? "" : "es"} saved.`,
+        description: parts.join(" "),
       });
+      if (result.warning) {
+        toast({
+          title: "Freezer-pull reminders not saved",
+          description: result.warning,
+          variant: "destructive",
+        });
+      }
     } catch (err) {
       setPremixImportError(
         err instanceof Error ? err.message : "Import failed while saving. Please try again.",

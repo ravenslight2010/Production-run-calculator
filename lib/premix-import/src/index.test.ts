@@ -11,6 +11,7 @@ import {
   buildPremixCandidates,
   rematchPremixCandidate,
   mergePremixIntoMixes,
+  collectPremixFreezerPulls,
   type PremixKnown,
   type SheetGrid,
 } from "./index";
@@ -125,6 +126,40 @@ describe("parsePremixWorkbook", () => {
     const [mix] = parsePremixWorkbook([BOBOS]);
     expect(mix.daysEarly).toBe(0);
     expect(mix.notes).toBeUndefined();
+    expect(mix.pullIngredients).toEqual([]);
+  });
+
+  it("flags the ingredient whose own cell carries the pull note (and keeps its name clean)", () => {
+    const grid: SheetGrid = {
+      name: "Bobos Buffalo",
+      rows: [
+        ["Bobo's Buffalo Chicken Mix", "", "", "# OF MIXES"],
+        ["", "Per Pizza", "Per Batch", "1"],
+        ["***Pull 3 Days Early***\r\nScrambled Egg", "0.5", "25"],
+        ["Buffalo Sauce", "0.1", "5"],
+        ["TOTAL", "0.6", "30"],
+      ],
+    };
+    const [mix] = parsePremixWorkbook([grid]);
+    expect(mix.daysEarly).toBe(3);
+    // The decorative note line must NOT leak into the ingredient name.
+    expect(mix.components.map((c) => c.ingredient)).toEqual([
+      "Scrambled Egg",
+      "Buffalo Sauce",
+    ]);
+    expect(mix.pullIngredients).toEqual(["Scrambled Egg"]);
+  });
+
+  it("a standalone note above the header flags the block's first ingredient", () => {
+    const [mix] = parsePremixWorkbook([BREAKFAST]);
+    expect(mix.daysEarly).toBe(3);
+    expect(mix.pullIngredients).toEqual(["Egg"]);
+  });
+
+  it("a far-away 'PULL OLD MIX' footer note stays mix-level (no ingredient flagged)", () => {
+    const [mix] = parsePremixWorkbook([SPINACH]);
+    expect(mix.daysEarly).toBe(2);
+    expect(mix.pullIngredients).toEqual([]);
   });
 });
 
@@ -279,5 +314,37 @@ describe("conversion + summary", () => {
     // Re-pointing to an unknown id stays "new".
     const stillNew = rematchPremixCandidate(candidate, "Bobos", "Deluxe", () => false);
     expect(stillNew.status).toBe("new");
+  });
+});
+
+describe("collectPremixFreezerPulls", () => {
+  it("collects flagged ingredients keyed by the mix's deterministic id", () => {
+    const parsed = parsePremixWorkbook([BREAKFAST]);
+    const grounded = parsed.map((p) => groundPremix(p, KNOWN, []).mix);
+    const pulls = collectPremixFreezerPulls(grounded);
+    const key = premixId(grounded[0]);
+    expect(pulls).toEqual({ [key]: [{ ingredient: "Egg", daysEarly: 3 }] });
+  });
+
+  it("canonicalizes the flagged ingredient against the known ingredient list", () => {
+    const grid: SheetGrid = {
+      name: "Bobos Deluxe 2",
+      rows: [
+        ["Bobo's Deluxe Veggie Mix", "", "", "# OF MIXES"],
+        ["", "Per Pizza", "Per Batch", "1"],
+        ["***Pull 2 Days Early***\r\nbacon", "0.75", "38.8"],
+        ["TOTAL", "0.75", "38.8"],
+      ],
+    };
+    const [parsed] = parsePremixWorkbook([grid]);
+    const grounded = groundPremix(parsed, KNOWN, []).mix;
+    const pulls = collectPremixFreezerPulls([grounded]);
+    // "bacon" grounds to the known "Bacon" so the freezer setting matches the app.
+    expect(Object.values(pulls)[0]).toEqual([{ ingredient: "Bacon", daysEarly: 2 }]);
+  });
+
+  it("skips mixes with a note but no specific ingredient, and mixes with no note", () => {
+    const parsed = parsePremixWorkbook([SPINACH, BOBOS]);
+    expect(collectPremixFreezerPulls(parsed)).toEqual({});
   });
 });

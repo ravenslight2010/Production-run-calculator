@@ -25,15 +25,19 @@ import {
   summarizePremixImport,
   buildPremixCandidates,
   mergePremixIntoMixes,
+  collectPremixFreezerPulls,
   type ParsedPremix,
   type GroundedPremix,
   type PremixKnown,
   type PremixImportSummary,
   type PremixCandidate,
+  type PremixFreezerPull,
   type SpecImportAlias,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
+import { buildFreezerPullUpserts } from "@workspace/freezer-pull";
 import { gridSanityIssue } from "@workspace/spec-import";
+import { fetchFreezerPullItems, saveFreezerPullItems } from "./freezerPull";
 import { loadSpecImportKnown } from "./storage";
 import { readWorkbookGrids } from "./specImport";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
@@ -56,6 +60,12 @@ export type PremixImportPrepared = {
   flavorsByBrand: Record<string, string[]>;
   /** Ids of mixes already saved, so a re-match can recompute new-vs-update. */
   existingIds: string[];
+  /**
+   * Freezer-pull settings suggested by the sheets' "Pull N days early" notes,
+   * keyed by the ORIGINAL parsed mix id (the review dialog's stable key), so
+   * they follow the manager's include/exclude picks and are applied on confirm.
+   */
+  freezerPulls: Record<string, PremixFreezerPull[]>;
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
   note?: string;
@@ -188,6 +198,9 @@ export async function preparePremixImport(
   const summary = summarizePremixImport(mixes, (id) => existingIds.has(id));
   const candidates = buildPremixCandidates(mixes, (id) => existingIds.has(id));
   const newAliases = collectPremixAliases(grounded);
+  // Pick out the "Pull N days early" ingredient notes as freezer-pull settings
+  // (keyed by the same deterministic ids the candidates carry at this point).
+  const freezerPulls = collectPremixFreezerPulls(groundedMixes);
 
   const noteParts: string[] = [];
   if (errors.length) {
@@ -206,20 +219,31 @@ export async function preparePremixImport(
     brands: known.brands,
     flavorsByBrand: known.flavorsByBrand,
     existingIds: [...existingIds],
+    freezerPulls,
     ...(note ? { note } : {}),
   };
 }
 
+export type PremixCommitResult = {
+  /** How many freezer-pull ingredient settings the import set/confirmed. */
+  freezerPullCount: number;
+  /** Non-fatal problem worth surfacing (the mixes themselves applied fine). */
+  warning?: string;
+};
+
 /**
- * Apply a prepared premix import: upsert the manager-approved mixes by id, then
- * persist new aliases. `mixesToApply` is the reviewed selection from the dialog
- * (already deselected/re-matched as the manager chose).
+ * Apply a prepared premix import: upsert the manager-approved mixes by id,
+ * set any freezer-pull settings the sheets' pull notes suggested for the
+ * included mixes, then persist new aliases. `mixesToApply` is the reviewed
+ * selection from the dialog (already deselected/re-matched as the manager
+ * chose); `freezerPulls` is the matching reviewed pull-note selection.
  */
 export async function commitPremixImport(
   prepared: PremixImportPrepared,
   mixesToApply: ReadonlyArray<Mix>,
-): Promise<void> {
-  if (mixesToApply.length === 0) return;
+  freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
+): Promise<PremixCommitResult> {
+  if (mixesToApply.length === 0) return { freezerPullCount: 0 };
   // Re-read current mixes right before writing so we merge onto the freshest
   // list (another manager may have edited mixes since prepare).
   const existing = await fetchMixes();
@@ -240,6 +264,25 @@ export async function commitPremixImport(
     // ignore — monitoring snapshot is non-critical
   }
 
+  // Set the freezer-pull settings the pull notes suggested for the included
+  // mixes: update an existing tagged ingredient's lead time, or tag it fresh.
+  // Failure here is surfaced as a warning — the mixes themselves applied fine.
+  let freezerPullCount = 0;
+  let warning: string | undefined;
+  if (freezerPulls.length > 0) {
+    try {
+      const existingItems = await fetchFreezerPullItems();
+      const upserts = buildFreezerPullUpserts(existingItems, [...freezerPulls]);
+      if (upserts.length > 0) await saveFreezerPullItems(upserts);
+      freezerPullCount = new Set(
+        freezerPulls.map((p) => p.ingredient.trim().toLowerCase()).filter(Boolean),
+      ).size;
+    } catch {
+      warning =
+        "The mixes were imported, but the freezer-pull reminders could not be saved. You can set them in the Freezer Pull settings.";
+    }
+  }
+
   if (prepared.newAliases.length) {
     try {
       await saveSpecImportAliases(prepared.newAliases);
@@ -256,6 +299,8 @@ export async function commitPremixImport(
       })),
     );
   }
+
+  return { freezerPullCount, ...(warning ? { warning } : {}) };
 }
 
 export { premixId };

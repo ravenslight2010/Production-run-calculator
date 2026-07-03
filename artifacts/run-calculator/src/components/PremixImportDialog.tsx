@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
-import { rematchPremixCandidate, type PremixCandidate } from "@workspace/premix-import";
+import {
+  rematchPremixCandidate,
+  type PremixCandidate,
+  type PremixFreezerPull,
+} from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
 import type { PremixImportPrepared } from "@/premixImport";
 
@@ -13,8 +17,8 @@ type Props = {
   error: string | null;
   prepared: PremixImportPrepared | null;
   applying: boolean;
-  /** Confirm with the reviewed mixes the manager chose to apply. */
-  onConfirm: (mixesToApply: Mix[]) => void;
+  /** Confirm with the reviewed mixes (and their pull-note freezer settings). */
+  onConfirm: (mixesToApply: Mix[], freezerPulls: PremixFreezerPull[]) => void;
 };
 
 // Local stable handle for a reviewable mix: a key that survives a re-match (the
@@ -94,8 +98,12 @@ export default function PremixImportDialog({
   const flavorsByBrand = prepared?.flavorsByBrand ?? {};
 
   const confirm = () => {
-    const mixes = items.filter((it) => selected.has(it.key)).map((it) => it.candidate.mix);
-    onConfirm(mixes);
+    const included = items.filter((it) => selected.has(it.key));
+    const mixes = included.map((it) => it.candidate.mix);
+    // Freezer-pull settings ride along with their mix's include/exclude pick
+    // (keyed by the ORIGINAL parsed id — a re-match doesn't change the note).
+    const pulls = included.flatMap((it) => prepared?.freezerPulls?.[it.key] ?? []);
+    onConfirm(mixes, pulls);
   };
 
   return (
@@ -261,6 +269,22 @@ export default function PremixImportDialog({
                             {m.notes && (
                               <div className="mt-1 text-xs italic text-muted-foreground">
                                 {m.notes}
+                              </div>
+                            )}
+                            {(prepared?.freezerPulls?.[it.key] ?? []).length > 0 && (
+                              <div
+                                className="mt-1 text-xs text-muted-foreground"
+                                data-testid={`premix-freezer-pull-${it.key}`}
+                              >
+                                Sets freezer-pull reminder:{" "}
+                                <span className="text-foreground">
+                                  {(prepared?.freezerPulls?.[it.key] ?? [])
+                                    .map(
+                                      (p) =>
+                                        `${p.ingredient} (${p.daysEarly} day${p.daysEarly === 1 ? "" : "s"} early)`,
+                                    )
+                                    .join(", ")}
+                                </span>
                               </div>
                             )}
                           </div>
