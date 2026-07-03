@@ -64,7 +64,15 @@ grounded in recent SIMILAR past incidents pulled from shared facility memory
 - Write-back is best-effort `recordFacilityKnowledge` (key=signature, source `"incident-diagnosis"`, `.catch` warn) — fire-and-forget, NOT awaited.
 - The general facility-memory block passed to the prompt EXCLUDES the `incidents`
   domain; that domain is injected separately as a focused "SIMILAR PAST INCIDENTS"
-  history block so prior incidents don't double-appear.
+  history block so prior incidents don't double-appear. This exclusion is now
+  enforced centrally in `aiMemoryContext.ts` (`UNTRUSTED_FREEFORM_DOMAINS`, applied
+  whenever `appendFacilityMemoryBlock`/`groundPromptWithMemory` is called without an
+  explicit `domains` list) rather than per-callsite — it's a security boundary, not
+  just de-duplication: the incident fact embeds up to 200 chars of a reporter's own
+  free text, so folding it into the generic "treat as trusted fact" block used by
+  every OTHER AI route (ask/optimize/forecast/anomalies/schedule-optimize) would let
+  any signed-in user plant prompt-injection text into unrelated AI features. Any
+  future untrusted-freeform domain should be added to that same set.
 - **Test isolation trap:** because write-back is async + unawaited, a prior test's
   write can land AFTER the next test's `beforeEach` truncate and leak a matching
   memory row. Don't assert "facility table empty before" or rely on a shared report

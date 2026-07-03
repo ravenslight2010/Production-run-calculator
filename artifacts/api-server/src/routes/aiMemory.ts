@@ -1,6 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { SaveFacilityKnowledgeBody, AppendConversationBody } from "@workspace/api-zod";
+import { normalizeKnowledge } from "@workspace/ai-memory";
 import { requireCapability } from "../middlewares/requireCapability";
+import { rateLimit } from "../middlewares/rateLimit";
+import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { getOrCreateUserRole, getRole, type Capability } from "../lib/roles";
 import {
   listFacilityKnowledge,
@@ -37,6 +40,29 @@ const router: IRouter = Router();
 //     bullet lines under a different, more-trusted domain either.)
 
 const MAX_BATCH = 1000;
+
+// Every real client call site writes exactly ONE facility-knowledge entry per
+// request (a single dismissal or a single quality-check confirmation) — never a
+// batch. Capping the request to exactly that (rather than MAX_BATCH) means a
+// single POST can no longer be used to mint many fake rows in one shot; it
+// bounds the "flood to evict" attack at the request-shape level, on top of the
+// per-user rate limit below.
+const MAX_FACILITY_WRITE_BATCH = 1;
+
+// Cost/abuse guard for the facility-memory write path. Combined with
+// MAX_FACILITY_WRITE_BATCH=1, this caps one low-privilege account to at most
+// FACILITY_WRITE_RATE_MAX new/updated rows per window — low enough that a
+// dismissal-flood attack can no longer meaningfully outpace legitimate writes
+// or force large-scale pruning (MAX_FACILITY_ROWS=500 in aiMemoryContext.ts),
+// even though the route itself only needs requireAuth (see
+// CLIENT_WRITABLE_KNOWLEDGE above). Real usage is a handful of writes per
+// session at most, so this stays generous for legitimate traffic.
+const FACILITY_WRITE_RATE_WINDOW_MS = 60_000;
+const FACILITY_WRITE_RATE_MAX = 5;
+const facilityWriteRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(FACILITY_WRITE_RATE_WINDOW_MS)
+    : undefined;
 
 type FacilityEntryInput = { domain: string; key: string; fact: string };
 
@@ -102,47 +128,67 @@ router.get(
   },
 );
 
-router.post("/ai-memory/facility", async (req: Request, res: Response) => {
-  const parsed = SaveFacilityKnowledgeBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Invalid input" });
-    return;
-  }
-  const entries = parsed.data.knowledge.slice(0, MAX_BATCH);
-  if (entries.some((e) => !matchesWriteRule(e))) {
-    res.status(403).json({ error: "Entry not writable via this endpoint" });
-    return;
-  }
-  const userId = req.userId;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-  try {
-    const needed = await requiredCapabilitiesFor(entries);
-    if (needed.size > 0) {
+router.post(
+  "/ai-memory/facility",
+  rateLimit({
+    windowMs: FACILITY_WRITE_RATE_WINDOW_MS,
+    max: FACILITY_WRITE_RATE_MAX,
+    keyGenerator: (req) => req.userId ?? req.ip ?? "unknown",
+    store: facilityWriteRateStore,
+  }),
+  async (req: Request, res: Response) => {
+    const parsed = SaveFacilityKnowledgeBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid input" });
+      return;
+    }
+    const entries = parsed.data.knowledge.slice(0, MAX_FACILITY_WRITE_BATCH);
+    if (entries.some((e) => !matchesWriteRule(e))) {
+      res.status(403).json({ error: "Entry not writable via this endpoint" });
+      return;
+    }
+    const userId = req.userId;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+    let hasFullReadAccess = false;
+    try {
+      const needed = await requiredCapabilitiesFor(entries);
       const { role } = await getOrCreateUserRole(userId);
       const def = await getRole(role);
       const held = new Set(def?.capabilities ?? []);
-      const missing = [...needed].filter((c) => !held.has(c));
-      if (missing.length > 0) {
-        res.status(403).json({ error: `Missing capability: ${missing.join(", ")}` });
-        return;
+      hasFullReadAccess = held.has("use-ai-tools");
+      if (needed.size > 0) {
+        const missing = [...needed].filter((c) => !held.has(c));
+        if (missing.length > 0) {
+          res.status(403).json({ error: `Missing capability: ${missing.join(", ")}` });
+          return;
+        }
       }
+    } catch (err) {
+      req.log.error({ err }, "capability check failed");
+      res.status(500).json({ error: "Capability check failed" });
+      return;
     }
-  } catch (err) {
-    req.log.error({ err }, "capability check failed");
-    res.status(500).json({ error: "Capability check failed" });
-    return;
-  }
-  try {
-    const knowledge = await recordFacilityKnowledge(entries);
-    res.json({ knowledge });
-  } catch (err) {
-    req.log.error({ err }, "failed to save facility knowledge");
-    res.status(500).json({ error: "Failed to save facility knowledge" });
-  }
-});
+    try {
+      const fullPool = await recordFacilityKnowledge(entries);
+      // GET /ai-memory/facility is gated to `use-ai-tools` specifically so
+      // ordinary staff can't bulk-read the shared pool. Returning the whole
+      // pool here (as recordFacilityKnowledge does internally) would let any
+      // authenticated user bypass that gate just by making one allowed write.
+      // Callers without that capability only get back the (already
+      // normalized/sanitized) rows they just submitted — never the rest of
+      // the facility-wide pool. No current client feature reads this
+      // response, so this can't break an existing UI.
+      const knowledge = hasFullReadAccess ? fullPool : normalizeKnowledge(entries);
+      res.json({ knowledge });
+    } catch (err) {
+      req.log.error({ err }, "failed to save facility knowledge");
+      res.status(500).json({ error: "Failed to save facility knowledge" });
+    }
+  },
+);
 
 router.get("/ai-memory/conversation", async (req: Request, res: Response) => {
   const userId = req.userId;

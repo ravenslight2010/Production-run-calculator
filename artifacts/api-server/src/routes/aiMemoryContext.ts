@@ -11,6 +11,7 @@ import {
   type ConversationTurn,
   type FacilityKnowledge,
 } from "@workspace/ai-memory";
+import { INCIDENT_MEMORY_DOMAIN } from "./incidentsAi";
 
 // Shared AI-memory context builder — the single seam every AI prompt uses to get
 // grounded by what the facility (and, in a conversation, the user) has learned.
@@ -45,16 +46,42 @@ export async function loadFacilityKnowledge(log: ContextLogger): Promise<Facilit
   }
 }
 
+// Domains that carry free-text authored by ANY signed-in user (not reviewed or
+// confirmed by a manager) rather than a fixed, closed-vocabulary observation.
+// `buildKnowledgeBlock` tells the model to treat every entry as a trusted,
+// durable operational fact and "factor it into your answer" — so a domain
+// whose fact string embeds a reporter's own words must never be folded into
+// that trusted, general-purpose block for OTHER features. The incidents
+// domain (`buildIncidentMemoryFact` embeds up to 200 chars of the reporter's
+// error message/description verbatim) is the only such domain today; a
+// low-privilege user could otherwise use a crash/issue report to plant
+// prompt-injection-style text into every other AI feature's grounding.
+// Incidents.ts already surfaces the same information appropriately — scoped,
+// ranked, and explicitly framed as "similar past reports" rather than
+// confirmed fact — via appendIncidentHistoryBlock, so no functionality is
+// lost by excluding it here.
+const UNTRUSTED_FREEFORM_DOMAINS = new Set([INCIDENT_MEMORY_DOMAIN]);
+
+function excludeUntrustedFreeformDomains(
+  knowledge: FacilityKnowledge[],
+): FacilityKnowledge[] {
+  return knowledge.filter((k) => !UNTRUSTED_FREEFORM_DOMAINS.has(k.domain.trim().toLowerCase()));
+}
+
 // Append the facility-memory block to a built user prompt. When `domains` is
-// given, only those topics are included; otherwise the whole pool is used. When
-// nothing applies the prompt is returned unchanged.
+// given, only those topics are included (this is an explicit opt-in, so it MAY
+// include an otherwise-untrusted domain, e.g. incidents.ts building its own
+// scoped block); otherwise the whole pool minus UNTRUSTED_FREEFORM_DOMAINS is
+// used. When nothing applies the prompt is returned unchanged.
 export function appendFacilityMemoryBlock(
   userPrompt: string,
   knowledge: FacilityKnowledge[],
   domains?: string[],
 ): string {
   const scoped =
-    domains && domains.length > 0 ? filterKnowledgeByDomain(knowledge, domains) : knowledge;
+    domains && domains.length > 0
+      ? filterKnowledgeByDomain(knowledge, domains)
+      : excludeUntrustedFreeformDomains(knowledge);
   const block = buildKnowledgeBlock(scoped);
   return block ? `${userPrompt}\n\n${block}` : userPrompt;
 }
