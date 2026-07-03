@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "@/components/UI";
@@ -30,6 +30,7 @@ import UseFirstCard from "@/components/UseFirstCard";
 import ScheduledRecipeWarningCard from "@/components/ScheduledRecipeWarningCard";
 import { useRouter } from "expo-router";
 import { useMe } from "@/hooks/useRole";
+import { showNote } from "@/utils/notify";
 import { decideSetupJump, type ScheduledRunRef } from "@workspace/scheduled-recipe-check";
 
 function fmtNum(n: number, dec: number): string {
@@ -483,12 +484,12 @@ export default function WarehouseScreen() {
                 maxRuns: MAX_RUNS,
               });
               if (decision === "at-cap") {
-                // RN Alert is a no-op on Expo web — branch like the other
-                // cross-platform alerts.
-                const title = "Run limit reached";
-                const msg = `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`;
-                if (Platform.OS === "web") window.alert(`${title}\n${msg}`);
-                else Alert.alert(title, msg);
+                // showNote handles the Expo-web no-op Alert branch (styled
+                // in-app dialog on web, native Alert elsewhere).
+                showNote(
+                  "Run limit reached",
+                  `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`,
+                );
                 return;
               }
               // "new-run": append a fresh run and make it current; the queued

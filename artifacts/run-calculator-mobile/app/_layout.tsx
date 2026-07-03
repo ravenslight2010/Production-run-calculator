@@ -19,6 +19,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import WebDialogHost from "@/components/WebDialogHost";
 import { AuthProvider } from "@/context/auth";
 import { RunContextProvider } from "@/context/RunContext";
 import { reportIncident } from "@/context/inventoryShared";
@@ -112,6 +113,7 @@ export default function RootLayout() {
             <AuthProvider>
               <RunContextProvider>
                 <RootLayoutNav />
+                {Platform.OS === "web" ? <WebDialogHost /> : null}
               </RunContextProvider>
             </AuthProvider>
           </GestureHandlerRootView>

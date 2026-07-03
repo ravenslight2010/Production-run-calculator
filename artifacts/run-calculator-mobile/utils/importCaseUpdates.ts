@@ -1,4 +1,4 @@
-import { Alert, Platform } from "react-native";
+import { showConfirm } from "@/utils/notify";
 
 // A skipped re-import file row can still carry news: the office may have
 // re-issued today's schedule with a DIFFERENT case count for a run that's
@@ -56,22 +56,13 @@ export function promptCaseUpdates(
     .map((o) => `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`)
     .join("\n");
   const message = `${prefix}The re-imported schedule lists ${many ? "different case counts" : "a different case count"} for ${many ? `${offers.length} runs that are` : "a run that's"} already going:\n\n${lines}\n\nUpdate the run target${many ? "s" : ""} to the new count${many ? "s" : ""}? Progress is kept.`;
-  if (Platform.OS === "web") {
-    // RN Alert is a silent no-op on Expo web (same reason utils/notify.ts
-    // exists) — fall back to window.confirm so the offer stays answerable.
-    if (typeof window !== "undefined" && typeof window.confirm === "function") {
-      if (window.confirm(`Case counts changed\n\n${message}`)) {
-        offers.forEach(apply);
-      }
-    }
-    return;
-  }
-  Alert.alert(
-    "Case counts changed",
+  // showConfirm renders the styled in-app dialog on web (RN Alert is a silent
+  // no-op there) and the exact two-button Alert.alert on native.
+  showConfirm({
+    title: "Case counts changed",
     message,
-    [
-      { text: "Keep Current", style: "cancel" },
-      { text: many ? "Update Targets" : "Update Target", onPress: () => offers.forEach(apply) },
-    ],
-  );
+    confirmText: many ? "Update Targets" : "Update Target",
+    cancelText: "Keep Current",
+    onConfirm: () => offers.forEach(apply),
+  });
 }
