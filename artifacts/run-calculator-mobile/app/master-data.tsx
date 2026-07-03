@@ -1710,6 +1710,7 @@ export default function MasterDataScreen() {
         settled,
         buildPremixStore(),
         (done, total) => setPremixProgress({ done, total }),
+        assets.map((a) => a.name ?? ""),
       );
       setPremixPrepared(prepared);
     } catch (e) {

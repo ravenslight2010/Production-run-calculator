@@ -36,6 +36,7 @@ import {
   type SpecImportAlias,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
+import { gridSanityIssue } from "@workspace/spec-import";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
 import { fetchMixes, saveMixes } from "./mixes";
 import { requestMatchPremix } from "./premixMatch";
@@ -90,6 +91,7 @@ export async function preparePremixImport(
   gridsList: SheetGrid[][],
   store: PremixImportStore,
   onProgress?: (done: number, total: number) => void,
+  names?: string[],
 ): Promise<PremixImportPrepared> {
   const { known } = store;
   const aliases = await loadPremixAliases();
@@ -97,17 +99,35 @@ export async function preparePremixImport(
 
   const parsed: ParsedPremix[] = [];
   const errors: string[] = [];
+  const failedNames: string[] = [];
   let done = 0;
-  for (const grids of gridsList) {
+  for (let i = 0; i < gridsList.length; i++) {
+    const grids = gridsList[i];
+    // Name each file so a failure can say WHICH file was skipped (fall back to
+    // a positional label when the caller didn't pass filenames). Mirrors web.
+    const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
+      // Cheap junk-file guard: the xlsx reader does NOT throw on garbage bytes
+      // (a renamed PDF/image "reads" as one junk sheet), so reject empty or
+      // binary-junk grids BEFORE the deterministic parse / AI matcher. In the
+      // multi-file path this throw becomes the per-file "could not be read …
+      // skipped" note. Shared with the spec importer (same wording/thresholds).
+      // Mirrors web.
+      const sanity = gridSanityIssue(grids);
+      if (sanity) {
+        throw new Error(sanity);
+      }
       const blocks = parsePremixWorkbook(grids);
       if (blocks.length === 0) {
-        errors.push("A workbook had no recognizable premix blocks.");
+        failedNames.push(label);
+        errors.push(`${label}: no recognizable premix blocks.`);
       } else {
         parsed.push(...blocks);
       }
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : "Could not read a file.");
+      const msg = err instanceof Error ? err.message : "could not be read";
+      failedNames.push(label);
+      errors.push(`${label}: ${msg}`);
     } finally {
       done += 1;
       onProgress?.(done, gridsList.length);
@@ -115,7 +135,7 @@ export async function preparePremixImport(
   }
 
   if (parsed.length === 0) {
-    throw new Error(errors[0] ?? "Nothing recognizable was found to import.");
+    throw new Error(errors.length ? errors.join("\n") : "Nothing recognizable was found to import.");
   }
 
   // Deterministic grounding first (alias → exact → fuzzy → new).
@@ -163,8 +183,9 @@ export async function preparePremixImport(
 
   const noteParts: string[] = [];
   if (errors.length) {
+    const list = failedNames.length ? `: ${failedNames.join(", ")}` : "";
     noteParts.push(
-      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
+      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped${list}.`,
     );
   }
   const note = noteParts.length ? noteParts.join("\n") : undefined;

@@ -43,3 +43,11 @@ are parsed DETERMINISTICALLY in the shared lib; AI ONLY disambiguates product na
 
 - Reuses learned spec-import alias memory and mirrors new brand/flavor mappings into the
   factory-wide AI corrections pool (both best-effort).
+
+- **Junk-file guard is the SHARED `gridSanityIssue` from `@workspace/spec-import`** — both
+  premix prepare paths run it per file BEFORE the deterministic parse / AI matcher (xlsx
+  "reads" garbage bytes as one junk sheet without throwing). Failures become the per-file
+  "could not be read … skipped: <name>" note (or a plain-language throw when everything is
+  junk). **Why:** never fork the thresholds/wording — spec + premix importers must reject
+  wrong-type picks identically. Mobile maps a failed native read to `[]` grids, which the
+  same guard flags as the empty-workbook message.

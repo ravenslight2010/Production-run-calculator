@@ -33,6 +33,7 @@ import {
   type SpecImportAlias,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
+import { gridSanityIssue } from "@workspace/spec-import";
 import { loadSpecImportKnown } from "./storage";
 import { readWorkbookGrids } from "./specImport";
 import { fetchSpecImportAliases, saveSpecImportAliases } from "./specImportAliases";
@@ -115,6 +116,15 @@ export async function preparePremixImport(
     const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
       const grids = await readWorkbookGrids(buffers[i]);
+      // Cheap junk-file guard: the xlsx reader does NOT throw on garbage bytes
+      // (a renamed PDF/image "reads" as one junk sheet), so reject empty or
+      // binary-junk grids BEFORE the deterministic parse / AI matcher. In the
+      // multi-file path this throw becomes the per-file "could not be read …
+      // skipped" note. Shared with the spec importer (same wording/thresholds).
+      const sanity = gridSanityIssue(grids);
+      if (sanity) {
+        throw new Error(sanity);
+      }
       const blocks = parsePremixWorkbook(grids);
       if (blocks.length === 0) {
         failedNames.push(label);
