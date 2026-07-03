@@ -323,6 +323,33 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[1].sauceName).toBeUndefined();
     expect(out.profiles[2].sauceName).toBeUndefined();
   });
+  it("converts recipe rows to lbs when the AI reports rowsUnit oz (sheet amounts in ounces)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        { kind: "cheese", name: "Fajita Blend", rowsUnit: "oz",
+          rows: [{ ingredient: "Mozz", lbs: 24 }, { ingredient: "Onion", lbs: 9 }] },
+        { kind: "dough", name: "Std Dough", rowsUnit: "OUNCES",
+          rows: [{ ingredient: "Flour", lbs: 500 }] },
+      ],
+    });
+    expect(out.recipes[0].rows).toEqual([
+      { ingredient: "Mozz", lbs: 1.5 },
+      { ingredient: "Onion", lbs: 0.563 },
+    ]);
+    expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 31.25 }]);
+  });
+  it("leaves recipe rows untouched when rowsUnit is lbs, missing, or unrecognized", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [
+        { kind: "cheese", name: "A", rowsUnit: "lbs", rows: [{ ingredient: "Mozz", lbs: 24 }] },
+        { kind: "cheese", name: "B", rows: [{ ingredient: "Mozz", lbs: 24 }] },
+        { kind: "cheese", name: "C", rowsUnit: "grams", rows: [{ ingredient: "Mozz", lbs: 24 }] },
+      ],
+    });
+    for (const r of out.recipes) expect(r.rows[0].lbs).toBe(24);
+  });
   it("never throws on garbage input", () => {
     expect(() => sanitizeParsedSpecImport(null)).not.toThrow();
     expect(sanitizeParsedSpecImport(null).profiles).toEqual([]);

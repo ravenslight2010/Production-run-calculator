@@ -221,9 +221,18 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "short reusable name. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
-    "in its correct field and NEVER swap units: `ozPerPizza`/`sauceOzPerPizza` are " +
-    "ounces PER PIZZA and `lbs` are recipe pounds — do not put a per-pizza ounce " +
-    "figure into a recipe's `lbs` or vice-versa, and do not convert between them. " +
+    "in its correct field and NEVER swap fields: `ozPerPizza`/`sauceOzPerPizza` are " +
+    "ounces PER PIZZA, while a recipe row's `lbs` is a RAW numeric field holding the " +
+    "amount exactly as written on the sheet (the sheet may label it pounds OR ounces " +
+    "— see RECIPE ROW UNITS). Do not put a per-pizza ounce figure into a recipe row " +
+    "or vice-versa, and never convert any number between units. " +
+    "RECIPE ROW UNITS: some sheets write recipe ingredient amounts in OUNCES " +
+    "instead of pounds. Still copy each amount verbatim into that row's `lbs`, " +
+    "and REPORT the unit on the recipe via `rowsUnit`: \"oz\" when the sheet " +
+    "marks those amounts as ounces (an oz/ozs/ounces column header or label), " +
+    "\"lbs\" when it marks pounds. Omit `rowsUnit` when the sheet states no unit " +
+    "for the recipe amounts. NEVER convert the numbers yourself — the app " +
+    "converts ounces to pounds after reading. " +
     "`sticks` is a whole-pepperoni-stick count, separate from its oz/pizza. Match " +
     "each value to the correct brand/flavor/ingredient row it sits on; if a cell is " +
     "blank or unreadable, omit that field rather than borrowing a neighbor's number. " +
@@ -291,7 +300,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
-      '"doughballOz":number,"app":number,' +
+      '"doughballOz":number,"app":number,"rowsUnit":"lbs"|"oz",' +
       '"rows":[{"ingredient":string,"lbs":number}]}],"note":string}. ' +
       "Omit any field or row you cannot determine. Prefer `targets` for a recipe that " +
       "serves multiple brand/flavor profiles (one recipe, many targets); use the singular " +

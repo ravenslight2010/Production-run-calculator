@@ -1806,12 +1806,20 @@ export function sanitizeParsedSpecImport(
     const name = clampName(o.name, lim.maxNameChars);
     const rows: RecipeRow[] = [];
     const rawRows = Array.isArray(o.rows) ? o.rows : [];
+    // Some spec sheets write recipe ingredient amounts in OUNCES, not pounds.
+    // The AI is told to copy numbers verbatim and only REPORT the unit it saw
+    // (`rowsUnit`); the deterministic oz→lbs conversion happens here so the
+    // canonical ParsedRecipe (and everything downstream — batch math, inventory,
+    // review preview) stays in lbs and the model never does arithmetic.
+    const unitRaw = clampName(o.rowsUnit, 16).toLowerCase();
+    const rowsAreOz = unitRaw === "oz" || unitRaw === "oz." || unitRaw === "ounce" || unitRaw === "ounces";
     for (const row of rawRows.slice(0, lim.maxRecipeRows)) {
       if (!row || typeof row !== "object") continue;
       const ro = row as Record<string, unknown>;
       const ingredient = clampName(ro.ingredient, lim.maxNameChars);
-      const lbs = num(ro.lbs);
-      if (!ingredient || lbs == null) continue;
+      const raw = num(ro.lbs);
+      if (!ingredient || raw == null) continue;
+      const lbs = rowsAreOz ? Math.round((raw / 16) * 1000) / 1000 : raw;
       rows.push({ ingredient, lbs });
     }
     if (rows.length === 0) continue;

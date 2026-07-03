@@ -305,6 +305,21 @@ Any change to one app's order/logic must land in the other verbatim.
   (topping blends), mapped to specific flavors by mix name — the existing cheese-tab
   handling + catch-all scrub covers them; no new code path needed.
 
+## Recipe row units: sheets may be in OUNCES — AI reports, sanitizer converts
+- This factory's spec sheets write recipe ingredient amounts in OZ, but the
+  canonical `RecipeRow.lbs` is real POUNDS (recipe totals are used as absolute
+  batch/barrel lbs in inventory-math — a raw oz read is 16× too big).
+- **Rule:** the AI NEVER converts. It copies row numbers verbatim into `lbs`
+  and reports the sheet's unit per recipe via `rowsUnit: "oz"|"lbs"` (omitted
+  when the sheet states no unit). `sanitizeParsedSpecImport` does the
+  deterministic oz→lbs (÷16, 3-decimal round) so every downstream consumer
+  (review, apply, mobile, saved sheets, export) stays in lbs unchanged.
+- **Why AI-reported unit, not a hard default:** unlabeled sheets can't be
+  assumed oz safely; unknown/missing `rowsUnit` = no conversion (old behavior).
+- Embedded applicator-blend extraction keeps numbers verbatim on purpose (no
+  unit signal in those cells). `doughballOz` is oz by definition — untouched.
+- `rowsUnit` is consumed inside sanitize and never emitted → no OpenAPI change.
+
 ## Pepperoni is a pep TYPE, never a recipe (+ die reviewer false-positive)
 - **Pepperoni must NOT import as a cheese recipe.** Pepperoni belongs on a profile's
   `pepperonis` (type + sticks + oz/pizza). The importer has only dough/sauce/cheese

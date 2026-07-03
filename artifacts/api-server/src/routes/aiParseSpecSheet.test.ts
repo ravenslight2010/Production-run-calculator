@@ -160,7 +160,7 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
     const { system } = buildParseSpecSheetPrompt(input());
     expect(system).toContain("READ NUMBERS EXACTLY");
     expect(system).toContain("never round");
-    expect(system).toContain("NEVER swap units");
+    expect(system).toContain("NEVER swap fields");
     expect(system).toContain("per-pizza ounce");
   });
 });
