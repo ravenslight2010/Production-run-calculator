@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "@/components/UI";
@@ -12,6 +12,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_PROGRESS,
   DEFAULT_PEP_TYPES,
+  MAX_RUNS,
   type RunCalc,
   type RunSettings,
   type RunState,
@@ -29,7 +30,7 @@ import UseFirstCard from "@/components/UseFirstCard";
 import ScheduledRecipeWarningCard from "@/components/ScheduledRecipeWarningCard";
 import { useRouter } from "expo-router";
 import { useMe } from "@/hooks/useRole";
-import type { ScheduledRunRef } from "@workspace/scheduled-recipe-check";
+import { decideSetupJump, type ScheduledRunRef } from "@workspace/scheduled-recipe-check";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -114,8 +115,19 @@ function buildRunPackagingRows(s: RunSettings): NeedRow[] {
 export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRuns, scheduled, brandProfiles, stagedItems, toggleStagedItem, updateSettings } =
-    useRun();
+  const {
+    run,
+    runCount,
+    allRuns,
+    scheduled,
+    brandProfiles,
+    stagedItems,
+    toggleStagedItem,
+    updateSettings,
+    addRun,
+    applyProfile,
+    hasProfile,
+  } = useRun();
   const router = useRouter();
   const { isManager } = useMe();
   const { items: freezerPullItems } = useFreezerPullItems();
@@ -457,7 +469,36 @@ export default function WarehouseScreen() {
           <ScheduledRecipeWarningCard
             scheduledRuns={scheduledRunRefs}
             onSetup={(brand, flavor) => {
+              // Never rename a run that's already configured, running, or
+              // finished — that corrupts it (its recipes/cases/timers stay
+              // behind under the new identity and later pollute the target
+              // profile). Shared decision keeps mobile identical to web.
+              const decision = decideSetupJump({
+                currentBrand: run.settings.brand,
+                currentFlavor: run.settings.flavor,
+                currentStarted: run.startedAt != null,
+                currentEnded: run.endedAt != null,
+                currentValues: run.settings as unknown as Record<string, unknown>,
+                runCount,
+                maxRuns: MAX_RUNS,
+              });
+              if (decision === "at-cap") {
+                // RN Alert is a no-op on Expo web — branch like the other
+                // cross-platform alerts.
+                const title = "Run limit reached";
+                const msg = `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`;
+                if (Platform.OS === "web") window.alert(`${title}\n${msg}`);
+                else Alert.alert(title, msg);
+                return;
+              }
+              // "new-run": append a fresh run and make it current; the queued
+              // updates below then land on that new run (assistant addRun
+              // pattern). "reuse-current": the run is blank, so setting its
+              // identity + loading the target profile is the normal
+              // identity-change flow (nothing to save off a blank run).
+              if (decision === "new-run") addRun();
               updateSettings({ brand, flavor });
+              if (hasProfile(brand, flavor)) applyProfile(brand, flavor);
               router.push("/configure" as never);
             }}
           />

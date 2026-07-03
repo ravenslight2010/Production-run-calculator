@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   profileHasRecipeData,
   findScheduledRecipeIssues,
+  runFormHasRealData,
+  decideSetupJump,
   type ProfileLike,
   type ScheduledRunRef,
 } from "./index";
@@ -99,5 +101,97 @@ describe("findScheduledRecipeIssues", () => {
       { date: "2026-06-25", brand: "Acme", flavor: "Cheese", casesNeeded: 5 },
     ];
     expect(findScheduledRecipeIssues(runs, () => withData)).toEqual([]);
+  });
+});
+
+describe("runFormHasRealData", () => {
+  it("is false for null/undefined/blank/default-shaped forms", () => {
+    expect(runFormHasRealData(null)).toBe(false);
+    expect(runFormHasRealData(undefined)).toBe(false);
+    expect(runFormHasRealData({})).toBe(false);
+    // Web DEFAULT_VALUES / mobile DEFAULT_SETTINGS shape: empty strings, empty
+    // arrays, zero cases — plus non-signal numeric defaults like batch lbs.
+    expect(
+      runFormHasRealData({
+        casesNeeded: 0,
+        doughRecipe: [],
+        frontlineRecipe: [],
+        app1CheeseRecipe: [],
+        app1Type: "",
+        pep1Type: " ",
+        dieType: "",
+        doughRecipeName: "",
+        frontlineRecipeName: "",
+        pep1BatchLbs: 25,
+        pizzasPerCase: 12,
+        cartoned: "yes",
+        allergen: "none",
+      }),
+    ).toBe(false);
+  });
+
+  it("is true when any recipe array has rows", () => {
+    expect(runFormHasRealData({ doughRecipe: [{ ingredient: "Flour", lbs: 1 }] })).toBe(true);
+    expect(runFormHasRealData({ app3CheeseRecipe: [{ ingredient: "Mozz", lbs: 2 }] })).toBe(true);
+  });
+
+  it("is true when any label/name field is set (unlike strict profileHasRecipeData)", () => {
+    expect(runFormHasRealData({ app1Type: "Cheese" })).toBe(true);
+    expect(runFormHasRealData({ dieType: "7 inch" })).toBe(true);
+    expect(runFormHasRealData({ doughRecipeName: "Classic" })).toBe(true);
+    expect(runFormHasRealData({ frontlineRecipeName: "Red Sauce" })).toBe(true);
+    expect(runFormHasRealData({ pep2Type: "Cup" })).toBe(true);
+  });
+
+  it("is true when a case target has been entered", () => {
+    expect(runFormHasRealData({ casesNeeded: 120 })).toBe(true);
+    expect(runFormHasRealData({ casesNeeded: 0 })).toBe(false);
+  });
+});
+
+describe("decideSetupJump", () => {
+  const blank = { casesNeeded: 0, doughRecipe: [], app1Type: "" };
+  const base = {
+    currentBrand: "",
+    currentFlavor: "",
+    currentStarted: false,
+    currentEnded: false,
+    currentValues: blank as ProfileLike,
+    runCount: 1,
+    maxRuns: 30,
+  };
+
+  it("reuses the current run only when it is truly blank", () => {
+    expect(decideSetupJump(base)).toBe("reuse-current");
+  });
+
+  it("never reuses a run that already has an identity", () => {
+    expect(decideSetupJump({ ...base, currentBrand: "Acme" })).toBe("new-run");
+    expect(decideSetupJump({ ...base, currentFlavor: "Cheese" })).toBe("new-run");
+    // Whitespace-only identity is still blank
+    expect(decideSetupJump({ ...base, currentBrand: "  " })).toBe("reuse-current");
+  });
+
+  it("never reuses a started or ended run — even an unnamed one", () => {
+    expect(decideSetupJump({ ...base, currentStarted: true })).toBe("new-run");
+    expect(decideSetupJump({ ...base, currentEnded: true })).toBe("new-run");
+    expect(decideSetupJump({ ...base, currentStarted: true, currentEnded: true })).toBe("new-run");
+  });
+
+  it("never reuses a run whose form carries real data", () => {
+    expect(
+      decideSetupJump({ ...base, currentValues: { doughRecipe: [{ ingredient: "Flour" }] } }),
+    ).toBe("new-run");
+    expect(decideSetupJump({ ...base, currentValues: { app2Type: "Cheddar" } })).toBe("new-run");
+    expect(decideSetupJump({ ...base, currentValues: { casesNeeded: 50 } })).toBe("new-run");
+  });
+
+  it("falls back to at-cap instead of clobbering when the day is full", () => {
+    const configured = { ...base, currentBrand: "Acme", runCount: 30 };
+    expect(decideSetupJump(configured)).toBe("at-cap");
+    // One slot free → new run is fine
+    expect(decideSetupJump({ ...configured, runCount: 29 })).toBe("new-run");
+    // A blank current run is reusable even at the cap (no new run needed)
+    expect(decideSetupJump({ ...base, runCount: 30 })).toBe("reuse-current");
   });
 });

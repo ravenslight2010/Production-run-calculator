@@ -429,6 +429,9 @@ export const DEFAULT_STOP_REASONS = [
 ];
 export const DEFAULT_SUPERVISOR_PIN = "1234";
 
+// Max runs per day — MUST match web's types.ts MAX_RUNS (replit.md parity).
+export const MAX_RUNS = 30;
+
 export const DEFAULT_PROGRESS: RunProgress = {
   skidsCompleted: 0,
   casesOnCurrentSkid: 0,
@@ -2625,6 +2628,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
 
   const addRun = useCallback(() => {
     setAppState((prev) => {
+      // Same day-run cap as web (types.ts MAX_RUNS) — web's addRun refuses past
+      // the cap, so mobile must too (replit.md parity).
+      if (prev.runs.length >= MAX_RUNS) return prev;
       const newRun = makeNewRun();
       const runs = [...prev.runs, newRun];
       const next = { ...prev, runs, currentIndex: runs.length - 1 };

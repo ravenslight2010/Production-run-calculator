@@ -134,6 +134,7 @@ import {
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
+import { decideSetupJump } from "@workspace/scheduled-recipe-check";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
@@ -4354,6 +4355,43 @@ export default function Home() {
     resetFieldArrays(removedVals);
     schedulePush(newDs, 0);
     setConfirmRemoveRun(false);
+  }
+
+  // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
+  // target brand+flavor and make it current, in one dayState computation, so
+  // the existing current run is never renamed/clobbered. Saves the outgoing
+  // run's values/profile exactly like addRun, then loads the target profile
+  // into the form exactly like setRunBrandFlavor (single-tick sequencing of
+  // addRun()+setRunBrandFlavor() would work off a stale dayState closure and
+  // drop the new run). Returns false at the run cap — caller must fall back
+  // without touching anything.
+  function addRunWithIdentity(brand: string, flavor: string): boolean {
+    if (dayState.runs.length >= MAX_RUNS) return false;
+    const cur = form.getValues();
+    saveRunValues(currentRunId, cur);
+    if (currentRun?.brand || currentRun?.flavor) saveProfile(currentRun.brand, currentRun.flavor, cur);
+    const newId = genId();
+    const newDs = {
+      runs: [...dayState.runs, { id: newId, brand, flavor }],
+      currentIndex: dayState.runs.length,
+    };
+    setDayState(newDs);
+    saveDayState(newDs);
+    const profile = loadProfile(brand, flavor);
+    if (profile) {
+      // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+      if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+        profile.frontlineRecipeName = "";
+        profile.frontlineRecipe = [];
+      }
+      form.reset(profile);
+      resetFieldArrays(profile);
+    } else {
+      form.reset(DEFAULT_VALUES);
+      resetFieldArrays(DEFAULT_VALUES);
+    }
+    schedulePush(newDs, 0);
+    return true;
   }
 
   function setRunBrandFlavor(brand: string, flavor: string) {
@@ -13504,7 +13542,34 @@ export default function Home() {
                           <ScheduledRecipeWarningCard
                             scheduledRuns={scheduledRuns}
                             onSetup={(brand, flavor) => {
-                              if (currentRunId) updateRunMeta(currentRunId, { brand, flavor });
+                              // Never rename a run that's already configured,
+                              // running, or finished — that corrupts it (its
+                              // recipes/cases/timers stay behind under the new
+                              // identity and later pollute the target profile).
+                              // Shared decision keeps web+mobile identical.
+                              const decision = decideSetupJump({
+                                currentBrand: currentRun?.brand,
+                                currentFlavor: currentRun?.flavor,
+                                currentStarted: !!currentRun?.startedAt,
+                                currentEnded: !!currentRun?.endedAt,
+                                currentValues: form.getValues() as unknown as Record<string, unknown>,
+                                runCount: dayState.runs.length,
+                                maxRuns: MAX_RUNS,
+                              });
+                              if (decision === "reuse-current") {
+                                // Blank run: proper identity-change flow (saves
+                                // old profile, loads the target's).
+                                setRunBrandFlavor(brand, flavor);
+                              } else if (decision === "new-run") {
+                                if (!addRunWithIdentity(brand, flavor)) return;
+                              } else {
+                                toast({
+                                  variant: "destructive",
+                                  title: "Run limit reached",
+                                  description: `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`,
+                                });
+                                return;
+                              }
                               setShowScheduleDialog(false);
                               setActiveTab("setup");
                             }}

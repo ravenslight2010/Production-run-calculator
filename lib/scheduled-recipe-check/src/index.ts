@@ -70,6 +70,86 @@ export type ScheduledRecipeIssue = {
   totalCases: number;
 };
 
+// ── "Set up" jump safety ─────────────────────────────────────────────────────
+//
+// The Recipe Setup Needed card's "Set up" button jumps the manager into the run
+// setup form for the flagged brand+flavor. Historically it renamed the CURRENT
+// run in place, which corrupted runs that were already configured (their
+// recipes/cases/packaging stayed behind under the new identity). Both apps now
+// route the jump through this shared pure decision so they can't drift
+// (replit.md parity): reuse the current run only when it is truly blank,
+// otherwise create a fresh run — and never silently clobber when at the cap.
+
+// Label/name string fields that mean a run form carries real configuration even
+// without recipe rows. Mirrors the apps' generic "profile has real data" checks
+// (web storage.ts profileObjHasRealData / mobile master-data profileExists).
+const RUN_FORM_LABEL_FIELDS = [
+  "app1Type",
+  "app2Type",
+  "app3Type",
+  "app4Type",
+  "pep1Type",
+  "pep2Type",
+  "dieType",
+  "doughRecipeName",
+  "frontlineRecipeName",
+] as const;
+
+/**
+ * True when a run's current form values carry ANY real configuration — recipe
+ * rows, applicator/pepperoni/die types, recipe names, or a non-zero case
+ * target. Deliberately broad (unlike the strict `profileHasRecipeData` above):
+ * this guards against mixing an existing run's data into a different
+ * brand+flavor, so anything the operator typed counts.
+ */
+export function runFormHasRealData(values: ProfileLike): boolean {
+  if (!values) return false;
+  const arr = (x: unknown) => Array.isArray(x) && x.length > 0;
+  for (const k of RECIPE_ARRAY_FIELDS) {
+    if (arr(values[k])) return true;
+  }
+  for (const k of RUN_FORM_LABEL_FIELDS) {
+    const v = values[k];
+    if (typeof v === "string" && v.trim()) return true;
+  }
+  if (Number(values["casesNeeded"]) > 0) return true;
+  return false;
+}
+
+// What the "Set up" jump should do with the current run.
+// - "reuse-current": the current run is blank/unconfigured — safe to give it the
+//   target identity through the normal identity-change flow.
+// - "new-run": the current run has an identity, real data, or has started/ended —
+//   never touch it; create/switch to a fresh run instead.
+// - "at-cap": a new run is needed but the day is at the run cap — do nothing
+//   destructive; tell the manager instead.
+export type SetupJumpDecision = "reuse-current" | "new-run" | "at-cap";
+
+/**
+ * Decide how the Recipe Setup Needed "Set up" jump may proceed. Pure; both apps
+ * pass their current run's identity/lifecycle plus its raw form values (web
+ * form values / mobile run settings) so the rule is identical on each.
+ */
+export function decideSetupJump(args: {
+  currentBrand: string | null | undefined;
+  currentFlavor: string | null | undefined;
+  currentStarted: boolean;
+  currentEnded: boolean;
+  currentValues: ProfileLike;
+  runCount: number;
+  maxRuns: number;
+}): SetupJumpDecision {
+  const hasIdentity =
+    (args.currentBrand ?? "").trim() !== "" || (args.currentFlavor ?? "").trim() !== "";
+  const reusable =
+    !hasIdentity &&
+    !args.currentStarted &&
+    !args.currentEnded &&
+    !runFormHasRealData(args.currentValues);
+  if (reusable) return "reuse-current";
+  return args.runCount < args.maxRuns ? "new-run" : "at-cap";
+}
+
 /**
  * Given the upcoming scheduled runs and a profile resolver, return the distinct
  * brand+flavor combinations whose saved profile is missing or has no real recipe

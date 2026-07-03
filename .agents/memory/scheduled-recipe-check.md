@@ -32,9 +32,24 @@ the resolver directly.
 
 **Parity:** both apps build the same scheduled-run ref set (upcoming
 `scheduled[date]` entries with a brand), gate the card to `isManager`, and
-onSetup sets the current run identity (web `updateRunMeta`, mobile
-`updateSettings({brand,flavor})`) then navigates to the setup/configure screen.
-Clobbering the current run's brand/flavor on jump-to-setup is intentional.
+onSetup jumps to the setup/configure screen via the shared `decideSetupJump`
+rule (same lib). The jump must NEVER rename a run that already has an identity,
+real form data, or has started/ended — that corrupts it (its recipes/cases/
+timers stay behind under the new identity and later pollute the target brand's
+profile when saved). Decision: reuse the current run only when it's truly blank
+(then go through the normal identity-change flow that loads the target
+profile); otherwise append a fresh run for the target brand+flavor; at the
+MAX_RUNS cap, tell the manager and do nothing. `runFormHasRealData` (same lib)
+is the deliberately-broad "has the operator typed anything" check — recipe
+rows, label/type/name fields, or casesNeeded>0 — distinct from the strict
+`profileHasRecipeData` detection rule.
+
+**Web gotcha:** don't sequence `addRun()` then `setRunBrandFlavor()` in one
+handler — both read the `dayState` closure, so the second call works off stale
+state and drops the new run. The jump uses a single-computation
+`addRunWithIdentity` in home.tsx instead. Mobile queues functional updates
+(`addRun` → `updateSettings` → `applyProfile`), so ordering is safe there
+(assistant addRun pattern).
 
 **How to apply:** any change to what counts as "real recipe data" must change
 `profileHasRecipeData` in the lib, not the apps — and stay in sync with the
