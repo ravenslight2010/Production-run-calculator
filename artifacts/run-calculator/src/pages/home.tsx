@@ -5842,7 +5842,7 @@ export default function Home() {
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
     // auto-applied). Finished runs are never modified.
-    const caseUpdateOffers: { runId: string; brand: string; flavor: string; from: number; to: number }[] = [];
+    const caseUpdateOffers: { runId: string; brand: string; flavor: string; from: number; to: number; madeAlready?: number }[] = [];
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
@@ -5878,11 +5878,24 @@ export default function Home() {
           if (!m.run.inProgress) continue;
           const planned = Math.round(m.row.casesPlanned ?? NaN);
           if (!Number.isFinite(planned) || planned <= 0) continue;
-          const current = m.run.id === currentRunIdRef.current
-            ? (Number(form.getValues("casesNeeded")) || 0)
-            : (loadRunValues(m.run.id).casesNeeded || 0);
+          const vals = m.run.id === currentRunIdRef.current ? form.getValues() : loadRunValues(m.run.id);
+          const current = Number(vals.casesNeeded) || 0;
           if (planned !== current) {
-            caseUpdateOffers.push({ runId: m.run.id, brand: m.row.brand, flavor: m.row.flavor, from: current, to: planned });
+            // Flag (but still allow — the office may genuinely cut the run
+            // short) offers whose new target is below what the floor already
+            // produced: accepting makes the run instantly "over target".
+            const made = Math.max(
+              0,
+              Math.round((Number(vals.skidsCompleted) || 0) * (Number(vals.casesPerSkid) || 0) + (Number(vals.casesOnCurrentSkid) || 0)),
+            );
+            caseUpdateOffers.push({
+              runId: m.run.id,
+              brand: m.row.brand,
+              flavor: m.row.flavor,
+              from: current,
+              to: planned,
+              ...(made > planned ? { madeAlready: made } : {}),
+            });
           }
         }
       }
@@ -5972,7 +5985,12 @@ export default function Home() {
     // current target. Finished runs are never modified.
     if (caseUpdateOffers.length > 0) {
       const lines = caseUpdateOffers
-        .map(o => `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`)
+        .map(o => {
+          const base = `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`;
+          return o.madeAlready != null
+            ? `${base}\n  ⚠ Already made ${o.madeAlready} — the new target of ${o.to} is BELOW that, so this run would show as over target.`
+            : base;
+        })
         .join("\n");
       const many = caseUpdateOffers.length > 1;
       const apply = window.confirm(

@@ -198,6 +198,9 @@ export default function ScheduleScreen() {
           startedAt: r.startedAt,
           endedAt: r.endedAt,
           casesNeeded: r.settings.casesNeeded,
+          casesMade:
+            r.progress.skidsCompleted * r.settings.casesPerSkid +
+            r.progress.casesOnCurrentSkid,
         }));
       let skipped = 0;
       const caseUpdateOffers: CaseUpdateOffer[] = [];

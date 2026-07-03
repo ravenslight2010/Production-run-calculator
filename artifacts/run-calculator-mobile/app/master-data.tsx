@@ -1257,6 +1257,9 @@ export default function MasterDataScreen() {
             startedAt: r.startedAt,
             endedAt: r.endedAt,
             casesNeeded: r.settings.casesNeeded,
+            casesMade:
+              r.progress.skidsCompleted * r.settings.casesPerSkid +
+              r.progress.casesOnCurrentSkid,
           }));
         const today = todayStr();
         const effective = byDate.map((day) => {
