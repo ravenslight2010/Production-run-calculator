@@ -22,7 +22,10 @@ the failure mode is an import that "succeeds" but loses data (truncated output
   targets). Needs the API server up + a manager account
   (`VERIFY_USERNAME`/`VERIFY_PASSWORD`). Last full pass: 2026-07-02.
 - `artifacts/api-server/scripts/e2e-spec-roundtrip.ts` — parse-RULE stress
-  (small dataset, xlsx round-trip, qualifier brands etc.).
+  (small dataset, xlsx round-trip, qualifier brands etc.). Its deterministic
+  xlsx write→read→grid half is now also guarded in CI without AI:
+  `lib/spec-export/src/xlsx-roundtrip.test.ts` (test:spec-export workflow); the
+  paid harness remains the only check for the AI-parse half.
 
 **Why:** a repeatable check is the only defense against "model changed, big
 imports quietly drop data"; the harness caught a real loss on its first run

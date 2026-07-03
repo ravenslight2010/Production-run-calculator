@@ -15,6 +15,7 @@
     "@workspace/mixes": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "xlsx": "npm:@e965/xlsx@^0.20.3"
   }
 }
