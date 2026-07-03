@@ -548,8 +548,18 @@ export function isEmptyFormValue(fv: WebFormValues | undefined): boolean {
 // input (brand, notes, Start, a typed value) makes this false and the run
 // syncs normally. Web parity: storage.isPristineSeedRun.
 export function isPristineSeedRun(run: RunState): boolean {
+  return !!run.seeded && isBlankRemovableRun(run);
+}
+
+// True when a run is completely blank — no identity/notes, never started, no
+// stoppages, all-default settings/progress — REGARDLESS of the `seeded` flag.
+// Used by the "remove blank runs" cleanup: placeholder runs pushed before the
+// seeded/local-only fix don't carry `seeded` over the wire, so the pinned
+// blanks in the shared day can only be recognized by their content. Any value
+// edit at all makes this false, so a run a user deliberately created and
+// already touched is never swept. Web parity: storage.isBlankRemovableRun.
+export function isBlankRemovableRun(run: RunState): boolean {
   return (
-    !!run.seeded &&
     !run.settings.brand &&
     !run.settings.flavor &&
     !(run.settings.notes ?? "").trim() &&

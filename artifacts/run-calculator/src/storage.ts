@@ -423,8 +423,20 @@ export function freshDayState(): DayState {
 // syncs normally. `value` is whatever would be pushed for the run (live form
 // for the current run, stored copy otherwise) so mid-typing is respected.
 export function isPristineSeedRun(run: RunMeta, value: unknown): boolean {
+  return !!run.seeded && isBlankRemovableRun(run, value);
+}
+
+// True when a run is completely blank — no identity, never started, no
+// stoppages, and an all-default value — REGARDLESS of the `seeded` flag.
+// Used by the "remove blank runs" cleanup: placeholder runs pushed before the
+// seeded/local-only fix don't carry `seeded` over the wire, so the pinned
+// blanks in the shared day can only be recognized by their content. Any value
+// edit at all (deepEqual vs DEFAULT_VALUES) makes this false, so a run a user
+// deliberately created and already touched is never swept. `value` is
+// whatever would be pushed for the run (live form for the current run, stored
+// copy otherwise).
+export function isBlankRemovableRun(run: RunMeta, value: unknown): boolean {
   return (
-    !!run.seeded &&
     !run.brand &&
     !run.flavor &&
     !(run.notes ?? "").trim() &&

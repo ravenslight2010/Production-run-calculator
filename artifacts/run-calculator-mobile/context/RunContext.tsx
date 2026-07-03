@@ -37,6 +37,7 @@ import {
   diffStampRunEdits,
   flavorNamespace,
   formValuesToSettings,
+  isBlankRemovableRun,
   runToFormValues,
 } from "./sync/mapping";
 import {
@@ -1509,6 +1510,10 @@ interface RunContextValue {
   addRun: () => void;
   switchRun: (index: number) => void;
   deleteRun: (index: number) => void;
+  // Remove every blank run (no identity, never started, all-default values)
+  // EXCEPT the current one, tombstoning each id so the removal propagates to
+  // all peers via sync (web parity: removeBlankRuns).
+  deleteBlankRuns: () => void;
   moveRun: (fromIdx: number, toIdx: number) => void;
   reorderRuns: (order: string[]) => { changed: boolean; undo: () => void };
   updateRunSettingsById: (runId: string, partial: Partial<RunSettings>) => void;
@@ -2682,6 +2687,34 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     },
     [persist],
   );
+
+  // Remove every blank run in one action (cleanup for "Unnamed Run" entries
+  // pinned in the shared day by the additive union before the seeded/local-only
+  // fix). Each removed id is tombstoned (deletedItems.runs) so the removal
+  // propagates to all peers and can't be resurrected. The current run is always
+  // excluded — it may be a blank the user is about to fill in, and excluding it
+  // guarantees the day never drops to 0 runs. Web parity: removeBlankRuns.
+  const deleteBlankRuns = useCallback(() => {
+    setAppState((prev) => {
+      const blankIds = new Set(
+        prev.runs
+          .filter((r, i) => i !== prev.currentIndex && isBlankRemovableRun(r))
+          .map((r) => r.id),
+      );
+      if (blankIds.size === 0) return prev;
+      const focused = prev.runs[prev.currentIndex];
+      const runs = prev.runs.filter((r) => !blankIds.has(r.id));
+      if (runs.length === 0) return prev; // never leave the day with 0 runs
+      let deletedItems = prev.deletedItems;
+      for (const id of blankIds) {
+        deletedItems = tombstoneDeletedItemNs(deletedItems, "runs", id);
+      }
+      const currentIndex = Math.max(0, runs.findIndex((r) => r.id === focused?.id));
+      const next = { ...prev, runs, currentIndex, deletedItems };
+      persist(next);
+      return next;
+    });
+  }, [persist]);
 
   // Reorder runs, keeping currentIndex pointed at the same run after the move.
   // Mirrors the web moveRun so AI "reorder run" actions apply at parity.
@@ -4196,6 +4229,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         addRun,
         switchRun,
         deleteRun,
+        deleteBlankRuns,
         moveRun,
         reorderRuns,
         updateRunSettingsById,

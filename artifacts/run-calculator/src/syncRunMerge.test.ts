@@ -262,3 +262,42 @@ describe("pristine placeholder runs stay local-only (the 'Unnamed Run pile-up' f
     expect(ids).toContain("seed1"); // real (in-progress) local run survives
   });
 });
+
+describe("isBlankRemovableRun (the 'remove blank runs' cleanup sweep)", () => {
+  // Blanks pushed BEFORE the seeded/local-only fix don't carry `seeded` over
+  // the wire, so the cleanup must recognize them by content alone.
+  it("is true for a blank run WITHOUT the seeded flag (pre-fix pinned blank)", () => {
+    const pinnedBlank = { ...pristineSeedRun("old1"), seeded: undefined };
+    expect(mapping.isBlankRemovableRun(pinnedBlank)).toBe(true);
+    // ...while isPristineSeedRun still requires the flag (push/receive rules
+    // for user-created blanks are unchanged).
+    expect(mapping.isPristineSeedRun(pinnedBlank)).toBe(false);
+  });
+
+  it("is false as soon as the run has ANY user data", () => {
+    const base = { ...pristineSeedRun("b1"), seeded: undefined };
+    expect(mapping.isBlankRemovableRun({ ...base, settings: { brand: "Bella" } })).toBe(false);
+    expect(mapping.isBlankRemovableRun({ ...base, settings: { flavor: "Cheese" } })).toBe(false);
+    expect(mapping.isBlankRemovableRun({ ...base, settings: { notes: "hold" } })).toBe(false);
+    expect(mapping.isBlankRemovableRun({ ...base, startedAt: 123 })).toBe(false);
+    expect(mapping.isBlankRemovableRun({ ...base, endedAt: 456 })).toBe(false);
+    expect(mapping.isBlankRemovableRun({ ...base, stoppages: [{ type: "jam" }] })).toBe(false);
+    // Any typed value (non-default settings) protects the run from the sweep.
+    expect(mapping.isBlankRemovableRun({ ...base, settings: { casesNeeded: 100 } })).toBe(false);
+  });
+
+  it("deleted blank ids propagate: a runs tombstone removes them from the union", () => {
+    // After the sweep tombstones a blank id, a peer that still holds it must
+    // drop it on receive instead of resurrecting it via the additive union.
+    const stalePeerBlank = { ...pristineSeedRun("blank1"), seeded: undefined };
+    const real = localRun("r1");
+    const prev = prevState([real, stalePeerBlank]);
+    const payload = payloadWith({
+      runIds: ["r1"],
+      deletedItems: { runs: ["blank1"] },
+    });
+    const { patch } = mapping.applyPayloadToState(payload, prev, {});
+    expect(patch.runs.map((r: any) => r.id)).toEqual(["r1"]);
+    expect(patch.deletedItems.runs).toContain("blank1");
+  });
+});

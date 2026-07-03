@@ -36,3 +36,11 @@ into EVERY peer's day list, forever.
   existing EDIT_QUIET_MS apply deferral.
 - Tests live in the web artifact's sync run-merge test (mobile mapping via the
   strip-imports harness); web's push/receive logic is inline in home.tsx.
+- **Pre-fix pinned blanks:** blanks pushed BEFORE this fix have no `seeded`
+  flag (it never travels over the wire) and stay pinned by the additive union.
+  Cleanup = the "remove blank runs" sweep (web run-actions eraser button,
+  supervisor-gated; mobile Switch Run sheet footer), which detects blanks by
+  CONTENT via `isBlankRemovableRun` (pristine check minus the seeded
+  requirement), always excludes the CURRENT run (may be about to be filled;
+  also guarantees ≥1 run), and tombstones each id in `deletedItems.runs` so
+  the removal propagates to peers and can't be resurrected.

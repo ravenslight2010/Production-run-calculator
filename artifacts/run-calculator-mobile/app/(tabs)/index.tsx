@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { showConfirm, showNote } from "@/utils/notify";
+import { isBlankRemovableRun } from "@/context/sync/mapping";
 import {
   Card,
   MetricCard,
@@ -95,7 +96,7 @@ export default function CalculatorScreen() {
     runIndex, runCount, allRuns,
     startRun, endRun,
     updateProgress, suppressAutoTrack, addStoppage, endActiveStoppage,
-    addRun, switchRun, deleteRun,
+    addRun, switchRun, deleteRun, deleteBlankRuns,
     runToTime, setRunToTime,
     applyCarryOver,
     floorModeEnabled,
@@ -106,6 +107,12 @@ export default function CalculatorScreen() {
   const { calc, activeStoppage } = useRunClock();
   const [showModal, setShowModal] = useState(false);
   const [showRunPicker, setShowRunPicker] = useState(false);
+  // Blank runs eligible for the one-tap cleanup sweep (never the current run —
+  // it may be a blank the user is about to fill in). Web parity: blankRunIds.
+  const blankRunCount = useMemo(
+    () => allRuns.filter((r, i) => i !== runIndex && isBlankRemovableRun(r)).length,
+    [allRuns, runIndex],
+  );
   // Per-run acknowledgement of strict-rule checklists. Keyed by
   // `${runId}#${ruleId}#${stepIndex}` so checks reset per run yet stay satisfied
   // when returning to a run (web parity). A strict violation with a checklist
@@ -1163,6 +1170,19 @@ export default function CalculatorScreen() {
             },
           });
         }}
+        blankCount={blankRunCount}
+        onRemoveBlanks={() => {
+          showConfirm({
+            title: "Remove Blank Runs",
+            message: `Remove ${blankRunCount} blank run${blankRunCount === 1 ? "" : "s"}? Runs with any details entered are kept.`,
+            confirmText: "Remove",
+            destructive: true,
+            onConfirm: () => {
+              deleteBlankRuns();
+              setShowRunPicker(false);
+            },
+          });
+        }}
       />
 
       <FloorMode
@@ -1241,6 +1261,8 @@ function RunPickerModal({
   currentIndex,
   onSelect,
   onDelete,
+  blankCount,
+  onRemoveBlanks,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -1248,6 +1270,8 @@ function RunPickerModal({
   currentIndex: number;
   onSelect: (i: number) => void;
   onDelete: (i: number) => void;
+  blankCount: number;
+  onRemoveBlanks: () => void;
 }) {
   const colors = useColors();
   return (
@@ -1302,6 +1326,20 @@ function RunPickerModal({
               );
             })}
           </ScrollView>
+          {blankCount > 0 && (
+            <Pressable
+              onPress={onRemoveBlanks}
+              style={({ pressed }) => [
+                styles.removeBlanksBtn,
+                { borderColor: colors.border, opacity: pressed ? 0.6 : 1 },
+              ]}
+            >
+              <Feather name="trash-2" size={14} color={colors.destructive} />
+              <Text style={[styles.removeBlanksText, { color: colors.destructive }]}>
+                Remove {blankCount} blank run{blankCount === 1 ? "" : "s"}
+              </Text>
+            </Pressable>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -1665,4 +1703,15 @@ const styles = StyleSheet.create({
   pickerLabel: { fontSize: 15, fontFamily: FONTS.semibold },
   pickerSub: { fontSize: 12, fontFamily: FONTS.regular, marginTop: 2 },
   pickerDelete: { padding: 12 },
+  removeBlanksBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 10,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  removeBlanksText: { fontFamily: FONTS.semibold, fontSize: 13 },
 });

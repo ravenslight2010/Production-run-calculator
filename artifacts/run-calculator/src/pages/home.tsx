@@ -83,6 +83,7 @@ import {
   isEmptyOverPopulated,
   shouldHealFormFromStored,
   isPristineSeedRun,
+  isBlankRemovableRun,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
   profileKeyIsTombstoned,
@@ -277,6 +278,7 @@ import {
   Square,
   Timer,
   Trash2,
+  Eraser,
   X,
   BarChart2,
   CheckCircle2,
@@ -2256,6 +2258,7 @@ export default function Home() {
   const confirmDeleteBrandRef = useRef<string | null>(null);
   const confirmDeleteFlavorRef = useRef<string | null>(null);
   const [confirmRemoveRun, setConfirmRemoveRun] = useState(false);
+  const [confirmRemoveBlanks, setConfirmRemoveBlanks] = useState(false);
   const [resumeDialog, setResumeDialog] = useState(false);
   const savedFlashRef = useRef<HTMLSpanElement>(null);
   const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4450,6 +4453,44 @@ export default function Home() {
     resetFieldArrays(removedVals);
     schedulePush(newDs, 0);
     setConfirmRemoveRun(false);
+  }
+
+  // Blank runs eligible for the one-tap cleanup sweep: every NON-CURRENT run
+  // with no identity/notes, never started, no stoppages, and an all-default
+  // stored value (isBlankRemovableRun — deliberately ignores the `seeded`
+  // flag, which never travels over the wire, so blanks pinned in the shared
+  // day BEFORE the seeded/local-only fix are recognized by content). The
+  // current run is always excluded: it may be a blank the user is about to
+  // fill in, and excluding it also guarantees the day never drops to 0 runs.
+  const blankRunIds = useMemo(
+    () =>
+      dayState.runs
+        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r, loadRunValues(r.id)))
+        .map((r) => r.id),
+    [dayState],
+  );
+
+  // Remove every blank run in one action, tombstoning each id
+  // (deletedItems.runs) so the removal propagates through /api/sync to all
+  // peers and can't be resurrected by the additive run union.
+  function removeBlankRuns() {
+    setConfirmRemoveBlanks(false);
+    // Recompute at click time — the memo may be a render behind a sync apply.
+    const blankIds = new Set(
+      dayState.runs
+        .filter((r, i) => i !== dayState.currentIndex && isBlankRemovableRun(r, loadRunValues(r.id)))
+        .map((r) => r.id),
+    );
+    if (blankIds.size === 0) return;
+    const curId = dayState.runs[dayState.currentIndex]?.id;
+    const newRuns = dayState.runs.filter((r) => !blankIds.has(r.id));
+    if (newRuns.length === 0) return; // never leave the day with 0 runs
+    blankIds.forEach((id) => tombstoneDeleted("runs", id));
+    const newIndex = Math.max(0, newRuns.findIndex((r) => r.id === curId));
+    const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+    setDayState(newDs);
+    saveDayState(newDs);
+    schedulePush(newDs, 0);
   }
 
   // Recipe Setup Needed "Set up" jump target: append a FRESH run carrying the
@@ -9295,6 +9336,33 @@ export default function Home() {
                       title="Remove this run"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )
+                )}
+                {/* Remove blank runs — sweep untouched "Unnamed Run" entries pinned in the shared day, supervisors only */}
+                {isSupervisor && blankRunIds.length > 0 && (
+                  confirmRemoveBlanks ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-destructive font-semibold">Remove {blankRunIds.length} blank run{blankRunIds.length === 1 ? "" : "s"}?</span>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
+                        onClick={removeBlankRuns}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
+                        onClick={() => setConfirmRemoveBlanks(false)}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemoveBlanks(true)}
+                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      title={`Remove ${blankRunIds.length} blank run${blankRunIds.length === 1 ? "" : "s"}`}
+                    >
+                      <Eraser className="w-3.5 h-3.5" />
                     </button>
                   )
                 )}
