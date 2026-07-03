@@ -28,7 +28,14 @@ the failure mode is an import that "succeeds" but loses data (truncated output
   (small dataset, xlsx round-trip, qualifier brands etc.). Its deterministic
   xlsx write→read→grid half is now also guarded in CI without AI:
   `lib/spec-export/src/xlsx-roundtrip.test.ts` (test:spec-export workflow); the
-  paid harness remains the only check for the AI-parse half.
+  paid harness remains the only check for the AI-parse half. Also carries
+  SCENARIO 2 (known-sauce grounding): a sheet abbreviating ready-made sauces
+  the factory already has (`known.sauceNames`) must import with NO false
+  "not found on the sheet" warning; a control re-sanitize WITHOUT the known
+  list must warn; a scripted paraphrase must still warn/snap. Last full pass
+  (2 consecutive): 2026-07-03. The model occasionally truncates JSON mid-note
+  even on tiny outputs — the harness retries a malformed-JSON response up to
+  3× (the real route fails safe with an empty result instead).
 
 **Why:** a repeatable check is the only defense against "model changed, big
 imports quietly drop data"; the harness caught a real loss on its first run

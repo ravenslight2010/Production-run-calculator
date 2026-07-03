@@ -17,8 +17,14 @@
 // @workspace/api-zod's extensionless internal imports, and the esm banner shims
 // google-auth-library's dynamic require.) Expected output ends with
 // "ALL CHECKS PASSED — full round-trip with no data loss." Raw AI output and
-// the sanitized parse are dumped to /tmp/spec-e2e-{raw,parsed}.json for triage.
-// Last verified passing (2 consecutive runs): 2026-07-02, gemini-3.1-pro-preview.
+// the sanitized parse are dumped to /tmp/spec-e2e-{raw,parsed}.json for triage
+// (scenario 2 dumps to /tmp/spec-sauce-e2e-{raw,parsed}.json).
+// Last verified passing (2 consecutive runs): 2026-07-03, gemini-3.1-pro-preview.
+//
+// SCENARIO 2 (same run): known-sauce grounding — a sheet abbreviating ready-made
+// sauces the factory already has (known.sauceNames) must import with NO false
+// "not found on the sheet" warning, a control without the known list must warn,
+// and a paraphrased unknown sauce must still warn or snap.
 //
 // Companion harness: scripts/src/verify-large-spec-import.mts (repo-root
 // scripts/ package) verifies LARGE imports (30 brands × 8 flavors, chunked
@@ -214,19 +220,36 @@ const body = { workbookText, known, aliases: [] };
 const { system, user } = buildParseSpecSheetPrompt(body as never);
 
 // ── 4. Real AI call, same params as the route ────────────────────────────────
-console.log(`Calling model ${pickModel("full")}…`);
-const response = await openai.chat.completions.create({
-  model: pickModel("full"),
-  max_completion_tokens: 32768,
-  response_format: { type: "json_object" },
-  messages: [
-    { role: "system", content: system },
-    { role: "user", content: user },
-  ],
-});
-const content = response.choices[0]?.message?.content ?? "";
+// The model occasionally truncates/malforms its JSON; the real route fails safe
+// (empty result + note) and the user retries — the harness retries here so a
+// one-off truncation doesn't abort the whole run.
+async function callParseModel(sys: string, usr: string): Promise<{ content: string; raw: unknown }> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`Calling model ${pickModel("full")}… (attempt ${attempt})`);
+    const response = await openai.chat.completions.create({
+      model: pickModel("full"),
+      max_completion_tokens: 65536,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: usr },
+      ],
+    });
+    const content = response.choices[0]?.message?.content ?? "";
+    try {
+      return { content, raw: JSON.parse(content) };
+    } catch (err) {
+      lastErr = err;
+      console.log(`  attempt ${attempt}: model returned malformed JSON (${content.length} chars), retrying…`);
+    }
+  }
+  throw lastErr;
+}
+
+const { content, raw: rawOut } = await callParseModel(system, user);
 writeFileSync("/tmp/spec-e2e-raw.json", content);
-const parsed = sanitizeParseSpecSheet(JSON.parse(content), body as never);
+const parsed = sanitizeParseSpecSheet(rawOut, body as never);
 writeFileSync("/tmp/spec-e2e-parsed.json", JSON.stringify(parsed, null, 2));
 
 // ── 5. Deterministic diff vs the originals ──────────────────────────────────
@@ -350,6 +373,117 @@ for (const w of wantRecipes) {
 if (parsed.recipes.length !== wantRecipes.length)
   fail(`recipe count ${parsed.recipes.length} != ${wantRecipes.length}`);
 
+// ── SCENARIO 2: known-sauce grounding (`known.sauceNames`) ───────────────────
+// A sheet that references ready-made sauces the factory ALREADY has, but
+// abbreviates/misspells them so the canonical name is NOT spelled out on the
+// sheet. The AI should snap to the KNOWN name; the sanitizer must then ground
+// that name against known.sauceNames and emit NO "not found on the sheet"
+// warning. A control re-sanitize WITHOUT the known list proves the list is
+// what suppresses the false flag, and a scripted paraphrase proves a genuinely
+// unknown sauce name still warns or snaps.
+console.log("\n===== SCENARIO 2: sauce-name grounding =====");
+
+const KNOWN_SAUCES = ["Marinara", "Zesty Garlic Sauce", "Classic Pizza Sauce"];
+const sauceGrid: SheetGrid = {
+  name: "Mario Specs",
+  rows: [
+    ["MARIO'S PIZZA SPECS"],
+    [""],
+    ["", "Cheese", "Pepperoni"],
+    ["Die Type", "Argus", "Argus"],
+    // Ready-made sauces, abbreviated the way floor sheets actually do it — the
+    // canonical names ("Marinara", "Zesty Garlic Sauce") are NOT on the sheet.
+    ["Sauce", "Marnara (ready made)", "Zesty Grlc RTU"],
+    ["Sauce oz/pizza", "3.2", "2.8"],
+    ["Mozzarella Shred oz", "4.1", "3.9"],
+    ["Pepperoni sticks", "", "2"],
+    ["Pepperoni oz", "", "1.1"],
+  ],
+};
+const wbS = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wbS, XLSX.utils.aoa_to_sheet(sauceGrid.rows), sauceGrid.name);
+const sauceFile = "/tmp/spec-sauce-e2e.xlsx";
+writeFileSync(sauceFile, XLSX.write(wbS, { type: "buffer", bookType: "xlsx" }));
+const wbS2 = XLSX.read(readFileSync(sauceFile), { type: "buffer" });
+const sauceGrids: SheetGrid[] = wbS2.SheetNames.map((name) => {
+  const ws = wbS2.Sheets[name];
+  const rows = ws
+    ? (XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", blankrows: false }) as unknown[][])
+    : [];
+  return {
+    name,
+    rows: rows.map((r) => (Array.isArray(r) ? r.map((c) => (c == null ? "" : String(c))) : [])),
+  };
+});
+const sauceText = gridsToPromptText(sauceGrids);
+
+const sauceKnown = {
+  brands: ["Mario's"],
+  flavorsByBrand: { "Mario's": ["Cheese", "Pepperoni"] },
+  appTypes: ["Mozzarella Shred"],
+  pepTypes: ["Standard Pepperoni"],
+  dieTypes: ["Argus"],
+  // The factory's existing sauce/frontline names (incl. ready-made pulls).
+  sauceNames: KNOWN_SAUCES,
+};
+const sauceBody = { workbookText: sauceText, known: sauceKnown, aliases: [] };
+const saucePrompt = buildParseSpecSheetPrompt(sauceBody as never);
+const { content: sauceContent, raw: sauceRaw } = await callParseModel(
+  saucePrompt.system,
+  saucePrompt.user,
+);
+writeFileSync("/tmp/spec-sauce-e2e-raw.json", sauceContent);
+const sauceParsed = sanitizeParseSpecSheet(sauceRaw, sauceBody as never);
+writeFileSync("/tmp/spec-sauce-e2e-parsed.json", JSON.stringify(sauceParsed, null, 2));
+
+const sauceWarnings = (p: typeof sauceParsed) =>
+  (p.warnings ?? []).filter((w) => /sauce/i.test(w.message));
+const notFoundWarnings = (p: typeof sauceParsed) =>
+  sauceWarnings(p).filter((w) => /not found on the sheet/i.test(w.message));
+
+// 2a. Both profiles carry the KNOWN canonical sauce name.
+for (const [flavor, want] of [
+  ["Cheese", "Marinara"],
+  ["Pepperoni", "Zesty Garlic Sauce"],
+] as const) {
+  const prof = sauceParsed.profiles.find((q) => ci(q.flavor) === ci(flavor));
+  if (!prof) fail(`S2 profile ${flavor}: MISSING`);
+  else if (ci(prof.sauceName) !== ci(want))
+    fail(`S2 profile ${flavor}: sauceName "${prof.sauceName}" != known "${want}"`);
+  else ok(`S2 profile ${flavor}: sauceName snapped to known "${want}"`);
+}
+
+// 2b. NO false "not found on the sheet" warning for the known sauces.
+const falseFlags = notFoundWarnings(sauceParsed);
+if (falseFlags.length)
+  fail(`S2: false sauce warnings for known sauces: ${falseFlags.map((w) => w.message).join(" | ")}`);
+else ok("S2: no false sauce-name warning with known.sauceNames supplied");
+
+// 2c. CONTROL: the same raw output sanitized WITHOUT known.sauceNames must
+// flag (or snap) those names — proving the known list is what grounds them,
+// not accidental sheet text.
+const controlBody = { workbookText: sauceText, known: { ...sauceKnown, sauceNames: [] }, aliases: [] };
+const controlParsed = sanitizeParseSpecSheet(sauceRaw, controlBody as never);
+if (sauceWarnings(controlParsed).length === 0)
+  fail("S2 control: expected sauce warnings/corrections without known.sauceNames, got none");
+else ok(`S2 control: without known list -> ${sauceWarnings(controlParsed).length} sauce warning(s), as expected`);
+
+// 2d. A genuinely unknown/paraphrased sauce name must still warn or snap
+// (deterministic — mutate the real raw output).
+const paraRaw = JSON.parse(sauceContent);
+if (Array.isArray(paraRaw.profiles) && paraRaw.profiles[0]) {
+  paraRaw.profiles[0].sauceName = "Golden Tang Dressing";
+  const paraParsed = sanitizeParseSpecSheet(paraRaw, sauceBody as never);
+  const prof0 = paraParsed.profiles[0];
+  const warned = sauceWarnings(paraParsed).length > 0;
+  const snapped = prof0 && ci(prof0.sauceName) !== ci("Golden Tang Dressing");
+  if (warned || snapped)
+    ok(`S2 paraphrase: unknown sauce ${warned ? "warned" : ""}${warned && snapped ? "+" : ""}${snapped ? `snapped to "${prof0?.sauceName}"` : ""}`);
+  else fail('S2 paraphrase: unknown sauce "Golden Tang Dressing" neither warned nor snapped');
+} else {
+  fail("S2 paraphrase: raw output had no profiles to mutate");
+}
+
 console.log("\n===== RESULTS =====");
 for (const n of notes) console.log(n);
 if (failures.length) {
@@ -360,3 +494,4 @@ if (failures.length) {
   console.log("\nALL CHECKS PASSED — full round-trip with no data loss.");
 }
 if (parsed.note) console.log(`\nAI note: ${parsed.note}`);
+if (sauceParsed.note) console.log(`S2 AI note: ${sauceParsed.note}`);
