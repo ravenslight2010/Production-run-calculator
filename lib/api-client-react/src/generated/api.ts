@@ -6482,7 +6482,7 @@ export const getListFacilityKnowledgeUrl = () => {
 }
 
 /**
- * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Available to any signed-in user.
+ * Returns every durable operational fact in the shared facility-knowledge pool (domain-tagged plain-language observations the whole team and every AI feature have learned over time). Distinct from the name-corrections pool. AI helpers fold this into their prompts via a shared context builder, so a pattern learned in one feature is visible to all. Requires the `use-ai-tools` capability — reading the raw pool is a bulk-disclosure risk, and no client feature reads it directly (prompts are grounded server-side).
  * @summary List the shared facility-wide AI knowledge pool
  */
 export const listFacilityKnowledge = async ( options?: RequestInit): Promise<FacilityKnowledgeList> => {
@@ -6507,7 +6507,7 @@ export const getListFacilityKnowledgeQueryKey = () => {
     }
 
 
-export const getListFacilityKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getListFacilityKnowledgeQueryOptions = <TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -6526,14 +6526,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListFacilityKnowledgeQueryResult = NonNullable<Awaited<ReturnType<typeof listFacilityKnowledge>>>
-export type ListFacilityKnowledgeQueryError = ErrorType<unknown>
+export type ListFacilityKnowledgeQueryError = ErrorType<void>
 
 
 /**
  * @summary List the shared facility-wide AI knowledge pool
  */
 
-export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<unknown>>(
+export function useListFacilityKnowledge<TData = Awaited<ReturnType<typeof listFacilityKnowledge>>, TError = ErrorType<void>>(
   options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listFacilityKnowledge>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
@@ -6560,7 +6560,7 @@ export const getSaveFacilityKnowledgeUrl = () => {
 }
 
 /**
- * Persists a batch of durable operational facts into the shared facility-knowledge pool. Existing entries (matched case-insensitively on domain + key) are updated in place; new ones are inserted. This is the single shared write path AI features use to record observations back into facility memory. Available to any signed-in user.
+ * Persists a batch of durable operational facts into the shared facility-knowledge pool. Existing entries (matched case-insensitively on domain + key) are updated in place; new ones are inserted. Available to any signed-in user, but every entry must match the exact domain + key shape AND the fixed fact template one of the handful of real client features produces (e.g. proactive-alert dismissals, quality-check confirmations), with only a short bounded substring left free — anything else, including a well-formed domain/key with an out-of-template fact, is rejected. Some domains additionally require the same capability their own UI already gates the feature behind. This keeps the route from being usable as an open-ended facility-wide prompt-injection primitive.
  * @summary Record facility knowledge (case-insensitive upsert by domain + key)
  */
 export const saveFacilityKnowledge = async (saveFacilityKnowledgeInput: SaveFacilityKnowledgeInput, options?: RequestInit): Promise<FacilityKnowledgeList> => {

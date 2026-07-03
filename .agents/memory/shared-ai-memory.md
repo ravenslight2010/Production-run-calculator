@@ -51,9 +51,34 @@ them pollutes both dedupe keys and the prompt blocks.
   avoid a bigint round-trip through codegen. Server stamps createdAt.
 - Facility rows are capped server-side (MAX_FACILITY_ROWS=500); conversation is
   window-trimmed on write. Don't rely on clients to bound size.
-- Auth: conversation routes are per-user (`req.userId`); facility routes are
-  open to any signed-in user (mirrors the corrections precedent). All gated by
-  requireAuth → unauthenticated = 401.
+- Auth: conversation routes are per-user (`req.userId`). Facility GET requires
+  `use-ai-tools` (bulk pool disclosure is gated — no client reads it directly,
+  prompts are grounded server-side). Facility POST stays open to any
+  signed-in user for the couple of everyday features that legitimately write
+  back (dismissing a nudge; confirming a quality check), but every entry must
+  match its domain's exact key shape AND fact shape via CLOSED-VOCABULARY
+  regexes with zero free-text capture groups (enum values / slugs / numbers
+  only) — no bounded-length free text either. Two weaker versions were
+  rejected in review before landing here: a domain-only allow-list still left
+  `fact` fully free-text, and even a "fixed sentence with a short bounded
+  quoted substring" template was rejected as still attacker-controlled prose.
+  The lesson: for a value that gets folded into an AI prompt as trusted
+  background, "bounded free text" is not a safe stopping point if a
+  meaningfully-privileged surface consumes that prompt — only closed
+  vocabulary (or full capability-gating / removing public write access) is.
+  One domain also requires a real capability server-side, mirroring the
+  capability its own UI already gates it behind, so the raw endpoint can't
+  bypass that. `normalizeKnowledge` additionally strips control
+  characters/newlines from every field (domain/key/fact) unconditionally, for
+  every caller — otherwise a fact containing newlines could forge fake extra
+  "- [domain] ..." lines under an unrelated, more-trusted domain in the
+  rendered prompt block, defeating any per-domain rule regardless of how
+  strict it is. Any new client-writable domain needs the same treatment: full
+  key regex + full fact regex with no free-text captures, and a capability
+  check if the underlying feature isn't meant for every signed-in user.
+  Server-side writers (incidents, forecast, waste, proactive-alert triggers)
+  are unaffected since they call the write function directly, never through
+  this route.
 - Parity: web glue `artifacts/run-calculator/src/aiMemory.ts` (relative `/api`,
   `inventoryClientId()`), mobile glue
   `artifacts/run-calculator-mobile/context/aiMemory.ts` (`getApiBaseUrl()` +

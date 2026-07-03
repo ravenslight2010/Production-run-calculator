@@ -143,9 +143,22 @@ export function knowledgeKey(domain: string, key: string): string {
   return `${domain.trim().toLowerCase()}::${key.trim().toLowerCase()}`;
 }
 
-// Clean an untrusted/raw batch of knowledge entries: trim, cap length, drop
-// blanks, and dedupe by identity key (last write wins). Optionally bound the
-// count. Mirrors normalizeCorrections so every caller shares identical rules.
+// Collapse control characters (newlines, tabs, etc.) to a single space and
+// trim. `buildKnowledgeBlock` renders exactly one line per entry — without
+// this, a single knowledge entry could embed newlines to forge extra fake
+// "- [domain] ..." bullet lines (including under a DIFFERENT, more-trusted
+// domain than the one it was actually stored under), defeating any
+// domain-based write allow-list downstream. Applied to every field so domain
+// and key can't be used for the same trick either.
+function sanitizeKnowledgeText(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  return raw.replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Clean an untrusted/raw batch of knowledge entries: sanitize control chars,
+// trim, cap length, drop blanks, and dedupe by identity key (last write
+// wins). Optionally bound the count. Mirrors normalizeCorrections so every
+// caller shares identical rules.
 export function normalizeKnowledge(
   raw: ReadonlyArray<Partial<FacilityKnowledge> | null | undefined> | null | undefined,
   opts: { factMaxLen?: number; domainMaxLen?: number; keyMaxLen?: number; limit?: number } = {},
@@ -156,9 +169,15 @@ export function normalizeKnowledge(
   const byKey = new Map<string, FacilityKnowledge>();
   for (const e of raw ?? []) {
     if (!e || typeof e !== "object") continue;
-    const domain = (typeof e.domain === "string" ? e.domain : "").trim().slice(0, domainMax);
-    const key = (typeof e.key === "string" ? e.key : "").trim().slice(0, keyMax);
-    const fact = (typeof e.fact === "string" ? e.fact : "").trim().slice(0, factMax);
+    const domain = sanitizeKnowledgeText(typeof e.domain === "string" ? e.domain : "").slice(
+      0,
+      domainMax,
+    );
+    const key = sanitizeKnowledgeText(typeof e.key === "string" ? e.key : "").slice(0, keyMax);
+    const fact = sanitizeKnowledgeText(typeof e.fact === "string" ? e.fact : "").slice(
+      0,
+      factMax,
+    );
     if (!domain || !key || !fact) continue;
     byKey.set(knowledgeKey(domain, key), { domain, key, fact });
   }

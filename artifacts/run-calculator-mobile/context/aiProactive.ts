@@ -217,7 +217,10 @@ async function recordDismissal(alert: ProactiveAlert): Promise<void> {
       {
         domain: "proactive-alerts",
         key: `dismissed:${alert.key}`,
-        fact: `A manager dismissed the "${alert.title}" nudge around ${clock}.`,
+        // Server-enforced closed-vocabulary template — no free text (e.g. the
+        // alert title) may appear here. See CLIENT_WRITABLE_KNOWLEDGE in
+        // artifacts/api-server/src/routes/aiMemory.ts.
+        fact: `A manager dismissed a proactive alert (key: ${alert.key}) around ${clock}.`,
       },
     ]);
   } catch {

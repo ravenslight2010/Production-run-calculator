@@ -1454,11 +1454,11 @@ function QualityCheckCard() {
       });
       qc.invalidateQueries({ queryKey: ["qualityChecks"] });
 
-      const issueText = a.issues.length
-        ? ` Issues: ${a.issues.map((i) => `${i.type} (${i.severity}) — ${i.detail}`).join("; ")}.`
-        : "";
       // Best-effort: the structured record above is the source of truth, so a
       // facility-memory write failure must not undo a successful save.
+      // Server-enforced closed-vocabulary template — no free text (e.g. the
+      // AI summary/issue notes) may appear here. See CLIENT_WRITABLE_KNOWLEDGE
+      // in artifacts/api-server/src/routes/aiMemory.ts.
       try {
         await saveFacilityKnowledge([
           {
@@ -1466,7 +1466,7 @@ function QualityCheckCard() {
             key: `check:${productType}:${todayStr()}`,
             fact:
               `On ${todayStr()}, a ${productType} quality check was reviewed and confirmed as ` +
-              `"${a.status}" (${Math.round(a.confidence * 100)}% confidence). ${a.summary}${issueText}`,
+              `"${a.status}" (${Math.round(a.confidence * 100)}% confidence).`,
           },
         ]);
       } catch {
