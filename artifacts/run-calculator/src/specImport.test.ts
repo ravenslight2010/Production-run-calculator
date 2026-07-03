@@ -877,6 +877,188 @@ describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
   });
 });
 
+describe("sanitizeParsedSpecImport — RECIPE brand grounding", () => {
+  const workbook =
+    "BASHA'S ULTRA THIN CRUST PIZZAS\tSPECS\n" +
+    "Flavor\tSauce oz\tCheese oz\n" +
+    "Cheese\t3\t4\n" +
+    "Pepperoni\t3\t4.5\n" +
+    "DOUGH RECIPE\nFlour\t50\nWater\t30\n";
+  const doughRecipe = (extra: Record<string, unknown>) => ({
+    kind: "dough",
+    name: "Thin Dough",
+    rows: [{ ingredient: "Flour", lbs: 50 }],
+    ...extra,
+  });
+
+  it("snaps a paraphrased singular recipe brand back to the sheet's brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [doughRecipe({ brand: "Basha's Ultra Slim Crust" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].brand).toBe("BASHA'S ULTRA THIN CRUST");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "BASHA'S ULTRA THIN CRUST", flavor: "" });
+    expect(out.warnings![0].message).toContain(
+      'Corrected brand "Basha\'s Ultra Slim Crust" to "BASHA\'S ULTRA THIN CRUST"',
+    );
+  });
+
+  it("prefers a KNOWN brand over a raw sheet cell for a recipe brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [doughRecipe({ brand: "Basha's Ultra Slim Crust" })],
+      },
+      {},
+      { sourceText: workbook, knownBrands: ["Basha's Ultra Thin Crust"] },
+    );
+    expect(out.recipes[0].brand).toBe("Basha's Ultra Thin Crust");
+  });
+
+  it("flags (keeps + notes) an invented recipe brand with no plausible match", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [doughRecipe({ brand: "Mission Foods" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].brand).toBe("Mission Foods");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Mission Foods", flavor: "" });
+    expect(out.warnings![0].message).toContain('Brand "Mission Foods" was not found');
+  });
+
+  it("does NOT flag a legitimate trailer-drop or folded size on a recipe brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          doughRecipe({ brand: "Basha's Ultra Thin Crust" }),
+          doughRecipe({ name: "Lowes Dough", brand: "Lowes 7in" }),
+        ],
+      },
+      {},
+      {
+        sourceText:
+          workbook + "LOWES PIZZAS\tSPECS\nSize\t7in\nPepperoni\t3\t4.5\n",
+      },
+    );
+    expect(out.recipes[0].brand).toBe("Basha's Ultra Thin Crust");
+    expect(out.recipes[1].brand).toBe("Lowes 7in");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("counts a token-subset of one cell as grounded for a recipe brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [doughRecipe({ brand: "Basha's Crust" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].brand).toBe("Basha's Crust");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("grounds the brand half of specific targets (flavor half unchanged)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          doughRecipe({
+            targets: [{ brand: "Basha's Ultra Slim Crust", flavor: "Cheese" }],
+          }),
+        ],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].targets).toEqual([
+      { brand: "BASHA'S ULTRA THIN CRUST", flavor: "Cheese" },
+    ]);
+    const msgs = (out.warnings ?? []).map((w) => w.message).join("\n");
+    expect(msgs).toContain('Corrected brand "Basha\'s Ultra Slim Crust"');
+  });
+
+  it("grounds brandAnchors built from catch-all targets, deduping post-snap", () => {
+    // Two paraphrases of the same sheet brand must collapse to ONE anchor
+    // after snapping, and back-compat `brand` mirrors the single anchor.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          doughRecipe({
+            targets: [
+              { brand: "Basha's Ultra Slim Crust", flavor: "All Varieties" },
+              { brand: "Basha's Slim Crust", flavor: "Dough" },
+            ],
+          }),
+        ],
+      },
+      {},
+      { sourceText: workbook, knownBrands: ["Basha's Ultra Thin Crust"] },
+    );
+    const r = out.recipes[0];
+    expect(r.brandAnchors).toEqual(["Basha's Ultra Thin Crust"]);
+    expect(r.brand).toBe("Basha's Ultra Thin Crust");
+  });
+
+  it("flags an invented brand inside a target without dropping the anchor", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          doughRecipe({ targets: [{ brand: "Mission Foods", flavor: "All" }] }),
+        ],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].brandAnchors).toEqual(["Mission Foods"]);
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Mission Foods", flavor: "" });
+    expect(out.warnings![0].message).toContain('Brand "Mission Foods" was not found');
+  });
+
+  it("leaves recipe brands untouched when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [doughRecipe({ brand: "Totally Invented Brand Co" })],
+    });
+    expect(out.recipes[0].brand).toBe("Totally Invented Brand Co");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("dedupes recipe-side warnings for the same bad brand, keeping the profile-row one distinct", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Mission Foods", flavor: "Cheese" }],
+        recipes: [
+          doughRecipe({ brand: "Mission Foods" }),
+          doughRecipe({ name: "Other Dough", brand: "Mission Foods" }),
+        ],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    const hits = (out.warnings ?? []).filter((w) =>
+      w.message.includes('Brand "Mission Foods" was not found'),
+    );
+    // One warning keyed to the profile row (flavor "Cheese"), one recipe-level
+    // warning (flavor "") shared by BOTH recipes — not one per recipe.
+    expect(hits).toHaveLength(2);
+    expect(hits.map((w) => w.flavor).sort()).toEqual(["", "Cheese"]);
+  });
+});
+
 describe("isCatchAllFlavor", () => {
   it("flags whole-brand scope words, case-insensitively, for any kind", () => {
     for (const f of ["All Varieties", "all", "N/A", "every variety", "", "  "]) {

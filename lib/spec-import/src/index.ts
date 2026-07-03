@@ -1158,6 +1158,30 @@ export function sanitizeParsedSpecImport(
   const brandCtx = buildProfileBrandGrounding(grounding);
   const groundingWarnings: SpecImportWarning[] = [];
 
+  // Shared brand grounding backstop, used for PROFILE brands and RECIPE brand
+  // anchors alike: a paraphrased/collapsed brand would silently attach data to
+  // a wrong/new brand. Snap it to the nearest real brand; if no confident
+  // match, keep it but warn — never silently invented. Returns the (possibly
+  // snapped) brand plus warning MESSAGES: the caller keys each message to the
+  // brand+flavor row it will actually appear under (profiles key to the FINAL
+  // brand+flavor after BOTH groundings; recipes have no flavor row).
+  const groundBrandName = (brand: string): { brand: string; messages: string[] } => {
+    if (!brandCtx) return { brand, messages: [] };
+    const g = groundProfileBrand(brand, brandCtx);
+    if (g.kind === "snapped") {
+      const snapped = clampName(g.flavor, lim.maxNameChars);
+      if (snapped) {
+        return { brand: snapped, messages: [`Corrected brand "${brand}" to "${g.flavor}".`] };
+      }
+    } else if (g.kind === "ungrounded") {
+      return {
+        brand,
+        messages: [`Brand "${brand}" was not found on the sheet — please verify.`],
+      };
+    }
+    return { brand, messages: [] };
+  };
+
   const profiles: ParsedProfile[] = [];
   const rawProfiles = Array.isArray(root.profiles) ? root.profiles : [];
   for (const p of rawProfiles.slice(0, lim.maxProfiles)) {
@@ -1174,16 +1198,9 @@ export function sanitizeParsedSpecImport(
     // Messages are collected first and keyed to the FINAL brand+flavor only
     // after BOTH groundings have run, so review UIs can attach each warning to
     // the profile row it will actually appear under.
-    const brandWarnMessages: string[] = [];
-    if (brandCtx) {
-      const g = groundProfileBrand(brand, brandCtx);
-      if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
-        brandWarnMessages.push(`Corrected brand "${brand}" to "${g.flavor}".`);
-        brand = clampName(g.flavor, lim.maxNameChars);
-      } else if (g.kind === "ungrounded") {
-        brandWarnMessages.push(`Brand "${brand}" was not found on the sheet — please verify.`);
-      }
-    }
+    const brandGrounding = groundBrandName(brand);
+    brand = brandGrounding.brand;
+    const brandWarnMessages = brandGrounding.messages;
     // Grounding backstop for PROFILE flavors: the parse model has paraphrased
     // flavors wholesale (e.g. "Buffalo Chicken" -> "BBQ Chicken"), minting
     // profiles under a name that never appears on the sheet. Snap such an
@@ -1273,8 +1290,19 @@ export function sanitizeParsedSpecImport(
     // never imports as a bogus "cheese recipe".
     if (kind === "cheese" && isPepperoniOnlyCheeseRecipe(rows)) continue;
     const recipe: ParsedRecipe = { kind, name, rows };
+    // Grounding backstop for RECIPE brands, same semantics as profiles: a
+    // paraphrased recipe brand silently attaches a dough/sauce/cheese recipe
+    // to a wrong/new brand, so it never shows on the intended products.
+    // Recipes have no flavor row to attach to, so warnings key to the grounded
+    // brand with an empty flavor.
     const brand = clampName(o.brand, lim.maxNameChars);
-    if (brand) recipe.brand = brand;
+    if (brand) {
+      const g = groundBrandName(brand);
+      recipe.brand = g.brand;
+      for (const message of g.messages) {
+        groundingWarnings.push({ brand: g.brand, flavor: "", message });
+      }
+    }
     const flavor = clampName(o.flavor, lim.maxNameChars);
     if (flavor) recipe.flavor = flavor;
     const rawTargets = Array.isArray(o.targets) ? o.targets : [];
@@ -1292,9 +1320,18 @@ export function sanitizeParsedSpecImport(
       for (const t of rawTargets.slice(0, lim.maxProfiles)) {
         if (!t || typeof t !== "object") continue;
         const to = t as Record<string, unknown>;
-        const tb = clampName(to.brand, lim.maxNameChars);
+        const tbRaw = clampName(to.brand, lim.maxNameChars);
         const tf = clampName(to.flavor, lim.maxNameChars);
-        if (!tb) continue;
+        if (!tbRaw) continue;
+        // Ground the target's brand half too (the flavor half already gets the
+        // token check below); a paraphrased target brand would fan the recipe
+        // out to a wrong/new brand or mint a junk anchor. Warnings key to the
+        // grounded brand with an empty flavor (no profile row yet).
+        const tg = groundBrandName(tbRaw);
+        const tb = tg.brand;
+        for (const message of tg.messages) {
+          groundingWarnings.push({ brand: tb, flavor: "", message });
+        }
         // A whole-brand scope word ("All Varieties") or the recipe's own kind, OR a
         // specific flavor the model invented that appears nowhere in the source and
         // isn't a known flavor — all become brand-wide anchors rather than junk
