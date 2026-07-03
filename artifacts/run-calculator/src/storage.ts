@@ -623,6 +623,38 @@ export function isEmptyOverPopulated(
   return deepEqual(candidate, DEFAULT_VALUES) && !deepEqual(fallback, DEFAULT_VALUES);
 }
 
+// A form.reset() re-emits values through form.watch(), so a heal that fires
+// while the operator is mid-keystroke could clobber a just-typed edit before
+// autosave persists it. Any caller of the heal (and the sync-receive current-run
+// reset) must honor this quiet window after the last local edit.
+export const RECENT_LOCAL_EDIT_WINDOW_MS = 2000;
+
+// Pure decision behind the current-run form heal effect (home.tsx). On a fresh
+// device's FIRST sync-apply right after sign-in, the apply callback's form-reset
+// block reads the PRE-apply dayStateRef — whose blank local run id isn't in the
+// payload — so it skips the reset, leaving the live form all-default ("0 cases
+// needed") while localStorage now holds the real synced values. The server sends
+// only ONE initial SSE payload on connect, so nothing later heals it. Heal (i.e.
+// reset the form to the stored copy) ONLY when:
+//   1. the live form is all-default while the stored copy is populated
+//      (isEmptyOverPopulated — the same guard the sync receive path uses, so a
+//      genuinely edited or legitimately blank form is never touched), and
+//   2. no local edit landed within RECENT_LOCAL_EDIT_WINDOW_MS, so genuine
+//      user typing always wins over the heal.
+// Healing is one-directional (defaults → stored real data); anything looser
+// re-introduces the empty-over-populated clobber class of bugs.
+export function shouldHealFormFromStored(
+  liveVals: FormValues,
+  storedVals: FormValues,
+  lastLocalEditAt: number,
+  now: number,
+): boolean {
+  return (
+    isEmptyOverPopulated(liveVals, storedVals) &&
+    now - lastLocalEditAt > RECENT_LOCAL_EDIT_WINDOW_MS
+  );
+}
+
 // ── Sync-receive merge-survival helpers ─────────────────────────────────────
 // Extracted from the home.tsx sync-receive handler so the recipe-name-merge
 // survival guarantees are importable and regression-tested end-to-end (a merge

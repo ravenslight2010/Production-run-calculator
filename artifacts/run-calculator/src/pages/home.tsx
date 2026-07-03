@@ -81,6 +81,7 @@ import {
   deepEqual,
   pickCurrentRunPushValue,
   isEmptyOverPopulated,
+  shouldHealFormFromStored,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
   profileKeyIsTombstoned,
@@ -4206,15 +4207,20 @@ export default function Home() {
   // form.getValues() for the current run (the re-import case-update dialog's
   // "from" count) sees that stale 0 too. When the current run id changes and
   // the live form is all-default while the stored copy is populated, load the
-  // stored values. isEmptyOverPopulated (the same guard the sync receive path
-  // uses) means a genuinely edited or legitimately blank form is never touched,
-  // and the lastLocalEditRef window keeps a just-typed edit safe.
+  // stored values. shouldHealFormFromStored (storage.ts) holds the pure
+  // decision: isEmptyOverPopulated (the same guard the sync receive path uses)
+  // means a genuinely edited or legitimately blank form is never touched, and
+  // the lastLocalEditRef window keeps a just-typed edit safe.
   useEffect(() => {
     if (!currentRunId) return;
     const stored = loadRunValues(currentRunId);
     if (
-      isEmptyOverPopulated(form.getValues(), stored) &&
-      Date.now() - lastLocalEditRef.current > 2000
+      shouldHealFormFromStored(
+        form.getValues(),
+        stored,
+        lastLocalEditRef.current,
+        Date.now(),
+      )
     ) {
       const merged = mergeRunDefaults(stored);
       form.reset(merged);
