@@ -167,6 +167,10 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
+localPort = 5173
+externalPort = 5173
+
+[[ports]]
 localPort = 8080
 externalPort = 8080
 
@@ -185,10 +189,6 @@ externalPort = 5000
 [[ports]]
 localPort = 26038
 externalPort = 3000
-
-[[ports]]
-localPort = 5173
-externalPort = 5173
 
 [nix]
 channel = "stable-25_05"
