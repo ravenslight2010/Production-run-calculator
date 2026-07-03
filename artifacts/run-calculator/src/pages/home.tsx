@@ -4195,6 +4195,34 @@ export default function Home() {
     replaceFrontline(vals.frontlineRecipe ?? []);
   }
 
+  // Heal the live form when the CURRENT RUN changes without going through an
+  // imperative run-switch handler (those form.reset the target run's values
+  // themselves). The main case: a fresh device's FIRST sync-apply right after
+  // sign-in. The initial SSE payload adopts the remote day (auto-selecting run
+  // 0) and saves every run's values to localStorage, but the apply callback's
+  // form-reset block reads the PRE-apply dayStateRef — whose blank local run id
+  // isn't in the payload — so it skips, leaving the form all-default ("0 cases
+  // needed") until some later remote push happens to land. Anything reading
+  // form.getValues() for the current run (the re-import case-update dialog's
+  // "from" count) sees that stale 0 too. When the current run id changes and
+  // the live form is all-default while the stored copy is populated, load the
+  // stored values. isEmptyOverPopulated (the same guard the sync receive path
+  // uses) means a genuinely edited or legitimately blank form is never touched,
+  // and the lastLocalEditRef window keeps a just-typed edit safe.
+  useEffect(() => {
+    if (!currentRunId) return;
+    const stored = loadRunValues(currentRunId);
+    if (
+      isEmptyOverPopulated(form.getValues(), stored) &&
+      Date.now() - lastLocalEditRef.current > 2000
+    ) {
+      const merged = mergeRunDefaults(stored);
+      form.reset(merged);
+      resetFieldArrays(merged);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentRunId]);
+
   // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
