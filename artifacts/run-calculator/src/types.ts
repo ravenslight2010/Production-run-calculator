@@ -376,12 +376,13 @@ export const MERGED_AWAY_KEY = "run-calc-merged-away";
 // Per-list deletion tombstones (see SyncPayload.deletedItems). Persisted + synced
 // so a user-deleted master-list item can't be resurrected by live-sync's union.
 export const DELETED_ITEMS_KEY = "run-calc-deleted-items";
-export const DEFAULT_INGREDIENT_TYPES = [
-  "Cheese", "Pepperoni", "Sausage",
-  "Mushroom", "Green Pepper", "Onion", "Black Olive", "Ham", "Bacon", "Jalapeño",
-];
+// Factory-specific defaults intentionally EMPTY since the 2026-07-03 full data
+// purge: the user re-imports their own spec sheets, so a fresh install starts
+// with no baked-in brands/ingredients/types. Generic app plumbing (stop
+// reasons, packaging fields) keeps its defaults.
+export const DEFAULT_INGREDIENT_TYPES: string[] = [];
 export const PEP_TYPES_KEY = "run-calc-pep-types";
-export const DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];
+export const DEFAULT_PEP_TYPES: string[] = [];
 // Legacy pep-type names that were renamed to the detailed standard names above.
 // Applied on read + via one-time migration so saved selections keep their pre-made
 // (no-batch) calc behavior and the deduped list shows only the detailed names.
@@ -439,20 +440,18 @@ export const INGREDIENT_RENAMES: Record<string, string> = {
 // from the pep-type list (still usable as an applicator type / cheese ingredient).
 export const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
 export const DIE_TYPES_KEY = "run-calc-die-types";
-export const DEFAULT_DIE_TYPES = ["7in", "9in", "11in", "12in", "Argus", "Mystic"];
+export const DEFAULT_DIE_TYPES: string[] = [];
 export const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
-export const DEFAULT_CHEESE_INGREDIENTS = [
-  "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
-];
+export const DEFAULT_CHEESE_INGREDIENTS: string[] = [];
 export const MIX_INGREDIENTS_KEY = "run-calc-mix-ingredients";
 export const DEFAULT_MIX_INGREDIENTS: string[] = [];
 export const DOUGH_INGREDIENTS_KEY = "run-calc-dough-ingredients";
-export const DEFAULT_DOUGH_INGREDIENTS = ["Flour", "Water", "Salt", "Yeast", "Oil", "Sugar"];
+export const DEFAULT_DOUGH_INGREDIENTS: string[] = [];
 export const DOUGH_RECIPE_NAMES_KEY = "run-calc-dough-recipe-names";
 export const DEFAULT_DOUGH_RECIPE_NAMES: string[] = [];
 export const DOUGH_RECIPE_PRESETS_KEY = "run-calc-dough-recipe-presets";
 export const FRONTLINE_INGREDIENTS_KEY = "run-calc-frontline-ingredients";
-export const DEFAULT_FRONTLINE_INGREDIENTS = ["Flour", "Water", "Salt", "Sugar", "Oil", "Yeast"];
+export const DEFAULT_FRONTLINE_INGREDIENTS: string[] = [];
 export const FRONTLINE_RECIPE_NAMES_KEY = "run-calc-frontline-recipe-names";
 export const DEFAULT_FRONTLINE_RECIPE_NAMES: string[] = [];
 export const FRONTLINE_RECIPE_PRESETS_KEY = "run-calc-frontline-recipe-presets";

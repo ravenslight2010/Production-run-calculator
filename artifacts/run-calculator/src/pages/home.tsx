@@ -105,22 +105,14 @@ import {
   saveFrontlineRecipePresets,
   loadCheeseRecipePresets,
   saveCheeseRecipePresets,
-  applyMixSeedIfNeeded,
-  applyMixSeedV14IfNeeded,
-  applyMixSeedV15IfNeeded,
   applyPepTaxonomyMigrationIfNeeded,
   applyIngredientDedupeMigrationIfNeeded,
-  applySpecProfilesSeedIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixCheeseOverlapDedupeIfNeeded,
   applyOneTimeLocalWipeIfNeeded,
   purgeOrphanedProfilesIfNeeded,
   deleteProfilesForBrand,
   deleteProfileEntry,
-  applyDieTypesSeedIfNeeded,
-  applyDoughSpecsSeedIfNeeded,
-  applySauceSpecsSeedIfNeeded,
-  applyCheeseSpecsSeedIfNeeded,
   applyIngredientMerge,
   applyRecipeNameMerge,
   loadMergedAway,
@@ -380,20 +372,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 // One-time full local wipe (user-requested 2026-07-03 data purge). MUST run
-// before every seed/migration below so they re-run against the blank slate,
-// and before any sync starts so the old local copy can't re-upload itself.
+// before every migration below so they run against the blank slate, and
+// before any sync starts so the old local copy can't re-upload itself.
 applyOneTimeLocalWipeIfNeeded();
 
-applyMixSeedIfNeeded();
-applyMixSeedV14IfNeeded();
-applyMixSeedV15IfNeeded();
-applySpecProfilesSeedIfNeeded();
+// Factory-data seeds (mix/spec-profile/die/dough/sauce/cheese) intentionally
+// NOT called since the 2026-07-03 purge: the app now starts completely empty
+// and the user re-imports their own spec sheets. Data-hygiene migrations below
+// are kept — they are no-ops on empty data but still heal devices with data.
 applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
-applyDieTypesSeedIfNeeded();
-applyDoughSpecsSeedIfNeeded();
-applySauceSpecsSeedIfNeeded();
-applyCheeseSpecsSeedIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
 applyMixCheeseOverlapDedupeIfNeeded();
 purgeOrphanedProfilesIfNeeded();

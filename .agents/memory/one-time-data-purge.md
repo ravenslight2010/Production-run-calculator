@@ -1,6 +1,6 @@
 ---
 name: One-time full data purge
-description: How to purge all factory data without it resurrecting through the additive sync union; accounts kept.
+description: How to purge all factory data without it resurrecting through the additive sync union; accounts kept; built-in seeds removed entirely.
 ---
 
 # One-time full data purge (done 2026-07-03)
@@ -26,7 +26,24 @@ localStorage `run-calc*`, mobile AsyncStorage `run-calc*`) and the additive
 client can never "push emptiness" over old server rows — the rows must be gone
 server-side while no old-data client is running.
 
-**Notes:** wiping the seed/migration markers on purpose makes apps behave like
-a fresh install (built-in seeds re-run — that IS the "clean state"). Auth is
-untouched (web httpOnly cookie, mobile SecureStore). The wipe code can be
-retired in a later cleanup once all devices have run it.
+**Round 2 — built-in seeds ARE data too:** after the wipe the user still "saw
+all data" because the factory seed blobs (spec/mix/dough/sauce/cheese seeds +
+DEFAULT_* master-data lists) re-installed themselves like a fresh install and
+re-pushed a populated daily_sync row. The user chose a completely EMPTY app, so
+the built-ins were removed for good (marker bumped to `-c`, daily_sync deleted
+again with the server stopped):
+- Web home.tsx no longer calls any factory seed; only data-hygiene migrations
+  remain (no-ops on empty data). Seed helpers in storage.ts are now dead code.
+- Seed blobs emptied but export shapes kept: web `src/specSeed.ts`,
+  `src/mixSeed.ts`, `src/mixPresets.ts`; mobile `data/specSeed.ts`,
+  `data/mixSeed.ts`, `data/mixPresets.ts`.
+- Factory-specific DEFAULT_* lists emptied in web types.ts and mobile
+  RunContext (pep types, die types, ingredient/cheese/dough/frontline lists,
+  applicator types). Generic plumbing (stop reasons, packaging fields) kept.
+- Consequence: with DEFAULT_PEP_TYPES empty, the premade-stick pep path never
+  triggers — all pep types take the batch-lbs path until the user adds types
+  (consistent web+mobile). Fill-missing's "spec" source is permanently empty.
+
+Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
+dead seed helpers can be retired in a later cleanup once all devices have run
+the `-c` wipe.

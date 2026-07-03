@@ -89,7 +89,7 @@ const STORAGE_KEY = "run-calc-mobile-v2";
 // see the boot effect below. Must NOT start with a prefix the wipe removes
 // before it is re-set… it does start with "run-calc", so the wipe explicitly
 // excludes it from the removal list.
-const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260703b";
+const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260703c";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 // One-time marker for backfilling die sizes onto existing brand/flavor profiles.
@@ -374,7 +374,9 @@ export const PACKAGING_FIELDS = [
 export type PackagingFieldName = (typeof PACKAGING_FIELDS)[number]["name"];
 
 // ── Master data defaults (manageable lists shared across runs) ──────────────
-export const DEFAULT_PEP_TYPES = ["Pepperoni Stick", "Pepperoni Stick - NATURAL"];
+// Factory-specific defaults intentionally EMPTY since the 2026-07-03 full data
+// purge (mirrors web types.ts): fresh installs start with no baked-in data.
+export const DEFAULT_PEP_TYPES: string[] = [];
 // Legacy pep-type names renamed to the detailed standard names above; applied on
 // every load so saved selections keep their pre-made (no-batch) calc behavior.
 export const PEP_TYPE_RENAMES: Record<string, string> = {
@@ -429,15 +431,9 @@ export const INGREDIENT_RENAMES: Record<string, string> = {
 // Pep-type names recategorized as applicators — dropped from the pep-type list
 // (still usable as an applicator via the cheese-ingredient list).
 const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
-export const DEFAULT_CHEESE_INGREDIENTS = [
-  "Mozzarella", "Cheddar", "Provolone", "Swiss", "Monterey Jack", "Parmesan",
-];
-export const DEFAULT_DOUGH_INGREDIENTS = [
-  "Flour", "Water", "Salt", "Yeast", "Oil", "Sugar",
-];
-export const DEFAULT_FRONTLINE_INGREDIENTS = [
-  "Flour", "Water", "Salt", "Sugar", "Oil", "Yeast",
-];
+export const DEFAULT_CHEESE_INGREDIENTS: string[] = [];
+export const DEFAULT_DOUGH_INGREDIENTS: string[] = [];
+export const DEFAULT_FRONTLINE_INGREDIENTS: string[] = [];
 export const DEFAULT_STOP_REASONS = [
   "Equipment jam", "Changeover", "Break", "Maintenance",
   "Quality hold", "Staffing", "Waiting on dough",
@@ -934,7 +930,7 @@ export function historicalBenchmarkPpm(history: HistoryDay[]): {
   };
 }
 
-export const DEFAULT_DIE_TYPES = ["7in", "9in", "11in", "12in", "Argus", "Mystic"];
+export const DEFAULT_DIE_TYPES: string[] = [];
 
 export interface RunTemplate {
   id: string;
