@@ -1,4 +1,5 @@
 - [Recipe print/share](recipe-print-share.md) — per-recipe card print/share button requested by user, deferred.
+- [AI JSON bounded retry](ai-json-retry.md) — AI routes that fail-safe to empty on malformed model JSON must use the shared 2-attempt retry helper; retry parse failures only, never provider throws.
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
 - [Spec-import seed pattern](spec-import-seed-pattern.md) — two-tier additive marker-guarded recipe imports (dough/sauce/cheese), kept at web+mobile parity.

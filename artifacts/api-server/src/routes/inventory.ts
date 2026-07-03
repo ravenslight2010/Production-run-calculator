@@ -32,6 +32,7 @@ import {
   UpdateInventorySettingsBody,
 } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
+import { fetchModelJsonWithRetry } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -546,39 +547,39 @@ router.post(
     '"matchedKey":string|null,"confidence":number}]}. ' +
     "confidence is 0..1. If you cannot identify anything, return {\"items\":[]}.";
 
-  let content = "";
-  try {
-    const response = await openai.chat.completions.create({
-      model: pickModel("full"),
-      max_completion_tokens: 8192,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userText },
-            { type: "image_url", image_url: { url: dataUri } },
-          ],
-        },
-      ],
-    });
-    content = response.choices[0]?.message?.content ?? "";
-  } catch (err) {
-    req.log.error({ err }, "identify-photo vision call failed");
-    res.status(502).json({ error: "Vision provider error" });
-    return;
-  }
-
-  let raw: unknown;
-  try {
-    raw = JSON.parse(content);
-  } catch {
-    req.log.warn({ content: content.slice(0, 200) }, "identify-photo non-JSON response");
+  // A malformed reply here silently reads as "the AI saw nothing in the
+  // photo", so retry once before the empty fallback.
+  const result = await fetchModelJsonWithRetry({
+    label: "identify-photo vision",
+    log: req.log,
+    call: async () => {
+      const response = await openai.chat.completions.create({
+        model: pickModel("full"),
+        max_completion_tokens: 8192,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userText },
+              { type: "image_url", image_url: { url: dataUri } },
+            ],
+          },
+        ],
+      });
+      return response.choices[0]?.message?.content ?? "";
+    },
+  });
+  if (!result.ok) {
+    if (result.reason === "provider") {
+      res.status(502).json({ error: "Vision provider error" });
+      return;
+    }
     res.json({ items: [] });
     return;
   }
-  res.json({ items: sanitizeGuesses(raw, candidateKeys) });
+  res.json({ items: sanitizeGuesses(result.raw, candidateKeys) });
 });
 
 // AI quality/defect check for a finished pizza or crust. A user photographs the
@@ -678,35 +679,35 @@ router.post(
     const dataUri = `data:${input.mimeType || "image/jpeg"};base64,${input.imageBase64}`;
     const { system, userText } = buildProductionSheetPrompt(input);
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        max_completion_tokens: 8192,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: userText },
-              { type: "image_url", image_url: { url: dataUri } },
-            ],
-          },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "production-sheet-photo vision call failed");
-      res.status(502).json({ error: "Vision provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "production-sheet-photo non-JSON response");
+    // A malformed reply here means a whole paper sheet comes back with zero
+    // rows, so retry once before the empty fallback.
+    const result = await fetchModelJsonWithRetry({
+      label: "production-sheet-photo vision",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          max_completion_tokens: 8192,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userText },
+                { type: "image_url", image_url: { url: dataUri } },
+              ],
+            },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "Vision provider error" });
+        return;
+      }
       res.json({
         rows: [],
         generatedAt: Date.now(),
@@ -714,7 +715,7 @@ router.post(
       });
       return;
     }
-    const { rows, note } = sanitizeSheetRows(raw);
+    const { rows, note } = sanitizeSheetRows(result.raw);
     res.json({ rows, generatedAt: Date.now(), ...(note ? { note } : {}) });
   },
 );

@@ -28,6 +28,7 @@ import {
 } from "./aiMixAssistant";
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
+import { fetchModelJsonWithRetry } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -1302,34 +1303,35 @@ router.post(
     const { system, user } = buildForecastPrompt(validation.data, accuracyGrounding);
     const userPrompt = appendFacilityMemoryBlock(user, knowledge);
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("full"),
-        // Multi-day plans produce proportionally more output; give the longer
-        // horizons more room while keeping a sane ceiling.
-        max_completion_tokens: targetDates.length > 1 ? 8192 : 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-forecast call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-forecast non-JSON response");
+    // A malformed reply here is user-visible data loss (the manager gets no
+    // forecast at all), so retry once before falling back to the empty result.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-forecast",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("full"),
+          // Multi-day plans produce proportionally more output; give the longer
+          // horizons more room while keeping a sane ceiling.
+          max_completion_tokens: targetDates.length > 1 ? 8192 : 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
       res.json({ forecast: null, forecasts: [], generatedAt: Date.now() });
       return;
     }
+    const raw: unknown = result.raw;
 
     const { forecasts, note } = sanitizeForecasts(raw, targetDates);
 
@@ -1727,32 +1729,33 @@ router.post(
       knowledge,
     );
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("cheap"),
-        max_completion_tokens: 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-fill-missing call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-fill-missing non-JSON response");
+    // A malformed reply here is user-visible data loss (the fill-missing panel
+    // shows nothing to apply), so retry once before the empty fallback.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-fill-missing",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
       res.json({ suggestions: [], generatedAt: Date.now() });
       return;
     }
+    const raw: unknown = result.raw;
 
     const requested: RequestedField[] = validation.data.fields.map((f) => ({
       key: f.key,
@@ -1810,32 +1813,33 @@ router.post(
       knowledge,
     );
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("cheap"),
-        max_completion_tokens: 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-match-import call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-match-import non-JSON response");
+    // A malformed reply here is user-visible data loss (an Excel import loses
+    // all its name matches), so retry once before the empty fallback.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-match-import",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
       res.json({ brandMatches: [], flavorMatches: [], generatedAt: Date.now() });
       return;
     }
+    const raw: unknown = result.raw;
 
     const { brandMatches, flavorMatches, ingredientMatches, appTypeMatches, pepTypeMatches, note } =
       sanitizeMatchImport(raw, validation.data);
@@ -1928,17 +1932,14 @@ router.post(
     );
 
     // The model occasionally truncates/malforms its JSON mid-response even for
-    // small sheets. One bounded retry absorbs that transient flakiness so the
-    // user's import doesn't silently come back empty. Each attempt is a paid
-    // call, so the cap stays at 2 total (1 retry) — a systematically failing
-    // model at most doubles cost, and the empty-result fallback still applies
-    // once attempts are exhausted.
-    const PARSE_SPEC_MAX_ATTEMPTS = 2;
-    let raw: unknown;
-    let parsedOk = false;
-    let content = "";
-    for (let attempt = 1; attempt <= PARSE_SPEC_MAX_ATTEMPTS; attempt++) {
-      try {
+    // small sheets; the shared bounded retry (fetchModelJsonWithRetry) absorbs
+    // that transient flakiness so the user's import doesn't silently come back
+    // empty, and the empty-result fallback still applies once attempts are
+    // exhausted.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-parse-spec-sheet",
+      log: req.log,
+      call: async () => {
         const response = await openai.chat.completions.create({
           model: pickModel("full"),
           // Parsing echoes the whole workbook chunk back as structured JSON, so
@@ -1952,28 +1953,14 @@ router.post(
             { role: "user", content: userPrompt },
           ],
         });
-        content = response.choices[0]?.message?.content ?? "";
-      } catch (err) {
-        req.log.error({ err, attempt }, "ai-parse-spec-sheet call failed");
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
         res.status(502).json({ error: "AI provider error" });
         return;
       }
-
-      try {
-        raw = JSON.parse(content);
-        parsedOk = true;
-        if (attempt > 1) {
-          req.log.info({ attempt }, "ai-parse-spec-sheet retry recovered a valid response");
-        }
-        break;
-      } catch {
-        req.log.warn(
-          { attempt, maxAttempts: PARSE_SPEC_MAX_ATTEMPTS, contentLength: content.length, content: content.slice(0, 200) },
-          "ai-parse-spec-sheet non-JSON response",
-        );
-      }
-    }
-    if (!parsedOk) {
       res.json({
         profiles: [],
         recipes: [],
@@ -1982,6 +1969,7 @@ router.post(
       });
       return;
     }
+    const raw: unknown = result.raw;
 
     const parsed = sanitizeParseSpecSheet(raw, validation.data);
 
@@ -2049,32 +2037,33 @@ router.post(
       knowledge,
     );
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("cheap"),
-        max_completion_tokens: 4096,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-match-premix call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-match-premix non-JSON response");
+    // A malformed reply here is user-visible data loss (a premix import loses
+    // all its product matches), so retry once before the empty fallback.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-match-premix",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 4096,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
       res.json({ matches: [], generatedAt: Date.now() });
       return;
     }
+    const raw: unknown = result.raw;
 
     const matches = sanitizeMatchPremix(raw, validation.data);
 
@@ -2123,32 +2112,33 @@ router.post(
       knowledge,
     );
 
-    let content = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: pickModel("cheap"),
-        max_completion_tokens: 16384,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      content = response.choices[0]?.message?.content ?? "";
-    } catch (err) {
-      req.log.error({ err }, "ai-suggest-merges call failed");
-      res.status(502).json({ error: "AI provider error" });
-      return;
-    }
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(content);
-    } catch {
-      req.log.warn({ content: content.slice(0, 200) }, "ai-suggest-merges non-JSON response");
+    // A malformed reply here is user-visible data loss (the user asked for
+    // merge suggestions and gets none), so retry once before the empty fallback.
+    const result = await fetchModelJsonWithRetry({
+      label: "ai-suggest-merges",
+      log: req.log,
+      call: async () => {
+        const response = await openai.chat.completions.create({
+          model: pickModel("cheap"),
+          max_completion_tokens: 16384,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: userPrompt },
+          ],
+        });
+        return response.choices[0]?.message?.content ?? "";
+      },
+    });
+    if (!result.ok) {
+      if (result.reason === "provider") {
+        res.status(502).json({ error: "AI provider error" });
+        return;
+      }
       res.json({ suggestions: [], generatedAt: Date.now() });
       return;
     }
+    const raw: unknown = result.raw;
 
     const suggestions = sanitizeSuggestMerges(raw, validation.data.names);
     const note =
