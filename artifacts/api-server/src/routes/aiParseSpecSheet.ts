@@ -200,6 +200,21 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "cheese or topping recipe; do not create a recipe whose ingredients are " +
     "pepperoni. THE ONE EXCEPTION IS DICED PEPPERONI: diced pepperoni is a " +
     "topping and stays part of a CHEESE/topping recipe, NOT a profile pepperoni. " +
+    "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
+    "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
+    "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +
+    "Fajita Mix 0.563 Blanched White Onion Strips, 0.563 Blanched Green Pepper " +
+    "Strips'. When an applicator cell embeds a composition like this: set that " +
+    "applicator's `type` to the CLEAN mix name ONLY (the text before the first " +
+    "number, e.g. \"Aldo's Cheese Mix\") and ALSO emit ONE CHEESE-kind RECIPE " +
+    "named that clean mix name whose rows are the number+ingredient pairs (each " +
+    "number is that ingredient's `lbs`). Many profiles often share the same " +
+    "embedded blend — emit the recipe ONCE and reuse the clean name in each " +
+    "profile's applicator `type`. If the SAME mix name appears with DIFFERENT " +
+    "numbers on different rows, they are different recipes: keep each and make " +
+    "the names distinct with a short suffix from their composition. NEVER leave " +
+    "the raw composition text inside an applicator `type` — the type must be a " +
+    "short reusable name. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap units: `ozPerPizza`/`sauceOzPerPizza` are " +

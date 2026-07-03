@@ -89,7 +89,7 @@ const STORAGE_KEY = "run-calc-mobile-v2";
 // see the boot effect below. Must NOT start with a prefix the wipe removes
 // before it is re-set… it does start with "run-calc", so the wipe explicitly
 // excludes it from the removal list.
-const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260703d";
+const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260703e";
 // One-time marker for seeding the imported pizza-spec brand/flavor presets.
 const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
 // One-time marker for backfilling die sizes onto existing brand/flavor profiles.

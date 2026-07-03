@@ -488,7 +488,7 @@ export type GridTextLimits = {
  * this limit instead of getting silently truncated here — a clipped targets
  * cell loses trailing flavors and the AI has to guess them back.
  */
-export const PROMPT_MAX_CELL_CHARS = 80;
+export const PROMPT_MAX_CELL_CHARS = 240;
 
 const DEFAULT_LIMITS: Required<GridTextLimits> = {
   maxSheets: 24,

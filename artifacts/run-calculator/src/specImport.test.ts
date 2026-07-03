@@ -1830,7 +1830,7 @@ describe("findTruncatedCells", () => {
     const grids: SheetGrid[] = [{ name: "S1", rows: [[padded]] }];
     expect(findTruncatedCells(grids)).toEqual([]);
     // And a cell that stays long AFTER collapsing is still caught.
-    const dense = Array.from({ length: 40 }, (_, i) => `w${i}`).join(" ");
+    const dense = Array.from({ length: PROMPT_MAX_CELL_CHARS }, (_, i) => `w${i}`).join(" ");
     expect(dense.replace(/\s+/g, " ").length).toBeGreaterThan(PROMPT_MAX_CELL_CHARS);
     expect(findTruncatedCells([{ name: "S1", rows: [[dense]] }])).toHaveLength(1);
   });

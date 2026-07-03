@@ -6,6 +6,7 @@ import {
   type PremixKnown,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
+import { PROMPT_MAX_CELL_CHARS } from "@workspace/spec-import";
 import {
   buildSpecExportGrids,
   buildMixExportGrids,
@@ -94,10 +95,15 @@ describe("buildSpecExportGrids", () => {
   });
 
   it("wraps a brand's target flavors across rows so no cell exceeds the prompt cell clamp", () => {
-    const flavors = [
-      "Cheese", "Pepperoni", "Supreme", "Hawaiian", "Margherita", "Sausage", "Veggie",
-      "BBQ Chicken",
-    ];
+    // Enough distinct flavors that a single "Brand: flavor, flavor…" line would
+    // exceed the prompt cell clamp (clamp-relative so the test tracks it).
+    const flavors: string[] = [];
+    let lineLen = "Silverline Kitchens:".length;
+    for (let i = 0; lineLen <= PROMPT_MAX_CELL_CHARS + 40; i++) {
+      const f = `Specialty Flavor Number ${i + 1}`;
+      flavors.push(f);
+      lineLen += f.length + 2;
+    }
     const wide: SpecExportInput = {
       profiles: flavors.map((flavor) => ({
         brand: "Silverline Kitchens",
@@ -117,10 +123,10 @@ describe("buildSpecExportGrids", () => {
     const targetLines = dough.rows
       .map((r) => r.join("|"))
       .filter((l) => l.startsWith("Silverline Kitchens:"));
-    // A single line would be >80 chars and get truncated by the prompt cell
-    // clamp (losing trailing flavors) — it must wrap into several short lines.
+    // A single line would exceed the prompt cell clamp and get truncated
+    // (losing trailing flavors) — it must wrap into several short lines.
     expect(targetLines.length).toBeGreaterThan(1);
-    for (const line of targetLines) expect(line.length).toBeLessThanOrEqual(80);
+    for (const line of targetLines) expect(line.length).toBeLessThanOrEqual(PROMPT_MAX_CELL_CHARS);
     // Every flavor survives across the wrapped lines.
     const joined = targetLines.map((l) => l.slice("Silverline Kitchens:".length)).join(", ");
     const seen = joined.split(",").map((s) => s.trim()).filter(Boolean);

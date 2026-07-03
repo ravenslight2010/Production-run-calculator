@@ -277,7 +277,8 @@ describe("large export survives the prompt-text/chunking path with zero string l
   it("negative control: the verbatim check DOES catch a clamped cell", () => {
     // Prove the guard detects the failure mode it exists for: an over-clamp
     // cell must come out of gridsToPromptText missing its tail.
-    const longCell = `Example Brand: ${FLAVOR_NAMES.join(", ")}, ${FLAVOR_NAMES.join(", ")}`;
+    let longCell = "Example Brand:";
+    while (longCell.length <= PROMPT_MAX_CELL_CHARS) longCell += ` ${FLAVOR_NAMES.join(", ")},`;
     expect(longCell.length).toBeGreaterThan(PROMPT_MAX_CELL_CHARS);
     const text = gridsToPromptText([{ name: "Control", rows: [[longCell]] }]);
     expect(text).not.toContain(longCell);

@@ -553,3 +553,17 @@ time, not in the AI schema.
   the classifier pure/exported; the routing must cover BOTH the tombstone
   clear and the name-list registration, or re-imports recreate cheese/mix
   duplicates. Web-only: mobile has no mix/cheese name category lists.
+
+## Embedded blends in applicator cells (post-purge lesson)
+Many spec grids pack a full blend recipe INSIDE one applicator cell ("Aldo's
+Cheese Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan"). The
+prompt teaches the model to split these: clean mix name → applicator `type`,
+number+ingredient pairs → one cheese-kind recipe.
+- **Why:** before the 2026-07-03 purge the seed data supplied clean mix names
+  + recipes, so known-name grounding masked this; on an empty install the raw
+  (truncated) cell text landed verbatim as applicator types and NO cheese/mix
+  recipes were created. Also PROMPT_MAX_CELL_CHARS was 80, cutting the blends
+  mid-word before the AI ever saw them — now 240.
+- **How to apply:** keep the EMBEDDED BLENDS prompt section; don't lower the
+  cell clamp; tests sizing "long cell" fixtures must be clamp-relative
+  (build to > PROMPT_MAX_CELL_CHARS), never hardcode 80/240.
