@@ -70,6 +70,30 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
   mobile util through the strip-imports harness (see web-test-harness.md) and drive
   its dialog chain with a stubbed `showConfirm` (e.g. `mobileCaseUpdateChoices.test.ts`).
 
+- **When runTest keeps hitting the cap on the Expo web build, drive Playwright yourself.**
+  The 12MB dev bundle takes ~20s+ to first paint per fresh context; the subagent burns
+  its whole 10-iteration budget on waits/polls (six straight cap-outs, even a 6-step
+  diagnostic). Escape hatch that works: `npm i playwright-core` in /tmp, install the nix
+  `chromium` system package (playwright's own chromium-headless-shell fails on missing
+  libglib), launch with `executablePath: $(which chromium)`, and script the whole flow
+  (poll `document.body.innerText` for paint, deep-link routes like `/warehouse` via URL
+  instead of clicking tabs). Uninstall the chromium system dep when done.
+
+- **For scripted Playwright tests, prefer the full Expo dev domain**
+  (`https://$REPLIT_EXPO_DEV_DOMAIN`) over the `/mobile/` proxy path — it works without
+  depending on the Vite proxy above and avoids the not-found route at the naked path.
+
+- **Playwright locator gotchas on RN-web:** `text=Foo` is substring-match — "Set up"
+  also matches prose like "Set up each profile…"; use `getByText(..., { exact: true })`.
+  Card rows are one big Pressable, so click the row's name text, then assert
+  `location.pathname` changed (body text is NOT proof of navigation — the source screen
+  often contains the same string).
+
+- **Mobile `scheduled` runs are LOCAL-ONLY** (not pulled from the server scheduled rows);
+  to make schedule-driven cards appear, seed `st.scheduled` inside the AsyncStorage web
+  blob `run-calc-mobile-v2`. The app autosaves over that key on a debounce, so seed and
+  reload atomically (mutate then reload immediately, or setTimeout-reload inside one eval).
+
 - **Test-fixture cleanup (full set):** test user rows live in `users` plus dependents
   `user_roles` and `password_reset_requests` (no cascade — delete dependents first).
   Factory-wide rules in `production_rules`. Always also delete the test-created
