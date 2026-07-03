@@ -1687,6 +1687,7 @@ export const AiParseSpecSheetBody = zod.object({
   "cheeseIngredients": zod.array(zod.string()).optional(),
   "doughIngredients": zod.array(zod.string()).optional(),
   "sauceIngredients": zod.array(zod.string()).optional(),
+  "sauceNames": zod.array(zod.string()).optional().describe('Existing sauce\/frontline recipe names (incl. ready-made sauces) to ground profile sauceName'),
   "dieTypes": zod.array(zod.string()).optional(),
   "doughRecipes": zod.array(zod.string()).optional().describe('Existing dough recipe names (grounds paraphrased recipe names)'),
   "sauceRecipes": zod.array(zod.string()).optional().describe('Existing sauce recipe names (grounds paraphrased recipe names)'),

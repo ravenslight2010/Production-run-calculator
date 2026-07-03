@@ -1750,6 +1750,7 @@ export function loadSpecImportKnown(): {
   cheeseIngredients: string[];
   doughIngredients: string[];
   sauceIngredients: string[];
+  sauceNames: string[];
   dieTypes: string[];
   doughRecipes: string[];
   sauceRecipes: string[];
@@ -1765,6 +1766,17 @@ export function loadSpecImportKnown(): {
     cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
     doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
     sauceIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
+    // Existing sauce/frontline recipe names: the selectable Sauce Recipe
+    // options list (which carries ready-made sauce names like "BBQ Sauce")
+    // unioned with the mixed-recipe preset names. Grounds a parsed profile's
+    // sauceName so a sauce the factory already uses isn't false-flagged just
+    // because this particular sheet doesn't spell it out.
+    sauceNames: [
+      ...new Set([
+        ...loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES),
+        ...Object.keys(loadFrontlineRecipePresets()),
+      ]),
+    ],
     dieTypes: [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])],
     // Existing recipe names per kind: lets the server ground a paraphrased
     // recipe name back to the factory's existing recipe (update, not duplicate).

@@ -42,6 +42,7 @@ export function validateParseSpecSheetBody(body: unknown): ParseSpecSheetValidat
     (known.cheeseIngredients?.length ?? 0) +
     (known.doughIngredients?.length ?? 0) +
     (known.sauceIngredients?.length ?? 0) +
+    (known.sauceNames?.length ?? 0) +
     (known.dieTypes?.length ?? 0) +
     (known.doughRecipes?.length ?? 0) +
     (known.sauceRecipes?.length ?? 0) +
@@ -77,6 +78,11 @@ export function sanitizeParseSpecSheet(raw: unknown, input?: ParseSpecSheetInput
           sauce: names(input.known?.sauceRecipes),
           cheese: names(input.known?.cheeseRecipes),
         },
+        // Existing sauce/frontline recipe names (incl. ready-made sauces the
+        // factory already pulls, e.g. "Marinara"): a profile sauceName matching
+        // one of these is legitimate even when it isn't written on this
+        // particular sheet, so the sanitizer must not false-flag it.
+        knownSauceNames: names(input.known?.sauceNames),
       }
     : {};
   return sanitizeParsedSpecImport(raw, {}, grounding);
@@ -227,6 +233,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   list("Cheese ingredients", known.cheeseIngredients);
   list("Dough ingredients", known.doughIngredients);
   list("Sauce ingredients", known.sauceIngredients);
+  list("Sauce names (existing mixed or ready-made sauces)", known.sauceNames);
   list("Die types", known.dieTypes);
   list("Dough recipe names", known.doughRecipes);
   list("Sauce recipe names", known.sauceRecipes);

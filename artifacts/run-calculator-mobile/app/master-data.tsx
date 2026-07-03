@@ -1420,6 +1420,10 @@ export default function MasterDataScreen() {
         cheeseIngredients,
         doughIngredients,
         sauceIngredients: frontlineIngredients,
+        // Existing sauce/frontline recipe names. Mobile has no separate
+        // names list (web's FRONTLINE_RECIPE_NAMES_KEY): ready-made sauces
+        // are preset keys with empty rows, so the keys ARE the full set.
+        sauceNames: Object.keys(frontlineRecipePresets),
         dieTypes,
         // Existing recipe names per kind: lets the server ground a paraphrased
         // recipe name back to the factory's existing recipe (update, not

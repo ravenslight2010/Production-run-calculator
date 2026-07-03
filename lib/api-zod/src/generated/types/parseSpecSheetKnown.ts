@@ -18,6 +18,8 @@ export interface ParseSpecSheetKnown {
   cheeseIngredients?: string[];
   doughIngredients?: string[];
   sauceIngredients?: string[];
+  /** Existing sauce/frontline recipe names (incl. ready-made sauces) to ground profile sauceName */
+  sauceNames?: string[];
   dieTypes?: string[];
   /** Existing dough recipe names (grounds paraphrased recipe names) */
   doughRecipes?: string[];

@@ -6781,6 +6781,11 @@ components:
           type: array
           items:
             type: string
+        sauceNames:
+          type: array
+          description: Existing sauce/frontline recipe names (incl. ready-made sauces) to ground profile sauceName
+          items:
+            type: string
         dieTypes:
           type: array
           items:

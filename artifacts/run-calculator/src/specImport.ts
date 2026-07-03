@@ -273,6 +273,7 @@ async function parseWorkbookCore(
     cheeseIngredients: known.cheeseIngredients,
     doughIngredients: known.doughIngredients,
     sauceIngredients: known.sauceIngredients,
+    sauceNames: known.sauceNames,
     dieTypes: known.dieTypes,
     doughRecipes: known.doughRecipes,
     sauceRecipes: known.sauceRecipes,

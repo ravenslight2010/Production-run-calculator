@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   buildParseSpecSheetPrompt,
   sanitizeParseSpecSheet,
+  validateParseSpecSheetBody,
+  MAX_KNOWN_LIST,
   type ParseSpecSheetInput,
 } from "./aiParseSpecSheet";
 import { isPepperoniOnlyCheeseRecipe } from "@workspace/spec-import";
@@ -312,5 +314,74 @@ describe("known recipe names — prompt + grounding wiring", () => {
     const out = sanitizeParseSpecSheet(raw, input());
     expect(out.recipes[0].name).toBe("Ultra Thin Dough Recipe");
     expect(out.warnings).toBeUndefined();
+  });
+});
+
+// The factory's existing sauce/frontline recipe names (known.sauceNames) ground
+// a parsed profile's sauceName: a sauce the app already knows (e.g. ready-made
+// "Marinara") is legitimate even when this particular sheet never spells it
+// out, so it must NOT get a "not found on the sheet" warning — while an unknown
+// paraphrase still snaps/flags as before.
+describe("known sauceNames ground profile sauceName", () => {
+  const workbookText =
+    "Brand\tFlavor\tSauce\nLowes\tPepperoni\tsee sauce spec\n";
+  const rawWithSauce = (sauceName: string) => ({
+    profiles: [
+      {
+        brand: "Lowes",
+        flavor: "Pepperoni",
+        sauceName,
+        applicators: [],
+        pepperonis: [],
+      },
+    ],
+    recipes: [],
+  });
+
+  it("does not warn for a known sauce name absent from the sheet", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithSauce("Marinara"),
+      input({ known: { sauceNames: ["Marinara"] }, workbookText }),
+    );
+    expect(out.profiles[0]?.sauceName).toBe("Marinara");
+    expect(out.warnings ?? []).toHaveLength(0);
+  });
+
+  it("still flags the same sauce name when it is not a known name", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithSauce("Marinara"),
+      input({ known: {}, workbookText }),
+    );
+    expect(out.profiles[0]?.sauceName).toBe("Marinara");
+    expect(
+      (out.warnings ?? []).map((w) => (typeof w === "string" ? w : w.message)).join(" "),
+    ).toContain("Marinara");
+  });
+
+  it("snaps an unknown paraphrase to the nearest known sauce name", () => {
+    const out = sanitizeParseSpecSheet(
+      rawWithSauce("Buffalo Wing Sauce"),
+      input({
+        known: { sauceNames: ["Hot Buffalo Sauce"] },
+        workbookText: "Brand\tFlavor\tSauce\nLowes\tPepperoni\tHot Buffalo Sauce\n",
+      }),
+    );
+    expect(out.profiles[0]?.sauceName).toBe("Hot Buffalo Sauce");
+  });
+
+  it("lists the known sauce names in the prompt", () => {
+    const { user } = buildParseSpecSheetPrompt(
+      input({ known: { sauceNames: ["Marinara", "BBQ Sauce"] } }),
+    );
+    expect(user).toContain("Sauce names (existing mixed or ready-made sauces): Marinara, BBQ Sauce");
+  });
+
+  it("counts sauceNames toward the MAX_KNOWN_LIST bound", () => {
+    const res = validateParseSpecSheetBody({
+      workbookText: "x",
+      known: { sauceNames: Array.from({ length: MAX_KNOWN_LIST + 1 }, (_, i) => `S${i}`) },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(400);
   });
 });

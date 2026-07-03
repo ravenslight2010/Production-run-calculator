@@ -32,6 +32,8 @@ export type SpecSheetKnown = {
   cheeseIngredients?: string[];
   doughIngredients?: string[];
   sauceIngredients?: string[];
+  /** Existing sauce/frontline recipe names (incl. ready-made sauces) to ground profile sauceName. */
+  sauceNames?: string[];
   dieTypes?: string[];
   /** Existing recipe names per kind — grounds paraphrased recipe names so a
    * near-match snaps to (or is flagged against) the existing recipe instead of
