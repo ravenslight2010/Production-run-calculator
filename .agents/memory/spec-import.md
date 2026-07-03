@@ -538,3 +538,18 @@ but a silent 0 reads as "the sheet said 0 oz" in the review preview. Any coerced
 numeric must push a structured groundingWarning keyed to the grounded brand+flavor so the
 review screens flag it. Warning headers in all 4 review/saved-sheet UIs say "items" (not
 "flavor names") because warnings now cover more than name corrections.
+
+## Mix routing at apply time
+The AI importer's kinds stay dough/sauce/cheese; pre-blended topping mixes
+arrive as `kind:"cheese"` and are routed to the MIX name category at apply
+time, not in the AI schema.
+- **Why:** cheese and mix share one preset map, ingredient pool, and the
+  applicator-slot profile tie — the ONLY difference is which name list (and
+  deletion-tombstone namespace) the name registers under; extending the AI
+  schema would touch the OpenAPI contract, lib, and both clients for no gain.
+- **How to apply:** a cheese-kind recipe routes to Mix when its name is
+  already in the user Mix list (ci) or contains the standalone word "mix"
+  without mentioning cheese (same split as the stray-mix recategorizer). Keep
+  the classifier pure/exported; the routing must cover BOTH the tombstone
+  clear and the name-list registration, or re-imports recreate cheese/mix
+  duplicates. Web-only: mobile has no mix/cheese name category lists.

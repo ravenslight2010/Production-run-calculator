@@ -2074,6 +2074,25 @@ function ingredientKeyForKind(kind: ParsedRecipe["kind"]): { key: string; defaul
 }
 
 /**
+ * Whether a spec-sheet CHEESE-kind recipe is really a MIX and should register
+ * its name under the Mixes category instead of Cheese. The AI importer only
+ * knows dough/sauce/cheese, so pre-blended topping mixes ("White Fajita Mix",
+ * "Garlic Chicken Mix") arrive as `kind: "cheese"` — routing happens here at
+ * apply time. A name is a mix when the user already keeps it in the Mix list,
+ * or when it contains the standalone word "mix" without mentioning cheese
+ * (the same split applyStrayMixRecategorizeIfNeeded uses). Everything else —
+ * ingredient rows, the shared cheese/mix preset map, and the applicator-slot
+ * profile tie — is identical for both categories, so only the NAME list (and
+ * its tombstone namespace) differs.
+ */
+export function specImportCheeseRecipeIsMix(name: string, userMixNamesLower: ReadonlySet<string>): boolean {
+  const t = name.trim().toLowerCase();
+  if (!t) return false;
+  if (userMixNamesLower.has(t)) return true;
+  return /\bmix\b/.test(t) && !/cheese/i.test(t);
+}
+
+/**
  * Apply a (already-canonicalized) parsed spec-sheet import to local storage.
  * Profiles and recipes overwrite existing entries of the same brand+flavor /
  * name and add new ones; option lists are additively merged so every new
@@ -2097,10 +2116,17 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     clearMergedAway(brand);
     clearMergedAway(flavor);
   }
+  // Cheese-kind recipes whose name is really a MIX register under the Mixes
+  // category instead (see specImportCheeseRecipeIsMix) — decide once up front
+  // so the tombstone-clear and the name-list registration below stay in step.
+  const userMixNamesLower = new Set(loadList(MIX_RECIPE_NAMES_KEY, []).map((n) => n.toLowerCase()));
+  const routesToMix = (r: ParsedRecipe): boolean =>
+    r.kind === "cheese" && specImportCheeseRecipeIsMix(r.name, userMixNamesLower);
+
   for (const r of parsed.recipes) {
     const name = r.name.trim();
     if (!name || r.rows.length === 0) continue;
-    clearDeleted(RECIPE_KIND_DELETE_NAMESPACE[r.kind], name);
+    clearDeleted(routesToMix(r) ? "mixRecipeNames" : RECIPE_KIND_DELETE_NAMESPACE[r.kind], name);
     clearMergedAway(name);
   }
 
@@ -2114,6 +2140,7 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   const newDoughNames: string[] = [];
   const newSauceNames: string[] = [];
   const newCheeseNames: string[] = [];
+  const newMixNames: string[] = [];
 
   for (const r of parsed.recipes) {
     const name = r.name.trim();
@@ -2128,8 +2155,10 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
       newSauceNames.push(name);
       newSauceIng.push(...rows.map(x => x.ingredient));
     } else {
+      // Mixes share the cheese preset map and ingredient pool; only the NAME
+      // list differs (Mix category vs Cheese category).
       cheesePresets[name] = rows;
-      newCheeseNames.push(name);
+      (routesToMix(r) ? newMixNames : newCheeseNames).push(name);
       newCheeseIng.push(...rows.map(x => x.ingredient));
     }
   }
@@ -2148,6 +2177,11 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   }
   if (newCheeseNames.length) {
     saveList(CHEESE_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(CHEESE_RECIPE_NAMES_KEY, []), newCheeseNames).sort((a, b) => a.localeCompare(b)));
+  }
+  if (newMixNames.length) {
+    saveList(MIX_RECIPE_NAMES_KEY, mergeListInsensitive(loadList(MIX_RECIPE_NAMES_KEY, []), newMixNames).sort((a, b) => a.localeCompare(b)));
+  }
+  if (newCheeseIng.length) {
     saveList(ingredientKeyForKind("cheese").key, mergeListInsensitive(loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS), newCheeseIng).sort((a, b) => a.localeCompare(b)));
   }
 
