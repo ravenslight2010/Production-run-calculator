@@ -1061,6 +1061,188 @@ describe("sanitizeParsedSpecImport — RECIPE brand grounding", () => {
   });
 });
 
+describe("sanitizeParsedSpecImport — RECIPE flavor grounding", () => {
+  const workbook =
+    "ALDO'S PIZZAS\tSPECS\n" +
+    "Flavor\tSauce oz\tCheese oz\n" +
+    "Cheese\t3\t4\n" +
+    "Pepperoni\t3\t4.5\n" +
+    "Buffalo Chicken\t2.5\t4\n" +
+    "SAUCE RECIPE\nTomato Paste\t50\nWater\t30\n";
+  const sauceRecipe = (extra: Record<string, unknown>) => ({
+    kind: "sauce",
+    name: "Buffalo Sauce",
+    rows: [{ ingredient: "Tomato Paste", lbs: 50 }],
+    ...extra,
+  });
+
+  it("snaps a paraphrased recipe flavor back to the flavor written on the sheet", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo's", flavor: "BBQ Chicken" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].flavor).toBe("Buffalo Chicken");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Aldo's", flavor: "Buffalo Chicken" });
+    expect(out.warnings![0].message).toContain(
+      'Corrected flavor "BBQ Chicken" to "Buffalo Chicken" (brand Aldo\'s)',
+    );
+  });
+
+  it("prefers a KNOWN flavor over a raw sheet cell when both could snap", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo's", flavor: "BBQ Chicken" })],
+      },
+      {},
+      { sourceText: workbook, knownFlavors: ["Buffalo Chicken", "Cheese", "Pepperoni"] },
+    );
+    expect(out.recipes[0].flavor).toBe("Buffalo Chicken");
+  });
+
+  it("keeps a recipe flavor that appears verbatim on the sheet (no false snap)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo's", flavor: "Buffalo Chicken" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].flavor).toBe("Buffalo Chicken");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("keeps a KNOWN recipe flavor even when it is absent from the source text", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo's", flavor: "Hawaiian" })],
+      },
+      {},
+      { sourceText: workbook, knownFlavors: ["Hawaiian"] },
+    );
+    expect(out.recipes[0].flavor).toBe("Hawaiian");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("flags (keeps + warns) an invented recipe flavor with no plausible match", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo's", flavor: "Mission Taco Mexican" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].flavor).toBe("Mission Taco Mexican");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Aldo's", flavor: "Mission Taco Mexican" });
+    expect(out.warnings![0].message).toContain(
+      'Flavor "Mission Taco Mexican" (brand Aldo\'s) was not found',
+    );
+  });
+
+  it("omits the brand parenthetical from the warning when the recipe has no brand", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ flavor: "Mission Taco Mexican" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "", flavor: "Mission Taco Mexican" });
+    expect(out.warnings![0].message).toBe(
+      'Flavor "Mission Taco Mexican" was not found on the sheet — please verify.',
+    );
+  });
+
+  it("does NOT false-flag catch-all flavors or the recipe's own kind", () => {
+    // "All Varieties" is a whole-brand scope word and "Dough"/"Sauce" are the
+    // recipe's own kind used as placeholders — none appear as flavors on the
+    // sheet, but they are not inventions and must pass silently.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          sauceRecipe({ brand: "Aldo's", flavor: "All Varieties" }),
+          sauceRecipe({ name: "Base Sauce", brand: "Aldo's", flavor: "Sauce" }),
+          {
+            kind: "dough",
+            name: "Thin Dough",
+            rows: [{ ingredient: "Flour", lbs: 50 }],
+            brand: "Aldo's",
+            flavor: "Dough",
+          },
+        ],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes.map((r) => r.flavor)).toEqual(["All Varieties", "Sauce", "Dough"]);
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("DOES ground a cheese recipe's 'Cheese' flavor (a real flavor, not catch-all)", () => {
+    // "Cheese" on a cheese recipe is a legitimate flavor name — it must go
+    // through grounding like any other; here it appears on the sheet, so no warn.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [
+          {
+            kind: "cheese",
+            name: "Cheese Blend",
+            rows: [{ ingredient: "Mozzarella", lbs: 50 }],
+            brand: "Aldo's",
+            flavor: "Cheese",
+          },
+        ],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.recipes[0].flavor).toBe("Cheese");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("leaves recipe flavors untouched when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [],
+      recipes: [sauceRecipe({ brand: "Aldo's", flavor: "Totally Invented Flavor" })],
+    });
+    expect(out.recipes[0].flavor).toBe("Totally Invented Flavor");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("keys the warning to the GROUNDED recipe brand (brand snaps first)", () => {
+    // "Aldo Bros" shares the "aldo" token with the "ALDO'S PIZZAS" header
+    // cell, so the brand snaps (trailer stripped) BEFORE the flavor warning is
+    // keyed — the warning must carry the final brand, not the raw one.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [],
+        recipes: [sauceRecipe({ brand: "Aldo Bros", flavor: "Mission Taco Mexican" })],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    const flavorWarn = (out.warnings ?? []).find((w) =>
+      w.message.includes('Flavor "Mission Taco Mexican"'),
+    );
+    expect(out.recipes[0].brand).toBe("ALDO'S");
+    expect(flavorWarn).toBeDefined();
+    expect(flavorWarn!.brand).toBe("ALDO'S");
+  });
+});
+
 describe("isCatchAllFlavor", () => {
   it("flags whole-brand scope words, case-insensitively, for any kind", () => {
     for (const f of ["All Varieties", "all", "N/A", "every variety", "", "  "]) {

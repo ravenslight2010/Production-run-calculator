@@ -1376,7 +1376,33 @@ export function sanitizeParsedSpecImport(
         groundingWarnings.push({ brand: g.brand, flavor: "", message });
       }
     }
-    const flavor = clampName(o.flavor, lim.maxNameChars);
+    let flavor = clampName(o.flavor, lim.maxNameChars);
+    // Grounding backstop for the RECIPE's own flavor, same snap-or-flag
+    // semantics as profile flavors: a paraphrased flavor here (e.g. "BBQ
+    // Chicken" for a sheet that says "Buffalo Chicken") silently scopes a
+    // dough/sauce/cheese recipe to a flavor that doesn't exist, so it never
+    // shows on the intended product. Catch-all flavors (a whole-brand scope
+    // word or the recipe's own kind) are placeholders, not inventions — skip
+    // grounding for those so they aren't false-flagged. Warnings key to the
+    // (already grounded) recipe brand + flavor.
+    if (flavor && profileCtx && !isCatchAllFlavor(flavor, kind)) {
+      const g = groundProfileFlavor(flavor, profileCtx);
+      if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
+        const corrected = clampName(g.flavor, lim.maxNameChars);
+        groundingWarnings.push({
+          brand: recipe.brand ?? "",
+          flavor: corrected,
+          message: `Corrected flavor "${flavor}" to "${g.flavor}"${recipe.brand ? ` (brand ${recipe.brand})` : ""}.`,
+        });
+        flavor = corrected;
+      } else if (g.kind === "ungrounded") {
+        groundingWarnings.push({
+          brand: recipe.brand ?? "",
+          flavor,
+          message: `Flavor "${flavor}"${recipe.brand ? ` (brand ${recipe.brand})` : ""} was not found on the sheet — please verify.`,
+        });
+      }
+    }
     if (flavor) recipe.flavor = flavor;
     const rawTargets = Array.isArray(o.targets) ? o.targets : [];
     if (rawTargets.length) {
