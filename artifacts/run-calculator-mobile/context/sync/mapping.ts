@@ -501,27 +501,25 @@ function deepEqual(a: unknown, b: unknown): boolean {
 // runToFormValues ignores the id, so this is deterministic. Used to detect the
 // empty-value-with-real-stamp corruption on receive (web parity with
 // DEFAULT_VALUES / isEmptyOverPopulated).
-// Computed lazily: this module and RunContext import each other, so reading
-// DEFAULT_SETTINGS/DEFAULT_PROGRESS at module-evaluation time hits the TDZ
-// (RunContext hasn't finished evaluating yet) and crashes the app at startup.
-let emptyFormValuesCache: WebFormValues | null = null;
-function getEmptyFormValues(): WebFormValues {
-  if (!emptyFormValuesCache) {
-    emptyFormValuesCache = runToFormValues({
-      id: "",
-      settings: DEFAULT_SETTINGS,
-      progress: DEFAULT_PROGRESS,
-      stoppages: [],
-      startedAt: undefined,
-      endedAt: undefined,
-      isRunning: false,
-    });
-  }
-  return emptyFormValuesCache;
-}
+// Computed LAZILY (not at module init): this module is part of a require cycle
+// with RunContext.tsx (RunContext -> sync/mapping -> RunContext), so touching
+// DEFAULT_SETTINGS here at module-evaluation time throws "Cannot access
+// 'DEFAULT_SETTINGS' before initialization" and blank-screens the whole app at
+// boot. First call happens long after both modules are initialized.
+let EMPTY_FORM_VALUES: WebFormValues | undefined;
 
 export function isEmptyFormValue(fv: WebFormValues | undefined): boolean {
-  return fv !== undefined && deepEqual(fv, getEmptyFormValues());
+  if (fv === undefined) return false;
+  EMPTY_FORM_VALUES ??= runToFormValues({
+    id: "",
+    settings: DEFAULT_SETTINGS,
+    progress: DEFAULT_PROGRESS,
+    stoppages: [],
+    startedAt: undefined,
+    endedAt: undefined,
+    isRunning: false,
+  });
+  return deepEqual(fv, EMPTY_FORM_VALUES);
 }
 
 // Translate an incoming payload into a patch for the mobile AppState. Master-data

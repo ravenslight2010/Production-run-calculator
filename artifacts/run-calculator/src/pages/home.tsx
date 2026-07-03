@@ -6006,6 +6006,7 @@ export default function Home() {
     const accepted = (caseUpdatePrompt ?? []).filter(o => caseUpdateAccepted[o.runId]);
     setCaseUpdatePrompt(null);
     if (accepted.length === 0) return;
+    const now = Date.now();
     for (const o of accepted) {
       if (o.runId === currentRunIdRef.current) {
         form.setValue("casesNeeded", o.to, { shouldDirty: true });
@@ -6014,7 +6015,15 @@ export default function Home() {
         const vals = loadRunValues(o.runId);
         saveRunValues(o.runId, { ...vals, casesNeeded: o.to });
       }
+      // Stamp the edit ourselves: this path bypasses the form-watch autosave
+      // (saveRunValues above makes the watcher's loadRunValues===v guard skip),
+      // and the server's per-run LWW merge only accepts a value whose
+      // runValuesUpdatedAt stamp is strictly newer than the stored one. Without
+      // this the accepted count lived only in localStorage and reverted to the
+      // old target on reload / on every peer.
+      markRunValuesUpdated(o.runId, now);
     }
+    lastLocalEditRef.current = now;
     schedulePush(dayStateRef.current, 0);
     toast({
       title: "Run targets updated",

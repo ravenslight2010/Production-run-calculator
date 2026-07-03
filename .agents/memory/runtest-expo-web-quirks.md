@@ -48,6 +48,28 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
   waste iterations creating a fresh run. `DELETE FROM daily_sync WHERE date='<today>'`
   gives a clean pending run with "Start Run" visible immediately.
 
+- **The /mobile/ preview needs Metro-shaped requests proxied through the WEB app's
+  Vite dev server.** The workspace router serves the Expo web page under `/mobile/`,
+  but that page requests its bundle/assets via root-absolute paths
+  (`/node_modules/...entry.bundle`, `/assets/?unstable_path=...`, `/symbolicate`)
+  which the router forwards to the WEB app (Vite), not Metro — Vite answers with SPA
+  index.html and the mobile preview renders blank. Fixed with a dev-only
+  `server.proxy` in `artifacts/run-calculator/vite.config.ts` forwarding those
+  patterns to the Expo dev server (localhost:20191). If /mobile/ goes blank again,
+  check this proxy first.
+
+- **At the `/mobile/` pathname expo-router matches NO route** — it renders the
+  "+not-found Oops!" screen. The "Go to home screen!" link does a client-side nav
+  into the real app, so test plans entering via the naked domain must click through
+  it (or navigate to a real route).
+
+- **Long multi-dialog flows do NOT fit the 10-iteration cap.** A schedule re-import
+  flow (menu → Schedule → import Excel → confirm → 2 sequential custom dialogs →
+  verify two runs) capped out 6 consecutive times even with token pre-seeding.
+  For flows this long, verify the mobile behavior at module level instead: load the
+  mobile util through the strip-imports harness (see web-test-harness.md) and drive
+  its dialog chain with a stubbed `showConfirm` (e.g. `mobileCaseUpdateChoices.test.ts`).
+
 - **Test-fixture cleanup (full set):** test user rows live in `users` plus dependents
   `user_roles` and `password_reset_requests` (no cascade — delete dependents first).
   Factory-wide rules in `production_rules`. Always also delete the test-created
