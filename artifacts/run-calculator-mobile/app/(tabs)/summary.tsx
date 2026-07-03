@@ -43,6 +43,7 @@ import {
   promptCaseUpdates,
   type CaseUpdateOffer,
 } from "@/utils/importCaseUpdates";
+import { useDevTestImport } from "@/utils/devTestImport";
 import { shareShiftReport } from "@/utils/shiftReport";
 
 type RunStatus = "finished" | "current" | "upcoming";
@@ -441,6 +442,16 @@ export default function SummaryScreen() {
     setImportOpen(false);
     setImportResult(null);
   }
+
+  // Dev-only browser test hook (shared with Schedule + Master Data — see
+  // utils/devTestImport.ts): commits a staged ImportCommit from localStorage
+  // "rc_test_import" (screen:"summary") through the SAME commitImport path.
+  useDevTestImport({
+    screen: "summary",
+    allRuns,
+    today: todayStr(),
+    commit: commitImport,
+  });
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;

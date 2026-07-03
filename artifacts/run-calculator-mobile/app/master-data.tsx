@@ -50,6 +50,7 @@ import {
   promptCaseUpdates,
   type CaseUpdateOffer,
 } from "@/utils/importCaseUpdates";
+import { useDevTestImport } from "@/utils/devTestImport";
 import {
   buildMergeMap,
   countMergeReferences,
@@ -1306,6 +1307,17 @@ export default function MasterDataScreen() {
       );
     }
   }
+
+  // Dev-only browser test hook (shared with Schedule + Summary — see
+  // utils/devTestImport.ts): commits a staged ImportCommit from localStorage
+  // "rc_test_import" (screen:"master-data") through the SAME commit path.
+  useDevTestImport({
+    screen: "master-data",
+    allRuns,
+    today: todayStr(),
+    commit: commitExcelImport,
+  });
+
   const mixNames = Object.keys(mixRecipePresets);
 
   // Confirm + roll back to just before this entry (it plus every newer change).

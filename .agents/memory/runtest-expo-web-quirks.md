@@ -97,17 +97,33 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
 - **Dev-only localStorage test hooks collapse long flows under the cap.** Two
   `__DEV__ && Platform.OS === "web"` hooks (stripped from production builds):
   `rc_test_route` (read by `+not-found.tsx`) deep-links straight to a route (e.g.
-  `/schedule`) from the not-found screen the `/mobile/` entry always lands on;
-  `rc_test_import` (read by `app/schedule.tsx`) commits a staged multi-day
-  ImportCommit through the REAL `commitImport` path — it deliberately WAITS until
-  every today-dated row's matching in-progress run has hydrated from sync (firing
-  earlier finds no matches and quietly imports plain scheduled runs instead of
-  popping the dialogs). Both keys are consumed one-shot. Full pre-seed script:
-  `.local/fixtures/setup-case-update-test.mjs` (sign-up → onboarding_seen → clear
-  daily_sync → PUT two in-progress runs; prints the exact localStorage values and
-  verify SQL). This made the re-import "Case count changed" accept-one/keep-other
-  flow pass browser-level in ~8 steps: navigate → set 3 keys → navigate → 2 dialog
-  clicks → DB verify (`runValues[<id>].casesNeeded`).
+  `/schedule`) from the not-found screen the `/mobile/` entry always lands on
+  (on the full Expo dev domain real routes resolve directly, so just goto the
+  route — the not-found hook never runs there); `rc_test_import` (shared hook
+  `utils/devTestImport.ts`, mounted by Schedule, Summary tab, AND Master Data)
+  commits a staged multi-day ImportCommit through each screen's REAL commit
+  path — the staged payload's `screen` field ("schedule" default | "summary" |
+  "master-data") selects which screen fires, and the hook deliberately WAITS
+  until every today-dated row's matching in-progress run has hydrated from sync
+  (firing earlier finds no matches and quietly imports plain scheduled runs
+  instead of popping the dialogs). Both keys are consumed one-shot. Full
+  pre-seed script: `.local/fixtures/setup-case-update-test.mjs [screen]`
+  (sign-up → onboarding_seen → clear daily_sync → PUT two in-progress runs;
+  prints the exact localStorage values, verify SQL, and cleanup SQL). All three
+  entry points' re-import "Case count changed" accept-one/keep-other flow pass
+  browser-level this way (Summary + Master Data verified end-to-end, DB shows
+  accepted run updated and kept run untouched).
+
+- **Scripted-Playwright runs don't survive between bash tool calls — use a
+  throwaway console workflow.** Backgrounded (`nohup ... &`) browser scripts get
+  killed when the shell returns, and the whole seed+browse flow rarely fits the
+  120s bash cap on the 12MB dev bundle. What works: warm the bundle once with
+  curl (fetch the entry.bundle URL the page references), then wrap the test in a
+  temporary workflow (`configureWorkflow` outputType console, command tees to a
+  log, trailing `sleep` keeps it alive) and poll the log file. Remove the
+  workflow and uninstall the nix chromium dep when done. Also: `pkill -f
+  chromium` matches your own shell's command string and kills it — grep/kill by
+  exact process instead.
 
 - **Test-fixture cleanup (full set):** test user rows live in `users` plus dependents
   `user_roles` and `password_reset_requests` (no cascade — delete dependents first).
