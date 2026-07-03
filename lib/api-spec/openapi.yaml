@@ -53,14 +53,17 @@ paths:
       tags: [auth]
       summary: Create a staff account and start a session
       description: >-
-        Creates a new username + password account. The first account ever
-        created becomes a manager; all later accounts default to operator.
+        Creates a new username + password account. Requires a facility access
+        code (configured server-side out of band and shared only with
+        legitimate staff) — sign-up is otherwise closed to the public
+        internet. The very first account ever created becomes a manager; all
+        later accounts default to operator.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AuthCredentials"
+              $ref: "#/components/schemas/SignUpCredentials"
       responses:
         "201":
           description: Account created and signed in
@@ -70,6 +73,8 @@ paths:
                 $ref: "#/components/schemas/AuthResponse"
         "400":
           description: Invalid input
+        "403":
+          description: Missing or invalid access code
         "409":
           description: Username already taken
 
@@ -3734,6 +3739,21 @@ components:
           type: string
           minLength: 6
           maxLength: 200
+
+    SignUpCredentials:
+      allOf:
+        - $ref: "#/components/schemas/AuthCredentials"
+        - type: object
+          required:
+            - accessCode
+          properties:
+            accessCode:
+              type: string
+              minLength: 1
+              maxLength: 200
+              description: >-
+                Facility access code configured server-side (STAFF_SIGNUP_CODE)
+                and shared out of band with legitimate new staff.
 
     AuthResponse:
       type: object

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, rolesTable, userRolesTable, usersTable } from "@workspace/db";
 import { updateUserPassword } from "./users";
 import { revokeUser } from "./userValidity";
@@ -199,6 +199,35 @@ async function manageStaffHolders(): Promise<string[]> {
   return all.filter((id) => nonSandboxIds.has(id));
 }
 
+// Arbitrary fixed key for a Postgres transaction-scoped advisory lock guarding
+// the manager-bootstrap decision (see resolveBootstrapRole below). Any two
+// distinct 32-bit ints work as a pg_advisory_xact_lock(a, b) pair; the values
+// carry no meaning beyond being a stable, collision-free constant.
+const BOOTSTRAP_LOCK_KEY: [number, number] = [0x5354_4646, 0x424f_4f54]; // "STFF" "BOOT"
+
+// Decide + assign a user's role inside one Postgres-transaction-scoped
+// advisory lock, so the "is anyone already a manager?" read and the role
+// INSERT are atomic across concurrent requests. Without this lock, two
+// sign-ups racing on a fresh database can both read zero manage-staff holders
+// and both be granted "manager" — a takeover race an attacker can trigger
+// deliberately by firing concurrent sign-ups at a brand-new deployment.
+// pg_advisory_xact_lock blocks other callers until this transaction commits
+// (releasing the lock), so the read here always sees any prior winner's
+// committed insert before deciding.
+async function resolveBootstrapRole(userId: string): Promise<Role> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(${BOOTSTRAP_LOCK_KEY[0]}, ${BOOTSTRAP_LOCK_KEY[1]})`,
+    );
+    const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
+    await tx
+      .insert(userRolesTable)
+      .values({ userId, role })
+      .onConflictDoNothing({ target: userRolesTable.userId });
+    return role;
+  });
+}
+
 // Resolve the current user's role, creating their row on first sight.
 //
 // Bootstrap rule: the very first user (when no one holds manage-staff yet)
@@ -212,11 +241,7 @@ export async function getOrCreateUserRole(userId: string): Promise<{ role: Role 
     .where(eq(userRolesTable.userId, userId));
   if (existing) return { role: existing.role };
 
-  const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
-  await db
-    .insert(userRolesTable)
-    .values({ userId, role })
-    .onConflictDoNothing({ target: userRolesTable.userId });
+  const role = await resolveBootstrapRole(userId);
 
   const [row] = await db
     .select({ role: userRolesTable.role })
@@ -226,14 +251,10 @@ export async function getOrCreateUserRole(userId: string): Promise<{ role: Role 
 }
 
 // Assign a role at account creation. First account (no admin yet) becomes the
-// manager; everyone after defaults to operator.
+// manager; everyone after defaults to operator. See resolveBootstrapRole for
+// the race-safety guarantee.
 export async function createRoleForNewUser(userId: string): Promise<Role> {
-  const role: Role = (await manageStaffHolders()).length === 0 ? "manager" : "operator";
-  await db
-    .insert(userRolesTable)
-    .values({ userId, role })
-    .onConflictDoNothing({ target: userRolesTable.userId });
-  return role;
+  return resolveBootstrapRole(userId);
 }
 
 export async function getStaffMember(userId: string): Promise<StaffMember> {

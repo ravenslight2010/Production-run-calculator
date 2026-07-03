@@ -78,6 +78,7 @@ export default function SignUpScreen() {
   const [username, setUsername] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
+  const [accessCode, setAccessCode] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [showConfirm, setShowConfirm] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -101,10 +102,12 @@ export default function SignUpScreen() {
     }
     setBusy(true);
     try {
-      await signUp(username.trim(), password);
+      await signUp(username.trim(), password, accessCode.trim());
       router.replace("/(tabs)" as Href);
     } catch (err) {
-      if (err instanceof InventoryApiError && err.status === 409) {
+      if (err instanceof InventoryApiError && err.status === 403) {
+        setError("Invalid access code. Check with your manager for the correct code.");
+      } else if (err instanceof InventoryApiError && err.status === 409) {
         setError("That username is already taken.");
       } else if (err instanceof InventoryApiError && err.status === 400) {
         setError("Username must be 3–64 characters and password at least 6.");
@@ -320,15 +323,27 @@ export default function SignUpScreen() {
             </Text>
           </View>
 
+          <Text style={styles.label}>Facility access code</Text>
+          <TextInput
+            style={styles.input}
+            autoCapitalize="none"
+            autoCorrect={false}
+            value={accessCode}
+            placeholder="Ask your manager for this"
+            placeholderTextColor={colors.mutedForeground}
+            onChangeText={setAccessCode}
+          />
+
           {error && <Text style={styles.error}>{error}</Text>}
 
           <Pressable
             style={[
               styles.primaryBtn,
-              (!username || !password || !confirm || busy) && styles.btnDisabled,
+              (!username || !password || !confirm || !accessCode || busy) &&
+                styles.btnDisabled,
             ]}
             onPress={handleSubmit}
-            disabled={!username || !password || !confirm || busy}
+            disabled={!username || !password || !confirm || !accessCode || busy}
           >
             {busy ? (
               <ActivityIndicator color={colors.primaryForeground} />

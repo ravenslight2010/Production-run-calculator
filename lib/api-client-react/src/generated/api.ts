@@ -133,6 +133,7 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  SignUpCredentials,
   SpecImportAliasList,
   SpecReconcileInput,
   SpecReconcileResult,
@@ -253,10 +254,10 @@ export const getSignUpUrl = () => {
 }
 
 /**
- * Creates a new username + password account. The first account ever created becomes a manager; all later accounts default to operator.
+ * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.
  * @summary Create a staff account and start a session
  */
-export const signUp = async (authCredentials: AuthCredentials, options?: RequestInit): Promise<AuthResponse> => {
+export const signUp = async (signUpCredentials: SignUpCredentials, options?: RequestInit): Promise<AuthResponse> => {
 
   return customFetch<AuthResponse>(getSignUpUrl(),
   {
@@ -264,7 +265,7 @@ export const signUp = async (authCredentials: AuthCredentials, options?: Request
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
     body: JSON.stringify(
-      authCredentials,)
+      signUpCredentials,)
   }
 );}
 
@@ -272,8 +273,8 @@ export const signUp = async (authCredentials: AuthCredentials, options?: Request
 
 
 export const getSignUpMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<SignUpCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<SignUpCredentials>}, TContext> => {
 
 const mutationKey = ['signUp'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -285,7 +286,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signUp>>, {data: BodyType<AuthCredentials>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signUp>>, {data: BodyType<SignUpCredentials>}> = (props) => {
           const {data} = props ?? {};
 
           return  signUp(data,requestOptions)
@@ -299,18 +300,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type SignUpMutationResult = NonNullable<Awaited<ReturnType<typeof signUp>>>
-    export type SignUpMutationBody = BodyType<AuthCredentials>
+    export type SignUpMutationBody = BodyType<SignUpCredentials>
     export type SignUpMutationError = ErrorType<void>
 
     /**
  * @summary Create a staff account and start a session
  */
 export const useSignUp = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<AuthCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signUp>>, TError,{data: BodyType<SignUpCredentials>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof signUp>>,
         TError,
-        {data: BodyType<AuthCredentials>},
+        {data: BodyType<SignUpCredentials>},
         TContext
       > => {
       return useMutation(getSignUpMutationOptions(options));

@@ -797,10 +797,14 @@ export const markTourCompletedRequest = () =>
 // session cookie, which same-origin fetches send automatically, so we ignore the
 // token in the response body and rely on the cookie for subsequent requests.
 export type AuthResult = { token: string; user: StaffMember };
-export const signUpRequest = (username: string, password: string) =>
+export const signUpRequest = (
+  username: string,
+  password: string,
+  accessCode: string,
+) =>
   api<AuthResult>("/auth/sign-up", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, accessCode }),
   });
 export const signInRequest = (username: string, password: string) =>
   api<AuthResult>("/auth/sign-in", {

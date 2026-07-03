@@ -100,6 +100,8 @@ function messageForError(err: unknown, mode: Mode): string {
   if (err instanceof InventoryApiError) {
     if (mode === "sign-in" && err.status === 401)
       return "Incorrect username or password.";
+    if (mode === "sign-up" && err.status === 403)
+      return "Invalid access code. Check with your manager for the correct code.";
     if (mode === "sign-up" && err.status === 409)
       return "That username is already taken.";
     if (err.status === 400)
@@ -190,6 +192,7 @@ function AuthForm({ mode }: { mode: Mode }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [accessCode, setAccessCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -227,7 +230,7 @@ function AuthForm({ mode }: { mode: Mode }) {
     setSubmitting(true);
     try {
       if (isSignUp) {
-        await signUp(username.trim(), password);
+        await signUp(username.trim(), password, accessCode.trim());
       } else {
         await signIn(username.trim(), password);
       }
@@ -322,6 +325,28 @@ function AuthForm({ mode }: { mode: Mode }) {
                   onChange={(e) => setConfirm(e.target.value)}
                 />
                 <ConfirmPasswordHint password={password} confirm={confirm} />
+              </div>
+            )}
+
+            {isSignUp && (
+              <div className="space-y-1.5">
+                <Label htmlFor="accessCode" className="text-foreground">
+                  Facility access code
+                </Label>
+                <Input
+                  id="accessCode"
+                  name="accessCode"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  required
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  className="text-foreground"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ask your manager for the code new staff use to sign up.
+                </p>
               </div>
             )}
 

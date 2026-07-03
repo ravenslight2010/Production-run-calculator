@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Router, type IRouter } from "express";
 import {
   ChangePasswordBody,
@@ -24,8 +25,46 @@ import {
 import { createResetRequest, resetPasswordWithCode } from "../lib/passwordResets";
 import { createRoleForNewUser, getStaffMember } from "../lib/roles";
 import { requireAuth } from "../middlewares/requireAuth";
+import { rateLimit } from "../middlewares/rateLimit";
+import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 
 const router: IRouter = Router();
+
+// These endpoints are all public (reachable before requireAuth / with no
+// account yet), so they are the internet's only foothold for brute force,
+// credential stuffing, or spam against this server. Fixed-window per-IP caps,
+// generous enough not to bother a real user retyping a password a few times.
+// Postgres-backed in production so the cap holds across horizontally scaled
+// instances; falls back to in-memory in dev/test (single process, no DB
+// dependency, and keeps the test suite's many sequential calls from tripping
+// the limiter).
+const AUTH_RATE_WINDOW_MS = 60_000;
+const AUTH_RATE_MAX = 20;
+const authRateStore =
+  process.env.NODE_ENV === "production"
+    ? new PostgresRateLimitStore(AUTH_RATE_WINDOW_MS)
+    : undefined;
+const authRateLimit = rateLimit({
+  windowMs: AUTH_RATE_WINDOW_MS,
+  max: AUTH_RATE_MAX,
+  store: authRateStore,
+});
+
+// Sign-up is gated behind a facility access code so the endpoint isn't fully
+// public self-registration — anyone reaching it can otherwise mint an account
+// with access to shared internal factory data. The code is a plain shared
+// secret (like the read-only supervisor PIN elsewhere in the app), configured
+// out of band via STAFF_SIGNUP_CODE and handed to legitimate new hires. If the
+// operator hasn't configured one, sign-up is closed entirely rather than
+// silently left open.
+function accessCodeMatches(supplied: string): boolean {
+  const expected = process.env.STAFF_SIGNUP_CODE;
+  if (!expected) return false;
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 function setSessionCookie(
   res: import("express").Response,
@@ -40,15 +79,24 @@ function setSessionCookie(
   });
 }
 
-// Create a staff account and start a session. The first account ever created
-// becomes a manager (bootstrap); every later account defaults to operator.
-router.post("/auth/sign-up", async (req, res): Promise<void> => {
+// Create a staff account and start a session. Requires a valid facility
+// access code (STAFF_SIGNUP_CODE) — see accessCodeMatches above. The very
+// first account ever created becomes a manager (bootstrap); every later
+// account defaults to operator. createRoleForNewUser resolves the bootstrap
+// role and inserts inside one Postgres advisory-locked transaction so two
+// concurrent sign-ups can't both observe "no manager yet" and both become
+// manager.
+router.post("/auth/sign-up", authRateLimit, async (req, res): Promise<void> => {
   const parsed = SignUpBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { username, password } = parsed.data;
+  const { username, password, accessCode } = parsed.data;
+  if (!accessCodeMatches(accessCode)) {
+    res.status(403).json({ error: "Invalid or missing access code." });
+    return;
+  }
   const created = await createUser(username, password);
   if (!created.ok) {
     res.status(409).json({ error: "That username is already taken." });
@@ -62,7 +110,7 @@ router.post("/auth/sign-up", async (req, res): Promise<void> => {
 
 // Read-only username availability check for the live sign-up hint. Public, the
 // same as sign-up. Case-insensitive, matching how accounts are actually created.
-router.get("/auth/username-available", async (req, res): Promise<void> => {
+router.get("/auth/username-available", authRateLimit, async (req, res): Promise<void> => {
   // The generated query schema coerces a missing param to the string
   // "undefined", so guard presence explicitly before validating length.
   const raw = req.query.username;
@@ -80,7 +128,7 @@ router.get("/auth/username-available", async (req, res): Promise<void> => {
 });
 
 // Sign in with username + password.
-router.post("/auth/sign-in", async (req, res): Promise<void> => {
+router.post("/auth/sign-in", authRateLimit, async (req, res): Promise<void> => {
   const parsed = SignInBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -138,7 +186,7 @@ router.post(
 // Request a manager-approved password reset for a forgotten password. Public —
 // the user is signed out. Always responds 200 with { ok: true } whether or not
 // the account exists, so the endpoint can't be used to discover usernames.
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", authRateLimit, async (req, res): Promise<void> => {
   const parsed = ForgotPasswordBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -151,7 +199,7 @@ router.post("/auth/forgot-password", async (req, res): Promise<void> => {
 // Complete a reset with the single-use code a manager issued. Public. Verifies
 // the code belongs to an approved, unused, unexpired request for the named user
 // before replacing the password; a bad/expired/used code yields a 401.
-router.post("/auth/reset-password", async (req, res): Promise<void> => {
+router.post("/auth/reset-password", authRateLimit, async (req, res): Promise<void> => {
   const parsed = ResetPasswordBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

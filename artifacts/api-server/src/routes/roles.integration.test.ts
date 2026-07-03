@@ -926,6 +926,7 @@ describe("first-login onboarding overview", () => {
     const res = await req(null, "POST", "/api/auth/sign-up", {
       username: "newbie",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -946,6 +947,7 @@ describe("first-login onboarding overview", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "newbie2",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -959,6 +961,7 @@ describe("first-login onboarding overview", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "newbie3",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -984,6 +987,7 @@ describe("first-login onboarding overview", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "newbie4",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -1012,6 +1016,7 @@ describe("guided tour completion", () => {
     const res = await req(null, "POST", "/api/auth/sign-up", {
       username: "tour-newbie",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -1031,6 +1036,7 @@ describe("guided tour completion", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "tour-newbie2",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -1056,6 +1062,7 @@ describe("guided tour completion", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "tour-newbie3",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -1077,6 +1084,7 @@ describe("guided tour completion", () => {
     const signUp = await req(null, "POST", "/api/auth/sign-up", {
       username: "tour-newbie4",
       password: "first-password",
+      accessCode: process.env.STAFF_SIGNUP_CODE,
     });
     const { user } = (await signUp.json()) as { user: { userId: string } };
 
@@ -1088,6 +1096,89 @@ describe("guided tour completion", () => {
     };
     expect(meBody.tourCompleted).toBe(true);
     expect(meBody.onboardingSeen).toBe(false);
+  });
+});
+
+describe("sign-up access code gate", () => {
+  // Public self-registration must require the shared facility access code
+  // (STAFF_SIGNUP_CODE) or it exposes internal factory data to anyone who
+  // finds the endpoint. These tests exercise the enforcement directly rather
+  // than relying on the other describe blocks' happy-path usage of the code.
+  const ORIGINAL_CODE = process.env.STAFF_SIGNUP_CODE;
+
+  afterAll(() => {
+    process.env.STAFF_SIGNUP_CODE = ORIGINAL_CODE;
+  });
+
+  it("rejects sign-up with a missing access code (→ 400, schema requires it)", async () => {
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "no-code-user",
+      password: "first-password",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects sign-up with a wrong access code (→ 403)", async () => {
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "wrong-code-user",
+      password: "first-password",
+      accessCode: "definitely-not-the-code",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("accepts sign-up with the correct access code (→ 201)", async () => {
+    const res = await req(null, "POST", "/api/auth/sign-up", {
+      username: "right-code-user",
+      password: "first-password",
+      accessCode: ORIGINAL_CODE,
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("fails closed (rejects every non-empty code) when STAFF_SIGNUP_CODE is unset", async () => {
+    delete process.env.STAFF_SIGNUP_CODE;
+    try {
+      const withSomeCode = await req(null, "POST", "/api/auth/sign-up", {
+        username: "unset-code-user",
+        password: "first-password",
+        accessCode: "anything",
+      });
+      expect(withSomeCode.status).toBe(403);
+
+      // Even the *previously correct* code must not work once the operator
+      // has unconfigured the secret.
+      const withOldCode = await req(null, "POST", "/api/auth/sign-up", {
+        username: "unset-code-user-2",
+        password: "first-password",
+        accessCode: ORIGINAL_CODE,
+      });
+      expect(withOldCode.status).toBe(403);
+    } finally {
+      process.env.STAFF_SIGNUP_CODE = ORIGINAL_CODE;
+    }
+  });
+});
+
+describe("public auth endpoints are rate-limited", () => {
+  // Public, unauthenticated endpoints are the only foothold for brute force /
+  // credential stuffing, so they carry a shared per-IP cap (see authRateLimit
+  // in routes/auth.ts). This drives the cap past its limit on the cheapest
+  // public route (a read-only availability check) and confirms it 429s.
+  it("returns 429 once the per-IP auth rate limit is exceeded", async () => {
+    let lastStatus = 0;
+    // The cap is generous (20/60s) so real users retyping a password never
+    // trip it; comfortably exceed it here to observe the 429.
+    for (let i = 0; i < 25; i++) {
+      const res = await req(
+        null,
+        "GET",
+        `/api/auth/username-available?username=rate-limit-probe-${i}`,
+      );
+      lastStatus = res.status;
+      if (lastStatus === 429) break;
+    }
+    expect(lastStatus).toBe(429);
   });
 });
 

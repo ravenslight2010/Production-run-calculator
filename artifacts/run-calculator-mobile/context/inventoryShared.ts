@@ -448,10 +448,14 @@ export const markTourCompletedRequest = () =>
 // token is returned in the response body; the auth context persists it in
 // expo-secure-store and replays it as a bearer header via setAuthTokenGetter.
 export type AuthResult = { token: string; user: StaffMember };
-export const signUpRequest = (username: string, password: string) =>
+export const signUpRequest = (
+  username: string,
+  password: string,
+  accessCode: string,
+) =>
   api<AuthResult>("/auth/sign-up", {
     method: "POST",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, accessCode }),
   });
 export const signInRequest = (username: string, password: string) =>
   api<AuthResult>("/auth/sign-in", {

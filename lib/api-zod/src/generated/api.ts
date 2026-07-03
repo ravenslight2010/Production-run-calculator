@@ -18,21 +18,25 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
- * Creates a new username + password account. The first account ever created becomes a manager; all later accounts default to operator.
+ * Creates a new username + password account. Requires a facility access code (configured server-side out of band and shared only with legitimate staff) — sign-up is otherwise closed to the public internet. The very first account ever created becomes a manager; all later accounts default to operator.
  * @summary Create a staff account and start a session
  */
-export const signUpBodyUsernameMin = 3;
-export const signUpBodyUsernameMax = 64;
+export const signUpBodyOneUsernameMin = 3;
+export const signUpBodyOneUsernameMax = 64;
 
-export const signUpBodyPasswordMin = 6;
-export const signUpBodyPasswordMax = 200;
+export const signUpBodyOnePasswordMin = 6;
+export const signUpBodyOnePasswordMax = 200;
+
+export const signUpBodyTwoAccessCodeMax = 200;
 
 
 
 export const SignUpBody = zod.object({
-  "username": zod.string().min(signUpBodyUsernameMin).max(signUpBodyUsernameMax),
-  "password": zod.string().min(signUpBodyPasswordMin).max(signUpBodyPasswordMax)
-})
+  "username": zod.string().min(signUpBodyOneUsernameMin).max(signUpBodyOneUsernameMax),
+  "password": zod.string().min(signUpBodyOnePasswordMin).max(signUpBodyOnePasswordMax)
+}).and(zod.object({
+  "accessCode": zod.string().min(1).max(signUpBodyTwoAccessCodeMax).describe('Facility access code configured server-side (STAFF_SIGNUP_CODE) and shared out of band with legitimate new staff.')
+}))
 
 
 /**

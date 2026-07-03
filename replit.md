@@ -37,6 +37,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - **Pure logic lives in `lib/*`, not in the apps.** Any non-trivial formula or decision belongs in a shared lib so web and mobile can't drift; the apps keep only platform glue (storage, UI). This is how strict web+mobile parity is kept enforceable.
 - **Live day-state sync via `/api/sync`** with additive, non-clobber union merges (echo / lost-update guards). Merges need a synced `mergedAway` tombstone to survive the additive union. Some master-data (production rules, denied merges, change history) is intentionally NOT in sync.
 - **Auth is self-contained username+password** (Clerk removed): web uses an httpOnly cookie, mobile threads a bearer token; `requireAuth` gates all `/api` except `/healthz` and `/auth/*`. First registered user becomes a manager. Roles are DB rows resolved per-request via `requireCapability`.
+- **Sign-up is gated by a facility access code** (`STAFF_SIGNUP_CODE` env var, timing-safe compare, fails closed if unset) — public self-registration otherwise exposes internal factory data. Public auth endpoints are also rate-limited. See `.agents/memory/signup-bootstrap-hardening.md`.
 - **AI features never edit code or auto-write data.** They are advisory/fail-safe: a "fix" is an explanation, suggestions require per-field user confirmation through existing write paths, and AI output is canonicalized/sanitized server-side before use.
 
 ## Product

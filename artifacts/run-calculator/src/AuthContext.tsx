@@ -24,7 +24,11 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   isLoading: boolean;
   signIn: (username: string, password: string) => Promise<void>;
-  signUp: (username: string, password: string) => Promise<void>;
+  signUp: (
+    username: string,
+    password: string,
+    accessCode: string,
+  ) => Promise<void>;
   // Shortcut that signs in as the seeded sandbox account ("test"/"test"), which
   // operates in the isolated sandbox data scope.
   signInAsTest: () => Promise<void>;
@@ -98,8 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signUp = useCallback(
-    async (username: string, password: string) => {
-      const { user } = await signUpRequest(username, password);
+    async (username: string, password: string, accessCode: string) => {
+      const { user } = await signUpRequest(username, password, accessCode);
       resetCacheTo(user);
     },
     [resetCacheTo],

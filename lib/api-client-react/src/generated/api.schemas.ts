@@ -580,6 +580,15 @@ export interface AuthCredentials {
   password: string;
 }
 
+export type SignUpCredentials = AuthCredentials & {
+  /**
+     * Facility access code configured server-side (STAFF_SIGNUP_CODE) and shared out of band with legitimate new staff.
+     * @minLength 1
+     * @maxLength 200
+     */
+  accessCode: string;
+};
+
 /**
  * A discrete permission. A role grants a set of capabilities, and a user holds the union of their role's capabilities.
  */
