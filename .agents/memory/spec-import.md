@@ -477,3 +477,15 @@ Any change to one app's order/logic must land in the other verbatim.
   + match-import sibling guard. In tests without `knownBrands`, a real brand
   absent from the sheet gets flagged — pass the brand in `sourceText` or
   `knownBrands` when writing grounding tests.
+
+## Structured grounding warnings (not in `note`)
+- Flavor-grounding corrections/flags are STRUCTURED `warnings` ({brand, flavor,
+  message}) on ParsedSpecImport, keyed to the FINAL post-correction profile
+  names so review UIs attach them per-row; `note` stays model-text only.
+- **Why:** folding warnings into `note` made a mere correction look like a
+  failed pass to the chunk-retry rule (any note ⇒ retry ⇒ re-billing) and
+  buried them in free text on the review screen.
+- **How to apply:** every parse-carrying path (merge, tombstone partition,
+  applyNameMatches renames, client canonicalize) must carry + rename warnings
+  or row-matching silently breaks after canonicalization.
+>>>>>>> f81de09 (Show flavor-correction warnings prominently on spec-import review (web + mobile))

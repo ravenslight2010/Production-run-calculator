@@ -581,7 +581,15 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
       "Pepperoni",
       "Buffalo Chicken",
     ]);
-    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+    // Correction surfaces as a STRUCTURED warning keyed to the final profile
+    // names (so review UIs can attach it to the row) — not folded into `note`.
+    expect(out.note).toBeUndefined();
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0].brand).toBe("Aldo's");
+    expect(out.warnings![0].flavor).toBe("Buffalo Chicken");
+    expect(out.warnings![0].message).toContain(
+      'Corrected flavor "BBQ Chicken" to "Buffalo Chicken"',
+    );
   });
 
   it("prefers a KNOWN flavor over a raw sheet cell when both could snap", () => {
@@ -607,6 +615,7 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
     );
     expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
     expect(out.note).toBeUndefined();
+    expect(out.warnings).toBeUndefined();
   });
 
   it("keeps a KNOWN flavor even when it is absent from the source text", () => {
@@ -620,6 +629,7 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
     );
     expect(out.profiles[0].flavor).toBe("Hawaiian");
     expect(out.note).toBeUndefined();
+    expect(out.warnings).toBeUndefined();
   });
 
   it("is case/punctuation-insensitive when checking the sheet for the flavor", () => {
@@ -633,6 +643,7 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
     );
     expect(out.profiles[0].flavor).toBe("Buffalo-Chicken");
     expect(out.note).toBeUndefined();
+    expect(out.warnings).toBeUndefined();
   });
 
   it("flags (keeps + notes) an invented flavor with no plausible sheet match", () => {
@@ -647,7 +658,11 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
     // Never dropped (no data loss), but never silently accepted either.
     expect(out.profiles).toHaveLength(1);
     expect(out.profiles[0].flavor).toBe("Mission Taco Mexican");
-    expect(out.note).toContain('Flavor "Mission Taco Mexican" (brand Aldo\'s) was not found');
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Aldo's", flavor: "Mission Taco Mexican" });
+    expect(out.warnings![0].message).toContain(
+      'Flavor "Mission Taco Mexican" (brand Aldo\'s) was not found',
+    );
   });
 
   it("does not treat cross-cell adjacency as grounding (per-cell phrase check)", () => {
@@ -663,7 +678,7 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
       { sourceText: "Toppings sheet\nBBQ\tChicken\t2\n" },
     );
     expect(out.profiles).toHaveLength(1);
-    expect(out.note).toBeTruthy(); // corrected or flagged — never silent
+    expect(out.warnings?.length).toBeTruthy(); // corrected or flagged — never silent
   });
 
   it("leaves profiles untouched when no grounding is supplied (back-compat)", () => {
@@ -673,9 +688,10 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
     });
     expect(out.profiles[0].flavor).toBe("Totally Invented Flavor");
     expect(out.note).toBeUndefined();
+    expect(out.warnings).toBeUndefined();
   });
 
-  it("appends the flavor warnings after an existing model note", () => {
+  it("keeps the model note intact and puts flavor warnings in `warnings`", () => {
     const out = sanitizeParsedSpecImport(
       {
         profiles: [{ brand: "Aldo's", flavor: "BBQ Chicken" }],
@@ -685,8 +701,11 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
       {},
       { sourceText: workbook },
     );
-    expect(out.note).toContain("Could not parse the second sheet.");
-    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+    expect(out.note).toBe("Could not parse the second sheet.");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0].message).toContain(
+      'Corrected flavor "BBQ Chicken" to "Buffalo Chicken"',
+    );
   });
 });
 
@@ -709,7 +728,15 @@ describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
       { sourceText: workbook },
     );
     expect(out.profiles[0].brand).toBe("BASHA'S ULTRA THIN CRUST");
-    expect(out.note).toContain(
+    // Correction surfaces as a STRUCTURED warning keyed to the final profile
+    // names — not folded into `note`.
+    expect(out.note).toBeUndefined();
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({
+      brand: "BASHA'S ULTRA THIN CRUST",
+      flavor: "Cheese",
+    });
+    expect(out.warnings![0].message).toContain(
       'Corrected brand "Basha\'s Ultra Slim Crust" to "BASHA\'S ULTRA THIN CRUST"',
     );
   });
@@ -793,7 +820,9 @@ describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
     // Never dropped (no data loss), but never silently accepted either.
     expect(out.profiles).toHaveLength(1);
     expect(out.profiles[0].brand).toBe("Mission Foods");
-    expect(out.note).toContain('Brand "Mission Foods" was not found');
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Mission Foods", flavor: "Cheese" });
+    expect(out.warnings![0].message).toContain('Brand "Mission Foods" was not found');
   });
 
   it("is case/punctuation-insensitive when checking the sheet for the brand", () => {
@@ -833,8 +862,14 @@ describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
     );
     expect(out.profiles[0].brand).toBe("Aldo's");
     expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
-    expect(out.note).toContain('Corrected brand "Aldo Premium" to "Aldo\'s"');
-    expect(out.note).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+    // BOTH warnings are keyed to the FINAL brand+flavor (post-snap on both
+    // axes) so they attach to the same review row.
+    const msgs = (out.warnings ?? []).map((w) => w.message).join("\n");
+    expect(msgs).toContain('Corrected brand "Aldo Premium" to "Aldo\'s"');
+    expect(msgs).toContain('Corrected flavor "BBQ Chicken" to "Buffalo Chicken"');
+    for (const w of out.warnings ?? []) {
+      expect(w).toMatchObject({ brand: "Aldo's", flavor: "Buffalo Chicken" });
+    }
   });
 });
 

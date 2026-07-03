@@ -2478,10 +2478,21 @@ export interface SpecImportRecipe {
   review?: ReviewVerdict;
 }
 
+export interface SpecImportWarning {
+  /** Brand of the profile the warning concerns */
+  brand: string;
+  /** Final (post-correction) flavor of the profile the warning concerns */
+  flavor: string;
+  /** Human-readable explanation of the correction/flag */
+  message: string;
+}
+
 export interface ParseSpecSheetResult {
   profiles: SpecImportProfile[];
   recipes: SpecImportRecipe[];
   note?: string;
+  /** Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row. */
+  warnings?: SpecImportWarning[];
   generatedAt: number;
 }
 

@@ -65,10 +65,26 @@ export type ParsedRecipe = {
   rows: RecipeRow[];
 };
 
+/**
+ * One flavor-grounding correction/flag the sanitizer made — e.g. an
+ * AI-paraphrased flavor snapped back to what the sheet actually says, or an
+ * invented flavor kept-but-flagged. `brand`/`flavor` identify the profile the
+ * warning concerns (its FINAL, post-correction names) so review screens can
+ * attach the warning to that profile's row; `message` is the human-readable
+ * explanation.
+ */
+export type SpecImportWarning = { brand: string; flavor: string; message: string };
+
 export type ParsedSpecImport = {
   profiles: ParsedProfile[];
   recipes: ParsedRecipe[];
   note?: string;
+  /**
+   * Grounding corrections/flags from sanitizeParsedSpecImport. Kept separate
+   * from `note` so review UIs can surface them prominently (per-profile amber
+   * callouts) instead of burying them in free text.
+   */
+  warnings?: SpecImportWarning[];
 };
 
 /**
@@ -82,6 +98,7 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
   const profileMap = new Map<string, ParsedProfile>();
   const recipeMap = new Map<string, ParsedRecipe>();
   const notes: string[] = [];
+  const warningMap = new Map<string, SpecImportWarning>();
   // Nameless recipes (kept so the review can rescue them) must not collide on an
   // empty name key, or several distinct ones would collapse into one. Give each
   // a unique synthetic key so they all survive to the review screen.
@@ -95,12 +112,20 @@ export function mergeParsedSpecImports(list: ParsedSpecImport[]): ParsedSpecImpo
       recipeMap.set(nm ? `${r.kind}|${nm}` : `${r.kind}|__anon${anon++}`, r);
     }
     if (item.note && item.note.trim()) notes.push(item.note.trim());
+    for (const w of item.warnings ?? []) {
+      warningMap.set(
+        `${w.brand.trim().toLowerCase()}|${w.flavor.trim().toLowerCase()}|${w.message.trim().toLowerCase()}`,
+        w,
+      );
+    }
   }
   const result: ParsedSpecImport = {
     profiles: [...profileMap.values()],
     recipes: [...recipeMap.values()],
   };
   if (notes.length) result.note = notes.join("\n");
+  // Bounded so a flood of per-file corrections can't bloat the merged payload.
+  if (warningMap.size) result.warnings = [...warningMap.values()].slice(0, 30);
   return result;
 }
 
@@ -221,6 +246,7 @@ export function partitionTombstonedParse(
   }
   const kept: ParsedSpecImport = { profiles: keptProfiles, recipes: keptRecipes };
   if (parsed.note) kept.note = parsed.note;
+  if (parsed.warnings?.length) kept.warnings = parsed.warnings;
   return { kept, skipped: { profiles: skippedProfiles, recipes: skippedRecipes } };
 }
 
@@ -1053,7 +1079,7 @@ export function sanitizeParsedSpecImport(
       : undefined;
   const profileCtx = buildProfileFlavorGrounding(grounding);
   const brandCtx = buildProfileBrandGrounding(grounding);
-  const groundingWarnings: string[] = [];
+  const groundingWarnings: SpecImportWarning[] = [];
 
   const profiles: ParsedProfile[] = [];
   const rawProfiles = Array.isArray(root.profiles) ? root.profiles : [];
@@ -1068,33 +1094,46 @@ export function sanitizeParsedSpecImport(
     // under a wrong/new brand and create duplicates instead of updating
     // existing ones. Snap such a brand to the nearest real one; if no
     // confident match, keep it but warn — never silently invented.
+    // Messages are collected first and keyed to the FINAL brand+flavor only
+    // after BOTH groundings have run, so review UIs can attach each warning to
+    // the profile row it will actually appear under.
+    const brandWarnMessages: string[] = [];
     if (brandCtx) {
       const g = groundProfileBrand(brand, brandCtx);
       if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
-        groundingWarnings.push(`Corrected brand "${brand}" to "${g.flavor}".`);
+        brandWarnMessages.push(`Corrected brand "${brand}" to "${g.flavor}".`);
         brand = clampName(g.flavor, lim.maxNameChars);
       } else if (g.kind === "ungrounded") {
-        groundingWarnings.push(
-          `Brand "${brand}" was not found on the sheet — please verify.`,
-        );
+        brandWarnMessages.push(`Brand "${brand}" was not found on the sheet — please verify.`);
       }
     }
     // Grounding backstop for PROFILE flavors: the parse model has paraphrased
     // flavors wholesale (e.g. "Buffalo Chicken" -> "BBQ Chicken"), minting
     // profiles under a name that never appears on the sheet. Snap such an
     // invented flavor to the nearest flavor that DOES appear in the source; if
-    // no confident match, keep it but surface a warning in `note` so the review
-    // screen flags it — never silently invented.
+    // no confident match, keep it but surface a structured warning (attached to
+    // the profile via brand+flavor) so the review screen flags it prominently —
+    // never silently invented.
     if (profileCtx) {
       const g = groundProfileFlavor(flavor, profileCtx);
       if (g.kind === "snapped" && clampName(g.flavor, lim.maxNameChars)) {
-        groundingWarnings.push(`Corrected flavor "${flavor}" to "${g.flavor}" (brand ${brand}).`);
-        flavor = clampName(g.flavor, lim.maxNameChars);
+        const corrected = clampName(g.flavor, lim.maxNameChars);
+        groundingWarnings.push({
+          brand,
+          flavor: corrected,
+          message: `Corrected flavor "${flavor}" to "${g.flavor}" (brand ${brand}).`,
+        });
+        flavor = corrected;
       } else if (g.kind === "ungrounded") {
-        groundingWarnings.push(
-          `Flavor "${flavor}" (brand ${brand}) was not found on the sheet — please verify.`,
-        );
+        groundingWarnings.push({
+          brand,
+          flavor,
+          message: `Flavor "${flavor}" (brand ${brand}) was not found on the sheet — please verify.`,
+        });
       }
+    }
+    for (const message of brandWarnMessages) {
+      groundingWarnings.push({ brand, flavor, message });
     }
     const applicators: ParsedApplicator[] = [];
     const rawApps = Array.isArray(o.applicators) ? o.applicators : [];
@@ -1219,12 +1258,24 @@ export function sanitizeParsedSpecImport(
 
   const result: ParsedSpecImport = { profiles, recipes };
   const note = clampName(root.note, 400);
-  // Surface flavor-grounding corrections/warnings on the note so the review
-  // screen shows them (dedup repeated profiles; bounded so a flood can't bloat
-  // the payload).
-  const uniqueWarnings = [...new Set(groundingWarnings)].slice(0, 10);
-  const combined = [note, ...uniqueWarnings].filter(Boolean).join(" ");
-  if (combined) result.note = clampName(combined, 1200);
+  if (note) result.note = note;
+  // Surface flavor-grounding corrections/flags as STRUCTURED warnings (not
+  // folded into `note`) so review screens can attach each to its profile row
+  // prominently. Dedup repeated profiles; bounded so a flood can't bloat the
+  // payload. Keeping them out of `note` also stops a mere correction from
+  // making the pass look "failed" to the chunk-retry rule.
+  if (groundingWarnings.length) {
+    const seenW = new Set<string>();
+    const unique: SpecImportWarning[] = [];
+    for (const w of groundingWarnings) {
+      const key = `${w.brand.toLowerCase()}|${w.flavor.toLowerCase()}|${w.message.toLowerCase()}`;
+      if (seenW.has(key)) continue;
+      seenW.add(key);
+      unique.push(w);
+      if (unique.length >= 10) break;
+    }
+    result.warnings = unique;
+  }
   return result;
 }
 
@@ -1457,8 +1508,22 @@ export function applyNameMatches(
     });
   }
 
+  // Keep grounding warnings attached to the RENAMED profile names so review
+  // screens can still match each warning to its (now-canonical) profile row.
+  const warnings = parsed.warnings?.length
+    ? parsed.warnings.map((w) => {
+        const brand = renameBrand(w.brand) ?? w.brand;
+        return { ...w, brand, flavor: renameFlavor(brand, w.flavor) ?? w.flavor };
+      })
+    : undefined;
+
   return {
-    parsed: { profiles, recipes, ...(parsed.note ? { note: parsed.note } : {}) },
+    parsed: {
+      profiles,
+      recipes,
+      ...(parsed.note ? { note: parsed.note } : {}),
+      ...(warnings ? { warnings } : {}),
+    },
     aliases: [...aliasByKey.values()],
   };
 }

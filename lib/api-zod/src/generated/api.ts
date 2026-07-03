@@ -1723,6 +1723,11 @@ export const AiParseSpecSheetResponse = zod.object({
 }).optional().describe('A reviewer-AI \"second set of eyes\" verdict for one suggestion. Advisory only — surfaced in the review UI, never blocks applying the suggestion. Absent when the reviewer was unavailable (fail-safe).')
 })),
   "note": zod.string().optional(),
+  "warnings": zod.array(zod.object({
+  "brand": zod.string().describe('Brand of the profile the warning concerns'),
+  "flavor": zod.string().describe('Final (post-correction) flavor of the profile the warning concerns'),
+  "message": zod.string().describe('Human-readable explanation of the correction\/flag')
+})).optional().describe('Flavor-grounding corrections\/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row.'),
   "generatedAt": zod.number()
 })
 

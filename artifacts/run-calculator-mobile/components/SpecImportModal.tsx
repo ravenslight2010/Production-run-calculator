@@ -167,6 +167,39 @@ export default function SpecImportModal({
                   </View>
                 ) : null}
 
+                {prepared.parsed.warnings && prepared.parsed.warnings.length > 0 ? (
+                  <View
+                    style={[
+                      styles.warnBox,
+                      {
+                        backgroundColor: "rgba(245,158,11,0.12)",
+                        borderColor: "rgba(245,158,11,0.4)",
+                      },
+                    ]}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Feather name="alert-triangle" size={14} color={colors.warning} />
+                      <Text style={[styles.errorTitle, { color: colors.warning }]}>
+                        {prepared.parsed.warnings.length} flavor name
+                        {prepared.parsed.warnings.length === 1 ? " was" : "s were"} corrected
+                        or flagged
+                      </Text>
+                    </View>
+                    <Text style={[styles.help, { color: colors.warning }]}>
+                      The AI's reading didn't match the sheet exactly — double-check these
+                      products before applying:
+                    </Text>
+                    {prepared.parsed.warnings.map((w, i) => (
+                      <View key={i} style={{ gap: 1 }}>
+                        <Text style={[styles.warnName, { color: colors.foreground }]}>
+                          {w.brand} — {w.flavor}
+                        </Text>
+                        <Text style={[styles.help, { color: colors.warning }]}>{w.message}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
                 {prepared.note ? (
                   <View style={[styles.noteBox, { borderColor: colors.border }]}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -289,6 +322,8 @@ const styles = StyleSheet.create({
   summaryStat: { fontSize: 12, fontWeight: "600" },
   note: { fontSize: 12 },
   noteBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
+  warnBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 8 },
+  warnName: { fontSize: 13, fontWeight: "700" },
   errorBox: { borderWidth: 1, borderRadius: 10, padding: 12, gap: 6 },
   errorTitle: { fontSize: 13, fontWeight: "700" },
   footer: { flexDirection: "row", justifyContent: "flex-end", gap: 10 },

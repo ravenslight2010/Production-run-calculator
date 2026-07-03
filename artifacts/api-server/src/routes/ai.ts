@@ -1998,6 +1998,7 @@ router.post(
       recipes: reviewedRecipes,
       generatedAt: Date.now(),
       ...(parsed.note ? { note: parsed.note } : {}),
+      ...(parsed.warnings?.length ? { warnings: parsed.warnings } : {}),
     });
   },
 );

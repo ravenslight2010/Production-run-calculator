@@ -226,8 +226,23 @@ function canonicalizeParsed(
     return out;
   });
 
+  // Canonicalize grounding-warning brand/flavor the same way (WITHOUT alias
+  // tracking — warnings aren't new names to learn) so each warning still keys to
+  // its profile row after canonicalization renames. Mirrors web.
+  const warnings = (raw.warnings ?? []).map((w) => {
+    const brand = canonicalize(w.brand, known.brands, aliases, "brand").value;
+    const kf = known.flavorsByBrand[brand] ?? [];
+    const flavor = canonicalize(w.flavor, kf, aliases, "flavor", brand).value;
+    return { ...w, brand, flavor };
+  });
+
   return {
-    parsed: { profiles, recipes, ...(raw.note ? { note: raw.note } : {}) },
+    parsed: {
+      profiles,
+      recipes,
+      ...(raw.note ? { note: raw.note } : {}),
+      ...(warnings.length ? { warnings } : {}),
+    },
     resolved,
   };
 }
@@ -283,6 +298,7 @@ async function parseGridsCore(
       profiles: ai.profiles,
       recipes: ai.recipes,
       ...(ai.note ? { note: ai.note } : {}),
+      ...(ai.warnings?.length ? { warnings: ai.warnings } : {}),
     });
     // Reviewer-AI flags ride on the raw AI profiles/recipes (warn/reject only).
     for (const p of ai.profiles) {

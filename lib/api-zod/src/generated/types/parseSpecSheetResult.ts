@@ -7,10 +7,13 @@
  */
 import type { SpecImportProfile } from './specImportProfile';
 import type { SpecImportRecipe } from './specImportRecipe';
+import type { SpecImportWarning } from './specImportWarning';
 
 export interface ParseSpecSheetResult {
   profiles: SpecImportProfile[];
   recipes: SpecImportRecipe[];
   note?: string;
+  /** Flavor-grounding corrections/flags the server-side sanitizer made (e.g. an AI-paraphrased flavor snapped back to what the sheet says). Review UIs surface these prominently, attached to the affected profile row. */
+  warnings?: SpecImportWarning[];
   generatedAt: number;
 }

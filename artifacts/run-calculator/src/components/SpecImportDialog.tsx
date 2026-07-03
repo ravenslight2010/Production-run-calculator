@@ -200,7 +200,26 @@ export default function SpecImportDialog({
     [edited, prepared],
   );
 
+  // Flavor-grounding corrections/flags from the server-side sanitizer, keyed by
+  // the (canonicalized) brand+flavor of the profile each concerns so they can be
+  // attached to that profile's row. Warnings whose profile row can't be found
+  // (edge case) are surfaced in the top-level callout instead — never hidden.
+  const specWarnings = prepared?.parsed.warnings ?? [];
+  const warningsByProfile = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const w of prepared?.parsed.warnings ?? []) {
+      const k = warnKey(w.brand, w.flavor);
+      map.set(k, [...(map.get(k) ?? []), w.message]);
+    }
+    return map;
+  }, [prepared]);
+
   if (!open) return null;
+
+  const profileKeys = new Set(profiles.map((p) => warnKey(p.orig.brand, p.orig.flavor)));
+  const unmatchedWarnings = specWarnings.filter(
+    (w) => !profileKeys.has(warnKey(w.brand, w.flavor)),
+  );
 
   const includedProfiles = profiles.filter((p) => p.include).length;
   const includedRecipes = recipes.filter((r) => r.include).length;
@@ -291,6 +310,35 @@ export default function SpecImportDialog({
                 </div>
               )}
 
+              {specWarnings.length > 0 && (
+                <div
+                  className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
+                  data-testid="spec-import-warnings"
+                >
+                  <div className="flex items-center gap-2 text-amber-600">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      {specWarnings.length} flavor name{specWarnings.length === 1 ? " was" : "s were"}{" "}
+                      corrected or flagged
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-amber-700">
+                    The AI's reading didn't match the sheet exactly, so the names below were
+                    corrected or flagged for review. Double-check the highlighted products
+                    before applying.
+                  </p>
+                  {unmatchedWarnings.length > 0 && (
+                    <ul className="mt-1.5 space-y-0.5">
+                      {unmatchedWarnings.map((w, i) => (
+                        <li key={i} className="text-xs text-amber-700">
+                          {w.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {/* Shared brand suggestions for the profile match pickers. */}
               <datalist id="spec-import-brands">
                 {brands.map((b) => (
@@ -310,6 +358,7 @@ export default function SpecImportDialog({
                         item={p}
                         brands={brands}
                         flavorsByBrand={flavorsByBrand}
+                        warnings={warningsByProfile.get(warnKey(p.orig.brand, p.orig.flavor)) ?? []}
                         onToggle={() => setProfile(p.key, { include: !p.include })}
                         onBrand={(brand) => setProfile(p.key, { brand })}
                         onFlavor={(flavor) => setProfile(p.key, { flavor })}
@@ -464,10 +513,16 @@ function StatusBadge({ tombstoned, isNew }: { tombstoned: boolean; isNew: boolea
   );
 }
 
+/** Case-insensitive brand+flavor key used to attach grounding warnings to rows. */
+function warnKey(brand: string, flavor: string): string {
+  return `${brand.trim().toLowerCase()}|${flavor.trim().toLowerCase()}`;
+}
+
 function ProfileRow({
   item,
   brands,
   flavorsByBrand,
+  warnings,
   onToggle,
   onBrand,
   onFlavor,
@@ -475,6 +530,7 @@ function ProfileRow({
   item: ProfileItem;
   brands: string[];
   flavorsByBrand: Record<string, string[]>;
+  warnings: string[];
   onToggle: () => void;
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
@@ -542,6 +598,23 @@ function ProfileRow({
           {summary && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {summary}
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div
+              className="mt-2 rounded-md border border-amber-400/60 bg-amber-500/10 p-2"
+              data-testid={`spec-profile-warning-${item.key}`}
+            >
+              <div className="flex items-center gap-1.5 text-amber-600">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-xs font-semibold">Check this name</span>
+              </div>
+              {warnings.map((m, i) => (
+                <p key={i} className="mt-0.5 text-xs text-amber-700">
+                  {m}
+                </p>
+              ))}
             </div>
           )}
 

@@ -262,6 +262,7 @@ export * from './specImportRecipe';
 export * from './specImportRecipeKind';
 export * from './specImportRecipeRow';
 export * from './specImportRecipeTarget';
+export * from './specImportWarning';
 export * from './specReconcileApplicator';
 export * from './specReconcileInput';
 export * from './specReconcilePepperoni';
