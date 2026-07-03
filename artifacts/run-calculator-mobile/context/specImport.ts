@@ -581,6 +581,7 @@ export async function prepareSpecImportMulti(
   gridsList: SheetGrid[][],
   store: SpecImportStore,
   onProgress?: (done: number, total: number) => void,
+  names?: string[],
 ): Promise<SpecImportPrepared> {
   const aliases = await loadSpecImportAliases();
 
@@ -588,14 +589,17 @@ export async function prepareSpecImportMulti(
   const allResolved: ParseCore["resolved"] = [];
   const flagged: SpecFlaggedItem[] = [];
   const errors: string[] = [];
+  const failedNames: string[] = [];
   let totalDropped = 0;
   const allTruncated: TruncatedCell[] = [];
   const allOverflow: OverflowColumnRow[] = [];
 
-  let done = 0;
-  for (const grids of gridsList) {
+  for (let i = 0; i < gridsList.length; i++) {
+    // Name each file so a warning can say WHICH file it came from (fall back to
+    // a positional label when the caller didn't pass filenames).
+    const label = names?.[i]?.trim() || `File ${i + 1}`;
     try {
-      const core = await parseGridsCore(grids, store, aliases);
+      const core = await parseGridsCore(gridsList[i], store, aliases);
       parsedList.push(core.parsed);
       allResolved.push(...core.resolved);
       flagged.push(...core.flagged);
@@ -603,21 +607,22 @@ export async function prepareSpecImportMulti(
       // Prefix the sheet label with the file so a multi-file review says WHICH
       // workbook holds the shortened cell.
       allTruncated.push(
-        ...core.truncatedCells.map((t) => ({ ...t, sheet: `File ${done + 1} ${t.sheet}` })),
+        ...core.truncatedCells.map((t) => ({ ...t, sheet: `${label} ${t.sheet}` })),
       );
       allOverflow.push(
-        ...core.overflowRows.map((o) => ({ ...o, sheet: `File ${done + 1} ${o.sheet}` })),
+        ...core.overflowRows.map((o) => ({ ...o, sheet: `${label} ${o.sheet}` })),
       );
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : "Could not read a file.");
+      const msg = err instanceof Error ? err.message : "could not be read";
+      failedNames.push(label);
+      errors.push(`${label}: ${msg}`);
     } finally {
-      done += 1;
-      onProgress?.(done, gridsList.length);
+      onProgress?.(i + 1, gridsList.length);
     }
   }
 
   if (parsedList.length === 0) {
-    throw new Error(errors[0] ?? "Nothing to import.");
+    throw new Error(errors.length ? errors.join("\n") : "Nothing to import.");
   }
 
   const merged = mergeParsedSpecImports(parsedList);
@@ -631,8 +636,9 @@ export async function prepareSpecImportMulti(
   const noteParts: string[] = [];
   if (parsed.note) noteParts.push(parsed.note);
   if (errors.length) {
+    const list = failedNames.length ? `: ${failedNames.join(", ")}` : "";
     noteParts.push(
-      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped.`,
+      `${errors.length} file${errors.length === 1 ? "" : "s"} could not be read and ${errors.length === 1 ? "was" : "were"} skipped${list}.`,
     );
   }
   const note = appendOverflowNote(

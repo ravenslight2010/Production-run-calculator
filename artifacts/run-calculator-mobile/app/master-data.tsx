@@ -1477,8 +1477,11 @@ export default function MasterDataScreen() {
         const settled = await Promise.all(
           assets.map((a) => readGrids(a.uri).catch(() => [])),
         );
-        prepared = await prepareSpecImportMulti(settled, store, (done, total) =>
-          setSpecProgress({ done, total }),
+        prepared = await prepareSpecImportMulti(
+          settled,
+          store,
+          (done, total) => setSpecProgress({ done, total }),
+          assets.map((a) => a.name),
         );
       }
       setSpecPrepared(prepared);
