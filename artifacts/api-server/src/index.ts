@@ -1,7 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { seedRoles } from "./lib/roles";
-import { seedSandboxUser } from "./lib/sandbox";
+import { sandboxAllowed, seedSandboxUser } from "./lib/sandbox";
 
 const rawPort = process.env["PORT"];
 
@@ -33,8 +33,12 @@ app.listen(port, (err) => {
 
   // Ensure the seeded sandbox account exists with a known password + manager
   // role on every boot. Best-effort: a seeding failure must not take the server
-  // down (the rest of the API still works for real users).
-  seedSandboxUser().catch((err) => {
-    logger.error({ err }, "Failed to seed sandbox user");
-  });
+  // down (the rest of the API still works for real users). The sandbox account
+  // uses a well-known public password, so it is a non-production feature only —
+  // never seed it in a real deployment (see sandboxAllowed()).
+  if (sandboxAllowed()) {
+    seedSandboxUser().catch((err) => {
+      logger.error({ err }, "Failed to seed sandbox user");
+    });
+  }
 });

@@ -118,3 +118,4 @@
 - [Scheduled runs snapshot the profile](scheduled-run-profile-snapshot.md) — web scheduled runs freeze the profile at scheduling time; sauce backfill is blank-fill-only at pull-up; mobile spreads live profile.
 - [Run lifecycle LWW stamp](run-meta-lww.md) — per-run metaUpdatedAt, newer-stamp wins at all 3 sync merge points; stamping is centralized, bypass paths must self-stamp; never bump on value edits.
 - [Spec-import scale harness](spec-import-scale-harness.md) — run BOTH committed real-AI harnesses after any model change; exporter cells bound for the AI prompt must wrap under PROMPT_MAX_CELL_CHARS or targets silently truncate.
+- [Sandbox scope isolation](sandbox-scope-isolation.md) — sandboxAllowed() prod gate; requireLiveScope for global no-scope tables (users/roles); everything else uses a real scope column + currentScope().

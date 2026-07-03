@@ -19,6 +19,10 @@ import { usersTable } from "./users";
 // loses the who/where even without the user row.
 export const incidentsTable = pgTable("incidents", {
   id: text("id").primaryKey(),
+  // Isolates the seeded sandbox account's incidents from live ("live" |
+  // "sandbox"), mirroring the scope column on production_rules/inventory/etc.
+  // Additive (default "live") so existing rows are unaffected.
+  scope: text("scope").notNull().default("live"),
   // "user_report" | "auto_crash"
   source: text("source").notNull(),
   // Soft FK to the reporter; null once the account is removed.

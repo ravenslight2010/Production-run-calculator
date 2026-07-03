@@ -32,6 +32,17 @@ import { findUserByUsername, getUserById } from "./users";
 export const SANDBOX_USERNAME = "test";
 export const SANDBOX_PASSWORD = "test";
 
+// The sandbox account exists purely as a non-production demo/training
+// shortcut (both clients label it that way — see AuthContext's
+// signInAsTest). Its credentials are intentionally public knowledge, so it
+// must never be reachable in a real deployment: gate seeding, sign-in, and
+// the reset endpoint on this so a production boot never creates it and a
+// production sign-in never authenticates it, even if a pre-existing sandbox
+// row lingers in the database from before this hardening.
+export function sandboxAllowed(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
 // requireAuth runs on every request (including SSE), so cache whether a user is
 // the sandbox account briefly to avoid a DB round-trip per request — mirroring
 // the cached existence / daily-reset-boundary reads.

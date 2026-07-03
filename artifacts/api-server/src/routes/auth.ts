@@ -13,6 +13,7 @@ import {
   signToken,
   verifyPassword,
 } from "../lib/auth";
+import { sandboxAllowed } from "../lib/sandbox";
 import {
   createUser,
   findUserByUsername,
@@ -88,6 +89,14 @@ router.post("/auth/sign-in", async (req, res): Promise<void> => {
   const { username, password } = parsed.data;
   const user = await findUserByUsername(username);
   if (!user || !verifyPassword(password, user.passwordHash)) {
+    res.status(401).json({ error: "Invalid username or password." });
+    return;
+  }
+  // The seeded sandbox account uses a well-known public password and is a
+  // non-production demo shortcut only (see sandboxAllowed()). Refuse to
+  // authenticate it in production even if a sandbox row lingers in the DB, so
+  // there is no anonymous path into the app on a real deployment.
+  if (user.sandbox && !sandboxAllowed()) {
     res.status(401).json({ error: "Invalid username or password." });
     return;
   }

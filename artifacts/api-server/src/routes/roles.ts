@@ -24,7 +24,7 @@ import {
   declineResetRequest,
   listPendingResetRequests,
 } from "../lib/passwordResets";
-import { requireCapability } from "../middlewares/requireCapability";
+import { requireCapability, requireLiveScope } from "../middlewares/requireCapability";
 
 function pathUserId(raw: string | string[] | undefined): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
@@ -60,13 +60,25 @@ router.post("/me/tour-completed", async (req, res): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 // List all defined roles with their capability sets. Gated to manage-staff
-// because only the staff-admin surface needs the full role catalog.
-router.get("/roles", requireCapability("manage-staff"), async (_req, res): Promise<void> => {
-  res.json(await listRoles());
-});
+// because only the staff-admin surface needs the full role catalog. Staff/role
+// administration operates on genuinely global tables (no per-scope isolation
+// exists for accounts/roles), so it is blocked for the sandbox account
+// entirely — see requireLiveScope.
+router.get(
+  "/roles",
+  requireLiveScope,
+  requireCapability("manage-staff"),
+  async (_req, res): Promise<void> => {
+    res.json(await listRoles());
+  },
+);
 
 // Create a new role. Refuses to grant capabilities the actor lacks.
-router.post("/roles", requireCapability("manage-staff"), async (req, res): Promise<void> => {
+router.post(
+  "/roles",
+  requireLiveScope,
+  requireCapability("manage-staff"),
+  async (req, res): Promise<void> => {
   const parsed = CreateRoleBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -86,7 +98,7 @@ router.post("/roles", requireCapability("manage-staff"), async (req, res): Promi
 
 // Edit a role's capabilities. Refuses to grant capabilities the actor lacks,
 // to strip manage-staff from the manager role, or to strand the last admin.
-router.put("/roles/:name", requireCapability("manage-staff"), async (req, res): Promise<void> => {
+router.put("/roles/:name", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
   const name = pathUserId(req.params.name);
   if (!name) {
     res.status(400).json({ error: "Invalid role name" });
@@ -113,6 +125,7 @@ router.put("/roles/:name", requireCapability("manage-staff"), async (req, res): 
 // Delete a role. Refuses to delete built-in roles or roles still assigned.
 router.delete(
   "/roles/:name",
+  requireLiveScope,
   requireCapability("manage-staff"),
   async (req, res): Promise<void> => {
     const name = pathUserId(req.params.name);
@@ -131,7 +144,7 @@ router.delete(
 
 // Staff roster — manage-staff only. Lists every account so a manager can
 // reassign roles.
-router.get("/users", requireCapability("manage-staff"), async (_req, res): Promise<void> => {
+router.get("/users", requireLiveScope, requireCapability("manage-staff"), async (_req, res): Promise<void> => {
   res.json(await listStaff());
 });
 
@@ -140,6 +153,7 @@ router.get("/users", requireCapability("manage-staff"), async (_req, res): Promi
 // role with capabilities the actor lacks.
 router.put(
   "/users/:userId/role",
+  requireLiveScope,
   requireCapability("manage-staff"),
   async (req, res): Promise<void> => {
   const targetUserId = pathUserId(req.params.userId);
@@ -168,6 +182,7 @@ router.put(
 // locked-out operator; no current password is required.
 router.put(
   "/users/:userId/password",
+  requireLiveScope,
   requireCapability("manage-staff"),
   async (req, res): Promise<void> => {
     const targetUserId = pathUserId(req.params.userId);
@@ -193,6 +208,7 @@ router.put(
 // staff members waiting for approval of a reset and a relay code.
 router.get(
   "/password-reset-requests",
+  requireLiveScope,
   requireCapability("approve-password-resets"),
   async (_req, res): Promise<void> => {
     res.json(await listPendingResetRequests());
@@ -203,6 +219,7 @@ router.get(
 // code and returns it so it can be relayed to the locked-out staff member.
 router.post(
   "/password-reset-requests/:id/approve",
+  requireLiveScope,
   requireCapability("approve-password-resets"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
@@ -227,6 +244,7 @@ router.post(
 // it drops off the list without ever issuing a code.
 router.post(
   "/password-reset-requests/:id/decline",
+  requireLiveScope,
   requireCapability("approve-password-resets"),
   async (req, res): Promise<void> => {
     const id = pathUserId(req.params.id);
@@ -245,7 +263,7 @@ router.post(
 
 // Remove a staff member — manager only. Refuses to delete the last remaining
 // manager so the team can't lock itself out.
-router.delete("/users/:userId", requireCapability("manage-staff"), async (req, res): Promise<void> => {
+router.delete("/users/:userId", requireLiveScope, requireCapability("manage-staff"), async (req, res): Promise<void> => {
   const targetUserId = pathUserId(req.params.userId);
   if (!targetUserId) {
     res.status(400).json({ error: "Invalid user id" });
