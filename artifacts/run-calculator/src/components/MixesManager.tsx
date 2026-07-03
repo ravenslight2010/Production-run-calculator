@@ -1,10 +1,20 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, Plus, Trash2, Blend } from "lucide-react";
+import {
+  AlertTriangle,
+  Plus,
+  Trash2,
+  Blend,
+  Search,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import {
   DEFAULT_DAYS_EARLY,
   normalizeMix,
+  mixMatchesQuery,
+  groupMixesByBrand,
   type Mix,
   type MixComponent,
 } from "@workspace/mixes";
@@ -51,6 +61,37 @@ export default function MixesManager({
   const qc = useQueryClient();
   const { items, isLoading } = useMixes();
   const [error, setError] = useState<string | null>(null);
+  // Browsing state: search + which brand groups / mix editors are open. With
+  // dozens of imported mixes a flat list of full editors is unusable, so the
+  // list is grouped by brand (collapsed by default) and each mix is a compact
+  // row that expands to the full editor on tap.
+  const [query, setQuery] = useState("");
+  const [openBrands, setOpenBrands] = useState<Set<string>>(new Set());
+  const [openMixes, setOpenMixes] = useState<Set<string>>(new Set());
+
+  const searching = query.trim().length > 0;
+  const groups = useMemo(() => {
+    const filtered = items.filter((m) => mixMatchesQuery(m, query));
+    return groupMixesByBrand(filtered);
+  }, [items, query]);
+
+  function toggleBrand(key: string) {
+    setOpenBrands((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleMix(id: string) {
+    setOpenMixes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const saveMutation = useMutation({
     mutationFn: (next: Mix[]) => saveMixes(next),
@@ -77,6 +118,10 @@ export default function MixesManager({
   function addMix() {
     const draft = blankMix();
     draft.name = "New Mix";
+    // Open the new mix (and its no-brand group) so it's immediately editable.
+    setQuery("");
+    setOpenBrands((prev) => new Set(prev).add(""));
+    setOpenMixes((prev) => new Set(prev).add(draft.id));
     saveMutation.mutate([draft]);
   }
 
@@ -111,18 +156,112 @@ export default function MixesManager({
           <p className="text-xs text-muted-foreground">No mixes yet. Add one below.</p>
         ) : (
           <div className="flex flex-col gap-2">
-            {items.map((mix) => (
-              <MixEditor
-                key={mix.id}
-                mix={mix}
-                disabled={busy}
-                brands={brands}
-                brandFlavors={brandFlavors}
-                ingredientSuggestions={ingredientSuggestions}
-                onChange={(next) => saveMutation.mutate([next])}
-                onDelete={() => deleteMutation.mutate([mix.id])}
+            {/* Search */}
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search mixes by name, brand, or flavor…"
+                className="w-full rounded-md border border-input bg-background pl-7 pr-2 py-1.5 text-xs"
               />
-            ))}
+            </div>
+
+            {groups.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No mixes match "{query.trim()}".
+              </p>
+            ) : (
+              groups.map((group) => {
+                const key = group.brand.toLowerCase();
+                // While searching, matched groups stay open so results are
+                // visible. A single lone group is always open (no point
+                // hiding the whole list behind one header).
+                const open =
+                  searching || groups.length === 1 || openBrands.has(key);
+                return (
+                  <div
+                    key={key || "(none)"}
+                    className="rounded-md border border-border/60 overflow-hidden"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleBrand(key)}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 bg-muted/40 hover:bg-muted/60 text-left"
+                    >
+                      {open ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="text-xs font-semibold flex-1 truncate">
+                        {group.brand || "No brand"}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">
+                        {group.mixes.length}
+                      </span>
+                    </button>
+                    {open && (
+                      <div className="flex flex-col gap-1.5 p-1.5 border-t border-border/40">
+                        {group.mixes.map((mix) => {
+                          const expanded = openMixes.has(mix.id);
+                          return (
+                            <div key={mix.id} className="flex flex-col gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleMix(mix.id)}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left border ${
+                                  expanded
+                                    ? "border-primary/50 bg-primary/10"
+                                    : "border-transparent hover:bg-muted/40"
+                                }`}
+                              >
+                                {expanded ? (
+                                  <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
+                                ) : (
+                                  <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
+                                )}
+                                <span className="text-xs font-medium truncate">
+                                  {mix.name || "Unnamed mix"}
+                                </span>
+                                {mix.flavor && (
+                                  <span className="text-[11px] text-muted-foreground truncate">
+                                    {mix.flavor}
+                                  </span>
+                                )}
+                                <span className="flex-1" />
+                                {!mix.enabled && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                    Off
+                                  </span>
+                                )}
+                                {mix.batchSize > 0 && (
+                                  <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                    {mix.batchSize} lbs
+                                  </span>
+                                )}
+                              </button>
+                              {expanded && (
+                                <MixEditor
+                                  mix={mix}
+                                  disabled={busy}
+                                  brands={brands}
+                                  brandFlavors={brandFlavors}
+                                  ingredientSuggestions={ingredientSuggestions}
+                                  onChange={(next) => saveMutation.mutate([next])}
+                                  onDelete={() => deleteMutation.mutate([mix.id])}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 

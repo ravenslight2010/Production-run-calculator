@@ -14,6 +14,8 @@ import { Pressable, Switch, Text, TextInput, View } from "react-native";
 import {
   DEFAULT_DAYS_EARLY,
   normalizeMix,
+  mixMatchesQuery,
+  groupMixesByBrand,
   type Mix,
   type MixComponent,
 } from "@workspace/mixes";
@@ -54,6 +56,37 @@ export default function MixesManager({
   const qc = useQueryClient();
   const { items, isLoading } = useMixes();
   const [error, setError] = React.useState<string | null>(null);
+  // Browsing state: search + which brand groups / mix editors are open. With
+  // dozens of imported mixes a flat list of full editors is unusable, so the
+  // list is grouped by brand (collapsed by default) and each mix is a compact
+  // row that expands to the full editor on tap. (Parity with web.)
+  const [query, setQuery] = React.useState("");
+  const [openBrands, setOpenBrands] = React.useState<Set<string>>(new Set());
+  const [openMixes, setOpenMixes] = React.useState<Set<string>>(new Set());
+
+  const searching = query.trim().length > 0;
+  const groups = React.useMemo(() => {
+    const filtered = items.filter((m) => mixMatchesQuery(m, query));
+    return groupMixesByBrand(filtered);
+  }, [items, query]);
+
+  function toggleBrand(key: string) {
+    setOpenBrands((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleMix(id: string) {
+    setOpenMixes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const saveMutation = useMutation({
     mutationFn: (next: Mix[]) => saveMixes(next),
@@ -78,7 +111,12 @@ export default function MixesManager({
   const busy = saveMutation.isPending || deleteMutation.isPending;
 
   function addMix() {
-    saveMutation.mutate([blankMix()]);
+    const draft = blankMix();
+    // Open the new mix (and its no-brand group) so it's immediately editable.
+    setQuery("");
+    setOpenBrands((prev) => new Set(prev).add(""));
+    setOpenMixes((prev) => new Set(prev).add(draft.id));
+    saveMutation.mutate([draft]);
   }
 
   return (
@@ -119,18 +157,212 @@ export default function MixesManager({
         </Text>
       ) : (
         <View style={{ gap: 10 }}>
-          {items.map((mix) => (
-            <MixEditor
-              key={mix.id}
-              mix={mix}
-              disabled={busy}
-              brands={brands}
-              brandFlavors={brandFlavors}
-              ingredientSuggestions={ingredientSuggestions}
-              onChange={(next) => saveMutation.mutate([next])}
-              onDelete={() => deleteMutation.mutate([mix.id])}
+          {/* Search */}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 8,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              backgroundColor: colors.background,
+            }}
+          >
+            <Feather name="search" size={14} color={colors.mutedForeground} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search mixes by name, brand, or flavor…"
+              placeholderTextColor={colors.mutedForeground}
+              style={{
+                flex: 1,
+                fontFamily: FONTS.regular,
+                fontSize: 12,
+                color: colors.foreground,
+                paddingVertical: 8,
+              }}
             />
-          ))}
+          </View>
+
+          {groups.length === 0 ? (
+            <Text style={{ fontFamily: FONTS.regular, fontSize: 12, color: colors.mutedForeground }}>
+              No mixes match "{query.trim()}".
+            </Text>
+          ) : (
+            groups.map((group) => {
+              const key = group.brand.toLowerCase();
+              // While searching, matched groups stay open so results are
+              // visible. A single lone group is always open.
+              const open = searching || groups.length === 1 || openBrands.has(key);
+              return (
+                <View
+                  key={key || "(none)"}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    borderRadius: 8,
+                    overflow: "hidden",
+                  }}
+                >
+                  <Pressable
+                    onPress={() => toggleBrand(key)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      paddingHorizontal: 10,
+                      paddingVertical: 10,
+                      backgroundColor: colors.muted,
+                    }}
+                  >
+                    <Feather
+                      name={open ? "chevron-down" : "chevron-right"}
+                      size={14}
+                      color={colors.mutedForeground}
+                    />
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        flex: 1,
+                        fontFamily: FONTS.bold,
+                        fontSize: 13,
+                        color: colors.foreground,
+                      }}
+                    >
+                      {group.brand || "No brand"}
+                    </Text>
+                    <View
+                      style={{
+                        paddingHorizontal: 6,
+                        paddingVertical: 2,
+                        borderRadius: 999,
+                        backgroundColor: colors.background,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontFamily: FONTS.mono,
+                          fontSize: 10,
+                          color: colors.mutedForeground,
+                        }}
+                      >
+                        {group.mixes.length}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  {open ? (
+                    <View
+                      style={{
+                        gap: 6,
+                        padding: 6,
+                        borderTopWidth: 1,
+                        borderTopColor: colors.border,
+                      }}
+                    >
+                      {group.mixes.map((mix) => {
+                        const expanded = openMixes.has(mix.id);
+                        return (
+                          <View key={mix.id} style={{ gap: 6 }}>
+                            <Pressable
+                              onPress={() => toggleMix(mix.id)}
+                              style={{
+                                flexDirection: "row",
+                                alignItems: "center",
+                                gap: 8,
+                                paddingHorizontal: 8,
+                                paddingVertical: 8,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: expanded ? colors.primary : "transparent",
+                                backgroundColor: expanded
+                                  ? colors.primary + "1a"
+                                  : "transparent",
+                              }}
+                            >
+                              <Feather
+                                name={expanded ? "chevron-down" : "chevron-right"}
+                                size={12}
+                                color={colors.mutedForeground}
+                              />
+                              <Text
+                                numberOfLines={1}
+                                style={{
+                                  flexShrink: 1,
+                                  fontFamily: FONTS.medium,
+                                  fontSize: 12,
+                                  color: colors.foreground,
+                                }}
+                              >
+                                {mix.name || "Unnamed mix"}
+                              </Text>
+                              {mix.flavor ? (
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    flexShrink: 1,
+                                    fontFamily: FONTS.regular,
+                                    fontSize: 11,
+                                    color: colors.mutedForeground,
+                                  }}
+                                >
+                                  {mix.flavor}
+                                </Text>
+                              ) : null}
+                              <View style={{ flex: 1 }} />
+                              {!mix.enabled ? (
+                                <View
+                                  style={{
+                                    paddingHorizontal: 6,
+                                    paddingVertical: 2,
+                                    borderRadius: 999,
+                                    backgroundColor: colors.muted,
+                                  }}
+                                >
+                                  <Text
+                                    style={{
+                                      fontFamily: FONTS.regular,
+                                      fontSize: 10,
+                                      color: colors.mutedForeground,
+                                    }}
+                                  >
+                                    Off
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {mix.batchSize > 0 ? (
+                                <Text
+                                  style={{
+                                    fontFamily: FONTS.mono,
+                                    fontSize: 10,
+                                    color: colors.mutedForeground,
+                                  }}
+                                >
+                                  {mix.batchSize} lbs
+                                </Text>
+                              ) : null}
+                            </Pressable>
+                            {expanded ? (
+                              <MixEditor
+                                mix={mix}
+                                disabled={busy}
+                                brands={brands}
+                                brandFlavors={brandFlavors}
+                                ingredientSuggestions={ingredientSuggestions}
+                                onChange={(next) => saveMutation.mutate([next])}
+                                onDelete={() => deleteMutation.mutate([mix.id])}
+                              />
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
         </View>
       )}
 

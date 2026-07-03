@@ -333,3 +333,49 @@ export function buildMixPlan(args: {
 
   return groups.sort((a, b) => a.date.localeCompare(b.date));
 }
+
+// ── Mix list browsing (search + brand grouping for the settings UI) ─────────
+
+/** Case-insensitive match of a search query against a mix's name/brand/flavor. */
+export function mixMatchesQuery(mix: Mix, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    mix.name.toLowerCase().includes(q) ||
+    mix.brand.toLowerCase().includes(q) ||
+    mix.flavor.toLowerCase().includes(q)
+  );
+}
+
+export interface MixBrandGroup {
+  /** Trimmed brand name; "" for mixes with no brand (sorted last). */
+  brand: string;
+  mixes: Mix[];
+}
+
+/**
+ * Group mixes by brand for a browsable settings list: brands sorted
+ * alphabetically (case-insensitive), the no-brand group last, and mixes inside
+ * each group sorted by name. Pure — used by BOTH web and mobile so the two
+ * lists can't drift.
+ */
+export function groupMixesByBrand(mixes: ReadonlyArray<Mix>): MixBrandGroup[] {
+  const byBrand = new Map<string, { brand: string; mixes: Mix[] }>();
+  for (const mix of mixes) {
+    const brand = mix.brand.trim();
+    const key = brand.toLowerCase();
+    const g = byBrand.get(key);
+    if (g) g.mixes.push(mix);
+    else byBrand.set(key, { brand, mixes: [mix] });
+  }
+  const groups = [...byBrand.values()];
+  for (const g of groups) {
+    g.mixes.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }
+  groups.sort((a, b) => {
+    if (!a.brand && b.brand) return 1;
+    if (a.brand && !b.brand) return -1;
+    return a.brand.localeCompare(b.brand, undefined, { sensitivity: "base" });
+  });
+  return groups;
+}

@@ -39,3 +39,12 @@ The planner needs, per scheduled run: `pizzas` and `cases`.
 
 ## Gotcha
 - Mobile `hasCapability`/`useMe` come from `@/hooks/useRole` (NOT `@/hooks/useMe`).
+
+## Settings list UX (decided)
+- With ~57 imported mixes a flat list of full editors is unusable. The Mixes settings list
+  is search + brand groups (collapsed by default; forced open while searching or when only
+  one group) + compact rows expanding to the existing MixEditor on tap. Grouping/search
+  semantics live in @workspace/mixes (`mixMatchesQuery`, `groupMixesByBrand`: ci brand
+  grouping on trimmed brand, alpha sort, no-brand last, in-group name sort) so web+mobile
+  can't drift. Add Mix clears search and pre-opens the no-brand group + new editor
+  (client-generated id survives the save round-trip, so expansion is stable).
