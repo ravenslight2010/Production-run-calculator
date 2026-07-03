@@ -230,10 +230,12 @@ describe("computeCalc (mobile) — representative run", () => {
     expect(c.app2Batches).toBe(0); // "Cheddar Mix" is pre-made
   });
 
-  it("computes pepperoni lbs and excludes default pep types from batches", () => {
+  it("computes pepperoni lbs and batches (no built-in default pep types post-purge)", () => {
     const c = calc();
     expect(c.pep1Lbs).toBeCloseTo(80, 10); // (1200 * 1) / 16 + 5 sticks
-    expect(c.pep1Batches).toBe(0); // default "Pepperoni Stick" is pre-made
+    // DEFAULT_PEP_TYPES is intentionally empty since the 2026-07-03 data
+    // purge, so no pep type is treated as pre-made by default anymore.
+    expect(c.pep1Batches).toBeCloseTo(3.2, 10); // 80 / 25
     expect(c.pep2Lbs).toBeCloseTo(114.5, 10); // (1200 * 1.5) / 16 + 2 sticks
     expect(c.pep2Batches).toBeCloseTo(5.725, 10); // 114.5 / 20
   });
@@ -328,7 +330,7 @@ describe("frontline math parity: web computeSummaryStats <-> mobile computeCalc"
     });
   });
 
-  it("matches on the pre-made exclusions (a 'mix' applicator and a default pepperoni)", () => {
+  it("matches on the 'mix' applicator exclusion (no default pep types post-purge)", () => {
     const web = computeSummaryStats({
       ...scenario,
       app1Type: "Cheese Mix",
@@ -338,11 +340,15 @@ describe("frontline math parity: web computeSummaryStats <-> mobile computeCalc"
       mobileState({ ...scenario, app1Type: "Cheese Mix", pep1Type: "Pepperoni Stick" }),
       NOW,
     );
-    // Both still report lbs, both report zero batches for the pre-made items.
+    // "mix"-named applicators are still pre-made (zero batches) on both.
     expect(web.app1Batches).toBe(0);
     expect(m.app1Batches).toBe(0);
-    expect(web.pep1Batches).toBe(0);
-    expect(m.pep1Batches).toBe(0);
+    // DEFAULT_PEP_TYPES is intentionally empty since the 2026-07-03 data
+    // purge, so "Pepperoni Stick" is no longer pre-made — both engines
+    // compute batches and must agree. pep1Lbs = (2400*2)/16 + 4 = 304;
+    // batches = 304 / 30.
+    expect(web.pep1Batches).toBeCloseTo(304 / 30, 9);
+    expect(m.pep1Batches).toBeCloseTo(web.pep1Batches, 9);
     expect(m.app1Lbs).toBeCloseTo(web.app1Lbs, 9);
     expect(m.pep1Lbs).toBeCloseTo(web.pep1Lbs, 9);
   });

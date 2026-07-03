@@ -96,10 +96,24 @@ export function countRecipeNameReferences(
  * Anything containing the standalone word "mix" (as a whole token, so "mixed"
  * and "premix" are NOT matched) is treated as a recipe name, EXCEPT genuine
  * ingredients that legitimately contain "mix" (e.g. the jarred "Hot Giardiniera
- * Mix") — those are passed in via `realIngredients` (compared by full name).
+ * Mix") — those are passed in via `realIngredients` (compared by full name)
+ * and/or covered by the built-in GENUINE_MIX_INGREDIENT_NAMES allowlist below.
  */
+
+/**
+ * Genuine standalone ingredients that legitimately contain the word "mix".
+ * Built into isStrayMixName so protection does not depend on the (now
+ * intentionally empty) factory seed lists — after the 2026-07-03 data purge the
+ * caller-supplied `realIngredients` set no longer carries these names.
+ * Lower-cased full names.
+ */
+export const GENUINE_MIX_INGREDIENT_NAMES: ReadonlySet<string> = new Set([
+  "hot giardiniera mix",
+]);
+
 export function isStrayMixName(name: string, realIngredients: Set<string>): boolean {
   const t = name.trim().toLowerCase();
   if (realIngredients.has(t)) return false;
+  if (GENUINE_MIX_INGREDIENT_NAMES.has(t)) return false;
   return /\bmix\b/.test(t);
 }

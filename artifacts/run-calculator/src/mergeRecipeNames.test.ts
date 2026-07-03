@@ -134,6 +134,13 @@ describe("isStrayMixName", () => {
     expect(isStrayMixName("Pepperoni", real)).toBe(false);
   });
 
+  it("protects built-in genuine mix ingredients even with an empty caller allowlist", () => {
+    // Post-purge the seed-derived allowlist is empty; the built-in
+    // GENUINE_MIX_INGREDIENT_NAMES set must still protect real ingredients.
+    expect(isStrayMixName("Hot Giardiniera Mix", new Set())).toBe(false);
+    expect(isStrayMixName("4Hands Club Mix", new Set())).toBe(true);
+  });
+
   it("does not flag names where 'mix' is only part of a larger word", () => {
     expect(isStrayMixName("Mixed Berries", real)).toBe(false);
     expect(isStrayMixName("Premix Base", real)).toBe(false);
