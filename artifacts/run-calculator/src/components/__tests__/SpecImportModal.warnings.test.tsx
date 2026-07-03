@@ -199,7 +199,7 @@ describe("SpecImportModal (mobile) flavor-correction warnings", () => {
     const text = textOf(container);
 
     // Top-level callout with the count summary.
-    expect(text).toContain("1 flavor name was corrected or flagged");
+    expect(text).toContain("1 item was corrected or flagged");
 
     // The warning is attached to its product: the "Brand — Flavor" label of the
     // matching parsed profile renders together with the correction message.
@@ -227,7 +227,7 @@ describe("SpecImportModal (mobile) flavor-correction warnings", () => {
 
     // Case/whitespace differences must never hide the correction: the callout
     // renders with the warning's own label and message.
-    expect(text).toContain("1 flavor name was corrected or flagged");
+    expect(text).toContain("1 item was corrected or flagged");
     expect(text).toContain("tombstone — PEPPERONI");
     expect(text).toContain("Check this flavor name.");
   });
@@ -248,7 +248,7 @@ describe("SpecImportModal (mobile) flavor-correction warnings", () => {
     const text = textOf(container);
 
     // The unmatched warning is listed in the callout with its own label.
-    expect(text).toContain("1 flavor name was corrected or flagged");
+    expect(text).toContain("1 item was corrected or flagged");
     expect(text).toContain("Red Baron — Supreme");
     expect(text).toContain('Flavor "Suprême" did not match any product on the sheet.');
   });
@@ -265,7 +265,7 @@ describe("SpecImportModal (mobile) flavor-correction warnings", () => {
     );
     const text = textOf(container);
 
-    expect(text).toContain("2 flavor names were corrected or flagged");
+    expect(text).toContain("2 items were corrected or flagged");
     expect(text).toContain("First warning.");
     expect(text).toContain("Second warning.");
   });
