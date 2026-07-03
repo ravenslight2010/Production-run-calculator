@@ -4004,6 +4004,16 @@ export default function Home() {
                 pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
                 saveRunValues(id, pulledVals[id]);
               }
+              // Adopt the scheduled row's per-run value stamps: these values are
+              // server-sourced, not a local edit (stamping them with local time
+              // would fake one), but saving them completely unstamped would lose
+              // the per-run LWW merge to any peer that pushes a stamped copy.
+              {
+                const upd = loadRunValuesUpdated();
+                const remoteUpd = payload.runValuesUpdatedAt ?? {};
+                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
+                saveRunValuesUpdated(upd);
+              }
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
               setDayState(ds);
@@ -4576,12 +4586,18 @@ export default function Home() {
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
     const ds = dayStateRef.current;
+    const now = Date.now();
     for (const run of ds.runs) {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      if (!vals.doughRecipe.some(r => r.ingredient === oldName)) continue;
       const newVals = { ...vals, doughRecipe: vals.doughRecipe.map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r) };
       saveRunValues(run.id, newVals);
+      // Stamp: this bypasses the form-watch autosave; an unstamped value loses
+      // the per-run LWW merge to a peer's stale stamped copy.
+      markRunValuesUpdated(run.id, now);
       if (run.id === currentRunId) form.setValue("doughRecipe", newVals.doughRecipe);
     }
+    lastLocalEditRef.current = now;
     schedulePush(ds);
   }
 
@@ -4592,12 +4608,17 @@ export default function Home() {
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
     const ds = dayStateRef.current;
+    const now = Date.now();
     for (const run of ds.runs) {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      if (!vals.frontlineRecipe.some(r => r.ingredient === oldName)) continue;
       const newVals = { ...vals, frontlineRecipe: vals.frontlineRecipe.map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r) };
       saveRunValues(run.id, newVals);
+      // Stamp: bypasses the form-watch autosave (see renameDoughIngredient).
+      markRunValuesUpdated(run.id, now);
       if (run.id === currentRunId) form.setValue("frontlineRecipe", newVals.frontlineRecipe);
     }
+    lastLocalEditRef.current = now;
     schedulePush(ds);
   }
 
@@ -4609,14 +4630,19 @@ export default function Home() {
     saveList(CHEESE_INGREDIENTS_KEY, updated);
     const ds = dayStateRef.current;
     const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
+    const now = Date.now();
     for (const run of ds.runs) {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      if (!appFields.some(f => (vals[f] as RecipeRow[]).some(r => r.ingredient === oldName))) continue;
       const patch: Partial<typeof vals> = {};
       for (const f of appFields) patch[f] = (vals[f] as RecipeRow[]).map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r);
       const newVals = { ...vals, ...patch };
       saveRunValues(run.id, newVals);
+      // Stamp: bypasses the form-watch autosave (see renameDoughIngredient).
+      markRunValuesUpdated(run.id, now);
       if (run.id === currentRunId) for (const f of appFields) form.setValue(f, patch[f]!);
     }
+    lastLocalEditRef.current = now;
     schedulePush(ds);
   }
 
@@ -4628,14 +4654,19 @@ export default function Home() {
     saveList(MIX_INGREDIENTS_KEY, updated);
     const ds = dayStateRef.current;
     const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
+    const now = Date.now();
     for (const run of ds.runs) {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
+      if (!appFields.some(f => (vals[f] as RecipeRow[]).some(r => r.ingredient === oldName))) continue;
       const patch: Partial<typeof vals> = {};
       for (const f of appFields) patch[f] = (vals[f] as RecipeRow[]).map(r => r.ingredient === oldName ? { ...r, ingredient: trimmed } : r);
       const newVals = { ...vals, ...patch };
       saveRunValues(run.id, newVals);
+      // Stamp: bypasses the form-watch autosave (see renameDoughIngredient).
+      markRunValuesUpdated(run.id, now);
       if (run.id === currentRunId) for (const f of appFields) form.setValue(f, patch[f]!);
     }
+    lastLocalEditRef.current = now;
     schedulePush(ds);
   }
 
@@ -4657,14 +4688,18 @@ export default function Home() {
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
     const ds = dayStateRef.current;
+    const now = Date.now();
     for (const run of ds.runs) {
       const vals = run.id === currentRunId ? form.getValues() : loadRunValues(run.id);
       if (vals.dieType === oldName) {
         const newVals = { ...vals, dieType: trimmed };
         saveRunValues(run.id, newVals);
+        // Stamp: bypasses the form-watch autosave (see renameDoughIngredient).
+        markRunValuesUpdated(run.id, now);
         if (run.id === currentRunId) form.setValue("dieType", trimmed);
       }
     }
+    lastLocalEditRef.current = now;
     schedulePush(ds);
   }
 
@@ -4861,6 +4896,7 @@ export default function Home() {
           ? (form.getValues("casesNeeded") as number)
           : loadRunValues(runId).casesNeeded;
       const writeCases = (value: number) => {
+        const now = Date.now();
         if (runId === currentRunId) {
           form.setValue("casesNeeded", value, { shouldDirty: true });
           saveRunValues(currentRunId, form.getValues());
@@ -4868,6 +4904,11 @@ export default function Home() {
           const vals = loadRunValues(runId);
           saveRunValues(runId, { ...vals, casesNeeded: value });
         }
+        // Stamp the edit: this bypasses the form-watch autosave (saveRunValues
+        // above makes its loadRunValues===v guard skip), and an unstamped value
+        // loses the per-run LWW merge to a peer's stale stamped copy.
+        markRunValuesUpdated(runId, now);
+        lastLocalEditRef.current = now;
         schedulePush(dayStateRef.current, 0);
       };
       writeCases(cases);
@@ -5121,6 +5162,11 @@ export default function Home() {
               ...(p.casesPerSkid != null ? { casesPerSkid: p.casesPerSkid } : {}),
             });
           }
+          // Stamp: bypasses the form-watch autosave; unstamped values lose the
+          // per-run LWW merge to a peer's stale stamped copy.
+          const now = Date.now();
+          markRunValuesUpdated(isCurrent ? currentRunId : runId, now);
+          lastLocalEditRef.current = now;
           schedulePush(dayStateRef.current, 0);
         };
         writeProgress(progress);
@@ -5278,6 +5324,11 @@ export default function Home() {
           const vals = { ...DEFAULT_VALUES, ...loadRunValues(targetId), [recipeId]: next };
           saveRunValues(targetId, vals as FormValues);
         }
+        // Stamp: bypasses the form-watch autosave; unstamped values lose the
+        // per-run LWW merge to a peer's stale stamped copy.
+        const now = Date.now();
+        markRunValuesUpdated(targetId, now);
+        lastLocalEditRef.current = now;
         schedulePush(dayStateRef.current, 0);
       },
     });
@@ -5292,6 +5343,11 @@ export default function Home() {
   function updateDrainingRunValues(id: string, partial: Partial<FormValues>) {
     const vals = { ...DEFAULT_VALUES, ...loadRunValues(id), ...partial } as FormValues;
     saveRunValues(id, vals);
+    // Stamp: this run isn't the active form, so the autosave never stamps it;
+    // an unstamped value loses the per-run LWW merge to a peer's stale copy.
+    const now = Date.now();
+    markRunValuesUpdated(id, now);
+    lastLocalEditRef.current = now;
     schedulePush(dayStateRef.current, 0);
     setDrainBump((b) => b + 1);
   }
@@ -5454,6 +5510,13 @@ export default function Home() {
     form.reset(clean);
     resetFieldArrays(clean);
     saveRunValues(currentRunId, clean);
+    // Stamp + push: saveRunValues above makes the form-watch autosave's
+    // loadRunValues===v guard skip, so without this the applied template never
+    // stamps or pushes and loses the per-run LWW merge to a peer's stale copy.
+    const now = Date.now();
+    markRunValuesUpdated(currentRunId, now);
+    lastLocalEditRef.current = now;
+    schedulePush(dayStateRef.current, 0);
     setShowTemplatesDialog(false);
   }
 
@@ -5471,6 +5534,12 @@ export default function Home() {
     // Copy all form values except progress fields
     const copied = { ...cur, skidsCompleted: 0, casesOnCurrentSkid: 0, traysOnLine: 0, batchesReady: 0, carryOverDone: false, tempFreezerTime: 0, tempCrustsPerCycle: 0, tempCycleSpeed: 0 };
     saveRunValues(newId, copied);
+    // Stamp the new run's copied values: form.reset(copied) re-emits values
+    // equal to what we just saved, so the autosave guard skips and the copy
+    // would push unstamped (losing the per-run LWW merge to any stale peer).
+    const now = Date.now();
+    markRunValuesUpdated(newId, now);
+    lastLocalEditRef.current = now;
     form.reset(copied);
     resetFieldArrays(copied);
     schedulePush(newDs, 0);
@@ -6152,6 +6221,16 @@ export default function Home() {
                 const meta = metaById.get(id);
                 pulledVals[id] = backfillSauceFromProfile(mergeRunDefaults(vals as FormValues), meta?.brand, meta?.flavor);
                 saveRunValues(id, pulledVals[id]);
+              }
+              // Adopt the scheduled row's per-run value stamps: these values are
+              // server-sourced, not a local edit (stamping them with local time
+              // would fake one), but saving them completely unstamped would lose
+              // the per-run LWW merge to any peer that pushes a stamped copy.
+              {
+                const upd = loadRunValuesUpdated();
+                const remoteUpd = payload.runValuesUpdatedAt ?? {};
+                for (const id of Object.keys(pulledVals)) if (remoteUpd[id]) upd[id] = remoteUpd[id];
+                saveRunValuesUpdated(upd);
               }
               { const dm = loadDeletedItems(); if (dm["runs"]) { delete dm["runs"]; saveDeletedItems(dm); } }
               saveDayState(ds);
@@ -9682,6 +9761,11 @@ export default function Home() {
                               traysOnLine: (existing.traysOnLine ?? 0) + excessTrays,
                               batchesReady: (existing.batchesReady ?? 0) + excessBatches,
                             });
+                            // Stamp the next run's edit: it isn't the active
+                            // form, so the autosave never stamps it and the
+                            // carried trays/batches would lose the per-run LWW
+                            // merge to a peer's stale stamped copy.
+                            markRunValuesUpdated(nextRun.id, Date.now());
                             // The carried dough leaves THIS run's staged supply —
                             // deduct it here too, or the current run keeps showing
                             // (and auto-tracking) trays/batches that now belong to
