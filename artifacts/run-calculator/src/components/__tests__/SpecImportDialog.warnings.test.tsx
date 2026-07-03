@@ -82,7 +82,7 @@ describe("SpecImportDialog flavor-correction warnings", () => {
     // Top-level callout with the count summary.
     const callout = screen.getByTestId("spec-import-warnings");
     expect(
-      within(callout).getByText("1 flavor name was corrected or flagged"),
+      within(callout).getByText("1 item was corrected or flagged"),
     ).toBeTruthy();
 
     // Per-row callout is attached to the Tombstone row (first kept profile = pk0)
@@ -161,7 +161,7 @@ describe("SpecImportDialog flavor-correction warnings", () => {
 
     expect(
       within(screen.getByTestId("spec-import-warnings")).getByText(
-        "2 flavor names were corrected or flagged",
+        "2 items were corrected or flagged",
       ),
     ).toBeTruthy();
 

@@ -69,7 +69,7 @@ describe("saved spec sheet flavor-correction callout", () => {
     // Callout renders once the sheet list loads.
     const callout = await screen.findByTestId("spec-sheet-warnings-1");
     expect(callout).toBeTruthy();
-    expect(callout.textContent).toContain("2 flavor names were corrected or flagged at import");
+    expect(callout.textContent).toContain("2 items were corrected or flagged at import");
 
     // Collapsed by default: individual warning details are not visible yet.
     expect(screen.queryByText(/Tony's — Pepperoni/)).toBeNull();
@@ -94,7 +94,7 @@ describe("saved spec sheet flavor-correction callout", () => {
     render(<SpecReconcilePanel />);
 
     const callout = await screen.findByTestId("spec-sheet-warnings-3");
-    expect(callout.textContent).toContain("1 flavor name was corrected or flagged at import");
+    expect(callout.textContent).toContain("1 item was corrected or flagged at import");
   });
 
   it("shows no callout for legacy snapshots without warnings", async () => {

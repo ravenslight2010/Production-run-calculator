@@ -147,7 +147,7 @@ describe("mobile saved spec sheet flavor-correction callout", () => {
 
     const callout = screen.getByTestId("spec-sheet-warnings-1");
     expect(callout).toBeTruthy();
-    expect(callout.textContent).toContain("2 flavor names were corrected or flagged at import");
+    expect(callout.textContent).toContain("2 items were corrected or flagged at import");
 
     // Collapsed by default: individual warning details are not visible yet.
     expect(screen.queryByText(/Tony's — Pepperoni/)).toBeNull();
@@ -169,7 +169,7 @@ describe("mobile saved spec sheet flavor-correction callout", () => {
     render(<SheetCardHarness sheets={[makeSheet(3, { warnings: [WARNINGS[0]] })]} />);
 
     const callout = screen.getByTestId("spec-sheet-warnings-3");
-    expect(callout.textContent).toContain("1 flavor name was corrected or flagged at import");
+    expect(callout.textContent).toContain("1 item was corrected or flagged at import");
   });
 
   it("shows no callout for legacy snapshots without warnings", () => {
