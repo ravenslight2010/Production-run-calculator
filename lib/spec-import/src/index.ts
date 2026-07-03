@@ -846,6 +846,11 @@ export type SpecImportGrounding = {
   sourceText?: string;
   knownFlavors?: string[];
   knownBrands?: string[];
+  /** Existing sauce/frontline recipe names (e.g. ready-made sauces already in
+   * the app). Used to ground a profile's `sauceName` so a paraphrased sauce
+   * (e.g. "Buffalo Wing Sauce" for a sheet that says "Hot Buffalo Sauce")
+   * cannot silently point the profile at a sauce that doesn't exist. */
+  knownSauceNames?: string[];
 };
 
 const DEFAULT_SPEC_LIMITS: Required<SpecImportLimits> = {
@@ -1054,6 +1059,16 @@ export function buildProfileBrandGrounding(
   return buildNameGroundingCtx(grounding.sourceText, grounding.knownBrands);
 }
 
+/** Build the profile SAUCE-NAME grounding context: same cell split, keyed on
+ * `knownSauceNames` (existing sauce/frontline recipe names). Returns undefined
+ * without source text — no grounding source means sauce names are kept as-is
+ * (back-compat, never false-flagged). Pure. */
+export function buildProfileSauceGrounding(
+  grounding: SpecImportGrounding,
+): ProfileFlavorGroundingCtx | undefined {
+  return buildNameGroundingCtx(grounding.sourceText, grounding.knownSauceNames);
+}
+
 export type ProfileFlavorGroundResult =
   | { kind: "grounded" }
   | { kind: "snapped"; flavor: string }
@@ -1210,6 +1225,89 @@ export function groundProfileBrand(
   return { kind: "ungrounded" };
 }
 
+/** Sauce-name word tokens that should count toward grounding: the literal word
+ * "sauce" is generic in this context (the sheet's sauce row, the profile's
+ * sauceName, and unrelated notes all carry it), so it must neither ground an
+ * invented name nor flag a legitimate "X" -> "X Sauce" transform. Pure. */
+function sauceCheckTokens(name: string): string[] {
+  return flavorTokens(name).filter((t) => t !== "sauce");
+}
+
+/**
+ * Grounding backstop for a profile's SAUCE NAME, mirroring `groundProfileBrand`:
+ * a paraphrased sauce name (e.g. "Buffalo Wing Sauce" for a sheet that says
+ * "Hot Buffalo Sauce") silently points the profile at a sauce recipe that
+ * doesn't exist, so sauce consumption/batching never matches up. A sauce name
+ * is grounded when it is a known sauce name, its full phrase appears in a
+ * source cell, or its word tokens (ignoring the generic word "sauce") all sit
+ * inside a SINGLE cell — the prompt legitimately captures "Hot Buffalo" from
+ * the sheet as "Hot Buffalo Sauce". Otherwise snap to the nearest known sauce
+ * name or source cell by shared tokens (cells that mention "sauce" are
+ * preferred — they're likelier the actual sauce row); with no confident match
+ * it is flagged ungrounded (kept + warned) — never silently invented. Pure. */
+export function groundProfileSauceName(
+  name: string,
+  ctx: ProfileFlavorGroundingCtx,
+): ProfileFlavorGroundResult {
+  const n = name.trim();
+  if (!n) return { kind: "grounded" };
+  const phrase = normalizePhrase(n);
+  if (!phrase) return { kind: "grounded" };
+  if (ctx.knownFlavorSet && ctx.knownFlavorSet.has(phrase)) return { kind: "grounded" };
+  if (ctx.cells.some((c) => c.normalized.includes(phrase))) return { kind: "grounded" };
+
+  const toks = sauceCheckTokens(n);
+  // Nothing checkable beyond the generic word ("Q Sauce" and other very short
+  // names tokenize to nothing) — keep, never false-flag a short legit name.
+  if (toks.length === 0) return { kind: "grounded" };
+  // The sheet may name the sauce without the literal word "Sauce" ("BBQ" on
+  // the sauce row -> sauceName "BBQ Sauce" is a legitimate transform, not an
+  // invention): all remaining tokens inside ONE cell count as grounded.
+  for (const c of ctx.cells) {
+    const cellToks = new Set(flavorTokens(c.original));
+    if (toks.every((t) => cellToks.has(t))) return { kind: "grounded" };
+  }
+
+  // Not in the source and not known -> paraphrased/invented. Try to snap to
+  // the nearest sauce name that IS real, scored by shared word tokens.
+  const tokSet = new Set(toks);
+  const score = (candidate: string): number => {
+    const cToks = sauceCheckTokens(candidate);
+    if (cToks.length === 0 || cToks.length > MAX_SNAP_CANDIDATE_TOKENS) return 0;
+    let shared = 0;
+    const seen = new Set<string>();
+    for (const t of cToks) {
+      if (tokSet.has(t) && !seen.has(t)) {
+        seen.add(t);
+        shared++;
+      }
+    }
+    if (shared === 0) return 0;
+    return shared / Math.max(cToks.length, toks.length);
+  };
+
+  let best: { flavor: string; score: number } | undefined;
+  // Known sauce names present in the source are the safest candidates —
+  // scoring bonus so they win ties against raw cells.
+  for (const ks of ctx.knownInSource) {
+    const s = score(ks);
+    if (s >= 0.5 && (!best || s + 0.25 > best.score)) best = { flavor: ks, score: s + 0.25 };
+  }
+  for (const c of ctx.cells) {
+    // Never snap TO a generic placeholder ("Sauce"/"Pizza Sauce") — the
+    // sanitizer drops those names outright, so they're not real candidates.
+    if (isGenericSauceName(c.original)) continue;
+    const base = score(c.original);
+    if (base < 0.5) continue;
+    // Cells that mention "sauce" are likelier the sheet's actual sauce row
+    // than a same-token flavor cell (e.g. "Buffalo Chicken") — prefer them.
+    const s = /sauce/i.test(c.original) ? base + 0.2 : base;
+    if (!best || s > best.score) best = { flavor: c.original, score: s };
+  }
+  if (best) return { kind: "snapped", flavor: best.flavor };
+  return { kind: "ungrounded" };
+}
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -1229,6 +1327,7 @@ export function sanitizeParsedSpecImport(
       : undefined;
   const profileCtx = buildProfileFlavorGrounding(grounding);
   const brandCtx = buildProfileBrandGrounding(grounding);
+  const sauceCtx = buildProfileSauceGrounding(grounding);
   const groundingWarnings: SpecImportWarning[] = [];
 
   // Shared brand grounding backstop, used for PROFILE brands and RECIPE brand
@@ -1331,7 +1430,36 @@ export function sanitizeParsedSpecImport(
     const sauceOz = num(o.sauceOzPerPizza);
     if (sauceOz != null) profile.sauceOzPerPizza = sauceOz;
     const sauceName = clampName(o.sauceName, lim.maxNameChars);
-    if (sauceName && !isGenericSauceName(sauceName)) profile.sauceName = sauceName;
+    if (sauceName && !isGenericSauceName(sauceName)) {
+      // Grounding backstop for the profile's SAUCE NAME, same snap-or-flag
+      // semantics as brands/flavors: a paraphrased sauce name (e.g. "Buffalo
+      // Wing Sauce" for a sheet that says "Hot Buffalo Sauce") silently points
+      // the profile at a sauce recipe that doesn't exist, so consumption and
+      // batching never match up. Warnings key to the FINAL (already grounded)
+      // brand+flavor row so review UIs attach them to the right profile.
+      let grounded = sauceName;
+      if (sauceCtx) {
+        const g = groundProfileSauceName(sauceName, sauceCtx);
+        if (g.kind === "snapped") {
+          const corrected = clampName(g.flavor, lim.maxNameChars);
+          if (corrected && !isGenericSauceName(corrected)) {
+            groundingWarnings.push({
+              brand,
+              flavor,
+              message: `Corrected sauce "${sauceName}" to "${g.flavor}" (brand ${brand}, flavor ${flavor}).`,
+            });
+            grounded = corrected;
+          }
+        } else if (g.kind === "ungrounded") {
+          groundingWarnings.push({
+            brand,
+            flavor,
+            message: `Sauce "${sauceName}" (brand ${brand}, flavor ${flavor}) was not found on the sheet — please verify.`,
+          });
+        }
+      }
+      profile.sauceName = grounded;
+    }
     profiles.push(profile);
   }
 

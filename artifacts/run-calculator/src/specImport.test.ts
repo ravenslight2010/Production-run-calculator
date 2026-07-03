@@ -715,6 +715,181 @@ describe("sanitizeParsedSpecImport — profile flavor grounding", () => {
   });
 });
 
+describe("sanitizeParsedSpecImport — profile SAUCE NAME grounding", () => {
+  // Flattened workbook text: tab-separated cells; the sauce column names the
+  // ready-made sauce each flavor pulls.
+  const workbook =
+    "ALDO'S PIZZAS\tSPECS\n" +
+    "Flavor\tSauce\tSauce oz\n" +
+    "Cheese\tHot Buffalo Sauce\t2.5\n" +
+    "Buffalo Chicken\tRanch\t2\n";
+
+  it("snaps a paraphrased sauce name back to the sauce written on the sheet", () => {
+    // The model paraphrased "Hot Buffalo Sauce" into "Buffalo Wing Sauce" —
+    // that points the profile at a sauce recipe that doesn't exist, so sauce
+    // consumption/batching would never match up.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Buffalo Wing Sauce" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].sauceName).toBe("Hot Buffalo Sauce");
+    // Correction surfaces as a STRUCTURED warning keyed to the profile's
+    // brand+flavor row so review UIs can attach it to the right profile.
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0].brand).toBe("Aldo's");
+    expect(out.warnings![0].flavor).toBe("Cheese");
+    expect(out.warnings![0].message).toContain(
+      'Corrected sauce "Buffalo Wing Sauce" to "Hot Buffalo Sauce"',
+    );
+  });
+
+  it("prefers the sauce-mentioning cell over a flavor cell sharing tokens", () => {
+    // "Buffalo Wing Sauce" shares "buffalo" with BOTH the "Buffalo Chicken"
+    // flavor cell and the "Hot Buffalo Sauce" sauce cell — the sauce row must
+    // win or we'd point the profile at a flavor, not a sauce.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Buffalo Wing Sauce" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].sauceName).toBe("Hot Buffalo Sauce");
+  });
+
+  it("keeps a sauce name that appears verbatim on the sheet (no false snap)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Buffalo Chicken", sauceName: "Ranch" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].sauceName).toBe("Ranch");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("keeps a KNOWN sauce name even when it is absent from the sheet", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Marinara" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook, knownSauceNames: ["Marinara"] },
+    );
+    expect(out.profiles[0].sauceName).toBe("Marinara");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it('does not flag a legitimate "X" -> "X Sauce" transform', () => {
+    // The sheet's sauce cell just says "BBQ"; capturing it as "BBQ Sauce" is a
+    // naming transform, not an invention — must stay unflagged.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "BBQ Sauce" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: "ALDO'S\nFlavor\tSauce\nCheese\tBBQ\t2.5\n" },
+    );
+    expect(out.profiles[0].sauceName).toBe("BBQ Sauce");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("keeps a short sauce name whose only checkable token is the generic word", () => {
+    // "Q Sauce" tokenizes to nothing beyond "sauce" — nothing checkable, so it
+    // must be kept without a false flag.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Q Sauce" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].sauceName).toBe("Q Sauce");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("flags (keeps + warns) an invented sauce with no plausible sheet match", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Sriracha Glaze" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    // Never dropped (no data loss), but never silently accepted either.
+    expect(out.profiles[0].sauceName).toBe("Sriracha Glaze");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0]).toMatchObject({ brand: "Aldo's", flavor: "Cheese" });
+    expect(out.warnings![0].message).toContain('Sauce "Sriracha Glaze"');
+    expect(out.warnings![0].message).toContain("was not found");
+  });
+
+  it("never snaps TO a generic placeholder cell like 'Pizza Sauce'", () => {
+    // The only shared-token cell is the generic "Pizza Sauce" — snapping to it
+    // would mint the very placeholder the sanitizer drops. Flag instead.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Marinara Pizza Blend" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: "ALDO'S\nFlavor\tSauce\nCheese\tPizza Sauce\t2.5\n" },
+    );
+    expect(out.profiles[0].sauceName).toBe("Marinara Pizza Blend");
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings![0].message).toContain("was not found");
+  });
+
+  it("keys the sauce warning to the FINAL flavor after flavor grounding snapped it", () => {
+    // The flavor itself gets corrected ("BBQ Chicken" -> "Buffalo Chicken");
+    // the sauce warning must key to the corrected row, not the invented one.
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "BBQ Chicken", sauceName: "Sriracha Glaze" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].flavor).toBe("Buffalo Chicken");
+    const sauceWarn = out.warnings!.find((w) => w.message.includes("Sriracha Glaze"));
+    expect(sauceWarn).toMatchObject({ brand: "Aldo's", flavor: "Buffalo Chicken" });
+  });
+
+  it("leaves sauce names untouched when no grounding is supplied (back-compat)", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Totally Invented Sauce" }],
+      recipes: [],
+    });
+    expect(out.profiles[0].sauceName).toBe("Totally Invented Sauce");
+    expect(out.warnings).toBeUndefined();
+  });
+
+  it("still drops a generic sauceName outright (grounding does not resurrect it)", () => {
+    const out = sanitizeParsedSpecImport(
+      {
+        profiles: [{ brand: "Aldo's", flavor: "Cheese", sauceName: "Pizza Sauce" }],
+        recipes: [],
+      },
+      {},
+      { sourceText: workbook },
+    );
+    expect(out.profiles[0].sauceName).toBeUndefined();
+    expect(out.warnings).toBeUndefined();
+  });
+});
+
 describe("sanitizeParsedSpecImport — profile BRAND grounding", () => {
   const workbook =
     "BASHA'S ULTRA THIN CRUST PIZZAS\tSPECS\n" +
