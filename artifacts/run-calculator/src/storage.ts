@@ -883,11 +883,19 @@ export function applyPepTaxonomyMigrationIfNeeded(): void {
     const mergedPep = [...new Set([...DEFAULT_PEP_TYPES, ...cleanedPep])].sort((a, b) => a.localeCompare(b));
     saveList(PEP_TYPES_KEY, mergedPep);
 
-    const savedApp = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
-    for (const name of RETIRED_PEP_TYPES) {
-      if (!savedApp.some(t => t.toLowerCase() === name.toLowerCase())) savedApp.push(name);
+    // Only carry a retired pep name over to the applicator list if the user
+    // actually HAD it as a pep type — never introduce it on a fresh/empty
+    // install (the app ships with no built-in data since the 2026-07-03 purge).
+    const retiredPresent = RETIRED_PEP_TYPES.filter(name =>
+      savedPep.some(t => t.toLowerCase() === name.toLowerCase()),
+    );
+    if (retiredPresent.length > 0) {
+      const savedApp = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+      for (const name of retiredPresent) {
+        if (!savedApp.some(t => t.toLowerCase() === name.toLowerCase())) savedApp.push(name);
+      }
+      saveList(INGREDIENT_TYPES_KEY, [...new Set(savedApp)].sort((a, b) => a.localeCompare(b)));
     }
-    saveList(INGREDIENT_TYPES_KEY, [...new Set(savedApp)].sort((a, b) => a.localeCompare(b)));
 
     localStorage.setItem(PEP_TAXONOMY_MIGRATION_KEY, "1");
   } catch {}
@@ -1577,7 +1585,7 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
 
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 
-const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260703c";
+const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260703d";
 /**
  * One-time full local wipe (2026-07-03): the user asked for a one-time purge of
  * all factory data back to a fresh clean state. The server database is purged

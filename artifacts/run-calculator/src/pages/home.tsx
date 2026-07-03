@@ -1937,7 +1937,7 @@ export default function Home() {
   }, [history]);
 
   const [brands, setBrands] = useState<string[]>(() =>
-    [...loadList(BRANDS_KEY, ["Lucia's"])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
+    [...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
   );
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
@@ -2191,7 +2191,7 @@ export default function Home() {
   // directly to storage, so the Setup dropdowns reflect the new options
   // immediately without a reload. Mirrors each list's initializer above.
   function reloadMasterData() {
-    setBrands([...loadList(BRANDS_KEY, ["Lucia's"])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b)));
+    setBrands([...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b)));
     setBrandFlavors(loadBrandFlavors());
     setIngredientTypes([...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b)));
     setPepTypes(() => {

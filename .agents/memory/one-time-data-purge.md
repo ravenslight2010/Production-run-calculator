@@ -44,6 +44,15 @@ again with the server stopped):
   triggers — all pep types take the batch-lbs path until the user adds types
   (consistent web+mobile). Fill-missing's "spec" source is permanently empty.
 
+**Round 3 — sneaky survivors:** after removing seeds, two names still came
+back: inline non-empty fallbacks (`loadList(BRANDS_KEY, ["Lucia's"])` in
+home.tsx) and a "hygiene" migration that unconditionally ADDED a retired pep
+name to the applicator list. Lesson: for a true-empty app, audit (1) every
+inline list fallback, not just the DEFAULT_* constants, and (2) migrations that
+add names — make adds conditional on the name having existed. Marker ended at
+`-d`; each resurrection round needs marker bump + daily_sync delete with the
+server stopped.
+
 Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
 dead seed helpers can be retired in a later cleanup once all devices have run
-the `-c` wipe.
+the final wipe.
