@@ -127,3 +127,14 @@ viewport, the parent canvas re-layouts and pulls focus off the embedded app.
 Do NOT hunt for an app bug on these canvas-only symptoms — the answer is "run the
 app in its own browser tab"; the app cannot defend against parent-frame focus theft
 (programmatic refocus won't reopen a mobile keyboard without a user gesture).
+
+### Correction (Jul 3, 2026): Manage-dialog keyboard loss WAS an app bug
+The Manage Lists rename-keyboard-dismissal + delete-confirm-instantly-closing
+report turned out to be app-side after all: ListPanel/GroupedPanel were defined
+INSIDE the dialog's render IIFE, so every per-second Home re-render (run clock)
+gave them a new component identity → React remounted the subtree each tick,
+wiping rename state, closing the keyboard, and dismissing the confirm popover.
+Fixed by hoisting both to module scope (thread the mg*Input state via props).
+Rule: NEVER define a component inside Home's render — the per-second clock
+re-render remounts it every tick. The iframe-focus-theft explanation above still
+holds for the import-review one-letter case (top-level components there).

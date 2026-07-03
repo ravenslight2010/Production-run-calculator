@@ -1730,6 +1730,126 @@ function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues {
   return merged;
 }
 
+// ── Manage Lists panels ─────────────────────────────────────────────────
+// MUST live at module scope. They were previously defined inline inside the
+// Manage dialog's render IIFE, which gave them a new component identity on
+// every Home re-render (once per second via the run clock) — React remounted
+// the whole subtree each tick, closing the phone keyboard mid-rename, losing
+// the rename text, and instantly dismissing the delete-confirm popover.
+const ListPanel = ({
+  items, onAdd, onRemove, placeholder, protected: protectedItems,
+  inputVal, setInputVal, onRename, onEdit, selectedItem, onMove, moveTargets,
+}: {
+  items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
+  placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
+  onRename?: (oldName: string, newName: string) => void;
+  onEdit?: (name: string) => void;
+  selectedItem?: string | null;
+  onMove?: (name: string, targetKey: string) => void;
+  moveTargets?: { key: string; label: string }[];
+}) => {
+  const [renamingItem, setRenamingItem] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const [movingItem, setMovingItem] = useState<string | null>(null);
+  function beginRename(item: string) { setRenamingItem(item); setRenameVal(item); }
+  function commitRename() {
+    if (renamingItem && renameVal.trim() && renameVal.trim() !== renamingItem) {
+      onRename!(renamingItem, renameVal.trim());
+    }
+    setRenamingItem(null); setRenameVal("");
+  }
+  return (
+  <div className="space-y-2">
+    <div className="flex gap-2">
+      <input
+        type="text"
+        value={inputVal}
+        onChange={e => setInputVal(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" && inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
+        placeholder={placeholder}
+        className="flex-1 border border-input rounded-md px-3 py-1.5 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
+      />
+      <button
+        type="button"
+        onClick={() => { if (inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
+        disabled={!inputVal.trim()}
+        className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
+      >Add</button>
+    </div>
+    {items.length === 0
+      ? <p className="text-xs text-muted-foreground text-center py-3">No items yet.</p>
+      : <ul className="space-y-1 max-h-48 overflow-y-auto overscroll-contain">
+          {items.map(item => {
+            const isProt = protectedItems?.includes(item);
+            const isRenaming = renamingItem === item;
+            const isSelected = selectedItem === item;
+            return (
+              <li key={item} className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-md transition-colors ${isSelected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/30 hover:bg-muted/50"}`}>
+                {isRenaming ? (
+                  <input
+                    autoFocus
+                    type="text"
+                    value={renameVal}
+                    onChange={e => setRenameVal(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setRenamingItem(null); setRenameVal(""); } }}
+                    onBlur={commitRename}
+                    className="flex-1 border border-primary rounded px-2 py-0.5 text-sm bg-background focus:outline-none"
+                  />
+                ) : (
+                  <span className="text-sm flex-1 min-w-0 break-words">{item}</span>
+                )}
+                {isProt
+                  ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
+                  : isRenaming
+                  ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
+                  : movingItem === item && onMove && moveTargets
+                  ? <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Move to</span>
+                      {moveTargets.map(t => (
+                        <button key={t.key} type="button" onClick={() => { setMovingItem(null); onMove(item, t.key); }} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-primary/15 text-primary hover:bg-primary/25">{t.label}</button>
+                      ))}
+                      <button type="button" title="Cancel" onClick={() => setMovingItem(null)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
+                    </div>
+                  : <div className="flex items-center gap-1 shrink-0">
+                      {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
+                      {onMove && moveTargets && moveTargets.length > 0 && <button type="button" title="Move to another category" onClick={() => setMovingItem(item)} className="text-muted-foreground hover:text-foreground"><ArrowRightLeft className="w-3 h-3" /></button>}
+                      {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
+                      <ConfirmDeleteButton onConfirm={() => onRemove(item)} title={`Remove "${item}"?`} description="This removes it from your saved list. You can undo master-data changes from Change History." confirmLabel="Remove"><button type="button" title="Remove" className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button></ConfirmDeleteButton>
+                    </div>}
+              </li>
+            );
+          })}
+        </ul>
+    }
+  </div>
+  );
+};
+
+// Grouped panel: recipe names (left) + ingredients (right)
+const GroupedPanel = ({
+  namesLabel, names, onAddName, onRemoveName, onRenameName, onEditName, selectedName,
+  ingLabel, ingredients, onAddIng, onRemoveIng, onRenameIng,
+  ingProtected, onMoveName, nameMoveTargets,
+  namesInput, setNamesInput, ingInput, setIngInput,
+}: {
+  namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void; onEditName?: (n: string) => void; selectedName?: string | null;
+  ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void; onRenameIng?: (o: string, n: string) => void;
+  ingProtected?: string[];
+  onMoveName?: (name: string, targetKey: string) => void; nameMoveTargets?: { key: string; label: string }[];
+  namesInput: string; setNamesInput: (v: string) => void; ingInput: string; setIngInput: (v: string) => void;
+}) => (
+  <div className="grid grid-cols-2 gap-4">
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
+      <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} onEdit={onEditName} selectedItem={selectedName} placeholder="Add name…" inputVal={namesInput} setInputVal={setNamesInput} onMove={onMoveName} moveTargets={nameMoveTargets} />
+    </div>
+    <div>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
+      <ListPanel items={ingredients} onAdd={onAddIng} onRemove={onRemoveIng} onRename={onRenameIng} placeholder="Add ingredient…" protected={ingProtected} inputVal={ingInput} setInputVal={setIngInput} />
+    </div>
+  </div>
+);
+
 export default function Home() {
   const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen, markTourCompleted } =
     useAuth();
@@ -8183,118 +8303,9 @@ export default function Home() {
       })()}
 
       {showManageDialog && (() => {
-        // Simple list panel: add input + item list
-        const ListPanel = ({
-          items, onAdd, onRemove, placeholder, protected: protectedItems,
-          inputVal, setInputVal, onRename, onEdit, selectedItem, onMove, moveTargets,
-        }: {
-          items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
-          placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
-          onRename?: (oldName: string, newName: string) => void;
-          onEdit?: (name: string) => void;
-          selectedItem?: string | null;
-          onMove?: (name: string, targetKey: string) => void;
-          moveTargets?: { key: string; label: string }[];
-        }) => {
-          const [renamingItem, setRenamingItem] = useState<string | null>(null);
-          const [renameVal, setRenameVal] = useState("");
-          const [movingItem, setMovingItem] = useState<string | null>(null);
-          function beginRename(item: string) { setRenamingItem(item); setRenameVal(item); }
-          function commitRename() {
-            if (renamingItem && renameVal.trim() && renameVal.trim() !== renamingItem) {
-              onRename!(renamingItem, renameVal.trim());
-            }
-            setRenamingItem(null); setRenameVal("");
-          }
-          return (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputVal}
-                onChange={e => setInputVal(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
-                placeholder={placeholder}
-                className="flex-1 border border-input rounded-md px-3 py-1.5 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <button
-                type="button"
-                onClick={() => { if (inputVal.trim()) { onAdd(inputVal.trim()); setInputVal(""); } }}
-                disabled={!inputVal.trim()}
-                className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
-              >Add</button>
-            </div>
-            {items.length === 0
-              ? <p className="text-xs text-muted-foreground text-center py-3">No items yet.</p>
-              : <ul className="space-y-1 max-h-48 overflow-y-auto overscroll-contain">
-                  {items.map(item => {
-                    const isProt = protectedItems?.includes(item);
-                    const isRenaming = renamingItem === item;
-                    const isSelected = selectedItem === item;
-                    return (
-                      <li key={item} className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-md transition-colors ${isSelected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/30 hover:bg-muted/50"}`}>
-                        {isRenaming ? (
-                          <input
-                            autoFocus
-                            type="text"
-                            value={renameVal}
-                            onChange={e => setRenameVal(e.target.value)}
-                            onKeyDown={e => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setRenamingItem(null); setRenameVal(""); } }}
-                            onBlur={commitRename}
-                            className="flex-1 border border-primary rounded px-2 py-0.5 text-sm bg-background focus:outline-none"
-                          />
-                        ) : (
-                          <span className="text-sm flex-1 min-w-0 break-words">{item}</span>
-                        )}
-                        {isProt
-                          ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
-                          : isRenaming
-                          ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
-                          : movingItem === item && onMove && moveTargets
-                          ? <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Move to</span>
-                              {moveTargets.map(t => (
-                                <button key={t.key} type="button" onClick={() => { setMovingItem(null); onMove(item, t.key); }} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-primary/15 text-primary hover:bg-primary/25">{t.label}</button>
-                              ))}
-                              <button type="button" title="Cancel" onClick={() => setMovingItem(null)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
-                            </div>
-                          : <div className="flex items-center gap-1 shrink-0">
-                              {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
-                              {onMove && moveTargets && moveTargets.length > 0 && <button type="button" title="Move to another category" onClick={() => setMovingItem(item)} className="text-muted-foreground hover:text-foreground"><ArrowRightLeft className="w-3 h-3" /></button>}
-                              {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
-                              <ConfirmDeleteButton onConfirm={() => onRemove(item)} title={`Remove "${item}"?`} description="This removes it from your saved list. You can undo master-data changes from Change History." confirmLabel="Remove"><button type="button" title="Remove" className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button></ConfirmDeleteButton>
-                            </div>}
-                      </li>
-                    );
-                  })}
-                </ul>
-            }
-          </div>
-          );
-        };
-
-        // Grouped panel: recipe names (left) + ingredients (right)
-        const GroupedPanel = ({
-          namesLabel, names, onAddName, onRemoveName, onRenameName, onEditName, selectedName,
-          ingLabel, ingredients, onAddIng, onRemoveIng, onRenameIng,
-          ingProtected, onMoveName, nameMoveTargets,
-        }: {
-          namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void; onEditName?: (n: string) => void; selectedName?: string | null;
-          ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void; onRenameIng?: (o: string, n: string) => void;
-          ingProtected?: string[];
-          onMoveName?: (name: string, targetKey: string) => void; nameMoveTargets?: { key: string; label: string }[];
-        }) => (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
-              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} onEdit={onEditName} selectedItem={selectedName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} onMove={onMoveName} moveTargets={nameMoveTargets} />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
-              <ListPanel items={ingredients} onAdd={onAddIng} onRemove={onRemoveIng} onRename={onRenameIng} placeholder="Add ingredient…" protected={ingProtected} inputVal={mgIngInput} setInputVal={setMgIngInput} />
-            </div>
-          </div>
-        );
+        // ListPanel / GroupedPanel are module-scope components (see top of
+        // file) — do NOT define components inside this IIFE, they'd remount
+        // on every per-second Home re-render and lose their local state.
 
         // Standalone tabs: still use a single input
         // History instrumentation wrappers: snapshot before the edit, run it, then
@@ -8482,6 +8493,10 @@ export default function Home() {
                       onRenameIng={(groupedTab as any).onRenameIng}
                       onMoveName={(name, targetKey) => moveRecipeName(name, groupedTab.key as RecipeNameCategory, targetKey as RecipeNameCategory)}
                       nameMoveTargets={groupedTabs.filter(t => t.key !== groupedTab.key).map(t => ({ key: t.key, label: t.label }))}
+                      namesInput={mgNamesInput}
+                      setNamesInput={setMgNamesInput}
+                      ingInput={mgIngInput}
+                      setIngInput={setMgIngInput}
                     />
 
                     {/* Recipe ingredient editor */}
