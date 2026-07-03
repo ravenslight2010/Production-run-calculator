@@ -5838,6 +5838,11 @@ export default function Home() {
     let failed = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
+    // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
+    // run's current target: the office re-issued today's schedule with a new
+    // count. Collected here and OFFERED to the user after the import (never
+    // auto-applied). Finished runs are never modified.
+    const caseUpdateOffers: { runId: string; brand: string; flavor: string; from: number; to: number }[] = [];
     for (const day of byDate) {
       const date = day.date;
       let existing: SyncPayload | null = null;
@@ -5862,10 +5867,24 @@ export default function Home() {
       if (date === todayStr()) {
         const alreadyRan = existingRuns
           .filter(r => r.startedAt || r.endedAt)
-          .map(r => ({ brand: r.brand ?? "", flavor: r.flavor ?? "" }));
+          .map(r => ({ brand: r.brand ?? "", flavor: r.flavor ?? "", id: r.id, inProgress: !!r.startedAt && !r.endedAt }));
         const skipRes = skipAlreadyRanRuns(dayRuns, alreadyRan);
         dayRuns = skipRes.rows;
         skippedToday += skipRes.skipped;
+        // A skipped row can still carry news: the re-issued schedule may list a
+        // DIFFERENT case count for a run that's already going. Collect an offer
+        // for in-progress runs only (finished runs are never modified).
+        for (const m of skipRes.matches) {
+          if (!m.run.inProgress) continue;
+          const planned = Math.round(m.row.casesPlanned ?? NaN);
+          if (!Number.isFinite(planned) || planned <= 0) continue;
+          const current = m.run.id === currentRunIdRef.current
+            ? (Number(form.getValues("casesNeeded")) || 0)
+            : (loadRunValues(m.run.id).casesNeeded || 0);
+          if (planned !== current) {
+            caseUpdateOffers.push({ runId: m.run.id, brand: m.row.brand, flavor: m.row.flavor, from: current, to: planned });
+          }
+        }
       }
       const newRuns: RunMeta[] = [];
       const newRunValues: Record<string, FormValues> = {};
@@ -5947,6 +5966,34 @@ export default function Home() {
         title: failed === byDate.length ? "Import failed" : "Import partly failed",
         description: `${failed} of ${byDate.length} day${byDate.length === 1 ? "" : "s"} could not be saved${lastErrorDetail ? ` (${lastErrorDetail})` : ""}. Please try again.${skippedNote}`,
       });
+    }
+    // OFFER (never auto-apply) new case counts for in-progress runs whose
+    // skipped file row listed a different planned total than the floor's
+    // current target. Finished runs are never modified.
+    if (caseUpdateOffers.length > 0) {
+      const lines = caseUpdateOffers
+        .map(o => `• ${`${o.brand} ${o.flavor}`.trim() || "run"}: ${o.from} → ${o.to} cases`)
+        .join("\n");
+      const many = caseUpdateOffers.length > 1;
+      const apply = window.confirm(
+        `The re-imported schedule lists ${many ? "different case counts" : "a different case count"} for ${many ? `${caseUpdateOffers.length} runs that are` : "a run that's"} already going:\n\n${lines}\n\nUpdate the run target${many ? "s" : ""} to the new count${many ? "s" : ""}? The run${many ? "s" : ""} will keep ${many ? "their" : "its"} progress.`,
+      );
+      if (apply) {
+        for (const o of caseUpdateOffers) {
+          if (o.runId === currentRunIdRef.current) {
+            form.setValue("casesNeeded", o.to, { shouldDirty: true });
+            saveRunValues(o.runId, form.getValues());
+          } else {
+            const vals = loadRunValues(o.runId);
+            saveRunValues(o.runId, { ...vals, casesNeeded: o.to });
+          }
+        }
+        schedulePush(dayStateRef.current, 0);
+        toast({
+          title: "Run targets updated",
+          description: `${caseUpdateOffers.length} in-progress run${many ? "s" : ""} updated to the new case count${many ? "s" : ""}.`,
+        });
+      }
     }
   }
 

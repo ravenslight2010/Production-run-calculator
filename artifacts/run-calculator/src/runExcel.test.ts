@@ -544,4 +544,40 @@ describe("skipAlreadyRanRuns", () => {
     const out = skipAlreadyRanRuns(rows, [{ brand: "B", flavor: "y" }]);
     expect(out.rows).toEqual([rows[0], rows[2]]);
   });
+
+  it("returns the matched (row, run) pairs with the consumed run's extra fields", () => {
+    // Callers use these pairs to offer case-count updates for in-progress runs
+    // whose re-imported file row lists a different planned total.
+    const ran = [
+      { brand: "Acme", flavor: "Cheese", id: "r1", casesNeeded: 100 },
+      { brand: "Beta", flavor: "Veggie", id: "r2", casesNeeded: 50 },
+    ];
+    const out = skipAlreadyRanRuns(
+      [row("acme", "cheese", 120), row("Gamma", "Plain", 30)],
+      ran,
+    );
+    expect(out.skipped).toBe(1);
+    expect(out.matches).toHaveLength(1);
+    expect(out.matches[0].run).toBe(ran[0]);
+    expect(out.matches[0].row.casesPlanned).toBe(120);
+    expect(out.rows.map((r) => r.brand)).toEqual(["Gamma"]);
+  });
+
+  it("pairs duplicate file rows with distinct already-ran runs in order", () => {
+    const ran = [
+      { brand: "Acme", flavor: "Cheese", id: "first" },
+      { brand: "Acme", flavor: "Cheese", id: "second" },
+    ];
+    const out = skipAlreadyRanRuns(
+      [row("Acme", "Cheese", 5), row("Acme", "Cheese", 7)],
+      ran,
+    );
+    expect(out.matches.map((m) => m.run.id)).toEqual(["first", "second"]);
+    expect(out.matches.map((m) => m.row.casesPlanned)).toEqual([5, 7]);
+  });
+
+  it("returns no matches when nothing already ran", () => {
+    const out = skipAlreadyRanRuns([row("Acme", "Cheese")], []);
+    expect(out.matches).toEqual([]);
+  });
 });

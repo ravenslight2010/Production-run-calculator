@@ -38,6 +38,11 @@ import {
   skipAlreadyRanRuns,
   type ImportParseResult,
 } from "@/utils/runExcel";
+import {
+  buildCaseUpdateOffers,
+  promptCaseUpdates,
+  type CaseUpdateOffer,
+} from "@/utils/importCaseUpdates";
 import { shareShiftReport } from "@/utils/shiftReport";
 
 type RunStatus = "finished" | "current" | "upcoming";
@@ -328,6 +333,7 @@ export default function SummaryScreen() {
     addFlavor,
     addListItem,
     supervisorPin,
+    updateRunSettingsById,
   } = useRun();
   const { tick } = useRunClock();
 
@@ -387,17 +393,34 @@ export default function SummaryScreen() {
       // did (mirrors web commitMultiDayImport).
       const alreadyRan = allRuns
         .filter((r) => r.startedAt || r.endedAt)
-        .map((r) => ({ brand: r.settings.brand, flavor: r.settings.flavor }));
+        .map((r) => ({
+          brand: r.settings.brand,
+          flavor: r.settings.flavor,
+          id: r.id,
+          startedAt: r.startedAt,
+          endedAt: r.endedAt,
+          casesNeeded: r.settings.casesNeeded,
+        }));
       let skipped = 0;
+      const caseUpdateOffers: CaseUpdateOffer[] = [];
       const today = todayStr();
       const effective = byDate.map((day) => {
         if (day.date !== today) return day;
         const res = skipAlreadyRanRuns(day.runs, alreadyRan);
         skipped += res.skipped;
+        // A skipped row may list a NEW case count for a run already going —
+        // collect an offer (never auto-applied; finished runs untouched).
+        caseUpdateOffers.push(...buildCaseUpdateOffers(res.matches));
         return { ...day, runs: res.rows };
       });
       importScheduledRuns(effective);
-      if (skipped > 0) {
+      const skippedNote =
+        skipped > 0 ? `${skipped} run${skipped === 1 ? "" : "s"} already ran today, skipped.\n\n` : "";
+      if (caseUpdateOffers.length > 0) {
+        promptCaseUpdates(caseUpdateOffers, skippedNote, (o) =>
+          updateRunSettingsById(o.runId, { casesNeeded: o.to }),
+        );
+      } else if (skipped > 0) {
         showNote(
           "Some runs skipped",
           `${skipped} run${skipped === 1 ? "" : "s"} already ran today, skipped.`,

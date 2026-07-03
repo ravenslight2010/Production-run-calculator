@@ -47,6 +47,11 @@ import {
 } from "@/utils/runExcel";
 import { showNote } from "@/utils/notify";
 import {
+  buildCaseUpdateOffers,
+  promptCaseUpdates,
+  type CaseUpdateOffer,
+} from "@/utils/importCaseUpdates";
+import {
   buildMergeMap,
   countMergeReferences,
   type MergeMap,
@@ -1174,6 +1179,7 @@ export default function MasterDataScreen() {
     addScheduledRun,
     importScheduledRuns,
     allRuns,
+    updateRunSettingsById,
   } = useRun();
   const { isManager, hasCapability } = useMe();
   const mixesQc = useQueryClient();
@@ -1228,6 +1234,7 @@ export default function MasterDataScreen() {
       payload.createFlavors.forEach((cf) => addFlavor(cf.brand, cf.flavor));
       let count = 0;
       let skipped = 0;
+      const caseUpdateOffers: CaseUpdateOffer[] = [];
       if (payload.multiDay) {
         const byDate = (payload.byDate ?? []).map((day) => ({
           date: day.date,
@@ -1244,12 +1251,22 @@ export default function MasterDataScreen() {
         // did (mirrors web commitMultiDayImport).
         const alreadyRan = allRuns
           .filter((r) => r.startedAt || r.endedAt)
-          .map((r) => ({ brand: r.settings.brand, flavor: r.settings.flavor }));
+          .map((r) => ({
+            brand: r.settings.brand,
+            flavor: r.settings.flavor,
+            id: r.id,
+            startedAt: r.startedAt,
+            endedAt: r.endedAt,
+            casesNeeded: r.settings.casesNeeded,
+          }));
         const today = todayStr();
         const effective = byDate.map((day) => {
           if (day.date !== today) return day;
           const res = skipAlreadyRanRuns(day.runs, alreadyRan);
           skipped += res.skipped;
+          // A skipped row may list a NEW case count for a run already going —
+          // collect an offer (never auto-applied; finished runs untouched).
+          caseUpdateOffers.push(...buildCaseUpdateOffers(res.matches));
           return { ...day, runs: res.rows };
         });
         count = effective.reduce((n, d) => n + d.runs.length, 0);
@@ -1270,10 +1287,16 @@ export default function MasterDataScreen() {
       setImportOpen(false);
       setImportResult(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showNote(
-        "Import complete",
-        `${count} run${count === 1 ? "" : "s"} imported.${skipped > 0 ? ` ${skipped} already ran today, skipped.` : ""}`,
-      );
+      const summary = `${count} run${count === 1 ? "" : "s"} imported.${skipped > 0 ? ` ${skipped} already ran today, skipped.` : ""}`;
+      if (caseUpdateOffers.length > 0) {
+        // Fold the import summary into the offer alert (RN can't reliably
+        // stack two alerts back-to-back on Android).
+        promptCaseUpdates(caseUpdateOffers, `${summary}\n\n`, (o) =>
+          updateRunSettingsById(o.runId, { casesNeeded: o.to }),
+        );
+      } else {
+        showNote("Import complete", summary);
+      }
     } catch (e) {
       showNote(
         "Import failed",

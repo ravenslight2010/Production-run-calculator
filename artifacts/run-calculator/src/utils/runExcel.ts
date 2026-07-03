@@ -441,33 +441,40 @@ export function filterImportFromDate(result: ImportParseResult, fromISO: string)
  * already done. Matching is by brand+flavor (case-insensitive, trimmed) and
  * consumes one already-ran run per matched row: if the file lists the same
  * brand+flavor twice and only one was run, one row still imports. Rows with no
- * match pass through unchanged. Pure — mirrored VERBATIM web + mobile.
+ * match pass through unchanged. Also returns the matched (row, run) pairs so
+ * callers can offer follow-ups (e.g. "the re-issued schedule changed this
+ * in-progress run's case count — update it?"). Pure — mirrored VERBATIM
+ * web + mobile.
  */
-export function skipAlreadyRanRuns<T extends { brand: string; flavor: string }>(
+export function skipAlreadyRanRuns<
+  T extends { brand: string; flavor: string },
+  R extends { brand: string; flavor: string },
+>(
   rows: T[],
-  ranRuns: { brand: string; flavor: string }[],
-): { rows: T[]; skipped: number } {
+  ranRuns: R[],
+): { rows: T[]; skipped: number; matches: { row: T; run: R }[] } {
   const keyOf = (brand: string, flavor: string) =>
     `${(brand ?? "").trim().toLowerCase()}|||${(flavor ?? "").trim().toLowerCase()}`;
-  // Count of not-yet-consumed already-ran runs per brand+flavor key.
-  const remaining = new Map<string, number>();
+  // Queue of not-yet-consumed already-ran runs per brand+flavor key.
+  const remaining = new Map<string, R[]>();
   for (const r of ranRuns) {
     const key = keyOf(r.brand, r.flavor);
-    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+    const q = remaining.get(key);
+    if (q) q.push(r);
+    else remaining.set(key, [r]);
   }
   const kept: T[] = [];
-  let skipped = 0;
+  const matches: { row: T; run: R }[] = [];
   for (const row of rows) {
     const key = keyOf(row.brand, row.flavor);
-    const n = remaining.get(key) ?? 0;
-    if (n > 0) {
-      remaining.set(key, n - 1);
-      skipped++;
+    const q = remaining.get(key);
+    if (q && q.length > 0) {
+      matches.push({ row, run: q.shift() as R });
     } else {
       kept.push(row);
     }
   }
-  return { rows: kept, skipped };
+  return { rows: kept, skipped: matches.length, matches };
 }
 
 // ---------------------------------------------------------------------------
