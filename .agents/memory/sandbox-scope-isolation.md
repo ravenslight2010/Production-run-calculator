@@ -3,8 +3,9 @@ name: Sandbox scope isolation boundaries
 description: What is and isn't scope-isolated for the seeded sandbox account; use before adding new manager-gated or global-table routes.
 ---
 
-The seeded sandbox account (username/password `test`/`test`) is a
-non-production demo shortcut, not a real tenant boundary:
+The seeded sandbox account (a well-known demo login seeded in
+`artifacts/api-server/src/lib/sandbox.ts`) is a non-production demo
+shortcut, not a real tenant boundary:
 
 - `sandboxAllowed()` (`artifacts/api-server/src/lib/sandbox.ts`) gates it to
   `NODE_ENV !== "production"`. It's checked at seed time (index.ts), at
