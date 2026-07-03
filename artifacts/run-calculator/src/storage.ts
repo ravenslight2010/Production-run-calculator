@@ -731,6 +731,30 @@ export function dropTombstonedPresetKeys<V>(
   return out;
 }
 
+// Return a copy of `deletedMap` where tombstones under `namespace` are removed
+// for any name currently alive in `aliveNames` (case-insensitive). Needed for
+// the cheese-preset drop on sync-receive: Mix recipe rows share the cheese
+// preset map, so a name reclassified Cheese → Mix is tombstoned under
+// "cheeseRecipeNames" (to keep it out of the cheese list on every peer) while
+// its rows must survive in the shared map as long as the name lives in the mix
+// list. Without this filter the receive-side drop would wipe the moved
+// recipe's rows on the next sync.
+export function dropTombstonesForAliveNames(
+  deletedMap: Record<string, string[]>,
+  namespace: string,
+  aliveNames: string[],
+): Record<string, string[]> {
+  const tomb = deletedMap[namespace];
+  if (!tomb || tomb.length === 0 || aliveNames.length === 0) return deletedMap;
+  const alive = new Set(aliveNames.map((n) => n.trim().toLowerCase()));
+  const next = tomb.filter((n) => !alive.has(n.trim().toLowerCase()));
+  if (next.length === tomb.length) return deletedMap;
+  const out = { ...deletedMap };
+  if (next.length > 0) out[namespace] = next;
+  else delete out[namespace];
+  return out;
+}
+
 // Whether a brand+flavor profile key (`${brandLc}__${flavorLc}`) is tombstoned
 // by a brand/flavor deletion or merge. Brand+flavor profiles are keyed by the
 // lowercased brand/flavor combo; on sync-receive they must honor the deletion
@@ -1098,6 +1122,86 @@ export function applyRecipeNameMerge(category: RecipeNameMergeCategory, map: Mer
       const obj = JSON.parse(raw);
       if (obj && typeof obj === "object") {
         const next = JSON.stringify(rewrite(obj as Record<string, unknown>));
+        if (next !== raw) {
+          localStorage.setItem(k, next);
+          if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));
+        }
+      }
+    } catch {}
+  }
+  return affectedRunIds;
+}
+
+/**
+ * Blank every selection field that still points at a recipe name which is
+ * leaving its category (a reclassify/"move to another category", not a merge —
+ * there is no target name of the SAME category to re-point to). Walks the same
+ * surfaces as applyRecipeNameMerge (templates, history, per-run values,
+ * brand/crust profiles) and returns the ids of runs it actually changed so the
+ * caller can bump their edit stamps before the sync push — otherwise a stale
+ * peer at an equal/older stamp resurrects the dangling selection.
+ */
+export function clearRecipeNameSelections(
+  category: RecipeNameMergeCategory,
+  name: string,
+): string[] {
+  if (typeof localStorage === "undefined") return [];
+  const fields = RECIPE_NAME_FIELDS_BY_CATEGORY[category];
+  if (fields.length === 0 || !name.trim()) return [];
+  const needle = name.trim().toLowerCase();
+  const clear = <T extends Record<string, unknown>>(obj: T): T => {
+    let changed = false;
+    const out = { ...obj } as Record<string, unknown>;
+    for (const k of fields) {
+      const v = out[k];
+      if (typeof v === "string" && v.trim().toLowerCase() === needle) {
+        out[k] = "";
+        changed = true;
+      }
+    }
+    return (changed ? out : obj) as T;
+  };
+  // ── Templates ──
+  try {
+    const templates = loadTemplates().map((t) =>
+      t.values ? { ...t, values: clear(t.values as unknown as Record<string, unknown>) as unknown as typeof t.values } : t,
+    );
+    saveTemplates(templates);
+  } catch {}
+  // ── History ──
+  try {
+    const history = loadHistory().map((day) => ({
+      ...day,
+      runValues: Object.fromEntries(
+        Object.entries(day.runValues ?? {}).map(([id, vals]) => [
+          id,
+          clear(vals as unknown as Record<string, unknown>) as unknown as FormValues,
+        ]),
+      ),
+    }));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch {}
+  // ── Per-run values + brand/crust profiles (prefix scan; mirrors buildSyncPayload) ──
+  const runPrefix = RUN_KEY("");
+  const keysToRewrite: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (
+      k.startsWith(runPrefix) ||
+      k.startsWith("run-calc-profile-") ||
+      k.startsWith("run-calc-crust-profile-")
+    ) {
+      keysToRewrite.push(k);
+    }
+  }
+  const affectedRunIds: string[] = [];
+  for (const k of keysToRewrite) {
+    try {
+      const raw = localStorage.getItem(k) ?? "null";
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === "object") {
+        const next = JSON.stringify(clear(obj as Record<string, unknown>));
         if (next !== raw) {
           localStorage.setItem(k, next);
           if (k.startsWith(runPrefix)) affectedRunIds.push(k.slice(runPrefix.length));

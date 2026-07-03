@@ -344,7 +344,7 @@ export const MAX_HISTORY_DAYS = 14;
 export const CHANGE_HISTORY_KEY = "run-calc-change-history";
 export const MAX_CHANGE_HISTORY = 20;
 
-export type MasterDataChangeType = "merge" | "add" | "remove" | "rename";
+export type MasterDataChangeType = "merge" | "add" | "remove" | "rename" | "move";
 
 export type MasterDataChange = {
   id: string;

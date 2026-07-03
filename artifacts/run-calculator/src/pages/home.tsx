@@ -86,6 +86,8 @@ import {
   isBlankRemovableRun,
   acceptRemoteRunValueOnSync,
   dropTombstonedPresetKeys,
+  dropTombstonesForAliveNames,
+  clearRecipeNameSelections,
   profileKeyIsTombstoned,
   loadTemplates,
   saveTemplates,
@@ -329,6 +331,7 @@ import {
   Blend,
   ClipboardCheck,
   Users,
+  ArrowRightLeft,
 } from "lucide-react";
 import { useAuth } from "@/useAuth";
 import * as XLSX from "xlsx";
@@ -2137,6 +2140,84 @@ export default function Home() {
     () => [...new Set([...currentMixPresets.map(p => p.name), ...mixRecipeNames])].sort((a, b) => a.localeCompare(b)),
     [currentMixPresets, mixRecipeNames]
   );
+
+  // ── Reclassify a recipe name between category tabs (Dough/Sauce/Cheese/Mix) ──
+  // Moves the name to the target list (remove tombstones the source so peers
+  // drop it too; add un-tombstones the target so it sticks) and carries its
+  // saved recipe rows along. Preset maps: dough and sauce each have their own;
+  // cheese and mix SHARE the cheese preset map, so a cheese↔mix move keeps the
+  // rows in place (the sync-receive drop is mix-aware, see the receive handler).
+  type RecipeNameCategory = "dough" | "sauce" | "cheese" | "mix";
+  const RECIPE_CATEGORY_LABELS: Record<RecipeNameCategory, string> = {
+    dough: "Dough", sauce: "Sauce", cheese: "Cheese", mix: "Mix",
+  };
+  function moveRecipeName(name: string, from: RecipeNameCategory, to: RecipeNameCategory) {
+    if (from === to) return;
+    const before = captureMasterDataSnapshot();
+    // Which physical preset map a category stores its rows in.
+    const mapOf = (c: RecipeNameCategory) => (c === "dough" ? "dough" : c === "sauce" ? "sauce" : "cheese");
+    if (mapOf(from) !== mapOf(to)) {
+      // Carry the saved rows into the target category's preset map. If the
+      // target already has rows under this name, keep the target's (don't
+      // clobber) — the source entry is removed either way since the name is
+      // leaving that category.
+      let rows: RecipeRow[] = [];
+      if (mapOf(from) === "dough") {
+        const p = loadDoughRecipePresets();
+        rows = p[name]?.rows ?? [];
+        if (p[name]) { delete p[name]; saveDoughRecipePresets(p); }
+      } else if (mapOf(from) === "sauce") {
+        const p = loadFrontlineRecipePresets();
+        rows = p[name] ?? [];
+        if (p[name]) { delete p[name]; saveFrontlineRecipePresets(p); }
+      } else {
+        const p = loadCheeseRecipePresets();
+        rows = p[name] ?? [];
+        if (p[name]) { delete p[name]; saveCheeseRecipePresets(p); }
+      }
+      if (rows.length > 0) {
+        if (mapOf(to) === "dough") {
+          const p = loadDoughRecipePresets();
+          if (!p[name]) { p[name] = { rows }; saveDoughRecipePresets(p); }
+        } else if (mapOf(to) === "sauce") {
+          const p = loadFrontlineRecipePresets();
+          if (!p[name]) { p[name] = rows; saveFrontlineRecipePresets(p); }
+        } else {
+          const p = loadCheeseRecipePresets();
+          if (!p[name]) { p[name] = rows; saveCheeseRecipePresets(p); }
+        }
+      }
+    }
+    const removers: Record<RecipeNameCategory, (n: string) => void> = {
+      dough: removeDoughRecipeName, sauce: removeFrontlineRecipeName,
+      cheese: removeCheeseRecipeName, mix: removeMixRecipeName,
+    };
+    const adders: Record<RecipeNameCategory, (n: string) => void> = {
+      dough: addDoughRecipeName, sauce: addFrontlineRecipeName,
+      cheese: addCheeseRecipeName, mix: addMixRecipeName,
+    };
+    removers[from](name);
+    adders[to](name);
+    // The name is leaving its source category, so any run/template/history/
+    // profile selection field still pointing at it (e.g. doughRecipeName) would
+    // dangle — blank those references and bump the changed runs' edit stamps so
+    // the sync push wins over stale peers still carrying the old selection.
+    const mergeCategory: RecipeNameMergeCategory = from === "mix" ? "mixes" : from;
+    const affectedRunIds = clearRecipeNameSelections(mergeCategory, name);
+    if (affectedRunIds.length > 0) {
+      const stamp = Date.now();
+      const upd = loadRunValuesUpdated();
+      for (const id of affectedRunIds) upd[id] = stamp;
+      saveRunValuesUpdated(upd);
+      refreshAfterMerge();
+      schedulePush(dayStateRef.current);
+    }
+    noteChange("move", `Moved "${name}" from ${RECIPE_CATEGORY_LABELS[from]} to ${RECIPE_CATEGORY_LABELS[to]}`, before);
+    toast({
+      title: "Recipe moved",
+      description: `"${name}" is now under ${RECIPE_CATEGORY_LABELS[to]}. Undo from Change History if needed.`,
+    });
+  }
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -3956,7 +4037,16 @@ export default function Home() {
       }
       if (payload.cheeseRecipePresets && Object.keys(payload.cheeseRecipePresets).length > 0) {
         const merged = { ...loadCheeseRecipePresets(), ...payload.cheeseRecipePresets };
-        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, deletedMap, "cheeseRecipeNames"));
+        // Mix recipe rows live in the same map keyed by name; a name moved
+        // Cheese → Mix is tombstoned under "cheeseRecipeNames" but its rows
+        // must survive while the name is alive in the mix list (mergeList for
+        // mix names ran above, so storage is current).
+        const mixAwareDeleted = dropTombstonesForAliveNames(
+          deletedMap,
+          "cheeseRecipeNames",
+          loadList(MIX_RECIPE_NAMES_KEY, []),
+        );
+        saveCheeseRecipePresets(dropTombstonedPresetKeys(merged, mixAwareDeleted, "cheeseRecipeNames"));
       }
 
       // ── Brand+flavor profiles (remote wins for same brand/flavor combo) ──
@@ -8096,16 +8186,19 @@ export default function Home() {
         // Simple list panel: add input + item list
         const ListPanel = ({
           items, onAdd, onRemove, placeholder, protected: protectedItems,
-          inputVal, setInputVal, onRename, onEdit, selectedItem,
+          inputVal, setInputVal, onRename, onEdit, selectedItem, onMove, moveTargets,
         }: {
           items: string[]; onAdd: (v: string) => void; onRemove: (v: string) => void;
           placeholder: string; protected?: string[]; inputVal: string; setInputVal: (v: string) => void;
           onRename?: (oldName: string, newName: string) => void;
           onEdit?: (name: string) => void;
           selectedItem?: string | null;
+          onMove?: (name: string, targetKey: string) => void;
+          moveTargets?: { key: string; label: string }[];
         }) => {
           const [renamingItem, setRenamingItem] = useState<string | null>(null);
           const [renameVal, setRenameVal] = useState("");
+          const [movingItem, setMovingItem] = useState<string | null>(null);
           function beginRename(item: string) { setRenamingItem(item); setRenameVal(item); }
           function commitRename() {
             if (renamingItem && renameVal.trim() && renameVal.trim() !== renamingItem) {
@@ -8157,8 +8250,17 @@ export default function Home() {
                           ? <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">default</span>
                           : isRenaming
                           ? <button type="button" onClick={commitRename} className="text-primary hover:text-primary/80 shrink-0"><Check className="w-3.5 h-3.5" /></button>
+                          : movingItem === item && onMove && moveTargets
+                          ? <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                              <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Move to</span>
+                              {moveTargets.map(t => (
+                                <button key={t.key} type="button" onClick={() => { setMovingItem(null); onMove(item, t.key); }} className="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-primary/15 text-primary hover:bg-primary/25">{t.label}</button>
+                              ))}
+                              <button type="button" title="Cancel" onClick={() => setMovingItem(null)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button>
+                            </div>
                           : <div className="flex items-center gap-1 shrink-0">
                               {onEdit && <button type="button" title="View / edit recipe" onClick={() => onEdit(item)} className={`${isSelected ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}><ClipboardList className="w-3.5 h-3.5" /></button>}
+                              {onMove && moveTargets && moveTargets.length > 0 && <button type="button" title="Move to another category" onClick={() => setMovingItem(item)} className="text-muted-foreground hover:text-foreground"><ArrowRightLeft className="w-3 h-3" /></button>}
                               {onRename && <button type="button" onClick={() => beginRename(item)} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
                               <ConfirmDeleteButton onConfirm={() => onRemove(item)} title={`Remove "${item}"?`} description="This removes it from your saved list. You can undo master-data changes from Change History." confirmLabel="Remove"><button type="button" title="Remove" className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button></ConfirmDeleteButton>
                             </div>}
@@ -8175,16 +8277,17 @@ export default function Home() {
         const GroupedPanel = ({
           namesLabel, names, onAddName, onRemoveName, onRenameName, onEditName, selectedName,
           ingLabel, ingredients, onAddIng, onRemoveIng, onRenameIng,
-          ingProtected,
+          ingProtected, onMoveName, nameMoveTargets,
         }: {
           namesLabel: string; names: string[]; onAddName: (v: string) => void; onRemoveName: (v: string) => void; onRenameName?: (o: string, n: string) => void; onEditName?: (n: string) => void; selectedName?: string | null;
           ingLabel: string; ingredients: string[]; onAddIng: (v: string) => void; onRemoveIng: (v: string) => void; onRenameIng?: (o: string, n: string) => void;
           ingProtected?: string[];
+          onMoveName?: (name: string, targetKey: string) => void; nameMoveTargets?: { key: string; label: string }[];
         }) => (
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{namesLabel}</p>
-              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} onEdit={onEditName} selectedItem={selectedName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} />
+              <ListPanel items={names} onAdd={onAddName} onRemove={onRemoveName} onRename={onRenameName} onEdit={onEditName} selectedItem={selectedName} placeholder="Add name…" inputVal={mgNamesInput} setInputVal={setMgNamesInput} onMove={onMoveName} moveTargets={nameMoveTargets} />
             </div>
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{ingLabel}</p>
@@ -8377,6 +8480,8 @@ export default function Home() {
                       onAddIng={groupedTab.onAddIng}
                       onRemoveIng={groupedTab.onRemoveIng}
                       onRenameIng={(groupedTab as any).onRenameIng}
+                      onMoveName={(name, targetKey) => moveRecipeName(name, groupedTab.key as RecipeNameCategory, targetKey as RecipeNameCategory)}
+                      nameMoveTargets={groupedTabs.filter(t => t.key !== groupedTab.key).map(t => ({ key: t.key, label: t.label }))}
                     />
 
                     {/* Recipe ingredient editor */}

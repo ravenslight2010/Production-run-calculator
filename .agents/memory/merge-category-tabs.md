@@ -46,6 +46,28 @@ merges ingredient names on every tab.)
   strays (`dropDeleted`) and unions the moves in. Do NOT make such a migration rerunnable —
   it would auto-relocate any legitimately user-added "…mix" ingredient on every load.
 
+## Reclassify (move a recipe name between category tabs) — web-only
+- Manage Lists names panels have a per-row "Move to another category" action
+  (`moveRecipeName` in home.tsx): removes the name from the source list (which
+  TOMBSTONES it under the source namespace so peers drop it) and adds it to the
+  target (which clears any target tombstone), carrying saved recipe rows between
+  preset maps. Change History records it as type `"move"` (undoable).
+- **Shared cheese/mix preset map gotcha:** mix recipe rows live in the CHEESE
+  preset map. A cheese→mix move tombstones the name under `cheeseRecipeNames`,
+  so the sync-receive cheese-preset drop would WIPE the moved recipe's rows on
+  the next sync. The receive handler must filter tombstones through
+  `dropTombstonesForAliveNames(deletedMap, "cheeseRecipeNames", mixNamesList)`
+  before `dropTombstonedPresetKeys` — a name alive in the mix list is a move,
+  not a deletion. Regression test: `recipeReclassifySyncReceive.test.ts`.
+- Preset shape differences when carrying rows: dough map stores `{ rows }`,
+  sauce stores `rows[]`, cheese/mix share one `rows[]` map (cheese↔mix move
+  skips the row copy entirely).
+- **Dangling-selection invariant:** a move (unlike a merge) has no same-category
+  target to re-point to, so every run/template/history/profile selection field
+  still holding the moved name must be BLANKED (`clearRecipeNameSelections`,
+  same traversal as the merge) and the changed runs' `runValuesUpdatedAt`
+  stamps bumped before the push — else stale peers resurrect the old selection.
+
 ## Two universes, don't conflate them
 - **Full universe** (`mergeFullUniverse` web / `fullUniverse` mobile): every
   mergeable ingredient list unioned. Used by the AI "Suggested merges" scan, the
