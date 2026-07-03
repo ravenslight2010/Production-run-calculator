@@ -3,7 +3,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import * as Haptics from "expo-haptics";
 import { Stack, useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Platform,
   Pressable,
@@ -241,6 +241,62 @@ export default function ScheduleScreen() {
     setImportOpen(false);
     setImportResult(null);
   }
+
+  // ─── Dev-only browser test hook ───────────────────────────────────────────
+  // The full re-import flow (menu → Schedule → file pick → confirm modal →
+  // per-run "Case count changed" dialogs) is too long for the UI-test
+  // harness's hard iteration cap. In dev on web ONLY, a staged ImportCommit
+  // left in localStorage under "rc_test_import" (shape:
+  // { byDate: [{ date, runs: [{ brand, flavor, casesPlanned, notes }] }] })
+  // is committed through the EXACT same commitImport path — so
+  // skipAlreadyRanRuns, buildCaseUpdateOffers, promptCaseUpdates, and
+  // updateRunSettingsById are all exercised in situ; only the file picker and
+  // confirm modal are skipped. The commit waits until every today-dated row's
+  // matching in-progress run has hydrated from live sync (firing earlier
+  // would find no matches and import the rows as plain scheduled runs). The
+  // key is consumed one-shot before committing. Stripped from production
+  // builds by the __DEV__ guard. See .local/fixtures/setup-case-update-test.mjs.
+  const testImportFiredRef = useRef(false);
+  useEffect(() => {
+    if (!__DEV__ || Platform.OS !== "web") return;
+    if (testImportFiredRef.current) return;
+    let staged: Partial<ImportCommit> | null = null;
+    try {
+      const raw = globalThis.localStorage?.getItem("rc_test_import");
+      if (!raw) return;
+      staged = JSON.parse(raw) as Partial<ImportCommit>;
+    } catch {
+      return;
+    }
+    if (!staged || !Array.isArray(staged.byDate)) return;
+    const key = (brand: string, flavor: string) =>
+      `${(brand ?? "").trim().toLowerCase()}|||${(flavor ?? "").trim().toLowerCase()}`;
+    const inProgress = new Set(
+      allRuns
+        .filter((r) => r.startedAt && !r.endedAt)
+        .map((r) => key(r.settings.brand, r.settings.flavor)),
+    );
+    const todayRows = staged.byDate
+      .filter((d) => d.date === today)
+      .flatMap((d) => d.runs ?? []);
+    const ready = todayRows.every((row) => inProgress.has(key(row.brand, row.flavor)));
+    if (!ready) return;
+    testImportFiredRef.current = true;
+    try {
+      globalThis.localStorage?.removeItem("rc_test_import");
+    } catch {
+      /* ignore */
+    }
+    commitImport({
+      date: today,
+      runs: [],
+      createBrands: staged.createBrands ?? [],
+      createFlavors: staged.createFlavors ?? [],
+      multiDay: true,
+      byDate: staged.byDate,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRuns, today]);
 
   const webTop = Platform.OS === "web" ? 16 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;

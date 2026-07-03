@@ -94,6 +94,21 @@ Lessons from writing run-screen production-rule UI tests (bypass + checklist gat
   blob `run-calc-mobile-v2`. The app autosaves over that key on a debounce, so seed and
   reload atomically (mutate then reload immediately, or setTimeout-reload inside one eval).
 
+- **Dev-only localStorage test hooks collapse long flows under the cap.** Two
+  `__DEV__ && Platform.OS === "web"` hooks (stripped from production builds):
+  `rc_test_route` (read by `+not-found.tsx`) deep-links straight to a route (e.g.
+  `/schedule`) from the not-found screen the `/mobile/` entry always lands on;
+  `rc_test_import` (read by `app/schedule.tsx`) commits a staged multi-day
+  ImportCommit through the REAL `commitImport` path — it deliberately WAITS until
+  every today-dated row's matching in-progress run has hydrated from sync (firing
+  earlier finds no matches and quietly imports plain scheduled runs instead of
+  popping the dialogs). Both keys are consumed one-shot. Full pre-seed script:
+  `.local/fixtures/setup-case-update-test.mjs` (sign-up → onboarding_seen → clear
+  daily_sync → PUT two in-progress runs; prints the exact localStorage values and
+  verify SQL). This made the re-import "Case count changed" accept-one/keep-other
+  flow pass browser-level in ~8 steps: navigate → set 3 keys → navigate → 2 dialog
+  clicks → DB verify (`runValues[<id>].casesNeeded`).
+
 - **Test-fixture cleanup (full set):** test user rows live in `users` plus dependents
   `user_roles` and `password_reset_requests` (no cascade — delete dependents first).
   Factory-wide rules in `production_rules`. Always also delete the test-created
