@@ -365,6 +365,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import { noteBreadcrumb } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
@@ -5899,6 +5900,7 @@ export default function Home() {
   async function handleSpecImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []).slice(0, MAX_SPEC_IMPORT_FILES);
     e.target.value = "";
+    noteBreadcrumb(`spec import: ${files.length} file(s) selected`);
     if (files.length === 0) return;
     setSpecImportPrepared(null);
     setSpecImportError(null);
@@ -5980,6 +5982,7 @@ export default function Home() {
   // names, and show a single review/summary screen. Nothing is written until the
   // user confirms; re-importing updates existing mixes by id.
   async function handlePremixImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    noteBreadcrumb(`premix import: ${e.target.files?.length ?? 0} file(s) selected`);
     const files = Array.from(e.target.files ?? []).slice(0, MAX_PREMIX_IMPORT_FILES);
     e.target.value = "";
     if (files.length === 0) return;
@@ -8773,12 +8776,12 @@ export default function Home() {
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
                     {isManager && (
-                      <button type="button" onClick={() => specImportInputRef.current?.click()}
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Spec Sheet
                       </button>
                     )}
-                    <button type="button" onClick={() => importInputRef.current?.click()}
+                    <button type="button" onClick={() => { noteBreadcrumb("Import Excel clicked (picker opening)"); importInputRef.current?.click(); }}
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md border border-border bg-muted/40 text-sm font-semibold hover:bg-muted">
                       <Upload className="w-4 h-4" /> Import Excel
                     </button>
@@ -8855,7 +8858,7 @@ export default function Home() {
                 {manageCategory === "mixes" && canManageInventory && (
                   <div className="space-y-3">
                     {isManager && (
-                      <button type="button" onClick={() => premixImportInputRef.current?.click()}
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Premix Sheet clicked (picker opening)"); premixImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Premix Sheet
                       </button>
