@@ -107,6 +107,24 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     });
   });
 
+  it("suppresses the 'won't show on any product' nudge for a reused recipe", () => {
+    // A recipe with no brand/flavor attaches to nothing, so the nudge shows...
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(makePrepared(recipe, []), () => {});
+
+    expect(screen.getByText(/Won't show on any product yet/)).toBeTruthy();
+
+    // ...but once the user reuses an existing recipe, the nudge disappears.
+    fireEvent.change(screen.getByTestId("spec-recipe-link-rk0"), {
+      target: { value: "House Dough" },
+    });
+    expect(screen.queryByText(/Won't show on any product yet/)).toBeNull();
+  });
+
   it("does NOT mark a recipe referenceOnly when 'Create new recipe' stays selected", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

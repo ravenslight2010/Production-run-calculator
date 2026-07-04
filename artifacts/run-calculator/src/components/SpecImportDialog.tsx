@@ -769,7 +769,7 @@ function RecipeRow({
   // the recipe name lands in the library but shows up on NO run — the silent
   // "it didn't import" miss the user reported.
   const targets = recipeApplyTargets(candidate, editedProfiles);
-  const attachesToNothing = item.include && !issue && targets.length === 0;
+  const attachesToNothing = item.include && !linked && !issue && targets.length === 0;
   const flavorMatch = Object.keys(flavorsByBrand).find(
     (b) => b.trim().toLowerCase() === brand.toLowerCase(),
   );

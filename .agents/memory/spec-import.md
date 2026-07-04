@@ -271,27 +271,24 @@ Any change to one app's order/logic must land in the other verbatim.
   the tombstone filter + editable review when parity resumes.
 
 ## Reuse-existing-recipe on import (`referenceOnly`, WEB ONLY)
-- The review dialog lets a user, per recipe item, REUSE one of their saved recipes
-  (dough/sauce/cheese/mix) instead of creating a new one from the sheet. Signalled
-  by the additive optional `referenceOnly?: boolean` on `ParsedRecipe`
-  (`@workspace/spec-import`); it's a type-only field, NO lib logic branches on it,
-  so no MOBILE_PRELUDE change is needed for the strip-imports harness.
-- **`applySpecImport` (web `storage.ts`) honors `referenceOnly` in THREE loops:**
-  (1) tombstone-clear loop SKIPS it, (2) recipe-library write loop SKIPS it (never
-  overwrites the saved recipe, never registers its name/ingredients), (3) tie-to-
-  profiles loop pulls rows from the EXISTING library via `existingRecipeRowsForImport`
-  (ci lookup) NOT `r.rows`, and if that lookup is empty (stale/tampered pick) it
-  SKIPS the tie entirely so no empty recipe is written onto a profile.
-- **Picker helpers only ever offer REAL saved targets:**
-  `existingRecipeNamesForImport(displayKind)` returns names that actually have saved
-  rows (dough/sauce filter their preset maps by row count; cheese/mix share the
-  cheese preset map but split by which NAME list the name lives in);
-  `existingDieTypesForImport()` = unique+sorted saved die types (DEFAULT_DIE_TYPES
-  is `[]`, so options come from the saved list only).
-- **Dialog gating:** a linked recipe suppresses its own `recipeApplyIssue`, AND the
-  global `attentionCount` must filter out `referenceOnly` recipes too (else a linked
-  recipe with parser-empty rows keeps Apply disabled). ProfileRow also has a die
-  REUSE `<select>`; `onKind` must reset `linkExisting` (kind change invalidates it).
+- A spec import may REUSE a saved recipe (dough/sauce/cheese/mix) instead of
+  creating one — the reused recipe must stay byte-identical (no overwrite, no
+  duplicate name/ingredient registered), only its saved rows get tied to profiles.
+  Signalled by the additive type-only `referenceOnly?: boolean` on `ParsedRecipe`;
+  NO lib logic branches on it (so no MOBILE_PRELUDE harness change needed) — every
+  effect lives in the web apply path + dialog.
+- **Rule for the apply path:** a `referenceOnly` recipe must be skipped by BOTH the
+  tombstone-clear and library-write passes, and its profile tie must pull rows from
+  the EXISTING saved recipe (ci name lookup), NOT from the parsed rows; if that
+  saved recipe is gone, SKIP the tie so no empty recipe is written onto a profile.
+- **Picker offers must be REAL saved targets only** (names that actually have saved
+  rows; die types from the saved list — `DEFAULT_DIE_TYPES` is `[]`), or the reuse
+  dropdown lets a user "reuse" something that hydrates to nothing.
+- **Dialog gating:** a linked recipe must suppress ALL its needs-attention nudges —
+  both the apply-issue (needs-name/no-rows, incl. the global `attentionCount` used
+  to enable Apply) AND the soft "won't attach to any product" warning — else a
+  reused recipe with parser-empty rows or no brand/flavor falsely blocks/nags.
+  Kind change must reset the chosen link (invalidated by the new kind).
 - **Parity:** intentionally WEB-ONLY — mobile spec import stays a read-only summary.
   Premix + photo-intake importers already support map-to-existing separately.
 
