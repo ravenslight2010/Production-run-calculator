@@ -20,6 +20,7 @@
 import {
   parsePremixWorkbook,
   groundPremix,
+  premixMatchName,
   collectPremixAliases,
   applyPremixMatches,
   premixToMix,
@@ -154,7 +155,9 @@ export async function preparePremixImport(
   // Ask the AI matcher ONLY for blocks whose product didn't resolve. Names only;
   // quantities are already final. Best-effort — proceed without it on failure.
   const unresolvedNames = [
-    ...new Set(grounded.filter((g) => !g.productResolved).map((g) => g.mix.name).filter(Boolean)),
+    ...new Set(
+      grounded.filter((g) => !g.productResolved).map((g) => premixMatchName(g.mix)).filter(Boolean),
+    ),
   ];
   let groundedMixes: ParsedPremix[] = grounded.map((g) => g.mix);
   if (unresolvedNames.length > 0) {
@@ -164,7 +167,13 @@ export async function preparePremixImport(
         brands: known.brands,
         brandFlavors: known.flavorsByBrand,
       });
-      groundedMixes = applyPremixMatches(groundedMixes, res.matches);
+      const matched = applyPremixMatches(groundedMixes, res.matches, unresolvedNames);
+      // Only accept AI matches for mixes that were actually unresolved — a
+      // tab-keyed match must not overwrite a sibling block on the same tab
+      // that already resolved deterministically.
+      groundedMixes = groundedMixes.map((mix, i) =>
+        grounded[i].productResolved ? mix : matched[i],
+      );
     } catch {
       // AI unavailable / not a manager — keep deterministic grounding.
     }

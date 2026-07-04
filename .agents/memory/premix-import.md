@@ -27,6 +27,18 @@ are parsed DETERMINISTICALLY in the shared lib; AI ONLY disambiguates product na
   state in the UI MUST be keyed by the ORIGINAL parsed mix.id (a stable key), because re-match
   changes the candidate's own id. Changing brand resets flavor (`rematch(key, newBrand, "")`).
 
+- **Brand/flavor auto-attach: the sheet TAB name is truth, block labels lie.** Blocks are
+  copy-pasted between products (a Basha tab's block can literally say "Corner Booth Hawaiian"),
+  so `splitPremixName` prefers the tab over the block name, with token-normalized brand-prefix
+  matching (case/punctuation/apostrophes stripped, inch marks 7in/7"/7' unified, 1-edit typo
+  tolerance for words ≥4 chars) and a unique in-order token-subsequence flavor fallback
+  (`matchFlavorBySubsequence`, ambiguity → no guess). Unresolved mixes are sent to the AI matcher
+  under `premixMatchName(mix)` (tab if ≥2 tokens, else block name), and `applyPremixMatches`
+  keys on that name first. **Gotcha:** because AI matches are tab-keyed, both apps' glue MUST
+  apply them only to mixes that were actually unresolved (`grounded[i].productResolved` guard +
+  `onlyNames` arg) — otherwise a tab-level AI match silently overwrites a correctly-resolved
+  sibling block on the same tab.
+
 - **Match-premix request body field is `unmatchedNames`, NOT `names`.** The server contract
   requires `unmatchedNames`. The client glue uses a hand-written local request type + raw
   `fetch`, so a wrong field name TYPECHECKS CLEAN but every call 400s and silently falls back

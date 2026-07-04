@@ -389,9 +389,54 @@ function stripMixSuffix(s: string): string {
 }
 
 /**
+ * Normalize one word for brand-prefix comparison: lowercase, strip
+ * punctuation/apostrophes, and reduce inch-size tokens (7in / 7" / 7'' / 7)
+ * to their bare digits so `Basha 11'` matches brand `Basha 11in`.
+ */
+function normBrandToken(t: string): string {
+  const bare = t.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const m = /^(\d+)(?:in|inch|inches)?$/.exec(bare);
+  return m ? m[1] : bare;
+}
+
+/**
+ * True when two normalized tokens match: equal, or (for words of 4+ chars)
+ * within one edit of each other — covers real-world tab typos like
+ * "Morming" for "Morning". Short/numeric tokens must match exactly.
+ */
+function brandTokenMatches(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4) return false;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  // Single-edit check (substitute, insert, or delete one char).
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) {
+    return a.slice(i + 1) === b.slice(i + 1);
+  }
+  const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+  return shorter.slice(i) === longer.slice(i + 1);
+}
+
+/** Tokenize a string, keeping each token's end offset in the original. */
+function brandTokens(s: string): { norm: string; end: number }[] {
+  const out: { norm: string; end: number }[] = [];
+  const re = /\S+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const norm = normBrandToken(m[0]);
+    if (norm) out.push({ norm, end: m.index + m[0].length });
+  }
+  return out;
+}
+
+/**
  * Best-effort deterministic split of a premix name into {brand, flavor} using
- * the known brand list: pick the LONGEST known brand that prefixes the name (or
- * the source tab name), and treat the remainder as the flavor. Returns empty
+ * the known brand list: pick the LONGEST known brand whose words prefix the
+ * name (or the source tab name), and treat the remainder as the flavor.
+ * Comparison is word-by-word on normalized tokens (case/punctuation/apostrophe
+ * insensitive, inch-marks unified) so real-world tab spellings like
+ * "Lucias Craft …" still match the saved brand "Lucia's Craft". Returns empty
  * brand when nothing matches — those go to the AI matcher.
  */
 export function splitPremixName(
@@ -399,20 +444,58 @@ export function splitPremixName(
   sheetName: string,
   brands: ReadonlyArray<string>,
 ): { brand: string; flavor: string } {
-  const candidates = [name, sheetName].map((c) => c.trim()).filter(Boolean);
-  const sorted = [...brands].sort((a, b) => b.length - a.length);
+  // Prefer the sheet TAB name: real workbooks name each tab after the product
+  // (brand + flavor) while the block name inside is often a shared base-mix
+  // label (e.g. "White Fajita Veggie Mix") that would mis-attribute the mix.
+  const candidates = [sheetName, name].map((c) => c.trim()).filter(Boolean);
+  const sorted = brands
+    .map((brand) => ({ brand, toks: brandTokens(brand).map((t) => t.norm) }))
+    .filter((b) => b.toks.length > 0)
+    .sort((a, b) => b.toks.length - a.toks.length || b.brand.length - a.brand.length);
   for (const cand of candidates) {
-    const lc = cand.toLowerCase();
-    for (const brand of sorted) {
-      const b = brand.trim().toLowerCase();
-      if (!b) continue;
-      if (lc === b || lc.startsWith(b + " ")) {
-        const rest = stripMixSuffix(cand.slice(brand.length).replace(/^[\s,:-]+/, ""));
-        return { brand, flavor: rest };
+    const candToks = brandTokens(cand);
+    for (const { brand, toks } of sorted) {
+      if (toks.length > candToks.length) continue;
+      let ok = true;
+      for (let i = 0; i < toks.length; i++) {
+        if (!brandTokenMatches(candToks[i].norm, toks[i])) {
+          ok = false;
+          break;
+        }
       }
+      if (!ok) continue;
+      const cut = candToks[toks.length - 1].end;
+      const rest = stripMixSuffix(cand.slice(cut).replace(/^[\s,:-]+/, ""));
+      return { brand, flavor: rest };
     }
   }
   return { brand: "", flavor: stripMixSuffix(name) };
+}
+
+/**
+ * Fallback flavor match: pick the UNIQUE known flavor whose words contain the
+ * guessed flavor's words as an in-order subsequence (word-by-word, same
+ * normalization/typo tolerance as brand matching). Covers short tab labels
+ * like "Red Hot" → "RED HOT CHICKEN" or "Club" → "CHICKEN BACON CLUB".
+ * Returns "" when zero or multiple known flavors qualify (ambiguity goes to
+ * the AI matcher / manual re-match instead of a guess).
+ */
+export function matchFlavorBySubsequence(
+  guess: string,
+  knownFlavors: ReadonlyArray<string>,
+): string {
+  const guessToks = brandTokens(guess).map((t) => t.norm);
+  if (guessToks.length === 0) return "";
+  const hits: string[] = [];
+  for (const flavor of knownFlavors) {
+    const toks = brandTokens(flavor).map((t) => t.norm);
+    let gi = 0;
+    for (let i = 0; i < toks.length && gi < guessToks.length; i++) {
+      if (brandTokenMatches(guessToks[gi], toks[i])) gi++;
+    }
+    if (gi === guessToks.length) hits.push(flavor);
+  }
+  return hits.length === 1 ? hits[0] : "";
 }
 
 export type GroundedPremix = {
@@ -435,13 +518,12 @@ export function groundPremix(
   const guess = splitPremixName(parsed.name, parsed.sheetName, known.brands);
   const brandRes = canonicalize(guess.brand, known.brands, aliases, "brand");
   const brand = brandRes.value;
-  const flavorRes = canonicalize(
-    guess.flavor,
-    known.flavorsByBrand[brand] ?? [],
-    aliases,
-    "flavor",
-    brand || null,
-  );
+  const brandFlavors = known.flavorsByBrand[brand] ?? [];
+  let flavorRes = canonicalize(guess.flavor, brandFlavors, aliases, "flavor", brand || null);
+  if (flavorRes.source === "new" && guess.flavor) {
+    const sub = matchFlavorBySubsequence(guess.flavor, brandFlavors);
+    if (sub) flavorRes = { value: sub, source: "fuzzy", externalName: guess.flavor };
+  }
   const flavor = flavorRes.value;
 
   const components = parsed.components.map((c) => ({
@@ -477,6 +559,20 @@ export function collectPremixAliases(grounded: ReadonlyArray<GroundedPremix>): S
 
 export type PremixMatch = { name: string; brand: string; flavor: string };
 
+/**
+ * The name string sent to (and matched back from) the AI product matcher for
+ * an unresolved mix. Prefer the sheet TAB name — real workbooks name tabs
+ * after the product, while the block label inside can be a copy-paste from a
+ * different product's template (which would mislead the AI the same way it
+ * misleads the deterministic split). Fall back to the block name when the tab
+ * looks generic (fewer than two words, e.g. "Sheet1").
+ */
+export function premixMatchName(mix: Pick<ParsedPremix, "name" | "sheetName">): string {
+  const tab = (mix.sheetName ?? "").trim();
+  if (tab && brandTokens(tab).length >= 2) return tab;
+  return mix.name.trim();
+}
+
 function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
@@ -507,9 +603,15 @@ export function sanitizePremixMatches(
     const brandRes = canonicalize(brandRaw, known.brands, aliases, "brand");
     if (brandRes.source === "new") continue; // hallucinated brand → drop
     const brand = brandRes.value;
-    const flavor = flavorRaw
-      ? canonicalize(flavorRaw, known.flavorsByBrand[brand] ?? [], aliases, "flavor", brand).value
-      : "";
+    let flavor = "";
+    if (flavorRaw) {
+      const brandFlavors = known.flavorsByBrand[brand] ?? [];
+      const flavorRes = canonicalize(flavorRaw, brandFlavors, aliases, "flavor", brand);
+      flavor =
+        flavorRes.source === "new"
+          ? matchFlavorBySubsequence(flavorRaw, brandFlavors) || flavorRes.value
+          : flavorRes.value;
+    }
     const key = name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -522,11 +624,18 @@ export function sanitizePremixMatches(
 export function applyPremixMatches(
   mixes: ReadonlyArray<ParsedPremix>,
   matches: ReadonlyArray<PremixMatch>,
+  onlyNames?: ReadonlyArray<string>,
 ): ParsedPremix[] {
   const byName = new Map<string, PremixMatch>();
   for (const m of matches) byName.set(m.name.trim().toLowerCase(), m);
+  // When the caller says which names it sent to the matcher, only touch those
+  // mixes — tab-keyed matches must not overwrite a sibling block on the same
+  // tab that already resolved deterministically.
+  const allow = onlyNames ? new Set(onlyNames.map((n) => n.trim().toLowerCase())) : null;
   return mixes.map((mix) => {
-    const m = byName.get(mix.name.trim().toLowerCase());
+    const keys = [premixMatchName(mix).toLowerCase(), mix.name.trim().toLowerCase()];
+    if (allow && !keys.some((k) => allow.has(k))) return mix;
+    const m = byName.get(keys[0]) ?? byName.get(keys[1]);
     if (!m) return mix;
     return { ...mix, brand: m.brand, flavor: m.flavor };
   });

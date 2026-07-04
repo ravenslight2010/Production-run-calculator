@@ -3,6 +3,8 @@ import {
   parsePremixWorkbook,
   groundPremix,
   splitPremixName,
+  premixMatchName,
+  matchFlavorBySubsequence,
   premixId,
   premixToMix,
   sanitizePremixMatches,
@@ -246,10 +248,103 @@ describe("name grounding", () => {
     });
   });
 
+  it("matches brands despite apostrophe/punctuation differences in the tab name", () => {
+    expect(splitPremixName("Veggie Mix", "Lucias Craft Tikka Masala", ["Lucia's Craft"])).toEqual({
+      brand: "Lucia's Craft",
+      flavor: "Tikka Masala",
+    });
+    expect(splitPremixName("Cheese Mix", "Bobos Deluxe", ["Bobo's"])).toEqual({
+      brand: "Bobo's",
+      flavor: "Deluxe",
+    });
+  });
+
+  it("unifies inch-mark spellings when matching a sized brand", () => {
+    expect(splitPremixName("Veggie Mix", "Basha 11' Hawaiian", ["Basha 11in"])).toEqual({
+      brand: "Basha 11in",
+      flavor: "Hawaiian",
+    });
+    expect(splitPremixName("Mix", "Lowes 7in Red Fajita", ["Lowes 7\""])).toEqual({
+      brand: "Lowes 7\"",
+      flavor: "Red Fajita",
+    });
+  });
+
+  it("tolerates a one-letter typo in a brand word", () => {
+    expect(
+      splitPremixName("Mix", "Lucias Morming Melts Americano", ["Lucia's Morning Melts"]),
+    ).toEqual({ brand: "Lucia's Morning Melts", flavor: "Americano" });
+  });
+
+  it("does not fuzz short or numeric brand words", () => {
+    expect(splitPremixName("Mix", "Lowes 8in Supreme", ["Lowe's 7in"]).brand).toBe("");
+    expect(splitPremixName("Mix", "SOB Supreme", ["SMD"]).brand).toBe("");
+  });
+
+  it("prefers the longest (most-word) brand when several prefix-match", () => {
+    expect(
+      splitPremixName("Mix", "Lowes 7in Red Fajita", ["Lowes", "Lowes 7in"]),
+    ).toEqual({ brand: "Lowes 7in", flavor: "Red Fajita" });
+  });
+
   it("returns empty brand when nothing matches (goes to AI)", () => {
     const r = splitPremixName("Mystery Topping Mix", "Mystery", []);
     expect(r.brand).toBe("");
     expect(r.flavor).toBe("Mystery");
+  });
+
+  it("prefers the sheet tab over a conflicting block label", () => {
+    // Real workbooks copy block templates between products — the tab is truth.
+    expect(
+      splitPremixName("Corner Booth Hawaiian", "Bobos Deluxe", ["Bobo's", "Corner Booth"]),
+    ).toEqual({ brand: "Bobo's", flavor: "Deluxe" });
+  });
+
+  it("premixMatchName sends the tab to the AI matcher unless it looks generic", () => {
+    expect(premixMatchName({ name: "Corner Booth Hawaiian", sheetName: "Basha 11' Hawaiian" })).toBe(
+      "Basha 11' Hawaiian",
+    );
+    expect(premixMatchName({ name: "Bobo's Deluxe Veggie Mix", sheetName: "Sheet1" })).toBe(
+      "Bobo's Deluxe Veggie Mix",
+    );
+    expect(premixMatchName({ name: "Pepperoni Blend", sheetName: "" })).toBe("Pepperoni Blend");
+  });
+
+  it("applyPremixMatches with onlyNames leaves mixes outside the sent set untouched", () => {
+    const resolved = {
+      name: "Bobo's Deluxe",
+      sheetName: "Bobo's Deluxe",
+      brand: "Bobo's",
+      flavor: "Deluxe",
+      rows: [],
+    } as never;
+    const unresolved = {
+      name: "Mystery Mix",
+      sheetName: "Mystery Mix",
+      brand: "",
+      flavor: "Mystery Mix",
+      rows: [],
+    } as never;
+    const matches = [
+      { name: "Bobo's Deluxe", brand: "WRONG", flavor: "WRONG" },
+      { name: "Mystery Mix", brand: "Lucia's", flavor: "Supreme" },
+    ];
+    const out = applyPremixMatches([resolved, unresolved], matches, ["Mystery Mix"]);
+    expect(out[0]).toMatchObject({ brand: "Bobo's", flavor: "Deluxe" });
+    expect(out[1]).toMatchObject({ brand: "Lucia's", flavor: "Supreme" });
+    // Without onlyNames the legacy behavior still applies everywhere.
+    const legacy = applyPremixMatches([resolved, unresolved], matches);
+    expect(legacy[0]).toMatchObject({ brand: "WRONG", flavor: "WRONG" });
+  });
+
+  it("matchFlavorBySubsequence picks a unique word-subsequence flavor, else nothing", () => {
+    expect(matchFlavorBySubsequence("Red Hot", ["RED HOT CHICKEN", "SUPREME"])).toBe(
+      "RED HOT CHICKEN",
+    );
+    expect(matchFlavorBySubsequence("Club", ["CHICKEN BACON CLUB"])).toBe("CHICKEN BACON CLUB");
+    // Ambiguous → no guess.
+    expect(matchFlavorBySubsequence("Chicken", ["BBQ CHICKEN", "RED HOT CHICKEN"])).toBe("");
+    expect(matchFlavorBySubsequence("Hawaiian", ["SUPREME"])).toBe("");
   });
 
   it("grounds brand/flavor against known lists", () => {

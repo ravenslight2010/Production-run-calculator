@@ -201,7 +201,7 @@ const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/prem
 
 const MOBILE_PRELUDE = `
 const {
-  parsePremixWorkbook, groundPremix, collectPremixAliases, applyPremixMatches,
+  parsePremixWorkbook, groundPremix, premixMatchName, collectPremixAliases, applyPremixMatches,
   premixToMix, premixId, summarizePremixImport, buildPremixCandidates,
   mergePremixIntoMixes, collectPremixFreezerPulls,
 } = globalThis.__PREMIX_IMPORT_LIB__;
