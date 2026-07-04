@@ -615,7 +615,6 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
 
   const MERGE_TABS: [MergeCategory, string][] = [
     ["ingredients", "Ingredients"],
-    ["mixes", "Mixes"],
     ["dough", "Dough"],
     ["sauce", "Sauce"],
     ["cheese", "Cheese mixes"],

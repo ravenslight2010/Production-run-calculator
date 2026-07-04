@@ -89,7 +89,15 @@ merging removes drift and makes the Settings → Mixes editor the one source of 
   there was no extra mobile UI to strip — parity is behavioral, not component-for-component.
 - CONSEQUENCE: mix recipe management is now MANAGER-ONLY (Mixes writes are
   `manage-inventory`-gated) whereas the old "Mix" tab / local save was open to all staff.
-- DORMANT (backward-compat, both apps): the merge-tool "mixes" category and the sync payload
-  fields (`mixIngredients`/`mixRecipeNames`, local `mixRecipePresets`) still exist but are no
-  longer surfaced in the applicator cards; the web `manageCategory === "mix"` block no longer
-  renders. Left in place so old synced data doesn't error.
+- The merge-tool "Mixes" tab was ALSO removed (web merge category selector + mobile
+  `MERGE_TABS`) because it read the old LOCAL `mixRecipeNames`/`mixRecipePresets` list and
+  showed mix names that aren't on the server Mixes screen — a confusing "second list" that
+  broke single-source. Mix names are now renamed/removed in the Mixes editor. The `"mixes"`
+  case handling in the merge switch/scope/apply code is left dormant (unreachable, harmless);
+  the `MergeCategory` union still includes `"mixes"`.
+- STILL DORMANT (backward-compat, both apps): sync payload fields
+  (`mixIngredients`/`mixRecipeNames`, local `mixRecipePresets`) still exist so old synced data
+  doesn't error; the web `manageCategory === "mix"` block no longer renders.
+- Migration note: local-only mixes (old "Mix" tab / "save as mix" on a run) were NEVER in the
+  server `mixes` table — they don't appear in Mixes and a premix reimport only brings back
+  mixes that are actually in a sheet; hand-entered ones must be re-added in the Mixes editor.
