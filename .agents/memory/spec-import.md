@@ -38,6 +38,31 @@ applying (no per-item prompts).
   sent to the AI for grounding too — keep the web/mobile `SpecSheetKnown` types,
   `loadSpecImportKnown`, and both AI `known` payloads in lockstep.
 
+## Spec import also creates/matches SERVER cheese recipes (pool link)
+- Both apps' `applySpecImport` already write `app{n}CheeseRecipeName` +
+  `app{n}CheeseRecipe` onto profiles. The applicator "Cheese" cards are PICK-ONLY
+  (hydrate rows from the server cheese pool, see cheese-server-master-data.md), so
+  a name that isn't in the pool hydrates to nothing. `commitSpecImport` therefore
+  also seeds the server pool.
+- **Flow (web `src/specImport.ts` + mobile `context/specImport.ts`, identical):**
+  `collectSpecImportCheeseRecipes(parsed, userMixNamesLower)` (pure, `@workspace/
+  spec-import`) → cheese-kind, non-mix (same `specImportRecipeIsMix` gate as the
+  Mixes routing), de-duped by name; brand from `recipeTargets(r)[0]`, flavors from
+  same-brand targets, components verbatim (NO unit conversion — oz-in-lbs quirk
+  kept, manager fixes batch lbs in editor). Then `specCheeseDraftToRecipe` (pure,
+  `@workspace/cheese-recipes`; deterministic id `cheese:spec:<name-slug>`, blank
+  shredder/cellulose/notes, enabled) → `addCheeseRecipesIfAbsentByName(existing,
+  candidates)` (MATCH-DON'T-CLOBBER: skip if name OR id already exists) →
+  `saveCheeseRecipes(merged)`.
+- **Best-effort, manager-gated on the server** (`saveCheeseRecipes` 403s for
+  non-managers) — wrapped in try/catch so a failed pool save never fails the
+  import (the profile links already applied locally). `commitSpecImport` returns
+  `{mixesAdded, cheeseRecipesAdded}`; callers invalidate `["cheeseRecipes"]` and
+  append a cheese note to the toast. Mirrors the Mixes seeding block exactly.
+- **Why name-slug id (not `cheese:brand:name` like cheese-import):** so re-importing
+  the same sheet targets the same recipe id and matching by name stays idempotent;
+  no collision with the importer's brand-scoped ids.
+
 ## One recipe → many profiles (no duplicates)
 - A single recipe (esp. a dough mixing procedure) often covers MANY brand/flavor
   profiles listed as header rows above one ingredient table. `ParsedRecipe` carries

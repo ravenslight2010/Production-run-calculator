@@ -1728,13 +1728,20 @@ export default function MasterDataScreen() {
     // actually imported (that's where standalone-duplicate ingredients arise).
     const importedRecipes = (specPrepared.summary?.totalRecipes ?? 0) > 0;
     try {
-      const { mixesAdded } = await commitSpecImport(specPrepared, buildSpecStore());
+      const { mixesAdded, cheeseRecipesAdded } = await commitSpecImport(
+        specPrepared,
+        buildSpecStore(),
+      );
       setSpecOpen(false);
       setSpecPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void mixesQc.invalidateQueries({ queryKey: ["mixes"] });
+      // Any named cheese blends were added to the Cheese Recipes pool — refresh
+      // so the run applicator "Cheese" pickers list them right away.
+      if (cheeseRecipesAdded > 0)
+        void mixesQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
       // Fire-and-forget: tells MergeManager to scan the updated lists once.
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
@@ -1744,11 +1751,15 @@ export default function MasterDataScreen() {
         mixesAdded > 0
           ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to the Mixes screen — set batch size and per-pizza amounts there.`
           : "";
+      const cheeseNote =
+        cheeseRecipesAdded > 0
+          ? ` ${cheeseRecipesAdded} cheese recipe${cheeseRecipesAdded === 1 ? "" : "s"} added to the Cheese Recipes pool — check batch pounds there.`
+          : "";
       showNote(
         "Spec sheet imported",
         (importedRecipes
           ? "Brands, flavors, and recipes have been added."
-          : "Brands and flavors have been added.") + mixNote,
+          : "Brands and flavors have been added.") + mixNote + cheeseNote,
       );
     } catch (e) {
       setSpecError(

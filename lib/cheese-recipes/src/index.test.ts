@@ -5,6 +5,8 @@ import {
   normalizeCheeseComponent,
   cheeseRecipeTotalLbs,
   addCheeseRecipesIfAbsent,
+  addCheeseRecipesIfAbsentByName,
+  specCheeseDraftToRecipe,
   mergeCheeseRecipes,
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
@@ -109,6 +111,80 @@ describe("addCheeseRecipesIfAbsent", () => {
     expect(added).toBe(1);
     expect(merged.map((r) => r.id)).toEqual(["a", "b"]);
     expect(merged[0].name).toBe("Whole Mozz Cheese Mix");
+  });
+});
+
+describe("specCheeseDraftToRecipe", () => {
+  it("builds a deterministic name-slug id so re-import matches the same recipe", () => {
+    const a = specCheeseDraftToRecipe({
+      name: "Aldo's Cheese Mix",
+      brand: "Bobo",
+      flavors: ["Pepperoni"],
+      components: [{ ingredient: "Mozzarella", lbs: 30 }],
+    });
+    const b = specCheeseDraftToRecipe({
+      name: "Aldo's Cheese Mix",
+      brand: "Bobo",
+      flavors: [],
+      components: [],
+    });
+    expect(a?.id).toBe("cheese:spec:aldo-s-cheese-mix");
+    expect(a?.id).toBe(b?.id);
+  });
+  it("leaves shredder/cellulose/notes blank, enables it, preserves components verbatim", () => {
+    const r = specCheeseDraftToRecipe({
+      name: "White Blend",
+      brand: "Corner Booth",
+      flavors: ["Fajita"],
+      components: [
+        { ingredient: "Monterey Jack", lbs: 20 },
+        { ingredient: "Green Peppers", lbs: 5 },
+      ],
+    });
+    expect(r).not.toBeNull();
+    expect(r?.name).toBe("White Blend");
+    expect(r?.brand).toBe("Corner Booth");
+    expect(r?.flavors).toEqual(["Fajita"]);
+    expect(r?.shredderSetting).toBe("");
+    expect(r?.cellulose).toBe("");
+    expect(r?.notes).toBe("");
+    expect(r?.enabled).toBe(true);
+    expect(r?.components).toEqual([
+      { ingredient: "Monterey Jack", lbs: 20 },
+      { ingredient: "Green Peppers", lbs: 5 },
+    ]);
+  });
+  it("returns null for a blank name", () => {
+    expect(
+      specCheeseDraftToRecipe({ name: "  ", brand: "", flavors: [], components: [] }),
+    ).toBeNull();
+  });
+});
+
+describe("addCheeseRecipesIfAbsentByName", () => {
+  it("skips a candidate whose name already exists (case-insensitive) — match, don't clobber", () => {
+    const existing = [make({ id: "curated", name: "Cheese Blend", brand: "Curated" })];
+    const candidate = make({ id: "cheese:spec:cheese-blend", name: "cheese blend", brand: "Spec" });
+    const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].brand).toBe("Curated");
+  });
+  it("skips a candidate whose id already exists", () => {
+    const existing = [make({ id: "cheese:spec:x", name: "Existing" })];
+    const candidate = make({ id: "cheese:spec:x", name: "Different Name" });
+    const { added } = addCheeseRecipesIfAbsentByName(existing, [candidate]);
+    expect(added).toBe(0);
+  });
+  it("appends genuinely new recipes and de-dupes within the candidate batch", () => {
+    const existing: CheeseRecipe[] = [];
+    const { merged, added } = addCheeseRecipesIfAbsentByName(existing, [
+      make({ id: "a", name: "Blend A" }),
+      make({ id: "b", name: "blend a" }),
+      make({ id: "c", name: "Blend B" }),
+    ]);
+    expect(added).toBe(2);
+    expect(merged.map((r) => r.name)).toEqual(["Blend A", "Blend B"]);
   });
 });
 

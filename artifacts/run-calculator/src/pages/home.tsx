@@ -6405,12 +6405,16 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded } = await commitSpecImport(toCommit);
+      const { mixesAdded, cheeseRecipesAdded } = await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      // Any named cheese blends were added to the Cheese Recipes pool — refresh
+      // so the run applicator "Cheese" pickers list them right away.
+      if (cheeseRecipesAdded > 0)
+        void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
       setShowSpecImport(false);
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
@@ -6423,12 +6427,16 @@ export default function Home() {
         mixesAdded > 0
           ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to the Mixes screen — set batch size and per-pizza amounts there.`
           : "";
+      const cheeseNote =
+        cheeseRecipesAdded > 0
+          ? ` ${cheeseRecipesAdded} cheese recipe${cheeseRecipesAdded === 1 ? "" : "s"} added to the Cheese Recipes pool — check batch pounds there.`
+          : "";
       toast({
         title: "Spec sheet imported",
         description:
           (importedRecipes
             ? "Brands, flavors, and recipes have been added."
-            : "Brands and flavors have been added.") + mixNote,
+            : "Brands and flavors have been added.") + mixNote + cheeseNote,
       });
     } catch (err) {
       setSpecImportError(

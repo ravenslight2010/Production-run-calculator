@@ -17,6 +17,7 @@ import {
   collectMatchCandidates,
   collectSpecAliases,
   collectSpecImportMixes,
+  collectSpecImportCheeseRecipes,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -71,8 +72,14 @@ import { requestParseSpecSheet } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
+import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
+import {
+  specCheeseDraftToRecipe,
+  addCheeseRecipesIfAbsentByName,
+  type CheeseRecipe,
+} from "@workspace/cheese-recipes";
 import type { ReviewVerdict } from "@workspace/ai-review";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
@@ -710,7 +717,7 @@ export async function prepareSpecImportMulti(
  */
 export async function commitSpecImport(
   prepared: SpecImportPrepared,
-): Promise<{ mixesAdded: number }> {
+): Promise<{ mixesAdded: number; cheeseRecipesAdded: number }> {
   applySpecImport(prepared.parsed);
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
@@ -733,6 +740,33 @@ export async function commitSpecImport(
       if (added > 0) {
         await saveMixes(merged);
         mixesAdded = added;
+      }
+    }
+  } catch {
+    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  }
+
+  // Add any named cheese blends detected in this import to the factory-wide
+  // Cheese Recipes pool so the run applicator "Cheese" cards (pick-only, they
+  // hydrate rows from the pool) can select them. Matched by name against the
+  // existing pool so an import never duplicates or clobbers a manager's curated
+  // recipe — it simply links to it. Manager-gated on the server and fully
+  // best-effort: the recipes already applied locally, so a failed sync must
+  // never surface as an import error.
+  let cheeseRecipesAdded = 0;
+  try {
+    const existingMixes = await fetchMixes();
+    const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
+    const drafts = collectSpecImportCheeseRecipes(prepared.parsed, userMixNamesLower);
+    const candidates = drafts
+      .map((d) => specCheeseDraftToRecipe(d))
+      .filter((r): r is CheeseRecipe => r != null);
+    if (candidates.length) {
+      const existingCheese = await fetchCheeseRecipes();
+      const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
+      if (added > 0) {
+        await saveCheeseRecipes(merged);
+        cheeseRecipesAdded = added;
       }
     }
   } catch {
@@ -774,5 +808,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded };
+  return { mixesAdded, cheeseRecipesAdded };
 }

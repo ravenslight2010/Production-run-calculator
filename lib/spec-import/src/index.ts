@@ -336,6 +336,83 @@ export function collectSpecImportMixes(
 }
 
 /**
+ * A cheese blend detected in a parsed spec import, ready to be matched against
+ * (or created in) the factory-wide server "cheese recipes" pool so the run
+ * applicator "Cheese" cards — which are pick-only and hydrate their rows from
+ * that pool — can select it. Only cheese-kind recipes that do NOT route to Mixes
+ * (see specImportRecipeIsMix) become drafts; mixes go to the Mixes list instead.
+ *
+ * NOTE on units: a spec sheet expresses cheese amounts as per-pizza ounces
+ * (dumped into the RecipeRow `lbs` field by the parser — a long-standing quirk),
+ * whereas a server cheese recipe stores per-BATCH pounds. The ratio between
+ * components is what matters for the blend, and this mirrors exactly what
+ * applySpecImport already writes onto the profile's `app{n}CheeseRecipe`, so the
+ * components are carried through verbatim (no unit conversion). A manager can
+ * refine the per-batch pounds in the Cheese Recipes editor afterward.
+ */
+export type SpecCheeseRecipeDraft = {
+  name: string;
+  /** Customer/brand from the recipe's first resolved target ("" if unscoped). */
+  brand: string;
+  /** Flavors of that brand this recipe is assigned to (may be empty). */
+  flavors: string[];
+  /** Component ingredients + amounts, de-duped by ingredient (order preserved). */
+  components: RecipeRow[];
+};
+
+/**
+ * Collect the cheese blends detected in a parsed spec import that should become
+ * server cheese recipes (cheese-kind recipes that do NOT route to Mixes per
+ * specImportRecipeIsMix), de-duped by name. `userMixNamesLower` is the
+ * lower-cased set of mix names the user already keeps, so a spec recipe named
+ * like an existing mix is treated as a mix (and excluded here). Brand comes from
+ * the recipe's first resolved target; flavors are the target flavors sharing
+ * that brand. Pure — shared by web + mobile so the two apps can't drift.
+ */
+export function collectSpecImportCheeseRecipes(
+  parsed: ParsedSpecImport,
+  userMixNamesLower: ReadonlySet<string>,
+): SpecCheeseRecipeDraft[] {
+  const out: SpecCheeseRecipeDraft[] = [];
+  const seen = new Set<string>();
+  for (const r of parsed.recipes ?? []) {
+    if (r.kind !== "cheese") continue;
+    const name = (r.name ?? "").trim();
+    if (!name || !(r.rows?.length)) continue;
+    if (specImportRecipeIsMix(r, userMixNamesLower)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const targets = recipeTargets(r);
+    const brand = (targets[0]?.brand ?? "").trim();
+    const brandLower = brand.toLowerCase();
+    const flavorSeen = new Set<string>();
+    const flavors: string[] = [];
+    for (const t of targets) {
+      if ((t.brand ?? "").trim().toLowerCase() !== brandLower) continue;
+      const f = (t.flavor ?? "").trim();
+      if (!f) continue;
+      const fk = f.toLowerCase();
+      if (flavorSeen.has(fk)) continue;
+      flavorSeen.add(fk);
+      flavors.push(f);
+    }
+    const ingSeen = new Set<string>();
+    const components: RecipeRow[] = [];
+    for (const row of r.rows) {
+      const ing = (row.ingredient ?? "").trim();
+      if (!ing) continue;
+      const k = ing.toLowerCase();
+      if (ingSeen.has(k)) continue;
+      ingSeen.add(k);
+      components.push({ ingredient: ing, lbs: row.lbs });
+    }
+    out.push({ name, brand, flavors, components });
+  }
+  return out;
+}
+
+/**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated
  * (case-insensitive). Entries missing a brand or flavor are dropped. Shared by

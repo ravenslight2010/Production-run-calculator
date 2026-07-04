@@ -180,6 +180,67 @@ export function addCheeseRecipesIfAbsent(
 }
 
 /**
+ * Build a well-formed CheeseRecipe from a spec-sheet-detected cheese blend
+ * draft (name + brand + flavors + components). A deterministic, name-slug id is
+ * used so re-importing the same sheet targets the same recipe instead of
+ * duplicating it. shredderSetting/cellulose/notes are left blank for a manager
+ * to fill in the editor; the recipe is enabled so run pickers see it right away.
+ * Pure — shared by web + mobile so a spec-import cheese recipe is identical on
+ * both platforms.
+ */
+export function specCheeseDraftToRecipe(draft: {
+  name: string;
+  brand: string;
+  flavors: string[];
+  components: ReadonlyArray<{ ingredient: string; lbs: number }>;
+}): CheeseRecipe | null {
+  const name = draft.name.trim();
+  if (!name) return null;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalizeCheeseRecipe({
+    id: slug ? `cheese:spec:${slug}` : name.toLowerCase(),
+    name,
+    brand: draft.brand,
+    flavors: draft.flavors,
+    shredderSetting: "",
+    cellulose: "",
+    notes: "",
+    components: draft.components,
+    enabled: true,
+  });
+}
+
+/**
+ * Add spec-import cheese recipes to the existing pool, skipping any whose NAME
+ * already exists (case-insensitive) OR whose id already exists. This is the
+ * "match, don't clobber" rule: a manager's curated recipe of the same name is
+ * left untouched — the run applicator simply links to it by name — while a
+ * genuinely new blend is appended. Pure. Returns the merged list plus how many
+ * were actually added.
+ */
+export function addCheeseRecipesIfAbsentByName(
+  existing: ReadonlyArray<CheeseRecipe>,
+  candidates: ReadonlyArray<CheeseRecipe>,
+): { merged: CheeseRecipe[]; added: number } {
+  const haveNames = new Set(existing.map((r) => r.name.trim().toLowerCase()));
+  const haveIds = new Set(existing.map((r) => r.id));
+  const merged: CheeseRecipe[] = [...existing];
+  let added = 0;
+  for (const c of candidates) {
+    const nameKey = c.name.trim().toLowerCase();
+    if (!nameKey || haveNames.has(nameKey) || haveIds.has(c.id)) continue;
+    haveNames.add(nameKey);
+    haveIds.add(c.id);
+    merged.push(c);
+    added++;
+  }
+  return { merged, added };
+}
+
+/**
  * Merge imported cheese recipes into the existing list BY ID: an imported
  * recipe replaces the existing one with the same id, otherwise it is appended.
  * Order is preserved (existing first, then genuinely new). Pure — mirrors the
