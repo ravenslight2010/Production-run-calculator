@@ -65,3 +65,7 @@ pool. Server must beat the local pool: web's passive cheese-preset autosave can 
 pool with wrong rows saved under a mix name. Mobile mirrors this in the preset chips
 (server wins over a same-named locally saved mix). If mixes change server-side, the run
 card picks it up on re-select — the Settings Mixes editor is the source of truth.
+Also applies to the web Manage Lists → Mix tab "view" editor: a name matching a server mix
+renders its components READ-ONLY (edit lives on the Mixes tab); only non-server names fall
+through to the local-pool editor. Mobile has no such lightweight mix editor (its master-data
+screen embeds MixesManager) — intentional parity exception.

@@ -8515,8 +8515,33 @@ export default function Home() {
                       setIngInput={setMgIngInput}
                     />
 
-                    {/* Recipe ingredient editor */}
-                    {mgSelectedPreset && presetConfig && (
+                    {/* Recipe ingredient editor. Mix names that match an imported
+                        (server) mix show its components read-only — the Mixes tab
+                        is the source of truth for those, and the local preset pool
+                        must not shadow it. */}
+                    {mgSelectedPreset && presetConfig && manageCategory === "mix" && serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase()) && (
+                      <div className="border border-primary/30 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
+                          <div className="flex items-center gap-2">
+                            <ClipboardList className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-xs font-semibold text-primary">{mgSelectedPreset}</span>
+                            <span className="text-[10px] text-muted-foreground">(imported mix{canManageInventory ? " — edit it on the Mixes tab" : ""})</span>
+                          </div>
+                          <button type="button" onClick={() => { setMgSelectedPreset(null); setMgPresetRows([]); }} className="text-muted-foreground hover:text-foreground">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        <div className="p-3 space-y-1.5">
+                          {(serverMixRowsByName.get(mgSelectedPreset.trim().toLowerCase()) ?? []).map((row, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-muted/30">
+                              <span className="text-sm">{row.ingredient}</span>
+                              <span className="text-sm font-mono">{fmtNum(row.lbs, 2)} <span className="text-xs font-sans text-muted-foreground">per pizza</span></span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {mgSelectedPreset && presetConfig && !(manageCategory === "mix" && serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase())) && (
                       <div className="border border-primary/30 rounded-lg overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
                           <div className="flex items-center gap-2">
