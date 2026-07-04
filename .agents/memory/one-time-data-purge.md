@@ -53,6 +53,21 @@ add names — make adds conditional on the name having existed. Marker ended at
 `-d`; each resurrection round needs marker bump + daily_sync delete with the
 server stopped.
 
+**Round 4 — a LIVE tab re-adopts synced master-data after its wipe (brands/
+flavors survived, 2026-07-04):** brands/flavors (and other master-data lists) are
+part of the /api/sync day-state, NOT purely local. Sequence that resurrects them:
+the open tab runs the marker wipe → clears local → immediately GETs the still-
+populated server row → re-adopts the lists → pushes them back, re-filling
+daily_sync. The marker is now already set, so a plain refresh won't re-wipe, and
+the re-populated tab keeps pushing. Fix each round: (1) BUMP the marker again
+(g→h) so the tab wipes once more, (2) TRUNCATE daily_sync, (3) restart the API
+workflows AND the Web/mobile workflows — restarting the Vite dev server forces
+the open tab to full-reload (HMR ws reconnect → location.reload()), which is what
+actually loads the new marker; a Vite HMR patch alone does NOT re-run the module-
+scope wipe. The reloaded (now-empty) tab must find daily_sync empty on its first
+GET or it re-adopts again — so keep the marker bump + daily_sync truncate tight
+together, right before the Web restart. Marker now at `h`.
+
 Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
 dead seed helpers can be retired in a later cleanup once all devices have run
 the final wipe.

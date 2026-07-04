@@ -1677,7 +1677,7 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
 
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 
-const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260703g";
+const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260703h";
 /**
  * One-time full local wipe (2026-07-03): the user asked for a one-time purge of
  * all factory data back to a fresh clean state. The server database is purged
