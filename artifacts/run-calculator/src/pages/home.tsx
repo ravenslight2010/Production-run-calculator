@@ -2467,6 +2467,20 @@ export default function Home() {
   // Factory-wide mixes (open to all signed-in users) — drives the Mixes
   // make-day plan and the manager Mixes editor.
   const { items: mixes } = useMixes();
+  // Imported mixes by name (case-insensitive) → recipe rows for the per-run
+  // Mix Recipe card. The old built-in factory presets were purged, so the
+  // server-side Mixes master data (from premix sheet imports / the Settings
+  // Mixes editor) is the real ingredient source when a mix name is picked.
+  const serverMixRowsByName = useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const mix of mixes) {
+      const rows = (mix.components ?? [])
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza }));
+      if (rows.length > 0) map.set(mix.name.trim().toLowerCase(), rows);
+    }
+    return map;
+  }, [mixes]);
   // The make-day chosen on the Mixes tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
@@ -12417,6 +12431,8 @@ export default function Home() {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
                             const factoryPreset = currentMixPresets.find(p => p.name === val);
                             if (factoryPreset) { form.setValue("app1CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese1(factoryPreset.ingredients); return; }
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app1CheeseRecipe", rows, { shouldDirty: true }); replaceCheese1(rows); return; }
                             const userPreset = loadCheeseRecipePresets()[val.trim()];
                             if (userPreset) { form.setValue("app1CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese1(userPreset); }
                           }}
@@ -12495,6 +12511,8 @@ export default function Home() {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
                             const factoryPreset = currentMixPresets.find(p => p.name === val);
                             if (factoryPreset) { form.setValue("app2CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese2(factoryPreset.ingredients); return; }
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app2CheeseRecipe", rows, { shouldDirty: true }); replaceCheese2(rows); return; }
                             const userPreset = loadCheeseRecipePresets()[val.trim()];
                             if (userPreset) { form.setValue("app2CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese2(userPreset); }
                           }}
@@ -12573,6 +12591,8 @@ export default function Home() {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
                             const factoryPreset = currentMixPresets.find(p => p.name === val);
                             if (factoryPreset) { form.setValue("app3CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese3(factoryPreset.ingredients); return; }
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); return; }
                             const userPreset = loadCheeseRecipePresets()[val.trim()];
                             if (userPreset) { form.setValue("app3CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese3(userPreset); }
                           }}
@@ -12651,6 +12671,8 @@ export default function Home() {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
                             const factoryPreset = currentMixPresets.find(p => p.name === val);
                             if (factoryPreset) { form.setValue("app4CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese4(factoryPreset.ingredients); return; }
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); return; }
                             const userPreset = loadCheeseRecipePresets()[val.trim()];
                             if (userPreset) { form.setValue("app4CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese4(userPreset); }
                           }}

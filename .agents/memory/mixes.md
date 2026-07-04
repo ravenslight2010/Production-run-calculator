@@ -55,3 +55,13 @@ not react-query. Any flow that saves a new sheet (spec import, premix import) mu
 parent `sheetListSignal` passed as `refreshSignal`, or the just-saved sheet looks like it
 "didn't save" (import buttons render right above the panel, which stays mounted). If a new
 import path is added, wire it into the same signal — or migrate the lists to react-query keys.
+
+## Per-run Mix Recipe card sources server mixes (2026-07-04)
+The Setup-tab per-applicator "Mix Recipe" name picker hydrates ingredient rows with priority:
+built-in factory presets (EMPTY since the 2026-07-03 purge) → server Mixes master data
+(matched by trimmed, case-insensitive name; components perPizza fed straight into the row
+value — the card's totals are proportional so units pass through) → the local user preset
+pool. Server must beat the local pool: web's passive cheese-preset autosave can poison the
+pool with wrong rows saved under a mix name. Mobile mirrors this in the preset chips
+(server wins over a same-named locally saved mix). If mixes change server-side, the run
+card picks it up on re-select — the Settings Mixes editor is the source of truth.

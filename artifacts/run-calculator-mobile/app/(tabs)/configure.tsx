@@ -22,6 +22,7 @@ import {
 } from "@/context/RunContext";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
+import { useMixes } from "@/hooks/useMixes";
 import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
 import {
@@ -214,6 +215,7 @@ export default function ConfigureScreen() {
   // against the current run + the day's sequence. "flexible" rules warn inline
   // (alongside the allergen advisory); "strict" rules block starting the run.
   const { rules: productionRules } = useProductionRules();
+  const { items: serverMixes } = useMixes();
   const ruleViolations = React.useMemo(() => {
     const s = run.settings;
     const effectiveLineSpeed =
@@ -302,7 +304,28 @@ export default function ConfigureScreen() {
     name,
     ingredients,
   }));
-  const mixPresets = [...userMixPresets, ...factoryMixPresets];
+  // Imported mixes (server Mixes master data, from premix sheet imports / the
+  // Mixes manager) → recipe rows, mirroring web. The old built-in factory
+  // presets were purged, so this is the real ingredient source for mix names.
+  // Server mixes win over a same-named locally saved mix (web parity).
+  const serverMixPresets = serverMixes
+    .map((m) => ({
+      name: m.name,
+      ingredients: (m.components ?? [])
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza })),
+    }))
+    .filter((p) => p.ingredients.length > 0);
+  const serverMixNames = new Set(
+    serverMixPresets.map((p) => p.name.trim().toLowerCase()),
+  );
+  const mixPresets = [
+    ...serverMixPresets,
+    ...userMixPresets.filter(
+      (p) => !serverMixNames.has(p.name.trim().toLowerCase()),
+    ),
+    ...factoryMixPresets,
+  ];
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
