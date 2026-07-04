@@ -221,6 +221,9 @@ importers:
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
+      '@workspace/named-recipes':
+        specifier: workspace:*
+        version: link:../../lib/named-recipes
       '@workspace/premix-import':
         specifier: workspace:*
         version: link:../../lib/premix-import
@@ -522,6 +525,9 @@ importers:
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
+      '@workspace/named-recipes':
+        specifier: workspace:*
+        version: link:../../lib/named-recipes
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -802,6 +808,9 @@ importers:
       '@workspace/mixes':
         specifier: workspace:*
         version: link:../../lib/mixes
+      '@workspace/named-recipes':
+        specifier: workspace:*
+        version: link:../../lib/named-recipes
       '@workspace/onboarding':
         specifier: workspace:*
         version: link:../../lib/onboarding
@@ -1140,6 +1149,12 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/mixes:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
+  lib/named-recipes:
     devDependencies:
       vitest:
         specifier: ^4.1.9

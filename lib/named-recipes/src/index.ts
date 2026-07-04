@@ -1,0 +1,202 @@
+// Shared "named recipe" model for the run calculator (web + mobile parity).
+//
+// A "named recipe" is a simple, factory-wide recipe organized purely by NAME
+// plus a list of ingredient components (each an ingredient and its POUNDS). It
+// backs the Dough and Sauce sections, promoting the old on-device Dough/Sauce
+// preset lists to server master-data that works like Mixes and Cheese Recipes:
+// managers define them once, they are shared across every signed-in device, and
+// the run form's Dough / Sauce cards pick one (hydrating their rows from the
+// chosen recipe) instead of each device keeping its own preset map.
+//
+// Unlike Mixes (per-pizza ounces + brand/flavor) and Cheese Recipes (brand +
+// flavors + shredder setting), Dough and Sauce carry no brand/flavor grouping —
+// they are just a name and a list of {ingredient, lbs} rows, matching the
+// existing per-run `doughRecipe` / `frontlineRecipe` RecipeRow shape so
+// hydration is a straight copy.
+//
+// This module is PURE so both apps agree on what a well-formed recipe is and how
+// the list is browsed. Definitions are stored factory-wide on the server (NOT in
+// the per-day sync payload) and edited by managers only; the apps keep only thin
+// platform glue (fetch/save/delete) plus the run-side hydration.
+
+// One component of a named recipe: an ingredient and how many POUNDS of it the
+// recipe uses. Matches the per-run RecipeRow shape ({ ingredient, lbs }).
+export interface NamedRecipeComponent {
+  ingredient: string;
+  lbs: number;
+}
+
+// A single manager-defined named recipe. Flat shape (plus a components array) so
+// it serializes cleanly to the API/DB and is easy to edit field-by-field in the
+// UI, mirroring the Mix / Cheese Recipe models minus the brand/flavor fields.
+export interface NamedRecipe {
+  id: string;
+  // Optional persistence scope (live vs sandbox); carried through opaquely.
+  scope?: string;
+  // Display name of the recipe (e.g. "12in NY Dough", "Marinara Sauce").
+  name: string;
+  // Free-form notes.
+  notes: string;
+  // The ingredients that make up the recipe, each in pounds.
+  components: NamedRecipeComponent[];
+  // Disabled recipes are kept (so toggling is easy) but hidden from run pickers.
+  enabled: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Normalization
+// ---------------------------------------------------------------------------
+
+function coerceNum(value: unknown, fallback: number): number {
+  const n =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  if (!Number.isFinite(n)) return fallback;
+  return n;
+}
+
+function coerceStr(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+// Coerce a raw value into a clean component, or null if it has no usable
+// ingredient name. lbs defaults to 0 and is clamped to >= 0.
+export function normalizeNamedRecipeComponent(
+  input: unknown,
+): NamedRecipeComponent | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const ingredient = coerceStr(raw.ingredient);
+  if (!ingredient) return null;
+  const lbs = Math.max(0, coerceNum(raw.lbs, 0));
+  return { ingredient, lbs };
+}
+
+// Coerce a raw API/DB record into a clean NamedRecipe, or null if it has no
+// usable name. Numeric component pounds are clamped to >= 0; enabled defaults to
+// true; malformed components are dropped.
+export function normalizeNamedRecipe(input: unknown): NamedRecipe | null {
+  if (!input || typeof input !== "object") return null;
+  const raw = input as Record<string, unknown>;
+  const name = coerceStr(raw.name);
+  if (!name) return null;
+  const id =
+    typeof raw.id === "string" && raw.id.trim() ? raw.id : name.toLowerCase();
+  const enabled = raw.enabled === undefined ? true : raw.enabled !== false;
+  const components = Array.isArray(raw.components)
+    ? raw.components
+        .map(normalizeNamedRecipeComponent)
+        .filter((c): c is NamedRecipeComponent => c !== null)
+    : [];
+  const recipe: NamedRecipe = {
+    id,
+    name,
+    notes: coerceStr(raw.notes),
+    components,
+    enabled,
+  };
+  if (typeof raw.scope === "string" && raw.scope) recipe.scope = raw.scope;
+  return recipe;
+}
+
+// Normalize a list, dropping malformed entries and collapsing duplicate ids onto
+// the last-seen entry.
+export function normalizeNamedRecipes(input: unknown): NamedRecipe[] {
+  if (!Array.isArray(input)) return [];
+  const byId = new Map<string, NamedRecipe>();
+  for (const raw of input) {
+    const recipe = normalizeNamedRecipe(raw);
+    if (!recipe) continue;
+    byId.set(recipe.id, recipe);
+  }
+  return Array.from(byId.values());
+}
+
+// Total pounds of the recipe (sum of component pounds).
+export function namedRecipeTotalLbs(recipe: NamedRecipe): number {
+  return recipe.components.reduce((acc, c) => acc + c.lbs, 0);
+}
+
+/** Case-insensitive match of a search query against name/ingredients. */
+export function namedRecipeMatchesQuery(
+  recipe: NamedRecipe,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    recipe.name.toLowerCase().includes(q) ||
+    recipe.components.some((c) => c.ingredient.toLowerCase().includes(q))
+  );
+}
+
+/**
+ * Sort recipes by name (case-insensitive) for a browsable settings list. Pure —
+ * used by BOTH web and mobile so the two lists can't drift.
+ */
+export function sortNamedRecipesByName(
+  recipes: ReadonlyArray<NamedRecipe>,
+): NamedRecipe[] {
+  return [...recipes].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+  );
+}
+
+/**
+ * Build a well-formed NamedRecipe from a name + component rows using a
+ * deterministic, name-slug id (prefixed so dough and sauce ids never collide,
+ * and so re-importing/re-migrating the same name targets the same recipe instead
+ * of duplicating it). enabled is true so run pickers see it right away. Returns
+ * null for a blank name. Pure — shared by web + mobile.
+ */
+export function namedRecipeFromDraft(draft: {
+  name: string;
+  components: ReadonlyArray<{ ingredient: string; lbs: number }>;
+  idPrefix: string;
+  notes?: string;
+}): NamedRecipe | null {
+  const name = draft.name.trim();
+  if (!name) return null;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const prefix = draft.idPrefix.replace(/[^a-z0-9]+/gi, "").toLowerCase();
+  return normalizeNamedRecipe({
+    id: slug ? `${prefix}:${slug}` : `${prefix}:${name.toLowerCase()}`,
+    name,
+    notes: draft.notes ?? "",
+    components: draft.components,
+    enabled: true,
+  });
+}
+
+/**
+ * Add recipes to the existing pool, skipping any whose NAME already exists
+ * (case-insensitive) OR whose id already exists. This is the "match, don't
+ * clobber" rule used by the one-time local→server migration and by spec-import:
+ * a recipe of the same name already on the server is left untouched, while a
+ * genuinely new one is appended. Pure. Returns the merged list plus how many
+ * were actually added.
+ */
+export function addNamedRecipesIfAbsentByName(
+  existing: ReadonlyArray<NamedRecipe>,
+  candidates: ReadonlyArray<NamedRecipe>,
+): { merged: NamedRecipe[]; added: number } {
+  const haveNames = new Set(existing.map((r) => r.name.trim().toLowerCase()));
+  const haveIds = new Set(existing.map((r) => r.id));
+  const merged: NamedRecipe[] = [...existing];
+  let added = 0;
+  for (const c of candidates) {
+    const nameKey = c.name.trim().toLowerCase();
+    if (!nameKey || haveNames.has(nameKey) || haveIds.has(c.id)) continue;
+    haveNames.add(nameKey);
+    haveIds.add(c.id);
+    merged.push(c);
+    added++;
+  }
+  return { merged, added };
+}

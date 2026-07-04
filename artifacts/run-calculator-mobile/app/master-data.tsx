@@ -26,6 +26,10 @@ import MixesManager from "@/components/MixesManager";
 import MixReconcilePanel from "@/components/MixReconcilePanel";
 import MixAssistChat from "@/components/MixAssistChat";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
+import NamedRecipesManager from "@/components/NamedRecipesManager";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { addNamedRecipesToServerIfAbsent } from "@/context/namedRecipes";
+import { namedRecipeFromDraft, type NamedRecipe } from "@workspace/named-recipes";
 import CheeseImportModal from "@/components/CheeseImportModal";
 import CycleCountManager from "@/components/CycleCountManager";
 import { DEFAULT_CYCLE_COUNT_SECTIONS } from "@workspace/cycle-count";
@@ -1481,6 +1485,57 @@ export default function MasterDataScreen() {
     void refreshSavedSheets();
   }, [refreshSavedSheets]);
 
+  // One-time migration: push any pre-existing local dough/sauce presets up to
+  // their factory-wide server pools once, so recipes a manager built before the
+  // server-backed model existed become available to everyone. Manager-only (the
+  // server rejects non-managers), matched by name so it never duplicates or
+  // clobbers, and best-effort. A marker keeps it from re-running; on failure the
+  // marker is left unset so it retries next mount. Mirrors web (parity).
+  const didMigrateDoughSauceRef = useRef(false);
+  useEffect(() => {
+    if (!canManageInventory) return;
+    if (didMigrateDoughSauceRef.current) return;
+    didMigrateDoughSauceRef.current = true;
+    const MARKER = "run-calc-dough-sauce-server-migrated-v1";
+    void (async () => {
+      try {
+        const done = await AsyncStorage.getItem(MARKER);
+        if (done) return;
+        const doughDrafts = Object.entries(doughRecipePresets)
+          .filter(([name]) => name.trim())
+          .map(([name, rows]) =>
+            namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "dough" }),
+          )
+          .filter((r): r is NamedRecipe => r !== null);
+        const sauceDrafts = Object.entries(frontlineRecipePresets)
+          .filter(([name]) => name.trim())
+          .map(([name, rows]) =>
+            namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "sauce" }),
+          )
+          .filter((r): r is NamedRecipe => r !== null);
+        let added = 0;
+        if (doughDrafts.length) {
+          const r = await addNamedRecipesToServerIfAbsent("dough", doughDrafts);
+          added += r.added;
+        }
+        if (sauceDrafts.length) {
+          const r = await addNamedRecipesToServerIfAbsent("sauce", sauceDrafts);
+          added += r.added;
+        }
+        // Only mark done once the server round-trips succeeded, so a failed push
+        // (offline, transient error) retries on a later mount.
+        await AsyncStorage.setItem(MARKER, "1");
+        if (added > 0) {
+          void mixesQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+          void mixesQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
+        }
+      } catch {
+        // Best-effort: leave the marker unset so it retries next mount.
+        didMigrateDoughSauceRef.current = false;
+      }
+    })();
+  }, [canManageInventory, doughRecipePresets, frontlineRecipePresets, mixesQc]);
+
   // Auto-run cross-reference when signal bumps (e.g. after spec sheet import).
   // Re-fetches the sheet list first so the newly saved sheet is included.
   useEffect(() => {
@@ -1729,10 +1784,8 @@ export default function MasterDataScreen() {
     // actually imported (that's where standalone-duplicate ingredients arise).
     const importedRecipes = (specPrepared.summary?.totalRecipes ?? 0) > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded } = await commitSpecImport(
-        specPrepared,
-        buildSpecStore(),
-      );
+      const { mixesAdded, cheeseRecipesAdded, doughRecipesAdded, sauceRecipesAdded } =
+        await commitSpecImport(specPrepared, buildSpecStore());
       setSpecOpen(false);
       setSpecPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1743,6 +1796,12 @@ export default function MasterDataScreen() {
       // so the run applicator "Cheese" pickers list them right away.
       if (cheeseRecipesAdded > 0)
         void mixesQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      // Any named dough/sauce recipes were added to their factory-wide pools —
+      // refresh so the run applicator pickers list them right away.
+      if (doughRecipesAdded > 0)
+        void mixesQc.invalidateQueries({ queryKey: ["doughRecipes"] });
+      if (sauceRecipesAdded > 0)
+        void mixesQc.invalidateQueries({ queryKey: ["sauceRecipes"] });
       // Fire-and-forget: tells MergeManager to scan the updated lists once.
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
@@ -2461,6 +2520,30 @@ export default function MasterDataScreen() {
             "Cheese" cards pick from this pool. */}
         {canManageInventory ? (
           <>
+            <SectionHeader title="Dough Recipes" />
+            <CardSection>
+              <NamedRecipesManager
+                kind="dough"
+                ingredientSuggestions={[
+                  ...doughIngredients,
+                  ...frontlineIngredients,
+                  ...cheeseIngredients,
+                ]}
+              />
+            </CardSection>
+
+            <SectionHeader title="Sauce Recipes" />
+            <CardSection>
+              <NamedRecipesManager
+                kind="sauce"
+                ingredientSuggestions={[
+                  ...frontlineIngredients,
+                  ...doughIngredients,
+                  ...cheeseIngredients,
+                ]}
+              />
+            </CardSection>
+
             <SectionHeader title="Cheese Recipes" />
             <CardSection>
               {isManager ? (

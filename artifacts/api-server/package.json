@@ -27,6 +27,7 @@
     "@workspace/mix-reconcile": "workspace:*",
     "@workspace/mixes": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
+    "@workspace/named-recipes": "workspace:*",
     "@workspace/premix-import": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/schedule-optimize": "workspace:*",

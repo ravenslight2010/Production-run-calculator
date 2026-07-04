@@ -28,6 +28,9 @@
       "path": "./lib/cheese-recipes"
     },
     {
+      "path": "./lib/named-recipes"
+    },
+    {
       "path": "./lib/cheese-import"
     },
     {

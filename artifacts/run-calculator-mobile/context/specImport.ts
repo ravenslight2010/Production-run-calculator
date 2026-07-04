@@ -68,6 +68,7 @@ import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
 import { fetchMixes, saveMixes } from "./mixes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "./cheeseRecipes";
+import { addNamedRecipesToServerIfAbsent } from "./namedRecipes";
 import { specMixDraftToMix } from "@workspace/premix-import";
 import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
 import {
@@ -75,6 +76,10 @@ import {
   addCheeseRecipesIfAbsentByName,
   type CheeseRecipe,
 } from "@workspace/cheese-recipes";
+import {
+  namedRecipeFromDraft,
+  type NamedRecipe,
+} from "@workspace/named-recipes";
 import type { ReviewVerdict } from "@workspace/ai-review";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
@@ -690,7 +695,12 @@ export async function prepareSpecImportMulti(
 export async function commitSpecImport(
   prepared: SpecImportPrepared,
   store: SpecImportStore,
-): Promise<{ mixesAdded: number; cheeseRecipesAdded: number }> {
+): Promise<{
+  mixesAdded: number;
+  cheeseRecipesAdded: number;
+  doughRecipesAdded: number;
+  sauceRecipesAdded: number;
+}> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
   // server cheese pool both link to a single recipe (the per-pizza weight lives
@@ -751,6 +761,43 @@ export async function commitSpecImport(
     // Best-effort (non-manager 403, offline, sync disabled) — import applied.
   }
 
+  // Add any named dough/sauce recipes detected in this import to their
+  // factory-wide server pools so the run applicator pickers can select them (they
+  // hydrate rows from the pool). Matched by name against the existing pool so an
+  // import never duplicates or clobbers a manager's curated recipe. Manager-gated
+  // on the server and fully best-effort: the recipes already applied locally, so
+  // a failed sync must never surface as an import error. Mirrors web (parity).
+  let doughRecipesAdded = 0;
+  let sauceRecipesAdded = 0;
+  try {
+    const doughDrafts = (prepared.parsed.recipes ?? [])
+      .filter((r) => r.kind === "dough" && r.name.trim())
+      .map((r) =>
+        namedRecipeFromDraft({ name: r.name, components: r.rows ?? [], idPrefix: "dough" }),
+      )
+      .filter((r): r is NamedRecipe => r !== null);
+    if (doughDrafts.length) {
+      const { added } = await addNamedRecipesToServerIfAbsent("dough", doughDrafts);
+      doughRecipesAdded = added;
+    }
+  } catch {
+    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  }
+  try {
+    const sauceDrafts = (prepared.parsed.recipes ?? [])
+      .filter((r) => r.kind === "sauce" && r.name.trim())
+      .map((r) =>
+        namedRecipeFromDraft({ name: r.name, components: r.rows ?? [], idPrefix: "sauce" }),
+      )
+      .filter((r): r is NamedRecipe => r !== null);
+    if (sauceDrafts.length) {
+      const { added } = await addNamedRecipesToServerIfAbsent("sauce", sauceDrafts);
+      sauceRecipesAdded = added;
+    }
+  } catch {
+    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  }
+
   // Snapshot this import server-side (factory-wide; only the two most recent are
   // kept) so it can later be cross-referenced against the current recipe library
   // (see /ai/spec-reconcile). Best-effort: the import already applied locally, so
@@ -781,5 +828,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded };
+  return { mixesAdded, cheeseRecipesAdded, doughRecipesAdded, sauceRecipesAdded };
 }

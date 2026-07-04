@@ -131,4 +131,5 @@
 - [First-load sync form heal](sync-first-load-form-heal.md) — fresh-device sync apply misses the live form (stale dayStateRef); heal effect on currentRunId with empty-over-populated + recent-edit guards.
 - [Seeded placeholder runs](seeded-placeholder-runs.md) — auto-created blank day placeholder is `seeded` + local-only (never pushed, dropped on receive) or fresh devices pile blank runs onto peers; clients must never hold 0 runs.
 - [Cheese server master-data](cheese-server-master-data.md) — cheese is a server pool (own table/lib/importer, like Mixes but NOT in Mixes, per-BATCH lbs); applicator cards pick-only; old local presets dormant.
+- [Dough/Sauce server master-data](dough-sauce-server-master-data.md) — dough & sauce now server pools (@workspace/named-recipes, own tables, name-keyed); sauce==frontline; migration + spec-import push differ web vs mobile by design.
 - [Dual API workflows](dual-api-workflows.md) — browser hits the artifact API workflow (8080), not the 5000 duplicate; after pkill restart BOTH and verify via public domain, not localhost.

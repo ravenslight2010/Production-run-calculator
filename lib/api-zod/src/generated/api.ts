@@ -2335,6 +2335,148 @@ export const DeleteCheeseRecipesResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined dough recipes
+ */
+export const ListDoughRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Upserts a batch of dough recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update dough recipes (manager only)
+ */
+export const SaveDoughRecipesBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+})
+
+export const SaveDoughRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Removes a batch of dough recipes by id. Manager role required.
+ * @summary Delete dough recipes by id (manager only)
+ */
+export const DeleteDoughRecipesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the named recipes to delete')
+})
+
+export const DeleteDoughRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined sauce recipes
+ */
+export const ListSauceRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Upserts a batch of sauce recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update sauce recipes (manager only)
+ */
+export const SaveSauceRecipesBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of named recipes to create or update (by id)')
+})
+
+export const SaveSauceRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Removes a batch of sauce recipes by id. Manager role required.
+ * @summary Delete sauce recipes by id (manager only)
+ */
+export const DeleteSauceRecipesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the named recipes to delete')
+})
+
+export const DeleteSauceRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the recipe'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient')
+}).describe('One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.')).describe('The ingredients that make up the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese\/mixes there is no brand\/flavor grouping. The run form\'s Dough \/ Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
  * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
  * @summary List manager-defined cycle-count schedules
  */

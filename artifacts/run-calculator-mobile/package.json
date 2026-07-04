@@ -64,6 +64,7 @@
     "@expo-google-fonts/space-mono": "^0.4.2",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
+    "@workspace/named-recipes": "workspace:*",
     "@workspace/cycle-count": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",

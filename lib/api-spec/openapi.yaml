@@ -2050,6 +2050,140 @@ paths:
         "403":
           description: Manager role required
 
+  /dough-recipes:
+    get:
+      operationId: listDoughRecipes
+      tags: [doughRecipes]
+      summary: List manager-defined dough recipes
+      description: >-
+        Returns every factory-wide dough recipe (a named recipe plus a list of
+        components — each an ingredient and its pounds). These are global master
+        data (not part of the per-day sync payload). Reading is available to any
+        signed-in user so the run form's Dough card can hydrate its rows from a
+        chosen recipe; editing is manager-only.
+      responses:
+        "200":
+          description: All dough recipes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+    post:
+      operationId: saveDoughRecipes
+      tags: [doughRecipes]
+      summary: Create or update dough recipes (manager only)
+      description: >-
+        Upserts a batch of dough recipes by id. Each recipe is normalized and
+        validated server-side; malformed recipes are dropped. Manager role
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveNamedRecipesInput"
+      responses:
+        "200":
+          description: The full updated dough-recipe list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteDoughRecipes
+      tags: [doughRecipes]
+      summary: Delete dough recipes by id (manager only)
+      description: >-
+        Removes a batch of dough recipes by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteNamedRecipesInput"
+      responses:
+        "200":
+          description: The full updated dough-recipe list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
+  /sauce-recipes:
+    get:
+      operationId: listSauceRecipes
+      tags: [sauceRecipes]
+      summary: List manager-defined sauce recipes
+      description: >-
+        Returns every factory-wide sauce (frontline) recipe (a named recipe plus
+        a list of components — each an ingredient and its pounds). These are
+        global master data (not part of the per-day sync payload). Reading is
+        available to any signed-in user so the run form's Sauce card can hydrate
+        its rows from a chosen recipe; editing is manager-only.
+      responses:
+        "200":
+          description: All sauce recipes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+    post:
+      operationId: saveSauceRecipes
+      tags: [sauceRecipes]
+      summary: Create or update sauce recipes (manager only)
+      description: >-
+        Upserts a batch of sauce recipes by id. Each recipe is normalized and
+        validated server-side; malformed recipes are dropped. Manager role
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveNamedRecipesInput"
+      responses:
+        "200":
+          description: The full updated sauce-recipe list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteSauceRecipes
+      tags: [sauceRecipes]
+      summary: Delete sauce recipes by id (manager only)
+      description: >-
+        Removes a batch of sauce recipes by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteNamedRecipesInput"
+      responses:
+        "200":
+          description: The full updated sauce-recipe list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamedRecipeList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
   /cycle-count-schedules:
     get:
       operationId: listCycleCountSchedules
@@ -6792,6 +6926,85 @@ components:
         ids:
           type: array
           description: The ids of the cheese recipes to delete
+          items:
+            type: string
+
+    NamedRecipeComponent:
+      type: object
+      description: >-
+        One ingredient of a named recipe (dough or sauce) and how many pounds of
+        it the recipe uses.
+      required:
+        - ingredient
+        - lbs
+      properties:
+        ingredient:
+          type: string
+          description: Ingredient name
+        lbs:
+          type: number
+          description: Pounds of this ingredient
+
+    NamedRecipe:
+      type: object
+      description: >-
+        A manager-defined factory-wide named recipe used by the Dough and Sauce
+        sections: a name plus a list of components — each an ingredient and its
+        pounds. Unlike cheese/mixes there is no brand/flavor grouping. The run
+        form's Dough / Sauce cards pick one and hydrate their rows from its
+        components. Disabled recipes are kept but hidden from run pickers.
+      required:
+        - id
+        - name
+        - components
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Display name of the recipe
+        notes:
+          type: string
+          description: Optional free-form notes
+        components:
+          type: array
+          description: The ingredients that make up the recipe
+          items:
+            $ref: "#/components/schemas/NamedRecipeComponent"
+        enabled:
+          type: boolean
+
+    NamedRecipeList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedRecipe"
+
+    SaveNamedRecipesInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of named recipes to create or update (by id)
+          items:
+            $ref: "#/components/schemas/NamedRecipe"
+
+    DeleteNamedRecipesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the named recipes to delete
           items:
             type: string
 

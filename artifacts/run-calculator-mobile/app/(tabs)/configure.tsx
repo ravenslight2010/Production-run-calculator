@@ -25,6 +25,7 @@ import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useMixes } from "@/hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
+import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
@@ -223,6 +224,11 @@ export default function ConfigureScreen() {
   // cards pick one of these by name and hydrate their rows read-only from it —
   // cheese is deliberately NOT routed through Mixes.
   const { items: cheeseRecipesList } = useCheeseRecipes();
+  // Factory-wide dough / sauce recipes (server master-data). The applicator
+  // "Dough" / "Sauce" cards pick one of these by name and hydrate their rows
+  // from it. Mirrors cheese; dough & sauce each have their OWN server pool.
+  const { items: doughRecipesList } = useNamedRecipes("dough");
+  const { items: sauceRecipesList } = useNamedRecipes("sauce");
   const ruleViolations = React.useMemo(() => {
     const s = run.settings;
     const effectiveLineSpeed =
@@ -380,6 +386,72 @@ export default function ConfigureScreen() {
       ].sort((x, y) => x.localeCompare(y));
     };
   }, [enabledCheeseRecipes, serverCheeseNames]);
+
+  // ── Dough / Sauce server-pool support (mirrors web home.tsx + the cheese
+  // pattern above). A picked recipe NAME hydrates the applicator rows from the
+  // server pool; the run-form chips union the server names with any locally
+  // known preset names (backward compat for names still only in the synced
+  // list). ──
+  const serverDoughRowsByName = React.useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [doughRecipesList]);
+  const serverSauceRowsByName = React.useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of sauceRecipesList) {
+      if (r.enabled === false) continue;
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [sauceRecipesList]);
+  const serverDoughNames = React.useMemo(
+    () => [
+      ...new Set(
+        doughRecipesList
+          .filter((r) => r.enabled !== false)
+          .map((r) => r.name.trim())
+          .filter(Boolean),
+      ),
+    ],
+    [doughRecipesList],
+  );
+  const serverSauceNames = React.useMemo(
+    () => [
+      ...new Set(
+        sauceRecipesList
+          .filter((r) => r.enabled !== false)
+          .map((r) => r.name.trim())
+          .filter(Boolean),
+      ),
+    ],
+    [sauceRecipesList],
+  );
+  const doughRecipeNameOptions = React.useMemo(
+    () =>
+      [...new Set([...serverDoughNames, ...doughNames].map((n) => n.trim()).filter(Boolean))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [serverDoughNames, doughNames],
+  );
+  const frontlineRecipeNameOptions = React.useMemo(
+    () =>
+      [...new Set([...serverSauceNames, ...frontlineNames].map((n) => n.trim()).filter(Boolean))].sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [serverSauceNames, frontlineNames],
+  );
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -846,7 +918,7 @@ export default function ConfigureScreen() {
             onRemoveIngredient={(v) => removeListItem("doughIngredients", v)}
             name={run.settings.doughRecipeName}
             onNameChange={(n) => updateSettings({ doughRecipeName: n })}
-            presetNames={doughNames}
+            presetNames={doughRecipeNameOptions}
             onSavePreset={() =>
               saveRecipePreset(
                 "dough",
@@ -855,7 +927,11 @@ export default function ConfigureScreen() {
               )
             }
             onApplyPreset={(presetName) => {
-              const rows = doughRecipePresets[presetName];
+              // Prefer the server pool; fall back to a locally-saved preset for
+              // names that only exist in the synced list (backward compat).
+              const rows =
+                serverDoughRowsByName.get(presetName.trim().toLowerCase()) ??
+                doughRecipePresets[presetName];
               if (rows)
                 updateSettings({
                   doughRecipe: rows.map((r) => ({ ...r })),
@@ -898,7 +974,7 @@ export default function ConfigureScreen() {
             onRemoveIngredient={(v) => removeListItem("frontlineIngredients", v)}
             name={run.settings.frontlineRecipeName}
             onNameChange={(n) => updateSettings({ frontlineRecipeName: n })}
-            presetNames={frontlineNames}
+            presetNames={frontlineRecipeNameOptions}
             onSavePreset={() =>
               saveRecipePreset(
                 "frontline",
@@ -907,7 +983,11 @@ export default function ConfigureScreen() {
               )
             }
             onApplyPreset={(presetName) => {
-              const rows = frontlineRecipePresets[presetName];
+              // Prefer the server pool; fall back to a locally-saved preset for
+              // names that only exist in the synced list (backward compat).
+              const rows =
+                serverSauceRowsByName.get(presetName.trim().toLowerCase()) ??
+                frontlineRecipePresets[presetName];
               if (rows)
                 updateSettings({
                   frontlineRecipe: rows.map((r) => ({ ...r })),

@@ -2371,6 +2371,45 @@ export interface DeleteCheeseRecipesInput {
 }
 
 /**
+ * One ingredient of a named recipe (dough or sauce) and how many pounds of it the recipe uses.
+ */
+export interface NamedRecipeComponent {
+  /** Ingredient name */
+  ingredient: string;
+  /** Pounds of this ingredient */
+  lbs: number;
+}
+
+/**
+ * A manager-defined factory-wide named recipe used by the Dough and Sauce sections: a name plus a list of components — each an ingredient and its pounds. Unlike cheese/mixes there is no brand/flavor grouping. The run form's Dough / Sauce cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.
+ */
+export interface NamedRecipe {
+  /** Stable client-generated id */
+  id: string;
+  /** Display name of the recipe */
+  name: string;
+  /** Optional free-form notes */
+  notes?: string;
+  /** The ingredients that make up the recipe */
+  components: NamedRecipeComponent[];
+  enabled: boolean;
+}
+
+export interface NamedRecipeList {
+  items: NamedRecipe[];
+}
+
+export interface SaveNamedRecipesInput {
+  /** The batch of named recipes to create or update (by id) */
+  items: NamedRecipe[];
+}
+
+export interface DeleteNamedRecipesInput {
+  /** The ids of the named recipes to delete */
+  ids: string[];
+}
+
+/**
  * A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.
  */
 export interface CycleCountSchedule {

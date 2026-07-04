@@ -353,6 +353,10 @@ import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
+import NamedRecipesManager from "@/components/NamedRecipesManager";
+import { useNamedRecipes } from "@/hooks/useNamedRecipes";
+import { addNamedRecipesToServerIfAbsent } from "@/namedRecipes";
+import { namedRecipeFromDraft, type NamedRecipe } from "@workspace/named-recipes";
 
 import {
   Form,
@@ -2662,6 +2666,58 @@ export default function Home() {
     () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [enabledCheeseRecipes],
   );
+
+  // Dough & Sauce recipes are now server-backed factory-wide master-data (like
+  // Cheese Recipes / Mixes): managers define them once, they are shared across
+  // every signed-in device, and the run form's Dough / Sauce cards pick one by
+  // name and hydrate their rows from the chosen recipe. We keep a name (case-
+  // insensitive) → rows map for hydration and a sorted name list for the run-form
+  // dropdowns.
+  const { items: doughRecipesList } = useNamedRecipes("dough");
+  const { items: sauceRecipesList } = useNamedRecipes("sauce");
+  const serverDoughRowsByName = useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of doughRecipesList) {
+      if (r.enabled === false) continue;
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [doughRecipesList]);
+  const serverSauceRowsByName = useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of sauceRecipesList) {
+      if (r.enabled === false) continue;
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [sauceRecipesList]);
+  const serverDoughNames = useMemo(
+    () => [...new Set(doughRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    [doughRecipesList],
+  );
+  const serverSauceNames = useMemo(
+    () => [...new Set(sauceRecipesList.filter((r) => r.enabled !== false).map((r) => r.name.trim()).filter(Boolean))],
+    [sauceRecipesList],
+  );
+  // Run-form dropdown options: the server pool names unioned with any locally
+  // known recipe names (backward compat for names still only in the synced
+  // list), sorted for a stable browse order.
+  const doughRecipeNameOptions = useMemo(
+    () => [...new Set([...serverDoughNames, ...doughRecipeNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [serverDoughNames, doughRecipeNames],
+  );
+  const frontlineRecipeNameOptions = useMemo(
+    () => [...new Set([...serverSauceNames, ...frontlineRecipeNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [serverSauceNames, frontlineRecipeNames],
+  );
   // Names filtered to the current run's brand/flavor: prefer recipes for this
   // customer (brand) and — among those — ones assigned to this flavor (or "all
   // varieties", i.e. no flavors). Returns ALL names when nothing matches so the
@@ -2704,6 +2760,44 @@ export default function Home() {
   const canManageInventory = hasCapability("manage-inventory");
   const canManageStaff = hasCapability("manage-staff");
   const canApproveResets = hasCapability("approve-password-resets");
+
+  // Push every locally-saved dough / sauce recipe preset up into the server pool
+  // (match-by-name, no clobber) so they become factory-wide master-data like
+  // Cheese Recipes / Mixes. Shared by the one-time migration and by spec-import.
+  // Best-effort: the server enforces manage-inventory on writes, so a non-manager
+  // (or offline device) simply no-ops. Updates the react-query cache on success.
+  const pushLocalDoughSauceToServer = useCallback(async (): Promise<number> => {
+    const doughDrafts = Object.entries(loadDoughRecipePresets())
+      .map(([name, p]) => namedRecipeFromDraft({ name, components: p?.rows ?? [], idPrefix: "dough" }))
+      .filter((r): r is NamedRecipe => r !== null);
+    const sauceDrafts = Object.entries(loadFrontlineRecipePresets())
+      .map(([name, rows]) => namedRecipeFromDraft({ name, components: rows ?? [], idPrefix: "sauce" }))
+      .filter((r): r is NamedRecipe => r !== null);
+    const [d, s] = await Promise.all([
+      doughDrafts.length ? addNamedRecipesToServerIfAbsent("dough", doughDrafts) : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
+      sauceDrafts.length ? addNamedRecipesToServerIfAbsent("sauce", sauceDrafts) : Promise.resolve({ added: 0, items: [] as NamedRecipe[] }),
+    ]);
+    if (d.added > 0) cycleCountQc.setQueryData(["doughRecipes"], d.items);
+    if (s.added > 0) cycleCountQc.setQueryData(["sauceRecipes"], s.items);
+    return d.added + s.added;
+  }, [cycleCountQc]);
+
+  // One-time migration: run pushLocalDoughSauceToServer once so pre-existing
+  // recipes stop living only on this device. Manager-only (server-enforced);
+  // marker-guarded so it runs once, and re-armed on failure to retry next mount.
+  const doughSauceMigratedRef = useRef(false);
+  useEffect(() => {
+    if (doughSauceMigratedRef.current || !canManageInventory) return;
+    const MARKER = "run-calc-dough-sauce-server-migrated-v1";
+    try {
+      if (localStorage.getItem(MARKER)) { doughSauceMigratedRef.current = true; return; }
+    } catch {}
+    doughSauceMigratedRef.current = true;
+    pushLocalDoughSauceToServer()
+      .then(() => { try { localStorage.setItem(MARKER, "1"); } catch {} })
+      .catch(() => { doughSauceMigratedRef.current = false; });
+  }, [canManageInventory, pushLocalDoughSauceToServer]);
+
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
@@ -6408,6 +6502,10 @@ export default function Home() {
       const { mixesAdded, cheeseRecipesAdded } = await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
+      // Any dough / sauce recipes the sheet added are pushed into the server pool
+      // so they become factory-wide master-data (like the Mixes / Cheese pools).
+      // Best-effort, manager-only server-side; never blocks the committed import.
+      if (importedRecipes && canManageInventory) void pushLocalDoughSauceToServer().catch(() => {});
       // Any mixes detected in the sheet were added to the factory-wide Mixes
       // list — refresh the Mixes screen so they appear right away.
       if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
@@ -8804,6 +8902,17 @@ export default function Home() {
                       setIngInput={setMgIngInput}
                     />
 
+                    {/* Dough & Sauce recipes are now server-backed factory-wide
+                        master-data (like Cheese Recipes / Mixes). Managers edit
+                        them here; the run form's Dough / Sauce cards pick one by
+                        name and hydrate their rows from the chosen recipe. */}
+                    {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
+                      <NamedRecipesManager
+                        kind={manageCategory === "dough" ? "dough" : "sauce"}
+                        ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
+                      />
+                    )}
+
                     {/* Recipe ingredient editor. Mix names that match an imported
                         (server) mix show its components read-only — the Mixes tab
                         is the source of truth for those, and the local preset pool
@@ -8830,7 +8939,7 @@ export default function Home() {
                         </div>
                       </div>
                     )}
-                    {mgSelectedPreset && presetConfig && !(manageCategory === "mix" && serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase())) && (
+                    {mgSelectedPreset && presetConfig && manageCategory === "mix" && !serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase()) && (
                       <div className="border border-primary/30 rounded-lg overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
                           <div className="flex items-center gap-2">
@@ -12618,14 +12727,14 @@ export default function Home() {
                     onRemove={removeDough}
                     onTargetWeightChange={val => form.setValue("targetDoughballWeight", val, { shouldDirty: true })}
                     recipeName={v.doughRecipeName ?? ""}
-                    recipeNameOptions={doughRecipeNames}
+                    recipeNameOptions={doughRecipeNameOptions}
                     onAddRecipeName={addDoughRecipeName}
                     onRemoveRecipeName={removeDoughRecipeName}
                     onRecipeNameChange={val => {
                       form.setValue("doughRecipeName", val, { shouldDirty: true });
                       if (val.trim()) {
-                        const preset = loadDoughRecipePresets()[val.trim()];
-                        if (preset) { form.setValue("doughRecipe", preset.rows, { shouldDirty: true }); replaceDough(preset.rows); }
+                        const rows = serverDoughRowsByName.get(val.trim().toLowerCase()) ?? loadDoughRecipePresets()[val.trim()]?.rows;
+                        if (rows) { form.setValue("doughRecipe", rows, { shouldDirty: true }); replaceDough(rows); }
                       }
                     }}
                   />
@@ -12646,8 +12755,8 @@ export default function Home() {
                       <TypeDropdown
                         label="Sauce"
                         value={v.frontlineRecipeName}
-                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const preset = loadFrontlineRecipePresets()[val.trim()]; if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); } } }}
-                        options={frontlineRecipeNames}
+                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } } }}
+                        options={frontlineRecipeNameOptions}
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
                         allowClear
@@ -12684,14 +12793,14 @@ export default function Home() {
                           onAppend={() => appendFrontline({ ingredient: "", lbs: 0 })}
                           onRemove={removeFrontline}
                           recipeName={v.frontlineRecipeName ?? ""}
-                          recipeNameOptions={frontlineRecipeNames}
+                          recipeNameOptions={frontlineRecipeNameOptions}
                           onAddRecipeName={addFrontlineRecipeName}
                           onRemoveRecipeName={removeFrontlineRecipeName}
                           onRecipeNameChange={val => {
                             form.setValue("frontlineRecipeName", val, { shouldDirty: true });
                             if (val.trim()) {
-                              const preset = loadFrontlineRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("frontlineRecipe", preset, { shouldDirty: true }); replaceFrontline(preset); }
+                              const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()];
+                              if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); }
                             }
                           }}
                         />

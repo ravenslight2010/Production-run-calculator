@@ -90,6 +90,7 @@
     "@workspace/allergen": "workspace:*",
     "@workspace/cheese-import": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
+    "@workspace/named-recipes": "workspace:*",
     "@workspace/cycle-count": "workspace:*",
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/fill-missing": "workspace:*",

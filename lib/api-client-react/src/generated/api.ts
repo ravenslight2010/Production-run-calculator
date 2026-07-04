@@ -45,6 +45,7 @@ import type {
   DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
   DeleteMixesInput,
+  DeleteNamedRecipesInput,
   DeleteProductionRulesInput,
   DeleteRunTemplatesInput,
   DeniedMergeList,
@@ -90,6 +91,7 @@ import type {
   MixList,
   MixReconcileInput,
   MixReconcileResult,
+  NamedRecipeList,
   OkResponse,
   OptimizeInput,
   OptimizeResult,
@@ -128,6 +130,7 @@ import type {
   SaveMergeAliasesInput,
   SaveMergedAwayInput,
   SaveMixesInput,
+  SaveNamedRecipesInput,
   SavePhotoAliasesInput,
   SavePremixSheetInput,
   SaveProductionRulesInput,
@@ -6267,6 +6270,450 @@ export const useDeleteCheeseRecipes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteCheeseRecipesMutationOptions(options));
+    }
+
+export const getListDoughRecipesUrl = () => {
+
+
+
+
+  return `/api/dough-recipes`
+}
+
+/**
+ * Returns every factory-wide dough recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Dough card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined dough recipes
+ */
+export const listDoughRecipes = async ( options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getListDoughRecipesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDoughRecipesQueryKey = () => {
+    return [
+    `/api/dough-recipes`
+    ] as const;
+    }
+
+
+export const getListDoughRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDoughRecipesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDoughRecipes>>> = ({ signal }) => listDoughRecipes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDoughRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof listDoughRecipes>>>
+export type ListDoughRecipesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined dough recipes
+ */
+
+export function useListDoughRecipes<TData = Awaited<ReturnType<typeof listDoughRecipes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDoughRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDoughRecipesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveDoughRecipesUrl = () => {
+
+
+
+
+  return `/api/dough-recipes`
+}
+
+/**
+ * Upserts a batch of dough recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update dough recipes (manager only)
+ */
+export const saveDoughRecipes = async (saveNamedRecipesInput: SaveNamedRecipesInput, options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getSaveDoughRecipesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveNamedRecipesInput,)
+  }
+);}
+
+
+
+
+export const getSaveDoughRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDoughRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveDoughRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext> => {
+
+const mutationKey = ['saveDoughRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveDoughRecipes>>, {data: BodyType<SaveNamedRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveDoughRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveDoughRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof saveDoughRecipes>>>
+    export type SaveDoughRecipesMutationBody = BodyType<SaveNamedRecipesInput>
+    export type SaveDoughRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update dough recipes (manager only)
+ */
+export const useSaveDoughRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveDoughRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveDoughRecipes>>,
+        TError,
+        {data: BodyType<SaveNamedRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveDoughRecipesMutationOptions(options));
+    }
+
+export const getDeleteDoughRecipesUrl = () => {
+
+
+
+
+  return `/api/dough-recipes`
+}
+
+/**
+ * Removes a batch of dough recipes by id. Manager role required.
+ * @summary Delete dough recipes by id (manager only)
+ */
+export const deleteDoughRecipes = async (deleteNamedRecipesInput: DeleteNamedRecipesInput, options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getDeleteDoughRecipesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteNamedRecipesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteDoughRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDoughRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDoughRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext> => {
+
+const mutationKey = ['deleteDoughRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDoughRecipes>>, {data: BodyType<DeleteNamedRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteDoughRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDoughRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDoughRecipes>>>
+    export type DeleteDoughRecipesMutationBody = BodyType<DeleteNamedRecipesInput>
+    export type DeleteDoughRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete dough recipes by id (manager only)
+ */
+export const useDeleteDoughRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDoughRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDoughRecipes>>,
+        TError,
+        {data: BodyType<DeleteNamedRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteDoughRecipesMutationOptions(options));
+    }
+
+export const getListSauceRecipesUrl = () => {
+
+
+
+
+  return `/api/sauce-recipes`
+}
+
+/**
+ * Returns every factory-wide sauce (frontline) recipe (a named recipe plus a list of components — each an ingredient and its pounds). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run form's Sauce card can hydrate its rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined sauce recipes
+ */
+export const listSauceRecipes = async ( options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getListSauceRecipesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSauceRecipesQueryKey = () => {
+    return [
+    `/api/sauce-recipes`
+    ] as const;
+    }
+
+
+export const getListSauceRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSauceRecipesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSauceRecipes>>> = ({ signal }) => listSauceRecipes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSauceRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof listSauceRecipes>>>
+export type ListSauceRecipesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined sauce recipes
+ */
+
+export function useListSauceRecipes<TData = Awaited<ReturnType<typeof listSauceRecipes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSauceRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSauceRecipesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveSauceRecipesUrl = () => {
+
+
+
+
+  return `/api/sauce-recipes`
+}
+
+/**
+ * Upserts a batch of sauce recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update sauce recipes (manager only)
+ */
+export const saveSauceRecipes = async (saveNamedRecipesInput: SaveNamedRecipesInput, options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getSaveSauceRecipesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveNamedRecipesInput,)
+  }
+);}
+
+
+
+
+export const getSaveSauceRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSauceRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveSauceRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext> => {
+
+const mutationKey = ['saveSauceRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveSauceRecipes>>, {data: BodyType<SaveNamedRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveSauceRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveSauceRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof saveSauceRecipes>>>
+    export type SaveSauceRecipesMutationBody = BodyType<SaveNamedRecipesInput>
+    export type SaveSauceRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update sauce recipes (manager only)
+ */
+export const useSaveSauceRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveSauceRecipes>>, TError,{data: BodyType<SaveNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveSauceRecipes>>,
+        TError,
+        {data: BodyType<SaveNamedRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveSauceRecipesMutationOptions(options));
+    }
+
+export const getDeleteSauceRecipesUrl = () => {
+
+
+
+
+  return `/api/sauce-recipes`
+}
+
+/**
+ * Removes a batch of sauce recipes by id. Manager role required.
+ * @summary Delete sauce recipes by id (manager only)
+ */
+export const deleteSauceRecipes = async (deleteNamedRecipesInput: DeleteNamedRecipesInput, options?: RequestInit): Promise<NamedRecipeList> => {
+
+  return customFetch<NamedRecipeList>(getDeleteSauceRecipesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteNamedRecipesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteSauceRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSauceRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteSauceRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext> => {
+
+const mutationKey = ['deleteSauceRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteSauceRecipes>>, {data: BodyType<DeleteNamedRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteSauceRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteSauceRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteSauceRecipes>>>
+    export type DeleteSauceRecipesMutationBody = BodyType<DeleteNamedRecipesInput>
+    export type DeleteSauceRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete sauce recipes by id (manager only)
+ */
+export const useDeleteSauceRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteSauceRecipes>>, TError,{data: BodyType<DeleteNamedRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteSauceRecipes>>,
+        TError,
+        {data: BodyType<DeleteNamedRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteSauceRecipesMutationOptions(options));
     }
 
 export const getListCycleCountSchedulesUrl = () => {
