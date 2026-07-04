@@ -8,6 +8,12 @@ description: The Merge section's 6-tab category selector (web+mobile) — scopin
 The Merge manager offers 6 category tabs — Ingredients, Mixes, Dough, Sauce,
 Cheese mixes, Brand/Flavor — so a manual merge stays within one master-data group.
 
+**Mixes tab was removed once, then restored by user request** (present on BOTH
+web + mobile). All the `"mixes"` wiring (universe, suggest scope, target options,
+`handleApplyRecipeNameMerge` guardrail, empty-state copy) is kept even when the
+tab button is absent, so removing/re-adding the tab is a one-line change to the
+category-selector list in each app — don't strip the underlying handling.
+
 ## WEB: category tabs merge RECIPE NAMES, Ingredients tab merges ingredients
 (Web-only during the parity pause; see `.local/parity-pause-log.md`. Mobile still
 merges ingredient names on every tab.)

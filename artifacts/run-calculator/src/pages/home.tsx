@@ -8932,6 +8932,7 @@ export default function Home() {
                     <div className="flex flex-wrap gap-1.5">
                       {([
                         ["ingredients", "Ingredients"],
+                        ["mixes", "Mixes"],
                         ["dough", "Dough"],
                         ["sauce", "Sauce"],
                         ["cheese", "Cheese mixes"],
