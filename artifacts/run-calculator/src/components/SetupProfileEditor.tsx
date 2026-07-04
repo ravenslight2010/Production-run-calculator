@@ -29,6 +29,7 @@ import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { toast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, Settings, Package, Save, X } from "lucide-react";
 
@@ -378,6 +379,7 @@ export default function SetupProfileEditor({
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+        <Form {...form}>
         {!isSupervisor ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
             Supervisor access required to edit setup profiles.
@@ -754,6 +756,7 @@ export default function SetupProfileEditor({
             </div>
           </div>
         )}
+        </Form>
         </div>
       </div>
     </div>
