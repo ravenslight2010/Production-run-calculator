@@ -620,3 +620,11 @@ number+ingredient pairs → one cheese-kind recipe.
   lets two chunks emit the same base name for different compositions, and the
   later-wins recipe merge then collapses one variant and mislinks applicator
   types. Both clients call it at `rawMerged` before `canonicalizeParsed`.
+- **One blend at two applicator weights = ONE cheese pool recipe.** The AI
+  sometimes suffixes the per-pizza weight onto the cheese name ("Aldo's Cheese
+  Mix 2.07" / "(2.07)"). `canonicalizeSpecImportCheeseRecipeNames` (runs on the
+  MERGED parse, before apply/seed, in BOTH clients) strips trailing weight
+  tokens via `cleanSpecCheeseRecipeName` so the variants collapse to one pool
+  recipe; the weight lives on the applicator field `app{n}OzPerPizza`, never in
+  the name. Skips mix-routed + non-cheese recipes; keeps the name if stripping
+  would leave no letters (protects e.g. "5 Cheese Blend").

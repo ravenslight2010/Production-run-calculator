@@ -413,6 +413,60 @@ export function collectSpecImportCheeseRecipes(
 }
 
 /**
+ * Strip a trailing per-pizza weight token off a cheese-blend name so the same
+ * blend applied at two different applicator weights collapses to ONE recipe.
+ *
+ * A spec sheet often crams the applicator amount into the same cell as the blend
+ * name (e.g. "Aldo's Cheese Mix\n2.07 Pizella, ..."), so the AI can emit two
+ * recipes named "Aldo's Cheese Mix 2.07" and "Aldo's Cheese Mix 1.75" for what
+ * is really one blend at two applicator weights. The per-pizza weight belongs on
+ * the applicator (`app{n}OzPerPizza`), not baked into the recipe name, so we drop
+ * a trailing bare number (optionally with a unit like oz/lb) from the name. Only
+ * strips when at least one letter remains, so an all-numeric name is left alone.
+ * Pure.
+ */
+export function cleanSpecCheeseRecipeName(name: string): string {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return "";
+  const stripped = trimmed
+    .replace(
+      /[\s(\-\u2013\u2014]+\d+(?:[.,]\d+)?\s*(?:oz|ozs|ounce|ounces|lb|lbs|#)?\)?\s*$/i,
+      "",
+    )
+    .trim();
+  return stripped && /[a-z]/i.test(stripped) ? stripped : trimmed;
+}
+
+/**
+ * Return a copy of a parsed import with cheese-blend recipe names canonicalized
+ * via cleanSpecCheeseRecipeName, so both apply (which writes the name onto the
+ * profile's `app{n}CheeseRecipeName`) and collectSpecImportCheeseRecipes (which
+ * seeds the server pool, de-duping by name) see the SAME clean name. This makes
+ * two applicator slots that use one blend at different weights point at a single
+ * pool recipe instead of creating a per-weight duplicate.
+ *
+ * Recipes that route to the Mixes list are left untouched (a mix name is matched
+ * elsewhere). The user-mix-name set is intentionally not consulted here — that
+ * bridge only matters before the pool fetch — so the intrinsic mix heuristic is
+ * used; names containing "cheese" are always cheese anyway. Pure + non-mutating.
+ */
+export function canonicalizeSpecImportCheeseRecipeNames(
+  parsed: ParsedSpecImport,
+): ParsedSpecImport {
+  const noUserMixes = new Set<string>();
+  let changed = false;
+  const recipes = (parsed.recipes ?? []).map((r) => {
+    if (r.kind !== "cheese") return r;
+    if (specImportRecipeIsMix(r, noUserMixes)) return r;
+    const cleaned = cleanSpecCheeseRecipeName(r.name ?? "");
+    if (!cleaned || cleaned === (r.name ?? "").trim()) return r;
+    changed = true;
+    return { ...r, name: cleaned };
+  });
+  return changed ? { ...parsed, recipes } : parsed;
+}
+
+/**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated
  * (case-insensitive). Entries missing a brand or flavor are dropped. Shared by

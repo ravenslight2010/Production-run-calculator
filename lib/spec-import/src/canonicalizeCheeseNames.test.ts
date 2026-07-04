@@ -1,0 +1,90 @@
+import { describe, it, expect } from "vitest";
+import {
+  cleanSpecCheeseRecipeName,
+  canonicalizeSpecImportCheeseRecipeNames,
+  collectSpecImportCheeseRecipes,
+  type ParsedSpecImport,
+} from "./index";
+
+const none = new Set<string>();
+
+describe("cleanSpecCheeseRecipeName", () => {
+  it("strips a trailing bare weight number", () => {
+    expect(cleanSpecCheeseRecipeName("Aldo's Cheese Mix 2.07")).toBe("Aldo's Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("Aldo's Cheese Mix 1.75")).toBe("Aldo's Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("Cheese Blend 2")).toBe("Cheese Blend");
+  });
+
+  it("strips a trailing weight with a unit or parens", () => {
+    expect(cleanSpecCheeseRecipeName("Cheese Mix 2.07 oz")).toBe("Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("Cheese Mix (1.75 oz)")).toBe("Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("Cheese Mix - 3lb")).toBe("Cheese Mix");
+  });
+
+  it("leaves names without a trailing weight alone", () => {
+    expect(cleanSpecCheeseRecipeName("Whole Mozz Cheese Mix")).toBe("Whole Mozz Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("5 Cheese Blend")).toBe("5 Cheese Blend");
+    expect(cleanSpecCheeseRecipeName("Basha's Ultra Thin 5 Cheese")).toBe("Basha's Ultra Thin 5 Cheese");
+  });
+
+  it("does not strip when nothing meaningful would remain", () => {
+    expect(cleanSpecCheeseRecipeName("2.07")).toBe("2.07");
+    expect(cleanSpecCheeseRecipeName("  ")).toBe("");
+  });
+});
+
+function cheese(name: string, over: Partial<ParsedSpecImport["recipes"][number]> = {}) {
+  return {
+    kind: "cheese" as const,
+    name,
+    rows: over.rows ?? [{ ingredient: "Pizella", lbs: 0.13 }],
+    ...over,
+  };
+}
+
+describe("canonicalizeSpecImportCheeseRecipeNames", () => {
+  it("collapses per-weight variants of one blend to a single pool recipe", () => {
+    const canon = canonicalizeSpecImportCheeseRecipeNames({
+      profiles: [],
+      recipes: [
+        cheese("Aldo's Cheese Mix 2.07", { brand: "Aldo's", flavor: "Cheese", app: 1 }),
+        cheese("Aldo's Cheese Mix 1.75", { brand: "Aldo's", flavor: "Pepperoni", app: 2 }),
+      ],
+    });
+    expect(canon.recipes.map((r) => r.name)).toEqual([
+      "Aldo's Cheese Mix",
+      "Aldo's Cheese Mix",
+    ]);
+    // Both applicator slots keep their own slot (weight lives on the applicator),
+    // but the pool now holds ONE recipe because the names match.
+    const drafts = collectSpecImportCheeseRecipes(canon, none);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].name).toBe("Aldo's Cheese Mix");
+  });
+
+  it("leaves mix-routed and non-cheese recipes untouched", () => {
+    const input: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        cheese("White Fajita Mix 2.5", {
+          rows: [
+            { ingredient: "Monterey Jack", lbs: 20 },
+            { ingredient: "Peppers", lbs: 5 },
+          ],
+        }),
+        { kind: "dough", name: "Thin Crust 12", rows: [{ ingredient: "Flour", lbs: 50 }] },
+      ],
+    };
+    const canon = canonicalizeSpecImportCheeseRecipeNames(input);
+    expect(canon.recipes[0].name).toBe("White Fajita Mix 2.5");
+    expect(canon.recipes[1].name).toBe("Thin Crust 12");
+  });
+
+  it("returns the same object when nothing changes", () => {
+    const input: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Whole Mozz Cheese Mix", { brand: "Bobo", flavor: "Pep" })],
+    };
+    expect(canonicalizeSpecImportCheeseRecipeNames(input)).toBe(input);
+  });
+});

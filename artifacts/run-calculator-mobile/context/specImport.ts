@@ -22,6 +22,7 @@ import {
   collectSpecAliases,
   collectSpecImportMixes,
   collectSpecImportCheeseRecipes,
+  canonicalizeSpecImportCheeseRecipeNames,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -690,6 +691,11 @@ export async function commitSpecImport(
   prepared: SpecImportPrepared,
   store: SpecImportStore,
 ): Promise<{ mixesAdded: number; cheeseRecipesAdded: number }> {
+  // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
+  // "…1.75") to one clean name up front, so the profile applicator fields and the
+  // server cheese pool both link to a single recipe (the per-pizza weight lives
+  // on app{n}OzPerPizza, not in the recipe name). Mirrors web (replit.md parity).
+  prepared.parsed = canonicalizeSpecImportCheeseRecipeNames(prepared.parsed);
   store.apply(prepared.parsed);
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
