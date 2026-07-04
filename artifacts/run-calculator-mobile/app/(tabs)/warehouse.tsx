@@ -12,7 +12,6 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_PROGRESS,
   DEFAULT_PEP_TYPES,
-  MAX_RUNS,
   type RunCalc,
   type RunSettings,
   type RunState,
@@ -30,8 +29,7 @@ import UseFirstCard from "@/components/UseFirstCard";
 import ScheduledRecipeWarningCard from "@/components/ScheduledRecipeWarningCard";
 import { useRouter } from "expo-router";
 import { useMe } from "@/hooks/useRole";
-import { showNote } from "@/utils/notify";
-import { decideSetupJump, type ScheduledRunRef } from "@workspace/scheduled-recipe-check";
+import type { ScheduledRunRef } from "@workspace/scheduled-recipe-check";
 
 function fmtNum(n: number, dec: number): string {
   const num = Number(n);
@@ -117,17 +115,11 @@ export default function WarehouseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    run,
-    runCount,
     allRuns,
     scheduled,
     brandProfiles,
     stagedItems,
     toggleStagedItem,
-    updateSettings,
-    addRun,
-    applyProfile,
-    hasProfile,
   } = useRun();
   const router = useRouter();
   const { isManager } = useMe();
@@ -470,37 +462,13 @@ export default function WarehouseScreen() {
           <ScheduledRecipeWarningCard
             scheduledRuns={scheduledRunRefs}
             onSetup={(brand, flavor) => {
-              // Never rename a run that's already configured, running, or
-              // finished — that corrupts it (its recipes/cases/timers stay
-              // behind under the new identity and later pollute the target
-              // profile). Shared decision keeps mobile identical to web.
-              const decision = decideSetupJump({
-                currentBrand: run.settings.brand,
-                currentFlavor: run.settings.flavor,
-                currentStarted: run.startedAt != null,
-                currentEnded: run.endedAt != null,
-                currentValues: run.settings as unknown as Record<string, unknown>,
-                runCount,
-                maxRuns: MAX_RUNS,
-              });
-              if (decision === "at-cap") {
-                // showNote handles the Expo-web no-op Alert branch (styled
-                // in-app dialog on web, native Alert elsewhere).
-                showNote(
-                  "Run limit reached",
-                  `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`,
-                );
-                return;
-              }
-              // "new-run": append a fresh run and make it current; the queued
-              // updates below then land on that new run (assistant addRun
-              // pattern). "reuse-current": the run is blank, so setting its
-              // identity + loading the target profile is the normal
-              // identity-change flow (nothing to save off a blank run).
-              if (decision === "new-run") addRun();
-              updateSettings({ brand, flavor });
-              if (hasProfile(brand, flavor)) applyProfile(brand, flavor);
-              router.push("/configure" as never);
+              // Route into the standalone Setup Profiles editor instead of
+              // creating/reusing a run — editing a brand/flavor's saved setup
+              // should never touch the current or a new run (web parity).
+              router.push({
+                pathname: "/setup-profiles",
+                params: { brand, flavor },
+              } as never);
             }}
           />
         ) : null}

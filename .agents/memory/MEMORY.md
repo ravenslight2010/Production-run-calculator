@@ -133,3 +133,4 @@
 - [Cheese server master-data](cheese-server-master-data.md) — cheese is a server pool (own table/lib/importer, like Mixes but NOT in Mixes, per-BATCH lbs); applicator cards pick-only; old local presets dormant.
 - [Dough/Sauce server master-data](dough-sauce-server-master-data.md) — dough & sauce now server pools (@workspace/named-recipes, own tables, name-keyed); sauce==frontline; migration + spec-import push differ web vs mobile by design.
 - [Dual API workflows](dual-api-workflows.md) — browser hits the artifact API workflow (8080), not the 5000 duplicate; after pkill restart BOTH and verify via public domain, not localhost.
+- [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.

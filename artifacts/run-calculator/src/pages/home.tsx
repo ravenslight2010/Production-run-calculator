@@ -133,7 +133,6 @@ import {
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
 } from "../storage";
-import { decideSetupJump } from "@workspace/scheduled-recipe-check";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
 import InventoryTab from "../components/InventoryTab";
@@ -371,6 +370,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -600,7 +600,7 @@ function StatRow({
   );
 }
 
-function IngredientSelect({
+export function IngredientSelect({
   value,
   onChange,
   options,
@@ -865,7 +865,7 @@ function CheeseRecipeCard({
 // read-only here. Picking hydrates the run's recipe rows so cheese still
 // consumes exactly as before (cheese type → batches). Mirrors the mobile
 // applicator cheese card (replit.md parity).
-function CheesePickCard({
+export function CheesePickCard({
   label,
   batches,
   recipe,
@@ -985,7 +985,7 @@ function CheesePickCard({
   );
 }
 
-function MixRecipeCard({
+export function MixRecipeCard({
   label,
   totalRunLbs,
   fields,
@@ -1107,7 +1107,7 @@ function MixRecipeCard({
   );
 }
 
-function DoughRecipeCard({
+export function DoughRecipeCard({
   batchesNeeded,
   fields,
   recipe,
@@ -1293,7 +1293,7 @@ function DoughRecipeCard({
   );
 }
 
-function FrontlineRecipeCard({
+export function FrontlineRecipeCard({
   fields,
   recipe,
   register,
@@ -1503,7 +1503,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function useDropdownScrollKeeper(open: boolean) {
+export function useDropdownScrollKeeper(open: boolean) {
   const posRef = useRef(0);
   const wasOpenRef = useRef(false);
   if (open && !wasOpenRef.current) posRef.current = 0;
@@ -1521,7 +1521,7 @@ function useDropdownScrollKeeper(open: boolean) {
   return handlersRef.current;
 }
 
-function TypeDropdown({
+export function TypeDropdown({
   label,
   value,
   onChange,
@@ -1636,7 +1636,7 @@ function TypeDropdown({
   );
 }
 
-function NumField({
+export function NumField({
   control,
   name,
   label,
@@ -2078,6 +2078,17 @@ export default function Home() {
     [...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
   );
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
+  // Standalone Setup Profiles editor: lets a manager/supervisor pick any
+  // brand/flavor and edit its saved setup directly, without touching the
+  // current run. Independent of dayState/currentRun.
+  const [setupEditorOpen, setSetupEditorOpen] = useState(false);
+  const [setupEditorBrand, setSetupEditorBrand] = useState<string | undefined>(undefined);
+  const [setupEditorFlavor, setSetupEditorFlavor] = useState<string | undefined>(undefined);
+  function openSetupEditor(brand?: string, flavor?: string) {
+    setSetupEditorBrand(brand);
+    setSetupEditorFlavor(flavor);
+    setSetupEditorOpen(true);
+  }
   const [ingredientTypes, setIngredientTypes] = useState<string[]>(() =>
     [...loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES)].sort((a, b) => a.localeCompare(b))
   );
@@ -10366,6 +10377,11 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("setup")}>
                   <Settings className="w-4 h-4 mr-2" /> Setup
                 </DropdownMenuItem>
+                {isSupervisor && (
+                  <DropdownMenuItem onClick={() => openSetupEditor()}>
+                    <Settings className="w-4 h-4 mr-2" /> Setup Profiles
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={(e) => { e.preventDefault(); toggleFloorModeEnabled(); }}>
                   <Layers className="w-4 h-4 mr-2" /> Floor Mode: {floorModeEnabled ? "On" : "Off"}
                 </DropdownMenuItem>
@@ -14580,6 +14596,45 @@ export default function Home() {
           onConfirm={handleCheeseImportConfirm}
         />
 
+        {/* ── Setup Profiles Dialog ─────────────────────────────────────────
+            Standalone brand/flavor setup editor. Lets a manager/supervisor
+            pick any brand/flavor and edit its saved setup directly — reuses
+            saveProfile/loadProfile and never touches the current run. */}
+        <SetupProfileEditor
+          open={setupEditorOpen}
+          onClose={() => setSetupEditorOpen(false)}
+          initialBrand={setupEditorBrand}
+          initialFlavor={setupEditorFlavor}
+          isSupervisor={isSupervisor}
+          brands={brands}
+          brandFlavors={brandFlavors}
+          onAddBrand={addBrand}
+          onRemoveBrand={removeBrand}
+          onAddFlavor={addFlavor}
+          onRemoveFlavor={removeFlavor}
+          dieTypes={dieTypes}
+          onAddDieType={addDieType}
+          onRemoveDieType={removeDieType}
+          ingredientTypes={ingredientTypes}
+          onAddIngredientType={addIngredientType}
+          onRemoveIngredientType={removeIngredientType}
+          pepTypes={pepTypes}
+          onAddPepType={addPepType}
+          onRemovePepType={removePepType}
+          doughIngredients={doughIngredients}
+          onAddDoughIngredient={addDoughIngredient}
+          onRemoveDoughIngredient={removeDoughIngredient}
+          doughRecipeNames={doughRecipeNames}
+          onAddDoughRecipeName={addDoughRecipeName}
+          onRemoveDoughRecipeName={removeDoughRecipeName}
+          frontlineIngredients={frontlineIngredients}
+          onAddFrontlineIngredient={addFrontlineIngredient}
+          onRemoveFrontlineIngredient={removeFrontlineIngredient}
+          frontlineRecipeNames={frontlineRecipeNames}
+          onAddFrontlineRecipeName={addFrontlineRecipeName}
+          onRemoveFrontlineRecipeName={removeFrontlineRecipeName}
+        />
+
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}
         {showScheduleDialog && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowScheduleDialog(false)}>
@@ -14615,36 +14670,12 @@ export default function Home() {
                           <ScheduledRecipeWarningCard
                             scheduledRuns={scheduledRuns}
                             onSetup={(brand, flavor) => {
-                              // Never rename a run that's already configured,
-                              // running, or finished — that corrupts it (its
-                              // recipes/cases/timers stay behind under the new
-                              // identity and later pollute the target profile).
-                              // Shared decision keeps web+mobile identical.
-                              const decision = decideSetupJump({
-                                currentBrand: currentRun?.brand,
-                                currentFlavor: currentRun?.flavor,
-                                currentStarted: !!currentRun?.startedAt,
-                                currentEnded: !!currentRun?.endedAt,
-                                currentValues: form.getValues() as unknown as Record<string, unknown>,
-                                runCount: dayState.runs.length,
-                                maxRuns: MAX_RUNS,
-                              });
-                              if (decision === "reuse-current") {
-                                // Blank run: proper identity-change flow (saves
-                                // old profile, loads the target's).
-                                setRunBrandFlavor(brand, flavor);
-                              } else if (decision === "new-run") {
-                                if (!addRunWithIdentity(brand, flavor)) return;
-                              } else {
-                                toast({
-                                  variant: "destructive",
-                                  title: "Run limit reached",
-                                  description: `All ${MAX_RUNS} run slots are in use. Remove a run before setting up ${`${brand} ${flavor}`.trim()}.`,
-                                });
-                                return;
-                              }
+                              // Opens the standalone Setup Profiles editor
+                              // directly on this brand+flavor, instead of
+                              // reusing/creating a run — editing the saved
+                              // profile never touches the current run.
                               setShowScheduleDialog(false);
-                              setActiveTab("setup");
+                              openSetupEditor(brand, flavor);
                             }}
                           />
                         );

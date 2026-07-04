@@ -1380,6 +1380,39 @@ export function stripPerRunFields(s: RunSettings): RunProfile {
   return out;
 }
 
+/**
+ * True when a profile object carries real recipe/applicator data (vs. a blank
+ * default form). Mirrors web storage.ts profileObjHasRealData — used to refuse
+ * saving a blank Setup Profiles form over a populated saved profile.
+ */
+function profileObjHasRealData(p: RunProfile): boolean {
+  const arr = (x: unknown): boolean => Array.isArray(x) && x.length > 0;
+  if (arr(p.doughRecipe) || arr(p.frontlineRecipe)) return true;
+  for (const k of [
+    "app1CheeseRecipe",
+    "app2CheeseRecipe",
+    "app3CheeseRecipe",
+    "app4CheeseRecipe",
+  ] as const) {
+    if (arr(p[k])) return true;
+  }
+  for (const k of [
+    "app1Type",
+    "app2Type",
+    "app3Type",
+    "app4Type",
+    "pep1Type",
+    "pep2Type",
+    "dieType",
+    "doughRecipeName",
+    "frontlineRecipeName",
+  ] as const) {
+    const val = p[k];
+    if (typeof val === "string" && val.trim()) return true;
+  }
+  return false;
+}
+
 // Flat string master-data lists the user can manage.
 export type MasterListKey =
   | "brands"
@@ -1576,6 +1609,10 @@ interface RunContextValue {
   saveProfile: () => void;
   applyProfile: (brand: string, flavor: string) => boolean;
   hasProfile: (brand: string, flavor: string) => boolean;
+  // Standalone brand+flavor profile read/write (Setup Profiles editor) — never
+  // touches the current run.
+  saveProfileFor: (brand: string, flavor: string, values: RunProfile) => void;
+  loadProfileFor: (brand: string, flavor: string) => RunSettings;
   // Recipe presets
   doughRecipePresets: Record<string, RecipeRow[]>;
   cheeseRecipePresets: Record<string, RecipeRow[]>;
@@ -3323,6 +3360,47 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [appState.brandProfiles],
   );
 
+  // Direct brand+flavor profile read/write that does NOT touch the current
+  // run — used by the standalone Setup Profiles editor so a manager can edit
+  // any brand/flavor's saved setup without disturbing an in-progress run
+  // (web parity: storage.ts loadProfile/saveProfile work the same way,
+  // independent of the active run).
+  const saveProfileFor = useCallback(
+    (brand: string, flavor: string, values: RunProfile): void => {
+      const b = brand.trim();
+      const f = flavor.trim();
+      if (!b || !f) return;
+      // Refuse to persist a blank/default form over a real profile — same
+      // guard as saveProfile/web storage.ts.
+      if (!profileObjHasRealData(values)) return;
+      setAppState((prev) => {
+        const key = profileKey(b, f);
+        const brands = prev.brands.includes(b) ? prev.brands : [...prev.brands, b];
+        const curFlavors = prev.brandFlavors[b] ?? [];
+        const brandFlavors = curFlavors.includes(f)
+          ? prev.brandFlavors
+          : { ...prev.brandFlavors, [b]: [...curFlavors, f] };
+        const next = {
+          ...prev,
+          brands,
+          brandFlavors,
+          brandProfiles: { ...prev.brandProfiles, [key]: { ...values } },
+        };
+        persist(next);
+        return next;
+      });
+    },
+    [persist],
+  );
+
+  const loadProfileFor = useCallback(
+    (brand: string, flavor: string): RunSettings => {
+      const profile = appState.brandProfiles[profileKey(brand, flavor)] ?? {};
+      return { ...DEFAULT_SETTINGS, ...profile, brand, flavor };
+    },
+    [appState.brandProfiles],
+  );
+
   const saveRecipePreset = useCallback(
     (kind: RecipePresetKind, name: string, rows: RecipeRow[]) => {
       const n = name.trim();
@@ -4310,6 +4388,8 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         saveProfile,
         applyProfile,
         hasProfile,
+        saveProfileFor,
+        loadProfileFor,
         doughRecipePresets: appState.doughRecipePresets,
         cheeseRecipePresets: appState.cheeseRecipePresets,
         frontlineRecipePresets: appState.frontlineRecipePresets,

@@ -56,6 +56,7 @@ function RootLayoutNav() {
       <Stack.Screen name="master-data" options={{ presentation: "card" }} />
       <Stack.Screen name="schedule" options={{ presentation: "card" }} />
       <Stack.Screen name="mixes" options={{ presentation: "card" }} />
+      <Stack.Screen name="setup-profiles" options={{ presentation: "card" }} />
     </Stack>
   );
 }
