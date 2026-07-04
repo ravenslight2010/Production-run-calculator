@@ -8875,6 +8875,7 @@ export default function Home() {
 
         const settingsTabs: { key: string; label: string }[] = [
           { key: "import", label: "Import" },
+          ...(isSupervisor ? [{ key: "setupProfiles", label: "Setup Profiles" }] : []),
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mixes" }] : []),
@@ -9472,6 +9473,19 @@ export default function Home() {
                   />
                 )}
 
+                {/* Setup Profiles: launch the standalone brand/flavor profile editor */}
+                {manageCategory === "setupProfiles" && isSupervisor && (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Edit the saved setup for any brand &amp; flavor — line settings, recipes, and packaging — without touching the current run. New runs auto-load these saved profiles.
+                    </p>
+                    <button type="button" onClick={() => { setShowManageDialog(false); openSetupEditor(); }}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                      <Settings className="w-4 h-4" /> Open Setup Profiles Editor
+                    </button>
+                  </div>
+                )}
+
                 {/* Import (spec sheet + excel) */}
                 {manageCategory === "import" && (
                   <div className="space-y-3">
@@ -9619,7 +9633,7 @@ export default function Home() {
                 )}
 
                 {/* Recent changes: local per-device undo trail for master-data edits */}
-                {!["pin", "import", "rules", "staff"].includes(manageCategory) && (
+                {!["pin", "import", "rules", "staff", "setupProfiles"].includes(manageCategory) && (
                   <div className="mt-6 pt-4 border-t border-border">
                     <h3 className="text-sm font-semibold mb-1">Recent changes</h3>
                     <p className="text-[11px] text-muted-foreground mb-3">
@@ -10492,11 +10506,6 @@ export default function Home() {
                 <DropdownMenuItem onClick={() => setActiveTab("setup")}>
                   <Settings className="w-4 h-4 mr-2" /> Setup
                 </DropdownMenuItem>
-                {isSupervisor && (
-                  <DropdownMenuItem onClick={() => openSetupEditor()}>
-                    <Settings className="w-4 h-4 mr-2" /> Setup Profiles
-                  </DropdownMenuItem>
-                )}
                 <DropdownMenuItem onClick={(e) => { e.preventDefault(); toggleFloorModeEnabled(); }}>
                   <Layers className="w-4 h-4 mr-2" /> Floor Mode: {floorModeEnabled ? "On" : "Off"}
                 </DropdownMenuItem>

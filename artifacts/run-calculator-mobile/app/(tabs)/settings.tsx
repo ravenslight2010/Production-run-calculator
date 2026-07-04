@@ -135,6 +135,26 @@ export default function SettingsScreen() {
           <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
         </Pressable>
 
+        {/* Setup Profiles editor (supervisor PIN-gated on the screen itself; mirrors web Settings) */}
+        <Pressable
+          onPress={() => router.push("/setup-profiles")}
+          style={({ pressed }) => [
+            styles.linkBtn,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              opacity: pressed ? 0.7 : 1,
+              marginTop: 10,
+            },
+          ]}
+        >
+          <Feather name="sliders" size={16} color={colors.foreground} />
+          <Text style={[styles.linkText, { color: colors.foreground }]}>
+            Setup Profiles
+          </Text>
+          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+        </Pressable>
+
         {/* Mixes make-day plan (open to all signed-in users; mirrors web) */}
         <Pressable
           onPress={() => router.push("/mixes")}
