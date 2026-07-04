@@ -3010,11 +3010,13 @@ export default function Home() {
       case "dough": return dedupSorted(doughRecipeNames);
       case "sauce": return dedupSorted(frontlineRecipeNames);
       case "cheese": {
-        // A name that also lives in the user Mix list is a mix, not a cheese
-        // recipe. The one-time overlap dedupe removes existing duplicates, but
-        // a later import could re-add one — keep the Cheese tab mix-free.
+        // Cheese is server-backed master-data now (the Cheese Recipes section),
+        // so the merge picker must show the SAME live pool — not the dormant
+        // local `cheeseRecipeNames` list, which held legacy names that no longer
+        // appear in the app. A name that also lives in the user Mix list is a
+        // mix, not a cheese recipe, so keep the Cheese tab mix-free.
         const mixNameSet = new Set(mixRecipeNames.map((n) => n.toLowerCase()));
-        return dedupSorted(cheeseRecipeNames.filter((n) => !mixNameSet.has(n.toLowerCase())));
+        return dedupSorted(serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())));
       }
       case "brandflavor":
         return dedupSorted(mergeBfMode === "brands" ? brands : (brandFlavors[mergeBfBrand] ?? []));
@@ -3030,6 +3032,7 @@ export default function Home() {
           [
             ...doughRecipeNames,
             ...frontlineRecipeNames,
+            ...serverCheeseNames,
             ...cheeseRecipeNames,
             ...MIX_SEED.mixRecipeNames,
             ...mixRecipeNames,
@@ -3054,7 +3057,7 @@ export default function Home() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, cheeseRecipeNames, mixRecipeNames, allMixRecipeOptions]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, allMixRecipeOptions]);
 
   // Recipe categories are merged by recipe NAME (not ingredient name).
   const isRecipeNameCategory =
@@ -3173,7 +3176,7 @@ export default function Home() {
     const listMap: Record<RecipeNameMergeCategory, string[]> = {
       dough: doughRecipeNames,
       sauce: frontlineRecipeNames,
-      cheese: cheeseRecipeNames,
+      cheese: serverCheeseNames,
       mixes: mixRecipeNames,
     };
     const { settingsObjects } = collectMergeSurfaces();

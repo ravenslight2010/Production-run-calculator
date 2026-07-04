@@ -111,3 +111,19 @@ showing on the Cheese mixes merge tab."
   and the merge Cheese universe defensively filters out user mix names at
   render time. If dups recur from imports, extend the import path, not the
   marker.
+
+## WEB Cheese merge tab sources the SERVER pool, not the local list
+Cheese is server-backed master-data now (Cheese Recipes section, `useCheeseRecipes`
+→ `serverCheeseNames`). The WEB merge "Cheese" universe + recipe-name preview
+surface must read `serverCheeseNames`, NOT the dormant local `cheeseRecipeNames`
+(`CHEESE_RECIPE_NAMES_KEY`) — else the merge tab shows phantom recipes that no
+longer appear anywhere in the app (user-reported).
+- **Why:** the local cheese preset/name list is dead per `cheese-server-master-data.md`;
+  the picker/section read the server pool, so the merge tab must too (mirrors how
+  the Mixes tab uses server `mixRecipeNames`).
+- **Limitation (same as Mixes):** `applyRecipeNameMerge` only re-points day-state
+  `app{n}CheeseRecipeName` references + tombstones the name; it does NOT delete the
+  server cheese recipe, so a merged-away recipe still shows in the Cheese Recipes
+  section. Deletion lives in that management section, not the merge tab.
+- **Mobile is unaffected:** mobile merge/cheese is ingredient-scoped (shows cheese
+  INGREDIENTS), a documented pre-existing platform difference — no server-name repoint.
