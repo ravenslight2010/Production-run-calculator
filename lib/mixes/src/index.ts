@@ -167,15 +167,30 @@ export function normalizeMixes(input: unknown): Mix[] {
  * never produces a duplicate of it. Pure. Returns the merged list plus how many
  * mixes were actually added.
  */
+// Loose match key mirroring @workspace/spec-import's specImportNameMatchKey:
+// lowercase, drop apostrophes/quotes, fold other punctuation to a single space,
+// collapse whitespace. So an imported mix that differs from an existing one only
+// in case / punctuation / spacing ("Aldo's Mix" vs "Aldos Mix") links to the mix
+// the manager already keeps instead of creating a duplicate. (Kept in lockstep
+// with the spec-import helper of the same behavior; duplicated here to avoid a
+// cross-lib dependency for a five-line pure function.)
+function mixNameMatchKey(name: string): string {
+  return (name ?? "")
+    .toLowerCase()
+    .replace(/['’`]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 export function addSpecMixesIfAbsent(
   existing: ReadonlyArray<Mix>,
   candidates: ReadonlyArray<Mix>,
 ): { merged: Mix[]; added: number } {
-  const haveNames = new Set(existing.map((m) => m.name.trim().toLowerCase()));
+  const haveNames = new Set(existing.map((m) => mixNameMatchKey(m.name)));
   const merged: Mix[] = [...existing];
   let added = 0;
   for (const c of candidates) {
-    const key = c.name.trim().toLowerCase();
+    const key = mixNameMatchKey(c.name);
     if (!key || haveNames.has(key)) continue;
     haveNames.add(key);
     merged.push(c);

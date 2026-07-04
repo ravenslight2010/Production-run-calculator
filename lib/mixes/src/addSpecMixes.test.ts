@@ -34,6 +34,16 @@ describe("addSpecMixesIfAbsent", () => {
     expect(merged[0].batchSize).toBe(40);
   });
 
+  it("links a candidate to an existing mix that differs only by punctuation/spacing (no duplicate)", () => {
+    const existing = [mix("Aldo's Fajita Mix", { batchSize: 40, id: "kept" })];
+    const candidates = [mix("Aldos  FAJITA mix", { batchSize: 0, id: "incoming" })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("kept");
+    expect(merged[0].batchSize).toBe(40);
+  });
+
   it("de-dupes candidates against each other by name", () => {
     const candidates = [
       mix("Buffalo Mix", { id: "a" }),

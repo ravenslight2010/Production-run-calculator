@@ -21,6 +21,8 @@ import {
   canonicalizeSpecImportCheeseRecipeNames,
   dedupeSpecImportCheeseRecipes,
   linkSpecImportCheeseToExisting,
+  linkSpecImportNamedRecipesToExisting,
+  linkSpecImportDieTypesToExisting,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -500,6 +502,13 @@ async function linkParsed(
   }
 
   working = crossFillSpecImport(working).parsed;
+  // Deterministic backstop to the AI match pass above: snap imported die types
+  // and dough/sauce recipe names onto the factory's EXISTING lists by a loose
+  // key (case/punctuation/spacing) so an import links to what the user already
+  // has instead of creating a disconnected duplicate. Mirrors mobile (parity).
+  working = linkSpecImportDieTypesToExisting(working, known.dieTypes ?? []);
+  working = linkSpecImportNamedRecipesToExisting(working, "dough", known.doughRecipes ?? []);
+  working = linkSpecImportNamedRecipesToExisting(working, "sauce", known.sauceRecipes ?? []);
   return { parsed: working, matchAliases: [...aliasByKey.values()] };
 }
 

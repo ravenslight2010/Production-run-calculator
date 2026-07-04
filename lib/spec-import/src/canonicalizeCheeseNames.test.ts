@@ -4,6 +4,8 @@ import {
   canonicalizeSpecImportCheeseRecipeNames,
   dedupeSpecImportCheeseRecipes,
   linkSpecImportCheeseToExisting,
+  linkSpecImportNamedRecipesToExisting,
+  linkSpecImportDieTypesToExisting,
   collectSpecImportCheeseRecipes,
   extractEmbeddedApplicatorBlends,
   recipeTargets,
@@ -322,5 +324,94 @@ describe("linkSpecImportCheeseToExisting", () => {
       ],
     };
     expect(linkSpecImportCheeseToExisting(parsed, ["house  blend"])).toBe(parsed);
+  });
+});
+
+describe("linkSpecImportNamedRecipesToExisting", () => {
+  it("snaps a dough recipe onto the existing pool name it differs from only by case/punctuation", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "dough", name: "Aldo's Thin Crust", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Aldos  THIN crust"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Aldos  THIN crust"]);
+  });
+
+  it("snaps a sauce recipe AND any profile.sauceName that references it, in lockstep", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [], sauceName: "House Sauce" },
+      ],
+      recipes: [{ kind: "sauce", name: "House Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["house  sauce"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["house  sauce"]);
+    expect(linked.profiles.map((p) => p.sauceName)).toEqual(["house  sauce"]);
+  });
+
+  it("only touches recipes of the requested kind", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Thin Crust", rows: [{ ingredient: "Flour", lbs: 50 }] },
+        { kind: "sauce", name: "Thin Crust", rows: [{ ingredient: "Tomato", lbs: 10 }] },
+      ],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["thin  CRUST"]);
+    expect(linked.recipes[0].name).toBe("thin  CRUST");
+    expect(linked.recipes[1].name).toBe("Thin Crust");
+  });
+
+  it("returns the SAME object when nothing matches or the pool is empty", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "dough", name: "Brand New Dough", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+    };
+    expect(linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Totally Different"])).toBe(parsed);
+    expect(linkSpecImportNamedRecipesToExisting(parsed, "dough", [])).toBe(parsed);
+    expect(linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Brand New Dough"])).toBe(parsed);
+  });
+});
+
+describe("linkSpecImportDieTypesToExisting", () => {
+  it("snaps a profile's dieType onto the existing known die type it differs from only by case/punctuation", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [], dieType: "12-In" },
+      ],
+      recipes: [],
+    };
+    const linked = linkSpecImportDieTypesToExisting(parsed, ["12 in"]);
+    expect(linked.profiles.map((p) => p.dieType)).toEqual(["12 in"]);
+  });
+
+  it("returns the SAME object when nothing matches, the list is empty, or already exact", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [], dieType: "12in" },
+      ],
+      recipes: [],
+    };
+    expect(linkSpecImportDieTypesToExisting(parsed, ["16in"])).toBe(parsed);
+    expect(linkSpecImportDieTypesToExisting(parsed, [])).toBe(parsed);
+    expect(linkSpecImportDieTypesToExisting(parsed, ["12in"])).toBe(parsed);
+  });
+
+  it("leaves profiles without a dieType alone", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [{ brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [] }],
+      recipes: [],
+    };
+    expect(linkSpecImportDieTypesToExisting(parsed, ["12in"])).toBe(parsed);
+  });
+
+  it("does NOT collapse space-vs-no-space (12in stays distinct from 12 in) — conservative key", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Aldo's", flavor: "Cheese", applicators: [], pepperonis: [], dieType: "12in" },
+      ],
+      recipes: [],
+    };
+    expect(linkSpecImportDieTypesToExisting(parsed, ["12 in"])).toBe(parsed);
   });
 });

@@ -194,6 +194,7 @@ const {
   resolveRetriedParsePass, shouldRetryParsePass, splitGridsForPrompt,
   summarizeSpecImport, canonicalizeSpecImportCheeseRecipeNames,
   dedupeSpecImportCheeseRecipes, linkSpecImportCheeseToExisting,
+  linkSpecImportNamedRecipesToExisting, linkSpecImportDieTypesToExisting,
 } = globalThis.__SPEC_IMPORT_LIB__;
 const { reconcileSpecWithRecipes, toReconcileRecipes } = globalThis.__SPEC_RECONCILE_LIB__;
 const {

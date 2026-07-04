@@ -425,19 +425,24 @@ export function collectSpecImportCheeseRecipes(
 }
 
 /**
- * Loose match key for reconciling a spec-import cheese-blend name against the
- * factory-wide server Cheese Recipes pool: lowercased, punctuation/apostrophes
- * dropped, and whitespace collapsed. Deliberately conservative (no fuzzy /
- * edit-distance matching) so two genuinely different blends never collide.
+ * Shared loose match key for snapping an imported master-data name onto an
+ * EXISTING saved one. Lowercases, drops apostrophes/quotes so "Aldo's" and
+ * "Aldos" collapse (instead of splitting into "aldo s" vs "aldos"), folds any
+ * other punctuation to a single space, and collapses whitespace. Deliberately
+ * conservative (no fuzzy / edit-distance matching) so two genuinely different
+ * names never collide. Used by every spec-import "link to existing" pass
+ * (cheese / dough / sauce recipes, die types).
  */
-function cheeseNameMatchKey(name: string): string {
+export function specImportNameMatchKey(name: string): string {
   return (name ?? "")
     .toLowerCase()
-    // Drop apostrophes/quotes so "Aldo's" and "Aldos" collapse to one key
-    // instead of splitting into "aldo s" vs "aldos".
     .replace(/['’`]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function cheeseNameMatchKey(name: string): string {
+  return specImportNameMatchKey(name);
 }
 
 /**
@@ -483,6 +488,100 @@ export function linkSpecImportCheeseToExisting(
     return { ...r, name: existing };
   });
   return changed ? { ...parsed, recipes } : parsed;
+}
+
+/**
+ * Snap imported DOUGH or SAUCE recipe names onto the factory's EXISTING recipe
+ * pool of that kind, exactly like linkSpecImportCheeseToExisting does for cheese.
+ *
+ * Dough and sauce are their own name-keyed master-data pools (server-backed on
+ * mobile, local presets on web) and the run's Dough / Sauce cards pick a recipe
+ * by name and hydrate its rows. Without this snap, an import whose recipe name
+ * differs only in case/punctuation/spacing ("Aldo's Dough" vs "Aldos Dough")
+ * creates a NEW recipe that never lines up with the one the user already has.
+ * Renaming the imported recipe to the saved EXACT name makes the pool add
+ * (addNamedRecipesIfAbsentByName) dedupe to the existing recipe and keeps every
+ * reference pointing at it.
+ *
+ * For sauce, a profile also references its sauce recipe by `sauceName`, so any
+ * profile whose sauceName loose-matches a renamed recipe is snapped to the same
+ * existing name (kept in lockstep with the recipe). Pure and non-mutating —
+ * returns the SAME object when nothing changes.
+ */
+export function linkSpecImportNamedRecipesToExisting(
+  parsed: ParsedSpecImport,
+  kind: "dough" | "sauce",
+  existingNames: ReadonlyArray<string>,
+): ParsedSpecImport {
+  const byKey = new Map<string, string>();
+  for (const n of existingNames) {
+    const name = (n ?? "").trim();
+    if (!name) continue;
+    const key = specImportNameMatchKey(name);
+    if (key && !byKey.has(key)) byKey.set(key, name);
+  }
+  if (byKey.size === 0) return parsed;
+  let changed = false;
+  const recipes = (parsed.recipes ?? []).map((r) => {
+    const name = (r.name ?? "").trim();
+    if (r.kind !== kind || !name) return r;
+    const existing = byKey.get(specImportNameMatchKey(name));
+    if (!existing || existing === name) return r;
+    changed = true;
+    return { ...r, name: existing };
+  });
+  let profiles = parsed.profiles;
+  if (kind === "sauce") {
+    let profilesChanged = false;
+    const next = (parsed.profiles ?? []).map((p) => {
+      const sn = (p.sauceName ?? "").trim();
+      if (!sn) return p;
+      const existing = byKey.get(specImportNameMatchKey(sn));
+      if (!existing || existing === sn) return p;
+      profilesChanged = true;
+      return { ...p, sauceName: existing };
+    });
+    if (profilesChanged) {
+      profiles = next;
+      changed = true;
+    }
+  }
+  return changed ? { ...parsed, recipes, profiles } : parsed;
+}
+
+/**
+ * Snap each imported profile's `dieType` onto an EXISTING known die type by the
+ * same loose key. Die types are a fixed picklist the run form selects from;
+ * unlike ingredients / pepperoni / applicator types they are NOT run through
+ * canonicalize, so a value differing only in case/punctuation ("12-In" vs
+ * "12 in", "Square" vs "square") would otherwise land the profile on a die type
+ * that isn't in the list. (Loose key keeps word spacing, so "12in" and "12 in"
+ * are still treated as distinct — matching is deliberately conservative.)
+ * Only rewrites when a loose match exists; the first known name wins on a tie.
+ * Pure and non-mutating — returns the SAME object when nothing changes.
+ */
+export function linkSpecImportDieTypesToExisting(
+  parsed: ParsedSpecImport,
+  existingDieTypes: ReadonlyArray<string>,
+): ParsedSpecImport {
+  const byKey = new Map<string, string>();
+  for (const n of existingDieTypes) {
+    const name = (n ?? "").trim();
+    if (!name) continue;
+    const key = specImportNameMatchKey(name);
+    if (key && !byKey.has(key)) byKey.set(key, name);
+  }
+  if (byKey.size === 0) return parsed;
+  let changed = false;
+  const profiles = (parsed.profiles ?? []).map((p) => {
+    const die = (p.dieType ?? "").trim();
+    if (!die) return p;
+    const existing = byKey.get(specImportNameMatchKey(die));
+    if (!existing || existing === die) return p;
+    changed = true;
+    return { ...p, dieType: existing };
+  });
+  return changed ? { ...parsed, profiles } : parsed;
 }
 
 /**

@@ -63,6 +63,40 @@ applying (no per-item prompts).
   the same sheet targets the same recipe id and matching by name stays idempotent;
   no collision with the importer's brand-scoped ids.
 
+## Every category links to EXISTING master-data, not a disconnected copy
+- **Principle:** an import must attach to the user's CURRENT list, not create a
+  near-duplicate that differs only in case/punctuation/spacing. Ingredients / pep /
+  applicator / brand / flavor already snap (canonicalize alias→exact→fuzzy, built
+  from the user's data via `loadSpecImportKnown`). Cheese snaps at COMMIT
+  (`linkSpecImportCheeseToExisting`, server pool authoritative). Die types +
+  dough/sauce recipes + mixes did NOT and would create disconnected copies.
+- **Shared loose key:** `specImportNameMatchKey` (exported from `@workspace/spec-import`)
+  = lowercase, drop `'`/`` ` ``/`’`, fold other punctuation to a single space,
+  collapse whitespace. **Deliberately conservative — it KEEPS word spacing, so
+  `"12in"` and `"12 in"` stay distinct.** `mixNameMatchKey` in `@workspace/mixes`
+  duplicates the same 5-line logic (avoids a cross-lib dep — keep them in lockstep).
+- **Snap point for die/dough/sauce = the shared `linkParsed` prepare step** (NOT
+  commit): pure, parity-clean, visible in the editable review, and works even where
+  the web dough/sauce SERVER-side pool add isn't wired yet. Fns
+  `linkSpecImportDieTypesToExisting(parsed, knownDieTypes)` and
+  `linkSpecImportNamedRecipesToExisting(parsed, "dough"|"sauce", knownNames)` run at
+  the END of `linkParsed` on `working` (after `crossFillSpecImport`, before return),
+  so they apply in single AND multi paths and even when the AI match pass threw.
+  For SAUCE the fn also snaps any `profile.sauceName` that loose-matches a renamed
+  recipe (recipe + profile ref stay in lockstep). Dough has no profile ref field.
+- **Guard `known.<field> ?? []`** in BOTH apps' `linkParsed` — mobile `store.known`
+  fields are optional AND the web test harness passes a partial `known` (`known.doughRecipes`
+  can be undefined). Without the guard `for (const n of existingNames)` throws
+  "not iterable" and (being inside/after the try) breaks prepare.
+- **Mixes:** `addSpecMixesIfAbsent` (`@workspace/mixes`) now dedupes by `mixNameMatchKey`
+  instead of `trim().toLowerCase()`, so a punctuation/spacing variant links to the
+  manager's existing mix instead of adding a duplicate.
+- **Harness gotcha (same class as prior cheese task):** new lib exports used by the
+  mobile module must be added to the `MOBILE_PRELUDE` destructuring of
+  `specImportMultiFileLabels.test.ts` + `specImportJunkFileGuard.test.ts`
+  (`__SPEC_IMPORT_LIB__ = specImportLib` injects the whole namespace, but the
+  strip-imports mobile module refs them by name → undefined if not destructured).
+
 ## One recipe → many profiles (no duplicates)
 - A single recipe (esp. a dough mixing procedure) often covers MANY brand/flavor
   profiles listed as header rows above one ingredient table. `ParsedRecipe` carries
