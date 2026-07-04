@@ -68,16 +68,28 @@ parent `sheetListSignal` passed as `refreshSignal`, or the just-saved sheet look
 "didn't save" (import buttons render right above the panel, which stays mounted). If a new
 import path is added, wire it into the same signal — or migrate the lists to react-query keys.
 
-## Per-run Mix Recipe card sources server mixes (2026-07-04)
-The Setup-tab per-applicator "Mix Recipe" name picker hydrates ingredient rows with priority:
-built-in factory presets (EMPTY since the 2026-07-03 purge) → server Mixes master data
-(matched by trimmed, case-insensitive name; components perPizza fed straight into the row
-value — the card's totals are proportional so units pass through) → the local user preset
-pool. Server must beat the local pool: web's passive cheese-preset autosave can poison the
-pool with wrong rows saved under a mix name. Mobile mirrors this in the preset chips
-(server wins over a same-named locally saved mix). If mixes change server-side, the run
-card picks it up on re-select — the Settings Mixes editor is the source of truth.
-Also applies to the web Manage Lists → Mix tab "view" editor: a name matching a server mix
-renders its components READ-ONLY (edit lives on the Mixes tab); only non-server names fall
-through to the local-pool editor. Mobile has no such lightweight mix editor (its master-data
-screen embeds MixesManager) — intentional parity exception.
+## Mixes is the SINGLE source for mix recipes (2026-07-04)
+The separate "Mix" recipe-type management was merged INTO server Mixes. Server Mixes master
+data is now the ONLY source of mix recipe names + ingredients + recipe-card rows on BOTH apps.
+**Why:** users had two disconnected places ("Mix" lists/local presets vs the Mixes editor);
+merging removes drift and makes the Settings → Mixes editor the one source of truth.
+**How it applies:**
+- Web (`home.tsx`): the 4 per-applicator Mix cards are PICK-ONLY — `recipeNameOptions` =
+  `serverMixNames`, `ingredientOptions` = `serverMixIngredients`, and `onRecipeNameChange`
+  hydrates rows from `serverMixRowsByName` ONLY (dropped the old factory-preset and
+  `loadCheeseRecipePresets` fallbacks). `IngredientSelect`/`MixRecipeCard` add/remove
+  handlers are now optional; when absent the Enter-add, per-option remove-X, and "Add …" UI
+  (incl. the confirm-Yes button, guarded `onRemoveOption?.()`) are hidden. The Manage Lists
+  "Mix" grouped tab is removed (Dough/Sauce/Cheese only).
+- Mobile (`configure.tsx`): the unified applicator `RecipeEditor` now gets
+  `factoryPresets={serverMixPresets}` (server only — dropped the local `userMixPresets` +
+  built-in `factoryMixPresets` composition), `factoryLabel="Mixes"`, and `onSaveMix` is
+  removed so no local mix list is written. Mobile never had a separate mix-ingredient list or
+  a distinct mix card (one RecipeEditor per applicator; mixes only ever entered via chips), so
+  there was no extra mobile UI to strip — parity is behavioral, not component-for-component.
+- CONSEQUENCE: mix recipe management is now MANAGER-ONLY (Mixes writes are
+  `manage-inventory`-gated) whereas the old "Mix" tab / local save was open to all staff.
+- DORMANT (backward-compat, both apps): the merge-tool "mixes" category and the sync payload
+  fields (`mixIngredients`/`mixRecipeNames`, local `mixRecipePresets`) still exist but are no
+  longer surfaced in the applicator cards; the web `manageCategory === "mix"` block no longer
+  renders. Left in place so old synced data doesn't error.

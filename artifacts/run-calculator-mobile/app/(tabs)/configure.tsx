@@ -297,17 +297,10 @@ export default function ConfigureScreen() {
   const doughNames = Object.keys(doughRecipePresets);
   const frontlineNames = Object.keys(frontlineRecipePresets);
 
-  // Factory mix presets matching the current brand + flavor, plus the user's
-  // own saved mixes (shown together as one-tap chips in the cheese editor).
-  const factoryMixPresets = findMixPresets(run.settings.brand, run.settings.flavor);
-  const userMixPresets = Object.entries(mixRecipePresets).map(([name, ingredients]) => ({
-    name,
-    ingredients,
-  }));
   // Imported mixes (server Mixes master data, from premix sheet imports / the
-  // Mixes manager) → recipe rows, mirroring web. The old built-in factory
-  // presets were purged, so this is the real ingredient source for mix names.
-  // Server mixes win over a same-named locally saved mix (web parity).
+  // Mixes manager) → recipe rows. Server Mixes is the single source for mix
+  // recipes across the app (web + mobile parity); the separate "Mix" recipe-type
+  // lists and locally-saved mixes were merged into Mixes.
   const serverMixPresets = serverMixes
     .map((m) => ({
       name: m.name,
@@ -316,16 +309,6 @@ export default function ConfigureScreen() {
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza })),
     }))
     .filter((p) => p.ingredients.length > 0);
-  const serverMixNames = new Set(
-    serverMixPresets.map((p) => p.name.trim().toLowerCase()),
-  );
-  const mixPresets = [
-    ...serverMixPresets,
-    ...userMixPresets.filter(
-      (p) => !serverMixNames.has(p.name.trim().toLowerCase()),
-    ),
-    ...factoryMixPresets,
-  ];
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -933,24 +916,14 @@ export default function ConfigureScreen() {
                   onDeletePreset={(presetName) =>
                     deleteRecipePreset("cheese", presetName)
                   }
-                  factoryPresets={mixPresets}
-                  factoryLabel={
-                    userMixPresets.length > 0
-                      ? "Your mixes + factory mixes"
-                      : "Factory mixes for this brand + flavor"
-                  }
+                  factoryPresets={serverMixPresets}
+                  factoryLabel="Mixes"
                   onApplyFactory={(fp) =>
                     updateSettings({
                       [recipeKey]: fp.ingredients.map((r) => ({ ...r })),
                       [recipeNameKey]: fp.name,
                     } as Partial<RunSettings>)
                   }
-                  onSaveMix={() => {
-                    saveRecipePreset("mix", recipeName, rows);
-                    Haptics.notificationAsync(
-                      Haptics.NotificationFeedbackType.Success,
-                    );
-                  }}
                 />
               </CardSection>
             </React.Fragment>

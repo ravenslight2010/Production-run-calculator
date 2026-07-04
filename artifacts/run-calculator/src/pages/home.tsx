@@ -602,8 +602,8 @@ function IngredientSelect({
   value: string;
   onChange: (v: string) => void;
   options: string[];
-  onAddOption: (v: string) => void;
-  onRemoveOption: (v: string) => void;
+  onAddOption?: (v: string) => void;
+  onRemoveOption?: (v: string) => void;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -667,7 +667,7 @@ function IngredientSelect({
             value={inputVal}
             onChange={e => setInputVal(e.target.value)}
             onKeyDown={e => {
-              if (e.key === "Enter" && inputVal.trim()) {
+              if (e.key === "Enter" && inputVal.trim() && onAddOption) {
                 onAddOption(inputVal.trim());
                 onChange(inputVal.trim());
                 setOpen(false);
@@ -684,7 +684,7 @@ function IngredientSelect({
                 <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                   <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                   <span className="flex gap-1 shrink-0">
-                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
+                    <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
                     <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
                   </span>
                 </div>
@@ -697,18 +697,20 @@ function IngredientSelect({
                   >
                     {opt}
                   </button>
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                    onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  {onRemoveOption && (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
+                      onMouseDown={e => { e.stopPropagation(); confirmDeleteRef.current = opt; setConfirmDelete(opt); }}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               )
             )}
-            {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && (
+            {inputVal.trim() && !(options ?? []).includes(inputVal.trim()) && onAddOption && (
               <button
                 type="button"
                 className="w-full text-left px-3 py-1.5 text-xs text-primary hover:bg-muted transition-colors flex items-center gap-1"
@@ -874,8 +876,8 @@ function MixRecipeCard({
   fieldPrefix: string;
   register: any;
   ingredientOptions: string[];
-  onAddIngredient: (v: string) => void;
-  onRemoveIngredient: (v: string) => void;
+  onAddIngredient?: (v: string) => void;
+  onRemoveIngredient?: (v: string) => void;
   onSetIngredient: (idx: number, val: string) => void;
   onAppend: () => void;
   onRemove: (idx: number) => void;
@@ -895,7 +897,7 @@ function MixRecipeCard({
     <>
       {recipeNameOptions && onRecipeNameChange && (
         <div className="flex-1 max-w-xs mb-3">
-          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName ?? (() => {})} onRemoveOption={onRemoveRecipeName ?? (() => {})} placeholder="Recipe name…" />
+          <IngredientSelect value={recipeName ?? ""} onChange={onRecipeNameChange} options={recipeNameOptions} onAddOption={onAddRecipeName} onRemoveOption={onRemoveRecipeName} placeholder="Recipe name…" />
         </div>
       )}
       {fields.length === 0 ? (
@@ -1457,7 +1459,7 @@ function TypeDropdown({
                   <div key={opt} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
                     <span className="text-[10px] text-destructive font-semibold truncate">Remove "{opt}"?</span>
                     <span className="flex gap-1 shrink-0">
-                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
+                      <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { onRemoveOption?.(opt); confirmDeleteRef.current = null; setConfirmDelete(null); setOpen(false); }}>Yes</button>
                       <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteRef.current = null; setConfirmDelete(null); }}>No</button>
                     </span>
                   </div>
@@ -2481,6 +2483,17 @@ export default function Home() {
     }
     return map;
   }, [mixes]);
+  // Names + ingredient vocabulary for the per-run Mix Recipe card come from the
+  // server Mixes master data — the single source for mixes across the app now
+  // that the separate "Mix" recipe-type lists have been merged into Mixes.
+  const serverMixNames = useMemo(
+    () => [...new Set(mixes.map((m) => m.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [mixes],
+  );
+  const serverMixIngredients = useMemo(
+    () => [...new Set(mixes.flatMap((m) => (m.components ?? []).map((c) => c.ingredient.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b)),
+    [mixes],
+  );
   // The make-day chosen on the Mixes tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
@@ -8358,7 +8371,6 @@ export default function Home() {
           { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: histAdd("Dough Recipe Names", addDoughRecipeName),     onRemoveName: histRemove("Dough Recipe Names", removeDoughRecipeName),     onRenameName: histRename("Dough Recipe Names", renameDoughRecipeName),     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: histAdd("Dough Ingredients", addDoughIngredient),     onRemoveIng: histRemove("Dough Ingredients", removeDoughIngredient),     onRenameIng: histRename("Dough Ingredients", renameDoughIngredient) },
           { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: histAdd("Sauce Recipe Names", addFrontlineRecipeName), onRemoveName: histRemove("Sauce Recipe Names", removeFrontlineRecipeName), onRenameName: histRename("Sauce Recipe Names", renameFrontlineRecipeName), ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: histAdd("Sauce Ingredients", addFrontlineIngredient), onRemoveIng: histRemove("Sauce Ingredients", removeFrontlineIngredient), onRenameIng: histRename("Sauce Ingredients", renameFrontlineIngredient) },
           { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: histAdd("Cheese Recipe Names", addCheeseRecipeName),    onRemoveName: histRemove("Cheese Recipe Names", removeCheeseRecipeName),    onRenameName: histRename("Cheese Recipe Names", renameCheeseRecipeName),    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: histAdd("Cheese Ingredients", addCheeseIngredient),   onRemoveIng: histRemove("Cheese Ingredients", removeCheeseIngredient),   onRenameIng: histRename("Cheese Ingredients", renameCheeseIngredient) },
-          { key: "mix",     label: "Mix",    namesLabel: "Recipe Names", names: mixRecipeNames,       onAddName: histAdd("Mix Recipe Names", addMixRecipeName),       onRemoveName: histRemove("Mix Recipe Names", removeMixRecipeName),       onRenameName: histRename("Mix Recipe Names", renameMixRecipeName),       ingLabel: "Ingredients", ingredients: mixIngredients,       onAddIng: histAdd("Mix Ingredients", addMixIngredient),      onRemoveIng: histRemove("Mix Ingredients", removeMixIngredient),      onRenameIng: histRename("Mix Ingredients", renameMixIngredient) },
         ];
 
         const settingsTabs: { key: string; label: string }[] = [
@@ -12442,24 +12454,16 @@ export default function Home() {
                           recipe={v.app1CheeseRecipe ?? []}
                           fieldPrefix="app1CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
+                          ingredientOptions={serverMixIngredients}
                           onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese1}
                           recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
+                          recipeNameOptions={serverMixNames}
                           onRecipeNameChange={val => {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app1CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese1(factoryPreset.ingredients); return; }
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app1CheeseRecipe", rows, { shouldDirty: true }); replaceCheese1(rows); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app1CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese1(userPreset); }
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app1CheeseRecipe", rows, { shouldDirty: true }); replaceCheese1(rows); }
                           }}
                         />
                       )}
@@ -12522,24 +12526,16 @@ export default function Home() {
                           recipe={v.app2CheeseRecipe ?? []}
                           fieldPrefix="app2CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
+                          ingredientOptions={serverMixIngredients}
                           onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese2}
                           recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
+                          recipeNameOptions={serverMixNames}
                           onRecipeNameChange={val => {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app2CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese2(factoryPreset.ingredients); return; }
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app2CheeseRecipe", rows, { shouldDirty: true }); replaceCheese2(rows); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app2CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese2(userPreset); }
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app2CheeseRecipe", rows, { shouldDirty: true }); replaceCheese2(rows); }
                           }}
                         />
                       )}
@@ -12602,24 +12598,16 @@ export default function Home() {
                           recipe={v.app3CheeseRecipe ?? []}
                           fieldPrefix="app3CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
+                          ingredientOptions={serverMixIngredients}
                           onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese3}
                           recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
+                          recipeNameOptions={serverMixNames}
                           onRecipeNameChange={val => {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app3CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese3(factoryPreset.ingredients); return; }
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app3CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese3(userPreset); }
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); }
                           }}
                         />
                       )}
@@ -12682,24 +12670,16 @@ export default function Home() {
                           recipe={v.app4CheeseRecipe ?? []}
                           fieldPrefix="app4CheeseRecipe"
                           register={form.register}
-                          ingredientOptions={mixIngredients}
-                          onAddIngredient={addMixIngredient}
-                          onRemoveIngredient={removeMixIngredient}
+                          ingredientOptions={serverMixIngredients}
                           onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
                           onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
                           onRemove={removeCheese4}
                           recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={allMixRecipeOptions}
-                          onAddRecipeName={addMixRecipeName}
-                          onRemoveRecipeName={removeMixRecipeName}
+                          recipeNameOptions={serverMixNames}
                           onRecipeNameChange={val => {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const factoryPreset = currentMixPresets.find(p => p.name === val);
-                            if (factoryPreset) { form.setValue("app4CheeseRecipe", factoryPreset.ingredients, { shouldDirty: true }); replaceCheese4(factoryPreset.ingredients); return; }
                             const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); return; }
-                            const userPreset = loadCheeseRecipePresets()[val.trim()];
-                            if (userPreset) { form.setValue("app4CheeseRecipe", userPreset, { shouldDirty: true }); replaceCheese4(userPreset); }
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); }
                           }}
                         />
                       )}
