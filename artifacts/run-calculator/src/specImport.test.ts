@@ -323,7 +323,7 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[1].sauceName).toBeUndefined();
     expect(out.profiles[2].sauceName).toBeUndefined();
   });
-  it("converts recipe rows to lbs when the AI reports rowsUnit oz (sheet amounts in ounces)", () => {
+  it("treats recipe rows as OUNCES by default (converts to lbs), including when rowsUnit is oz or missing", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [
@@ -331,6 +331,8 @@ describe("sanitizeParsedSpecImport", () => {
           rows: [{ ingredient: "Mozz", lbs: 24 }, { ingredient: "Onion", lbs: 9 }] },
         { kind: "dough", name: "Std Dough", rowsUnit: "OUNCES",
           rows: [{ ingredient: "Flour", lbs: 500 }] },
+        { kind: "sauce", name: "No Unit Stated",
+          rows: [{ ingredient: "Tomato", lbs: 32 }] },
       ],
     });
     expect(out.recipes[0].rows).toEqual([
@@ -338,14 +340,15 @@ describe("sanitizeParsedSpecImport", () => {
       { ingredient: "Onion", lbs: 0.563 },
     ]);
     expect(out.recipes[1].rows).toEqual([{ ingredient: "Flour", lbs: 31.25 }]);
+    expect(out.recipes[2].rows).toEqual([{ ingredient: "Tomato", lbs: 2 }]);
   });
-  it("leaves recipe rows untouched when rowsUnit is lbs, missing, or unrecognized", () => {
+  it("keeps recipe rows as-is ONLY when the sheet explicitly marks them as pounds", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],
       recipes: [
         { kind: "cheese", name: "A", rowsUnit: "lbs", rows: [{ ingredient: "Mozz", lbs: 24 }] },
-        { kind: "cheese", name: "B", rows: [{ ingredient: "Mozz", lbs: 24 }] },
-        { kind: "cheese", name: "C", rowsUnit: "grams", rows: [{ ingredient: "Mozz", lbs: 24 }] },
+        { kind: "cheese", name: "B", rowsUnit: "POUNDS", rows: [{ ingredient: "Mozz", lbs: 24 }] },
+        { kind: "cheese", name: "C", rowsUnit: "lb.", rows: [{ ingredient: "Mozz", lbs: 24 }] },
       ],
     });
     for (const r of out.recipes) expect(r.rows[0].lbs).toBe(24);
