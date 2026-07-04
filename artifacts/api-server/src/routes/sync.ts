@@ -113,6 +113,18 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const today = clientToday(req);
   const scope = currentScope();
+  try {
+    const p = payload as { brands?: unknown } | null | undefined;
+    const brands = p && Array.isArray(p.brands) ? p.brands : [];
+    if (brands.length > 0) {
+      req.log?.warn(
+        { ua: req.get("user-agent"), senderId, brandCount: brands.length, brands },
+        "PURGE-DIAG: client pushed brands",
+      );
+    }
+  } catch {
+    /* diagnostic only */
+  }
   // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
   // populated stored run value (see upsertProtected / protectRunValues).
   const merged = await upsertProtected(today, scope, payload);
