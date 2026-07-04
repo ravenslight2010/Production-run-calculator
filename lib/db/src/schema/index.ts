@@ -2,6 +2,7 @@
 // per file below.
 export * from "./runs";
 export * from "./sync";
+export * from "./dataReset";
 export * from "./inventory";
 export * from "./users";
 export * from "./userRoles";

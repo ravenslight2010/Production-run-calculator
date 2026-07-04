@@ -1,106 +1,66 @@
 ---
-name: One-time full data purge
-description: How to purge all factory data without it resurrecting through the additive sync union; accounts kept; built-in seeds removed entirely.
+name: Data reset (factory-wide)
+description: How the server-driven data reset clears daily_sync and neutralizes populated clients without the additive sync union resurrecting old data. Replaces the old marker-wipe recipe.
 ---
 
-# One-time full data purge (done 2026-07-03)
+# Data reset (server-driven, per-scope epoch)
 
-A DB purge alone is NOT enough: every device keeps a full local copy (web
+A DB truncate alone is NOT enough: every device keeps a full local copy (web
 localStorage `run-calc*`, mobile AsyncStorage `run-calc*`) and the additive
-/api/sync union re-uploads it, resurrecting everything.
+`/api/sync` union re-uploads it, resurrecting everything. The reset must clear
+the server AND neutralize every populated client in the same motion, and it must
+not race the live sync loop (a stale client re-seeding the just-cleared row).
 
-**The working recipe:**
-1. Ship a marker-guarded local wipe in BOTH apps that removes every `run-calc*`
-   storage key except its own marker: web `applyOneTimeLocalWipeIfNeeded()` in
-   storage.ts, called FIRST in home.tsx's module-scope migration chain; mobile
-   at the top of the RunContext boot effect (seed effect is gated on `bootDone`,
-   so ordering stays safe).
-2. Stop the API server, TRUNCATE all public tables EXCEPT `users`/`roles`/
-   `user_roles` (accounts kept), restart.
-3. Bump the wipe marker (e.g. `-b` suffix) AFTER the DB purge — a device that
-   wiped early may have re-pulled old server data before the truncate; the bump
-   forces one more wipe against the now-empty DB.
-4. Every device must refresh/reopen once so the final wipe runs.
+## The mechanism (current)
 
-**Why:** sync merges are additive with empty-over-populated guards, so a clean
-client can never "push emptiness" over old server rows — the rows must be gone
-server-side while no old-data client is running.
+A per-scope reset **epoch** integer in the `data_reset` table (scope PK, `epoch`
+default 0, `resetAt`) is the single source of truth.
 
-**Round 2 — built-in seeds ARE data too:** after the wipe the user still "saw
-all data" because the factory seed blobs (spec/mix/dough/sauce/cheese seeds +
-DEFAULT_* master-data lists) re-installed themselves like a fresh install and
-re-pushed a populated daily_sync row. The user chose a completely EMPTY app, so
-the built-ins were removed for good (marker bumped to `-c`, daily_sync deleted
-again with the server stopped):
-- Web home.tsx no longer calls any factory seed; only data-hygiene migrations
-  remain (no-ops on empty data). Seed helpers in storage.ts are now dead code.
-- Seed blobs emptied but export shapes kept: web `src/specSeed.ts`,
-  `src/mixSeed.ts`, `src/mixPresets.ts`; mobile `data/specSeed.ts`,
-  `data/mixSeed.ts`, `data/mixPresets.ts`.
-- Factory-specific DEFAULT_* lists emptied in web types.ts and mobile
-  RunContext (pep types, die types, ingredient/cheese/dough/frontline lists,
-  applicator types). Generic plumbing (stop reasons, packaging fields) kept.
-- Consequence: with DEFAULT_PEP_TYPES empty, the premade-stick pep path never
-  triggers — all pep types take the batch-lbs path until the user adds types
-  (consistent web+mobile). Fill-missing's "spec" source is permanently empty.
+- **Trigger:** `POST /api/sync/reset` (`requireCapability("manage-staff")`). In one
+  tx it deletes all `daily_sync` rows for the scope, bumps the epoch, and
+  broadcasts a `{ reset: true, resetEpoch }` SSE frame to that scope's clients.
+  There is no code change, no marker bump, no manual API-down/truncate.
+- **Live clients** honour the SSE reset frame: wipe local `run-calc*` storage
+  (except the epoch marker), record the new epoch, and reload (web) / reset
+  in-memory state (mobile). This is what stops the racing re-upload.
+- **Offline-during-reset clients** catch up on next connect: they `GET
+  /api/sync/reset-epoch`; if the server epoch is newer than the one they've
+  honoured, they run the same wipe before pulling today's row.
+- **The race is closed server-side too:** every `PUT /api/sync/*` today route
+  carries `&epoch=<honoured>`; the server rejects the write (`{ok:false,stale}`)
+  when the client's epoch is behind, so a stale client physically cannot re-seed
+  the freshly-cleared row in the window before it processes the reset. A missing
+  `epoch` param is treated as not-stale (older clients / scheduled PUTs bypass).
 
-**Round 3 — sneaky survivors:** after removing seeds, two names still came
-back: inline non-empty fallbacks (`loadList(BRANDS_KEY, ["Lucia's"])` in
-home.tsx) and a "hygiene" migration that unconditionally ADDED a retired pep
-name to the applicator list. Lesson: for a true-empty app, audit (1) every
-inline list fallback, not just the DEFAULT_* constants, and (2) migrations that
-add names — make adds conditional on the name having existed. Marker ended at
-`-d`; each resurrection round needs marker bump + daily_sync delete with the
-server stopped.
+**Why an epoch (not a marker constant):** the marker was a client-side constant
+that had to be hand-bumped and shipped for every purge, and it raced the sync
+loop (a tab that wiped while the server row was still populated re-adopted the
+data, then never wiped again because the marker was now set). A server-owned
+monotonic epoch makes the reset a one-click runtime action that every client
+converges on exactly once, with the PUT guard as the hard backstop.
 
-**Round 4 — a LIVE tab re-adopts synced master-data after its wipe (brands/
-flavors survived, 2026-07-04):** brands/flavors (and other master-data lists) are
-part of the /api/sync day-state, NOT purely local. Sequence that resurrects them:
-the open tab runs the marker wipe → clears local → immediately GETs the still-
-populated server row → re-adopts the lists → pushes them back, re-filling
-daily_sync. The marker is now already set, so a plain refresh won't re-wipe, and
-the re-populated tab keeps pushing. Fix each round: (1) BUMP the marker again
-(g→h) so the tab wipes once more, (2) TRUNCATE daily_sync, (3) restart the API
-workflows AND the Web/mobile workflows — restarting the Vite dev server forces
-the open tab to full-reload (HMR ws reconnect → location.reload()), which is what
-actually loads the new marker; a Vite HMR patch alone does NOT re-run the module-
-scope wipe. The reloaded (now-empty) tab must find daily_sync empty on its first
-GET or it re-adopts again — so keep the marker bump + daily_sync truncate tight
-together, right before the Web restart.
+## Key names / shapes
 
-**The trap that made it take several rounds (2026-07-04):** a marker wipe that runs
-while the server row is still populated will wipe, then immediately re-adopt the
-server data on its GET, then re-push it — AND the marker is now set, so no later
-reload will ever wipe again. Symptom: a freshly-pushed daily_sync row (age a few
-seconds) containing the user's REAL master-data (brands/flavors/dieTypes/mixes/
-recipes) even though the code has no seed for those names. The ONLY reliable
-recipe: (1) BUMP the marker to a brand-new value so the wipe is guaranteed to run
-again (a previously-set marker skips the wipe and the client keeps its re-adopted
-data); (2) take the API **down** so nothing can push/re-adopt — `pkill -f
-"index[.]mjs"` (use a regex char-class so the pattern in your OWN command line
-doesn't self-match; `pkill -f "dist/index.mjs"` literal kills the shell → exit
-143; killed API workflows stay down until you restart them); (3) TRUNCATE
-daily_sync while API is down; (4) restart ALL client workflows (Web App AND
-artifacts/run-calculator: web AND mobile expo — there are two web workflows;
-whichever serves the canvas iframe must be reloaded) so every open surface
-reloads and runs the fresh-marker wipe while API is unreachable (GET fails →
-stays empty); (5) bring the API back up — the now-empty clients push empty and it
-holds. Verify daily_sync stays 0 for ~20s+ after API is up. Marker now at `i`.
+- Epoch marker key: web `run-calc-reset-epoch` (localStorage), mobile
+  `run-calc-mobile-reset-epoch` (AsyncStorage). Excluded from the wipe.
+- SSE reset frame: `{ reset: true, resetEpoch }` (distinct from the normal
+  `{ data, senderId }` envelope — clients branch on `reset` first).
+- Client helpers: web `getStoredResetEpoch()` / `applyResetWipe(serverEpoch)` in
+  `storage.ts` (fail-safe, returns whether it wiped); mobile equivalents live in
+  `context/RunContext.tsx` (`getStoredResetEpoch`, in-effect `applyServerReset`)
+  and `context/sync/client.ts` (`fetchResetEpoch`, `putToday` epoch param,
+  `onReset` stream handler). Web+mobile parity.
 
-**Decisive gotcha — the CANVAS IFRAME does NOT auto-reload on a Vite workflow
-restart (2026-07-04).** Restarting the web workflows reloads normal browser tabs
-(HMR ws reconnect → location.reload()) but the Replit canvas iframe
-(`artifact:v3:artifacts/run-calculator`) keeps running its old bundle, so the
-marker wipe never runs there and it keeps re-pushing the user's real master-data.
-Diagnosis: a daily_sync row that reappears seconds after you truncate, containing
-the user's real brands/flavors, while your DB checks show the wipe "should" have
-run. There is NO agent tool to force-reload the canvas iframe — the USER must
-refresh it. Reliable finish: pause the API + truncate daily_sync (steps above),
-then ASK THE USER to refresh the app view while the API stays down (the module-
-scope wipe at home.tsx runs on bundle load regardless of API reachability; GET
-then fails so it can't re-adopt), wait for their confirmation, THEN bring the API
-back up. This is what finally stuck after ~5 failed restart-only rounds.
+## Historical context (retired 2026-07-03/04)
 
-Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
-dead seed helpers can be retired in a later cleanup once all devices have run
-the final wipe.
+The purge originally used a marker-guarded local wipe (`applyOneTimeLocalWipeIfNeeded`
++ a `run-calc*-local-wipe-YYYYMMDDx` constant) plus manual steps: stop API,
+TRUNCATE all tables except `users`/`roles`/`user_roles`, bump the marker suffix,
+restart. It took several rounds because factory seed blobs re-installed like a
+fresh install and because a LIVE tab re-adopted the still-populated synced
+master-data after its wipe. Those seed **application** helpers (spec/mix/dough/
+sauce/cheese) and the wipe marker are now removed; the seed **data** files
+(`specSeed.ts` etc.) stay because `fillMissing` still reads `SPEC_PROFILES`.
+
+Auth is never touched by a reset (web httpOnly cookie, mobile bearer token);
+`users`/`roles`/`user_roles` are global-scope tables and are not in `daily_sync`.

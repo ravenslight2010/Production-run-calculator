@@ -5,20 +5,6 @@ import {
 } from "react-native";
 import { showNote } from "@/utils/notify";
 import { MIX_SEED } from "@/data/mixSeed";
-import {
-  SPEC_BRANDS,
-  SPEC_BRAND_FLAVORS,
-  SPEC_PEP_TYPES,
-  SPEC_CHEESE_INGREDIENTS,
-  SPEC_PROFILES,
-  SPEC_DIE_TYPES,
-  DOUGH_RECIPES,
-  DOUGH_BRAND_SPECS,
-  SAUCE_RECIPES,
-  SAUCE_BRAND_SPECS,
-  CHEESE_RECIPES,
-  CHEESE_BRAND_SPECS,
-} from "@/data/specSeed";
 import { recipeApplyTargets } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
@@ -41,6 +27,7 @@ import {
   runToFormValues,
 } from "./sync/mapping";
 import {
+  fetchResetEpoch,
   fetchToday,
   getApiBaseUrl,
   getOrCreateClientId,
@@ -98,28 +85,28 @@ import {
 } from "./ingredients";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
-// One-time full local wipe marker (user-requested 2026-07-03 data purge) —
-// see the boot effect below. Must NOT start with a prefix the wipe removes
-// before it is re-set… it does start with "run-calc", so the wipe explicitly
-// excludes it from the removal list.
-const LOCAL_WIPE_KEY = "run-calc-mobile-local-wipe-20260704a";
-// One-time marker for seeding the imported pizza-spec brand/flavor presets.
-const SPEC_SEED_KEY = "run-calc-mobile-spec-v1";
-// One-time marker for backfilling die sizes onto existing brand/flavor profiles.
-const DIE_SEED_KEY = "run-calc-mobile-die-v1";
-// One-time marker for seeding the imported dough recipes + brand/flavor ties.
-const DOUGH_SEED_KEY = "run-calc-mobile-dough-v1";
-// One-time marker for seeding the imported sauce recipes + brand/flavor ties.
-const SAUCE_SEED_KEY = "run-calc-mobile-sauce-v1";
-// One-time marker for seeding the imported cheese recipes + brand/flavor ties.
-const CHEESE_SEED_KEY = "run-calc-mobile-cheese-v1";
+// Highest data-reset epoch this device has honoured. A manager reset bumps the
+// server-side epoch; when this device sees a newer one (on sync connect or via a
+// live SSE reset frame) it wipes local state and records the new epoch so the
+// reset applies exactly once. Excluded from the wipe so the marker survives it.
+const RESET_EPOCH_KEY = "run-calc-mobile-reset-epoch";
+
+// Read the reset epoch this device has honoured (0 if never set / unreadable).
+async function getStoredResetEpoch(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(RESET_EPOCH_KEY);
+    const n = raw == null ? 0 : Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
 
 // Used by the sandbox "Reset" action: wipe this device's locally-persisted
 // day-state so that, after the server re-copies live → sandbox, the app pulls
 // the fresh sandbox state from the server on the next launch instead of merging
 // stale local edits back in (the live-sync merge is additive/non-clobber, so a
-// reset would otherwise have no visible effect on this device). The one-time
-// seed markers are left intact so the additive spec/recipe seeds don't re-run.
+// reset would otherwise have no visible effect on this device).
 export async function clearLocalStateForSandboxReset(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
 }
@@ -1157,229 +1144,6 @@ function mergeInsensitive(existing: string[], additions: string[]): string[] {
   return [...seen.values()];
 }
 
-/**
- * Additively merge the imported pizza-spec presets into state: new brands,
- * flavors, pepperoni/cheese option lists, and a brand profile per brand+flavor
- * (only when absent, so user edits are never clobbered). Mirrors the web seed.
- */
-function applySpecSeed(state: AppState): AppState {
-  const brands = mergeInsensitive(state.brands, SPEC_BRANDS).sort();
-  const brandFlavors: Record<string, string[]> = { ...state.brandFlavors };
-  for (const [b, fl] of Object.entries(SPEC_BRAND_FLAVORS)) {
-    brandFlavors[b] = mergeInsensitive(brandFlavors[b] ?? [], fl);
-  }
-  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
-  for (const [k, v] of Object.entries(SPEC_PROFILES)) {
-    if (!brandProfiles[k]) {
-      const die = SPEC_DIE_TYPES[k];
-      brandProfiles[k] = die ? { ...v, dieType: die } : v;
-    }
-  }
-  return {
-    ...state,
-    brands,
-    brandFlavors,
-    pepTypes: mergeInsensitive(state.pepTypes, SPEC_PEP_TYPES),
-    cheeseIngredients: mergeInsensitive(
-      state.cheeseIngredients,
-      SPEC_CHEESE_INGREDIENTS,
-    ),
-    brandProfiles,
-  };
-}
-
-/**
- * Backfill the die size onto existing brand/flavor profiles, sourced from the
- * CRUST field of the pizza spec sheets. Only fills a profile when its dieType is
- * empty, so user edits are never clobbered. Also ensures the die-type option
- * list includes any newly seeded sizes (e.g. "9in"). Mirrors the web seed.
- */
-function applyDieSeed(state: AppState): AppState {
-  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
-  for (const [k, die] of Object.entries(SPEC_DIE_TYPES)) {
-    const prof = brandProfiles[k];
-    if (!prof) continue;
-    const cur = prof.dieType;
-    if (typeof cur === "string" && cur.trim()) continue;
-    brandProfiles[k] = { ...prof, dieType: die };
-  }
-  return {
-    ...state,
-    dieTypes: mergeInsensitive(state.dieTypes, DEFAULT_DIE_TYPES),
-    brandProfiles,
-  };
-}
-
-/**
- * Additively seed the imported dough recipes + brand/flavor ties. Tier 1 adds
- * every dough recipe to the recipe library (presets + ingredient list). Tier 2
- * ties an unambiguous brand+flavor to its dough recipe and doughball weight on
- * the brand profile — only when the profile has no dough recipe yet, so user
- * edits are never clobbered. Yield/per-tray are auto-formulated and not seeded.
- * Mirrors the web seed.
- */
-function applyDoughSeed(state: AppState): AppState {
-  // ── Tier 1: dough recipe library ──
-  const doughRecipePresets: Record<string, RecipeRow[]> = {
-    ...state.doughRecipePresets,
-  };
-  for (const [name, rows] of Object.entries(DOUGH_RECIPES)) {
-    if (!doughRecipePresets[name]) {
-      doughRecipePresets[name] = rows.map((r) => ({ ...r }));
-    }
-  }
-  const allDoughIngredients = [
-    ...new Set(
-      Object.values(DOUGH_RECIPES).flatMap((rows) =>
-        rows.map((r) => r.ingredient),
-      ),
-    ),
-  ];
-  const doughIngredients = mergeInsensitive(
-    state.doughIngredients,
-    allDoughIngredients,
-  );
-
-  // ── Tier 2: unambiguous brand → dough ties on brand profiles ──
-  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
-  for (const spec of DOUGH_BRAND_SPECS) {
-    const rows = DOUGH_RECIPES[spec.recipe];
-    if (!rows) continue;
-    const flavors = spec.flavor
-      ? [spec.flavor]
-      : (state.brandFlavors[spec.brand] ?? []);
-    for (const flavor of flavors) {
-      const key = profileKey(spec.brand, flavor);
-      const prof = brandProfiles[key] ?? {};
-      if (Array.isArray(prof.doughRecipe) && prof.doughRecipe.length > 0) {
-        continue;
-      }
-      brandProfiles[key] = {
-        ...prof,
-        doughRecipeName: spec.recipe,
-        doughRecipe: rows.map((r) => ({ ...r })),
-        doughballWeightOz: spec.oz,
-      };
-    }
-  }
-
-  return { ...state, doughRecipePresets, doughIngredients, brandProfiles };
-}
-
-/**
- * Additively seed the imported sauce recipes + brand/flavor ties. The app stores
- * sauce recipes under the "frontline" recipe system (the UI labels it "Sauce
- * Recipe"). Tier 1 adds every sauce recipe to that library (presets + ingredient
- * list). Tier 2 ties an unambiguous brand+flavor to its sauce recipe on the
- * brand profile — only when the profile has no sauce recipe yet, so user edits
- * are never clobbered. Oz-per-pizza usage is not in the sheets and is not seeded.
- * Mirrors the web seed.
- */
-function applySauceSeed(state: AppState): AppState {
-  // ── Tier 1: sauce (frontline) recipe library ──
-  const frontlineRecipePresets: Record<string, RecipeRow[]> = {
-    ...state.frontlineRecipePresets,
-  };
-  for (const [name, rows] of Object.entries(SAUCE_RECIPES)) {
-    if (!frontlineRecipePresets[name]) {
-      frontlineRecipePresets[name] = rows.map((r) => ({ ...r }));
-    }
-  }
-  const allSauceIngredients = [
-    ...new Set(
-      Object.values(SAUCE_RECIPES).flatMap((rows) =>
-        rows.map((r) => r.ingredient),
-      ),
-    ),
-  ];
-  const frontlineIngredients = mergeInsensitive(
-    state.frontlineIngredients,
-    allSauceIngredients,
-  );
-
-  // ── Tier 2: unambiguous brand → sauce ties on brand profiles ──
-  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
-  for (const spec of SAUCE_BRAND_SPECS) {
-    const rows = SAUCE_RECIPES[spec.recipe];
-    if (!rows) continue;
-    const flavors = spec.flavor
-      ? [spec.flavor]
-      : (state.brandFlavors[spec.brand] ?? []);
-    for (const flavor of flavors) {
-      const key = profileKey(spec.brand, flavor);
-      const prof = brandProfiles[key] ?? {};
-      if (Array.isArray(prof.frontlineRecipe) && prof.frontlineRecipe.length > 0) {
-        continue;
-      }
-      brandProfiles[key] = {
-        ...prof,
-        frontlineRecipeName: spec.recipe,
-        frontlineRecipe: rows.map((r) => ({ ...r })),
-      };
-    }
-  }
-
-  return { ...state, frontlineRecipePresets, frontlineIngredients, brandProfiles };
-}
-
-/**
- * Additively seed the imported cheese recipes + brand/flavor ties. Tier 1 adds
- * every cheese mix to the cheese recipe library (presets + ingredient list) so
- * each mix is selectable in the App 1-4 cheese dropdowns. Tier 2 ties a
- * brand+flavor to its specific mix on the brand profile, on the cheese
- * applicator slot the sheet specifies (app 1-4) — only when that slot has no
- * cheese recipe yet, so user edits are never clobbered. Batch totals are
- * auto-summed from the recipe and are not seeded. Mirrors the web seed.
- */
-function applyCheeseSeed(state: AppState): AppState {
-  // ── Tier 1: cheese recipe library ──
-  const cheeseRecipePresets: Record<string, RecipeRow[]> = {
-    ...state.cheeseRecipePresets,
-  };
-  for (const [name, rows] of Object.entries(CHEESE_RECIPES)) {
-    if (!cheeseRecipePresets[name]) {
-      cheeseRecipePresets[name] = rows.map((r) => ({ ...r }));
-    }
-  }
-  const allCheeseIngredients = [
-    ...new Set(
-      Object.values(CHEESE_RECIPES).flatMap((rows) =>
-        rows.map((r) => r.ingredient),
-      ),
-    ),
-  ];
-  const cheeseIngredients = mergeInsensitive(
-    state.cheeseIngredients,
-    allCheeseIngredients,
-  );
-
-  // ── Tier 2: brand+flavor → cheese mix ties on brand profiles ──
-  const brandProfiles: Record<string, RunProfile> = { ...state.brandProfiles };
-  for (const spec of CHEESE_BRAND_SPECS) {
-    const rows = CHEESE_RECIPES[spec.recipe];
-    if (!rows) continue;
-    const slot = spec.app >= 1 && spec.app <= 4 ? spec.app : 1;
-    const nameField = `app${slot}CheeseRecipeName` as keyof RunProfile;
-    const recipeField = `app${slot}CheeseRecipe` as keyof RunProfile;
-    const flavors = spec.flavor
-      ? [spec.flavor]
-      : (state.brandFlavors[spec.brand] ?? []);
-    for (const flavor of flavors) {
-      const key = profileKey(spec.brand, flavor);
-      const prof = brandProfiles[key] ?? {};
-      const existing = prof[recipeField] as RecipeRow[] | undefined;
-      if (Array.isArray(existing) && existing.length > 0) continue;
-      brandProfiles[key] = {
-        ...prof,
-        [nameField]: spec.recipe,
-        [recipeField]: rows.map((r) => ({ ...r })),
-      };
-    }
-  }
-
-  return { ...state, cheeseRecipePresets, cheeseIngredients, brandProfiles };
-}
-
 // Fields that belong to one specific run and must NOT travel via a profile.
 const PER_RUN_FIELDS: (keyof RunSettings)[] = [
   "brand",
@@ -2033,32 +1797,25 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   meUsernameRef.current = me?.name ?? undefined;
   const revalidateRef = useRef(revalidate);
   revalidateRef.current = revalidate;
+  // Highest data-reset epoch this device has honoured (primed on boot below).
+  const resetEpochRef = useRef(0);
 
   useEffect(() => {
-    // One-time full local wipe (user-requested 2026-07-03 data purge): clear
-    // every `run-calc*` AsyncStorage key — the saved app state AND the seed
-    // markers — so the app boots like a fresh install and can't re-upload its
-    // old data through the additive live-sync union. Runs BEFORE the state
-    // load below, and the seed effect is gated on `bootDone`, so the seeds
-    // re-run against the blank slate in their usual ordered flow. Fail-safe:
-    // any storage error skips the wipe and boots normally.
-    const wipeOnceThenLoad = async (): Promise<string | null> => {
+    // Load the persisted day-state on boot and prime the honoured reset epoch so
+    // pushes can carry it. Data resets are now server-driven (see the sync
+    // bootstrap effect): a manager reset bumps a per-scope epoch, and this device
+    // wipes local state + reloads onto the clean slate when it sees a newer epoch
+    // (on sync connect, and live via an SSE reset frame). Fail-safe: any read
+    // error boots with defaults.
+    const loadStored = async (): Promise<string | null> => {
+      resetEpochRef.current = await getStoredResetEpoch();
       try {
-        const done = await AsyncStorage.getItem(LOCAL_WIPE_KEY);
-        if (!done) {
-          const keys = await AsyncStorage.getAllKeys();
-          const doomed = keys.filter(
-            (k) => k.startsWith("run-calc") && k !== LOCAL_WIPE_KEY,
-          );
-          if (doomed.length > 0) await AsyncStorage.multiRemove(doomed);
-          await AsyncStorage.setItem(LOCAL_WIPE_KEY, "1");
-        }
+        return await AsyncStorage.getItem(STORAGE_KEY);
       } catch {
-        /* fail-safe: never block boot on the wipe */
+        return null;
       }
-      return AsyncStorage.getItem(STORAGE_KEY);
     };
-    wipeOnceThenLoad()
+    loadStored()
       .then((raw) => {
       if (raw) {
         try {
@@ -2173,48 +1930,6 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     [persist],
   );
 
-  // One-time seed of the imported pizza-spec presets and dough recipes after
-  // boot. Both are additive and marker-guarded so user-deleted brands/flavors/
-  // profiles never reappear. They run in a SINGLE ordered flow — spec first,
-  // then dough — so the dough seed never creates a dough-only profile key that
-  // would make the spec seed's "only if absent" guard skip the spec fields.
-  useEffect(() => {
-    if (!bootDone) return;
-    let cancelled = false;
-    (async () => {
-      const [specDone, doughDone, sauceDone, cheeseDone, dieDone] =
-        await Promise.all([
-          AsyncStorage.getItem(SPEC_SEED_KEY),
-          AsyncStorage.getItem(DOUGH_SEED_KEY),
-          AsyncStorage.getItem(SAUCE_SEED_KEY),
-          AsyncStorage.getItem(CHEESE_SEED_KEY),
-          AsyncStorage.getItem(DIE_SEED_KEY),
-        ]);
-      if (
-        cancelled ||
-        (specDone && doughDone && sauceDone && cheeseDone && dieDone)
-      )
-        return;
-      setAppState((prev) => {
-        let next = prev;
-        if (!specDone) next = applySpecSeed(next);
-        if (!doughDone) next = applyDoughSeed(next);
-        if (!sauceDone) next = applySauceSeed(next);
-        if (!cheeseDone) next = applyCheeseSeed(next);
-        if (!dieDone) next = applyDieSeed(next);
-        persistNow(next);
-        return next;
-      });
-      if (!specDone) AsyncStorage.setItem(SPEC_SEED_KEY, "1");
-      if (!doughDone) AsyncStorage.setItem(DOUGH_SEED_KEY, "1");
-      if (!sauceDone) AsyncStorage.setItem(SAUCE_SEED_KEY, "1");
-      if (!cheeseDone) AsyncStorage.setItem(CHEESE_SEED_KEY, "1");
-      if (!dieDone) AsyncStorage.setItem(DIE_SEED_KEY, "1");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [bootDone, persistNow]);
 
   // Build and PUT the current state to the server. The pushed signature is only
   // recorded AFTER a successful write, so a failed push doesn't get marked as
@@ -2245,7 +1960,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       setSyncStatus("offline");
       return;
     }
-    putToday(base, clientId, payload, todayStr())
+    putToday(base, clientId, payload, todayStr(), resetEpochRef.current)
       .then(() => {
         lastSyncSigRef.current = sig;
         setSyncStatus((s) => (s === "offline" ? "online" : s));
@@ -2341,11 +2056,51 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       tryApplyPending();
     };
 
+    // A manager ran a data reset (server bumped the per-scope epoch). Neutralize
+    // this populated device so it can't re-upload its stale state through the
+    // additive sync union: wipe local storage, record the new epoch (so it only
+    // fires once), and reset in-memory state to a clean slate. Fires from the
+    // boot connect (offline-during-reset catch-up) and live via an SSE reset
+    // frame. Fail-safe: a storage error still neutralizes the in-memory state.
+    const applyServerReset = async (serverEpoch: number): Promise<void> => {
+      if (!(serverEpoch > resetEpochRef.current)) return;
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const doomed = keys.filter(
+          (k) => k.startsWith("run-calc") && k !== RESET_EPOCH_KEY,
+        );
+        if (doomed.length > 0) await AsyncStorage.multiRemove(doomed);
+        await AsyncStorage.setItem(RESET_EPOCH_KEY, String(serverEpoch));
+      } catch {
+        /* fail-safe: still neutralize the in-memory state below */
+      }
+      resetEpochRef.current = serverEpoch;
+      if (cancelled) return;
+      const fresh: AppState = {
+        ...INITIAL_STATE,
+        date: todayStr(),
+        runs: [{ ...makeNewRun(), seeded: true }],
+      };
+      // Clear the sync gates so the wiped state doesn't echo the pre-reset sig.
+      lastRemoteRawRef.current = null;
+      lastSyncSigRef.current = "";
+      runValuesUpdatedAtRef.current = {};
+      setAppState(fresh);
+      persistNow(fresh);
+    };
+
     (async () => {
       const clientId = await getOrCreateClientId();
       if (cancelled) return;
       clientIdRef.current = clientId;
       syncStartedRef.current = true;
+      // Reconcile the data-reset epoch BEFORE pulling today's row, so a device
+      // that was offline during a reset wipes its stale state instead of seeding
+      // the freshly-cleared server row with it.
+      const serverEpoch = await fetchResetEpoch(base);
+      if (cancelled) return;
+      if (serverEpoch != null) await applyServerReset(serverEpoch);
+      if (cancelled) return;
       try {
         const data = await fetchToday(base, todayStr());
         if (cancelled) return;
@@ -2392,6 +2147,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         onPayload: (payload, senderId) => {
           if (senderId && senderId === clientIdRef.current) return; // ignore our own echo
           onRemote(payload);
+        },
+        onReset: (resetEpoch) => {
+          // A manager reset the data live — neutralize this device immediately so
+          // the next push can't re-seed the freshly-cleared server row.
+          void applyServerReset(resetEpoch);
         },
         onError: () => {
           setSyncStatus("connecting");

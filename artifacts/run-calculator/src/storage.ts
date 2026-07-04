@@ -67,21 +67,6 @@ import {
   foldPresetKeys,
   isStrayMixName,
 } from "./mergeRecipeNames";
-import {
-  SPEC_BRANDS,
-  SPEC_BRAND_FLAVORS,
-  SPEC_APP_TYPES,
-  SPEC_PEP_TYPES,
-  SPEC_CHEESE_INGREDIENTS,
-  SPEC_PROFILES,
-  SPEC_DIE_TYPES,
-  DOUGH_RECIPES,
-  DOUGH_BRAND_SPECS,
-  SAUCE_RECIPES,
-  SAUCE_BRAND_SPECS,
-  CHEESE_RECIPES,
-  CHEESE_BRAND_SPECS,
-} from "./specSeed";
 import { genId, todayStr } from "./utils";
 import {
   hydrateRecipeRows as hydrateRecipeRowsCatalog,
@@ -830,49 +815,11 @@ export function saveCheeseRecipePresets(p: Record<string, RecipeRow[]>): void {
   try { localStorage.setItem(CHEESE_RECIPE_PRESETS_KEY, JSON.stringify(p)); } catch {}
 }
 
-const MIX_SEED_KEY = "run-calc-mix-seed-v13";
-const MIX_SEED_V14_KEY = "run-calc-mix-seed-v14";
-const MIX_SEED_V15_KEY = "run-calc-mix-seed-v15";
-
 export const SEED_MIX_RECIPE_NAMES = new Set(MIX_SEED.mixRecipeNames);
 
 export const STALE_BRANDS = [
   "Bobos","Lowes","Lucias","Morming Melts",
   "Lucia's / Craft","Lucia's / Morning Melts","Lucia's / Pinsa",
-];
-
-const STALE_LUCIA_FLAVORS = [
-  "Morning Melts Americano","Morming Melts Italiano","Morning Melts Mexicano","Morning Melts Parisian",
-  "Pinsa Margherita","Pinsa Spinach","Pinsa Tikka Masala",
-  "SOB","Caribbean","Bratwurst","Bacon Cheeseburger","Alfredo Spinach","Red Hot","Chicken Club","Tikka Masala",
-];
-
-const STALE_RECIPE_NAMES = [
-  "Bobos Deluxe","Bobos Breakfast",
-  "Lowes 7in Red Fajita","Lowes 7in White Spin","Lowes Bacon Cheeseburger",
-  "Lowes California","Lowes Caribbean","Lowes Chicken Club","Lowes Grilled Vegetable",
-  "Lowes Red Hot","Lowes Spinach","Lowes 11in White Spinach",
-  "Lucias Morning Melts Americano","Lucias Morming Melts Italiano","Lucias Morning Melts Mexicano","Lucias Morning Melts Parisian",
-  "Lucias Pinsa Margherita","Lucias Pinsa Spinach","Lucias Pinsa Tikka Masala",
-  "Lucias Buffalo Chicken","Lucias Supreme",
-  "Morning Melts Americano (old)","Morming Melts Italiano",
-];
-
-const STALE_INGREDIENTS = [
-  "Bacon",
-  "Bacon - NATURAL / tri meats tm3514u or / c&f 061anub40",
-  "Bacon / (Tri Meats tm3514u or c&fb 061anub40)",
-  "Bacon / Tri Meats tm3514u or / c&f 001anub40",
-  "Bacon / Tri Meats tm3514u or / c&f 061anub40",
-  "Bacon / Tri Meats tm3514u or c&f 001anub40",
-  "Bacon, NATURAL / Tri Meats tm3514u or / c&f 061anub40",
-  "Bacon, NATURAL / Tri Meats tm3514u or c&f 061anub40",
-  "Bacon, NATURAL / tri meats tm3514u or / c&f 061anub40",
-  "Chicken, Diced / House of Raeford 28501 or / c&f 001mpdc40",
-  "Chicken, Diced / c&f - 001mpdc40 or / House of Raeford - 28501",
-  "Chicken, Diced / c&f - 001mpdc40 or House of Raeford - 28501",
-  "Diced Chicken / (C&F 0001mpdc40 or House of Raeford 28501)",
-  "Diced Chicken / c&f 001mpdc40 or / House of Raeford 28501",
 ];
 
 const PEP_TAXONOMY_MIGRATION_KEY = "run-calc-pep-taxonomy-v1";
@@ -1416,123 +1363,6 @@ export function undoChange(id: string): boolean {
   return true;
 }
 
-export function applyMixSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(MIX_SEED_KEY)) return;
-  try {
-    // ── Purge stale data from previous seed versions ──
-    localStorage.removeItem("run-calc-v1");
-
-    const cleanedBrands = loadList(BRANDS_KEY, []).filter(b => !STALE_BRANDS.includes(b));
-    saveList(BRANDS_KEY, cleanedBrands);
-
-    const cleanedBF = loadBrandFlavors();
-    for (const b of STALE_BRANDS) delete cleanedBF[b];
-    if (cleanedBF["Lucia's"]) {
-      cleanedBF["Lucia's"] = cleanedBF["Lucia's"].filter(f => !STALE_LUCIA_FLAVORS.includes(f));
-    }
-    saveBrandFlavors(cleanedBF);
-
-    // Move misplaced topping recipe names from frontline (sauce) → mix
-    const allMixNames = MIX_SEED.mixRecipeNames;
-    const existingFrontlineNames = loadList(FRONTLINE_RECIPE_NAMES_KEY, []);
-    const migratedToMix = existingFrontlineNames.filter(n => allMixNames.includes(n));
-    const remainingFrontline = existingFrontlineNames.filter(n => !allMixNames.includes(n) && !STALE_RECIPE_NAMES.includes(n));
-    saveList(FRONTLINE_RECIPE_NAMES_KEY, remainingFrontline);
-
-    const existingMixNames = loadList(MIX_RECIPE_NAMES_KEY, []);
-    const mergedMixNames = [...new Set([...existingMixNames, ...migratedToMix, ...allMixNames])].sort((a, b) => a.localeCompare(b));
-    saveList(MIX_RECIPE_NAMES_KEY, mergedMixNames);
-
-    const cleanedPresets = loadFrontlineRecipePresets();
-    for (const n of STALE_RECIPE_NAMES) delete cleanedPresets[n];
-    for (const n of allMixNames) delete cleanedPresets[n];
-    saveFrontlineRecipePresets(cleanedPresets);
-
-    const cleanedIngredients = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS)
-      .filter(i => !STALE_INGREDIENTS.includes(i));
-    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedIngredients);
-
-    // ── Scrub mix recipe names from all stored brand profiles ──
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith("run-calc-profile-")) continue;
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        const prof = JSON.parse(raw) as Record<string, unknown>;
-        if (prof.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(prof.frontlineRecipeName as string)) {
-          delete prof.frontlineRecipeName;
-          delete prof.frontlineRecipe;
-          localStorage.setItem(key, JSON.stringify(prof));
-        }
-      } catch {}
-    }
-
-    // ── Merge seed data ──
-    const existingBrands = loadList(BRANDS_KEY, []);
-    const mergedBrands = [...new Set([...existingBrands, ...MIX_SEED.brands])].sort();
-    saveList(BRANDS_KEY, mergedBrands);
-
-    const existingBF = loadBrandFlavors();
-    const mergedBF: Record<string, string[]> = { ...existingBF };
-    for (const [brand, flavors] of Object.entries(MIX_SEED.brandFlavors)) {
-      if (!mergedBF[brand]) mergedBF[brand] = [];
-      mergedBF[brand] = [...new Set([...mergedBF[brand], ...flavors])];
-    }
-    saveBrandFlavors(mergedBF);
-
-    // Topping ingredients go into Mix (applicator), NOT into Sauce/Frontline
-    const existingMixIng = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
-    const mergedMixIng = [...new Set([...existingMixIng, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
-    saveList(MIX_INGREDIENTS_KEY, mergedMixIng);
-
-    localStorage.setItem(MIX_SEED_KEY, "1");
-  } catch {}
-}
-
-/** v15: same as v14 but with expanded MIX_SEED.frontlineIngredients list (adds preset variant names) */
-export function applyMixSeedV15IfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(MIX_SEED_V15_KEY)) return;
-  try {
-    const toppingSet = new Set(MIX_SEED.frontlineIngredients);
-
-    const currentFrontline = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
-    const cleanedFrontline = currentFrontline.filter(i => !toppingSet.has(i));
-    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedFrontline);
-
-    const currentMix = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
-    const mergedMix = [...new Set([...currentMix, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
-    saveList(MIX_INGREDIENTS_KEY, mergedMix);
-
-    localStorage.setItem(MIX_SEED_V15_KEY, "1");
-  } catch {}
-}
-
-/** v14: move topping ingredients that were mis-seeded into Sauce → into Mix */
-export function applyMixSeedV14IfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(MIX_SEED_V14_KEY)) return;
-  try {
-    const toppingSet = new Set(MIX_SEED.frontlineIngredients);
-
-    // Remove toppings from the Sauce/Frontline ingredient list
-    const currentFrontline = loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS);
-    const cleanedFrontline = currentFrontline.filter(i => !toppingSet.has(i));
-    saveList(FRONTLINE_INGREDIENTS_KEY, cleanedFrontline);
-
-    // Merge toppings into the Mix ingredient list
-    const currentMix = loadList(MIX_INGREDIENTS_KEY, DEFAULT_MIX_INGREDIENTS);
-    const mergedMix = [...new Set([...currentMix, ...MIX_SEED.frontlineIngredients])].sort((a, b) => a.localeCompare(b));
-    saveList(MIX_INGREDIENTS_KEY, mergedMix);
-
-    localStorage.setItem(MIX_SEED_V14_KEY, "1");
-  } catch {}
-}
-
-const SPEC_PROFILES_SEED_KEY = "run-calc-spec-profiles-v3";
-
 /** Case-insensitive merge that keeps the existing label when a duplicate appears. */
 function mergeListInsensitive(existing: string[], additions: string[]): string[] {
   const seen = new Map<string, string>();
@@ -1542,72 +1372,6 @@ function mergeListInsensitive(existing: string[], additions: string[]): string[]
     if (!seen.has(k)) seen.set(k, a);
   }
   return [...seen.values()];
-}
-
-/**
- * Seed brand/flavor PRESETS imported from the pizza spec spreadsheets. Adds the
- * new brands, flavors, applicator/pepperoni/cheese option lists, and writes a
- * stored profile per brand+flavor (only when one does not already exist, so user
- * edits are never clobbered). Runs once, guarded by a version marker.
- */
-export function applySpecProfilesSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(SPEC_PROFILES_SEED_KEY)) return;
-  try {
-    const mergedBrands = mergeListInsensitive(
-      loadList(BRANDS_KEY, []),
-      SPEC_BRANDS,
-    ).sort();
-    saveList(BRANDS_KEY, mergedBrands);
-
-    const bf = loadBrandFlavors();
-    for (const [brand, flavors] of Object.entries(SPEC_BRAND_FLAVORS)) {
-      bf[brand] = mergeListInsensitive(bf[brand] ?? [], flavors);
-    }
-    saveBrandFlavors(bf);
-
-    saveList(
-      INGREDIENT_TYPES_KEY,
-      mergeListInsensitive(
-        loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES),
-        SPEC_APP_TYPES,
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-    saveList(
-      PEP_TYPES_KEY,
-      mergeListInsensitive(
-        loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
-        SPEC_PEP_TYPES,
-      ),
-    );
-    saveList(
-      CHEESE_INGREDIENTS_KEY,
-      mergeListInsensitive(
-        loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
-        SPEC_CHEESE_INGREDIENTS,
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    for (const p of SPEC_PROFILES) {
-      const key = PROFILE_KEY(p.brand, p.flavor);
-      const existingRaw = localStorage.getItem(key);
-      if (existingRaw) {
-        // Keep profiles that hold real user data; recreate ones that are
-        // missing, blank/clobbered, or unparseable (corrupt → fall through).
-        try {
-          const parsed = JSON.parse(existingRaw) as Record<string, unknown>;
-          if (profileObjHasRealData(parsed)) continue;
-        } catch {
-          // unparseable: fall through and recreate from seed
-        }
-      }
-      const die = SPEC_DIE_TYPES[key];
-      const values = die ? { ...p.values, dieType: die } : p.values;
-      localStorage.setItem(key, JSON.stringify(values));
-    }
-
-    localStorage.setItem(SPEC_PROFILES_SEED_KEY, "1");
-  } catch {}
 }
 
 const RECAT_STRAY_MIX_KEY = "run-calc-recat-stray-mix-v1";
@@ -1677,29 +1441,50 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
 
 const DEDUPE_MIX_CHEESE_OVERLAP_KEY = "run-calc-dedupe-mix-cheese-overlap-v1";
 
-const LOCAL_WIPE_KEY = "run-calc-local-wipe-20260704a";
-/**
- * One-time full local wipe (2026-07-03): the user asked for a one-time purge of
- * all factory data back to a fresh clean state. The server database is purged
- * separately (accounts/roles kept); this clears every `run-calc*` localStorage
- * key on the device so the client can't re-upload its old copy through the
- * additive live-sync union. Clearing the seed/migration markers on purpose
- * makes the app behave like a brand-new install (built-in seeds re-run).
- * Guarded by its own marker so it runs exactly once per device.
- */
-export function applyOneTimeLocalWipeIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
+// ── Server-driven data reset (replaces the old one-time local-wipe marker) ────
+// A manager can clear all shared day-state from the server (POST /api/sync/reset),
+// which bumps a per-scope "reset epoch". Every client tracks the last epoch it has
+// honoured in localStorage; when the server epoch is higher (learned on boot via
+// GET /api/sync/reset-epoch, or pushed live over SSE), the client wipes its local
+// day-state and adopts the new epoch. This is the ONE reliable reset path — no
+// constant to bump, no API downtime, and the PUT epoch guard stops a populated
+// client from re-uploading its old copy through the additive live-sync union.
+const RESET_EPOCH_KEY = "run-calc-reset-epoch";
+
+/** The reset epoch this device has already honoured (0 if never reset). */
+export function getStoredResetEpoch(): number {
+  if (typeof localStorage === "undefined") return 0;
   try {
-    if (localStorage.getItem(LOCAL_WIPE_KEY)) return;
+    const raw = localStorage.getItem(RESET_EPOCH_KEY);
+    const n = raw == null ? 0 : parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Apply a server data reset if the given server epoch is newer than what this
+ * device has honoured. Wipes every `run-calc*` localStorage key (day-state,
+ * profiles, master lists, migration markers) EXCEPT the epoch marker itself, so
+ * the device starts fresh and can't re-upload its old copy. Records the new epoch
+ * so it runs exactly once per reset. Returns true when a wipe happened (caller
+ * should reload the app), false otherwise. Fail-safe: never throws.
+ */
+export function applyResetWipe(serverEpoch: number): boolean {
+  if (typeof localStorage === "undefined") return false;
+  if (!Number.isFinite(serverEpoch) || serverEpoch <= getStoredResetEpoch()) return false;
+  try {
     const doomed: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith("run-calc") && k !== LOCAL_WIPE_KEY) doomed.push(k);
+      if (k && k.startsWith("run-calc") && k !== RESET_EPOCH_KEY) doomed.push(k);
     }
     for (const k of doomed) localStorage.removeItem(k);
-    localStorage.setItem(LOCAL_WIPE_KEY, "1");
+    localStorage.setItem(RESET_EPOCH_KEY, String(serverEpoch));
+    return true;
   } catch {
-    /* storage unavailable — nothing to wipe */
+    return false;
   }
 }
 
@@ -1810,258 +1595,6 @@ export function purgeOrphanedProfilesIfNeeded(): void {
       try { localStorage.removeItem(k); } catch {}
     }
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
-  } catch {}
-}
-
-const DIE_TYPES_SEED_KEY = "run-calc-die-types-v3";
-
-/**
- * Backfill the die size onto existing brand/flavor profiles, sourced from the
- * CRUST field of the pizza spec sheets. Only fills a profile when its dieType is
- * empty, so user edits are never clobbered. Also ensures the die-type option
- * list includes any newly seeded sizes (e.g. "9in"). Runs once, guarded by a
- * version marker.
- */
-export function applyDieTypesSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(DIE_TYPES_SEED_KEY)) return;
-  try {
-    saveList(
-      DIE_TYPES_KEY,
-      mergeListInsensitive(
-        loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
-        DEFAULT_DIE_TYPES,
-      ),
-    );
-
-    for (const [key, die] of Object.entries(SPEC_DIE_TYPES)) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      let values: Record<string, unknown>;
-      try {
-        values = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      const cur = values.dieType;
-      if (typeof cur === "string" && cur.trim()) continue;
-      values.dieType = die;
-      localStorage.setItem(key, JSON.stringify(values));
-    }
-
-    localStorage.setItem(DIE_TYPES_SEED_KEY, "1");
-  } catch {}
-}
-
-const DOUGH_SPECS_SEED_KEY = "run-calc-dough-specs-v3";
-
-/**
- * Seed dough RECIPES + SPECS imported from the dough mixing-procedure sheets.
- * Tier 1 adds every dough recipe to the recipe library (presets, names,
- * ingredient list). Tier 2 ties an unambiguous brand+flavor to its dough recipe
- * and doughball weight on the stored profile — only when the profile has no
- * dough recipe yet, so user edits are never clobbered. Yield and per-tray counts
- * are auto-formulated by the app and are intentionally not seeded. Runs once,
- * guarded by a version marker.
- */
-export function applyDoughSpecsSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(DOUGH_SPECS_SEED_KEY)) return;
-  try {
-    // ── Tier 1: dough recipe library ──
-    const presets = loadDoughRecipePresets();
-    for (const [name, rows] of Object.entries(DOUGH_RECIPES)) {
-      if (!presets[name]) presets[name] = { rows: rows.map(r => ({ ...r })) };
-    }
-    saveDoughRecipePresets(presets);
-
-    saveList(
-      DOUGH_RECIPE_NAMES_KEY,
-      mergeListInsensitive(
-        loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES),
-        Object.keys(DOUGH_RECIPES),
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    const allDoughIngredients = [
-      ...new Set(
-        Object.values(DOUGH_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
-      ),
-    ];
-    saveList(
-      DOUGH_INGREDIENTS_KEY,
-      mergeListInsensitive(
-        loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
-        allDoughIngredients,
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    // ── Tier 2: unambiguous brand → dough ties on stored profiles ──
-    const bf = loadBrandFlavors();
-    for (const spec of DOUGH_BRAND_SPECS) {
-      const rows = DOUGH_RECIPES[spec.recipe];
-      if (!rows) continue;
-      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
-      for (const flavor of flavors) {
-        const key = PROFILE_KEY(spec.brand, flavor);
-        let prof: Record<string, unknown> = {};
-        try {
-          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
-        } catch {
-          prof = {};
-        }
-        const existing = prof.doughRecipe as unknown[] | undefined;
-        if (Array.isArray(existing) && existing.length > 0) continue;
-        prof.doughRecipeName = spec.recipe;
-        prof.doughRecipe = rows.map(r => ({ ...r }));
-        prof.targetDoughballWeight = spec.oz;
-        localStorage.setItem(key, JSON.stringify(prof));
-      }
-    }
-
-    localStorage.setItem(DOUGH_SPECS_SEED_KEY, "1");
-  } catch {}
-}
-
-const SAUCE_SPECS_SEED_KEY = "run-calc-sauce-specs-v3";
-
-/**
- * Seed sauce RECIPES + SPECS imported from the sauce procedure sheets. The app
- * stores sauce recipes under the "frontline" recipe system (the UI labels it
- * "Sauce Recipe"). Tier 1 adds every sauce recipe to that library (presets,
- * names, ingredient list). Tier 2 ties an unambiguous brand+flavor to its sauce
- * recipe on the stored profile — only when the profile has no sauce recipe yet,
- * so user edits are never clobbered. Oz-per-pizza usage is not in the sheets and
- * is intentionally not seeded. Runs once, guarded by a version marker.
- */
-export function applySauceSpecsSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(SAUCE_SPECS_SEED_KEY)) return;
-  try {
-    // ── Tier 1: sauce (frontline) recipe library ──
-    const presets = loadFrontlineRecipePresets();
-    for (const [name, rows] of Object.entries(SAUCE_RECIPES)) {
-      if (!presets[name]) presets[name] = rows.map(r => ({ ...r }));
-    }
-    saveFrontlineRecipePresets(presets);
-
-    saveList(
-      FRONTLINE_RECIPE_NAMES_KEY,
-      mergeListInsensitive(
-        loadList(FRONTLINE_RECIPE_NAMES_KEY, DEFAULT_FRONTLINE_RECIPE_NAMES),
-        Object.keys(SAUCE_RECIPES),
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    const allSauceIngredients = [
-      ...new Set(
-        Object.values(SAUCE_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
-      ),
-    ];
-    saveList(
-      FRONTLINE_INGREDIENTS_KEY,
-      mergeListInsensitive(
-        loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
-        allSauceIngredients,
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    // ── Tier 2: unambiguous brand → sauce ties on stored profiles ──
-    const bf = loadBrandFlavors();
-    for (const spec of SAUCE_BRAND_SPECS) {
-      const rows = SAUCE_RECIPES[spec.recipe];
-      if (!rows) continue;
-      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
-      for (const flavor of flavors) {
-        const key = PROFILE_KEY(spec.brand, flavor);
-        let prof: Record<string, unknown> = {};
-        try {
-          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
-        } catch {
-          prof = {};
-        }
-        const existing = prof.frontlineRecipe as unknown[] | undefined;
-        if (Array.isArray(existing) && existing.length > 0) continue;
-        prof.frontlineRecipeName = spec.recipe;
-        prof.frontlineRecipe = rows.map(r => ({ ...r }));
-        localStorage.setItem(key, JSON.stringify(prof));
-      }
-    }
-
-    localStorage.setItem(SAUCE_SPECS_SEED_KEY, "1");
-  } catch {}
-}
-
-const CHEESE_SPECS_SEED_KEY = "run-calc-cheese-specs-v3";
-
-/**
- * Seed cheese RECIPES + SPECS imported from the cheese-mix sheets. Tier 1 adds
- * every cheese mix to the cheese recipe library (presets, names, ingredient
- * list) so each mix is selectable in the App 1-4 cheese dropdowns. Tier 2 ties
- * a brand+flavor to its specific mix on the stored profile, on the cheese
- * applicator slot the sheet specifies (app 1-4) — only when that slot has no
- * cheese recipe yet, so user edits are never clobbered. Batch totals are
- * auto-summed from the recipe and are not seeded. Runs once, guarded by a
- * version marker.
- */
-export function applyCheeseSpecsSeedIfNeeded(): void {
-  if (typeof localStorage === "undefined") return;
-  if (localStorage.getItem(CHEESE_SPECS_SEED_KEY)) return;
-  try {
-    // ── Tier 1: cheese recipe library ──
-    const presets = loadCheeseRecipePresets();
-    for (const [name, rows] of Object.entries(CHEESE_RECIPES)) {
-      if (!presets[name]) presets[name] = rows.map(r => ({ ...r }));
-    }
-    saveCheeseRecipePresets(presets);
-
-    saveList(
-      CHEESE_RECIPE_NAMES_KEY,
-      mergeListInsensitive(
-        loadList(CHEESE_RECIPE_NAMES_KEY, []),
-        Object.keys(CHEESE_RECIPES),
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    const allCheeseIngredients = [
-      ...new Set(
-        Object.values(CHEESE_RECIPES).flatMap(rows => rows.map(r => r.ingredient)),
-      ),
-    ];
-    saveList(
-      CHEESE_INGREDIENTS_KEY,
-      mergeListInsensitive(
-        loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
-        allCheeseIngredients,
-      ).sort((a, b) => a.localeCompare(b)),
-    );
-
-    // ── Tier 2: brand+flavor → cheese mix ties on stored profiles ──
-    const bf = loadBrandFlavors();
-    for (const spec of CHEESE_BRAND_SPECS) {
-      const rows = CHEESE_RECIPES[spec.recipe];
-      if (!rows) continue;
-      const slot = spec.app >= 1 && spec.app <= 4 ? spec.app : 1;
-      const nameField = `app${slot}CheeseRecipeName`;
-      const recipeField = `app${slot}CheeseRecipe`;
-      const flavors = spec.flavor ? [spec.flavor] : (bf[spec.brand] ?? []);
-      for (const flavor of flavors) {
-        const key = PROFILE_KEY(spec.brand, flavor);
-        let prof: Record<string, unknown> = {};
-        try {
-          prof = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
-        } catch {
-          prof = {};
-        }
-        const existing = prof[recipeField] as unknown[] | undefined;
-        if (Array.isArray(existing) && existing.length > 0) continue;
-        prof[nameField] = spec.recipe;
-        prof[recipeField] = rows.map(r => ({ ...r }));
-        localStorage.setItem(key, JSON.stringify(prof));
-      }
-    }
-
-    localStorage.setItem(CHEESE_SPECS_SEED_KEY, "1");
   } catch {}
 }
 

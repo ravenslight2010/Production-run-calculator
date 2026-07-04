@@ -71,22 +71,48 @@ export async function putToday(
   senderId: string,
   payload: SyncPayload,
   today: string,
+  epoch: number,
 ): Promise<void> {
   // ?today= keys the live row by the client's local date (see fetchToday).
-  const res = await fetch(`${baseUrl}/api/sync/today?today=${encodeURIComponent(today)}`, {
-    method: "PUT",
-    headers: await authHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ senderId, payload }),
-  });
+  // &epoch= is the data-reset epoch this device has honoured — the server
+  // rejects the write if a manager has since bumped it, so a stale client can't
+  // re-seed today's row right after a reset (closes the reset↔sync-loop race).
+  const res = await fetch(
+    `${baseUrl}/api/sync/today?today=${encodeURIComponent(today)}&epoch=${encodeURIComponent(String(epoch))}`,
+    {
+      method: "PUT",
+      headers: await authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ senderId, payload }),
+    },
+  );
   if (!res.ok) {
     if (res.status === 401) notifyUnauthorized();
     throw new Error(`PUT /api/sync/today -> ${res.status}`);
   }
 }
 
+// Read the current server-side data-reset epoch for this scope. Returns null on
+// any failure (offline, unauthenticated, server error) so callers fail safe and
+// leave existing local state untouched.
+export async function fetchResetEpoch(baseUrl: string): Promise<number | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/sync/reset-epoch`, {
+      headers: await authHeaders(),
+    });
+    if (!res.ok) return null;
+    const { epoch } = (await res.json()) as { epoch?: number };
+    return typeof epoch === "number" ? epoch : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface SyncStreamHandlers {
   onOpen?: () => void;
   onPayload?: (payload: SyncPayload, senderId: string | null) => void;
+  // A manager ran a data reset: the server broadcasts a `{ reset, resetEpoch }`
+  // frame so live clients neutralize their stale state instead of re-uploading it.
+  onReset?: (resetEpoch: number) => void;
   onError?: () => void;
 }
 
@@ -129,7 +155,16 @@ export function openSyncStream(
   function handleData(raw: string | null | undefined): void {
     if (!raw) return;
     try {
-      const parsed = JSON.parse(raw) as { data?: SyncPayload | null; senderId?: string | null };
+      const parsed = JSON.parse(raw) as {
+        data?: SyncPayload | null;
+        senderId?: string | null;
+        reset?: boolean;
+        resetEpoch?: number;
+      };
+      if (parsed && parsed.reset && typeof parsed.resetEpoch === "number") {
+        handlers.onReset?.(parsed.resetEpoch);
+        return;
+      }
       if (parsed && parsed.data) handlers.onPayload?.(parsed.data, parsed.senderId ?? null);
     } catch {
       /* ignore malformed frame */

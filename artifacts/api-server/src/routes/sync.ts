@@ -1,8 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, dailySyncTable } from "@workspace/db";
-import { and, eq, gt, asc } from "drizzle-orm";
+import { db, dailySyncTable, dataResetTable } from "@workspace/db";
+import { and, eq, gt, asc, sql } from "drizzle-orm";
 import { currentScope, type Scope } from "../lib/requestScope";
 import { protectRunValues } from "../lib/protectRunValues";
+import { requireCapability } from "../middlewares/requireCapability";
 
 const router: IRouter = Router();
 
@@ -38,6 +39,29 @@ function broadcast(data: unknown, senderId: string, scope: Scope, date: string):
       try { client.res.write(msg); } catch {}
     }
   }
+}
+
+// Push a "data was reset" frame to EVERY open client in the scope, regardless of
+// which calendar day they are watching (a reset clears all dates). Clients that
+// see a resetEpoch newer than the one they last honored wipe their local copy and
+// reload, so an open tab can't keep re-uploading its stale data after the reset.
+function broadcastReset(scope: Scope, resetEpoch: number): void {
+  const msg = `data: ${JSON.stringify({ reset: true, resetEpoch })}\n\n`;
+  for (const client of clients) {
+    if (client.scope === scope) {
+      try { client.res.write(msg); } catch {}
+    }
+  }
+}
+
+// Current reset generation for a scope (0 when never reset). Clients compare this
+// against the epoch they last honored to decide whether to perform a local wipe.
+async function getResetEpoch(scope: Scope): Promise<number> {
+  const [row] = await db
+    .select()
+    .from(dataResetTable)
+    .where(eq(dataResetTable.scope, scope));
+  return row?.epoch ?? 0;
 }
 
 // Postgres unique-violation is SQLSTATE 23505. Drizzle wraps driver errors, so
@@ -109,22 +133,30 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
   res.json(row?.data ?? null);
 });
 
+// A client pushes the reset epoch it last honored as `?epoch=`. If a data reset
+// bumped the server epoch past it, the client is still holding pre-reset data and
+// is about to re-upload it — so reject the write (returning the new epoch) until
+// the client has wiped and re-adopted the empty state. This closes the re-adoption
+// race that used to require taking the API down during a manual purge.
+async function isStaleResetPush(req: Request, scope: Scope): Promise<number | null> {
+  const raw = req.query.epoch;
+  if (typeof raw !== "string" || raw === "") return null;
+  const clientEpoch = Number(raw);
+  if (!Number.isFinite(clientEpoch)) return null;
+  const serverEpoch = await getResetEpoch(scope);
+  return clientEpoch < serverEpoch ? serverEpoch : null;
+}
+
+router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<void> => {
+  res.json({ epoch: await getResetEpoch(currentScope()) });
+});
+
 router.put("/sync/today", async (req: Request, res: Response): Promise<void> => {
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const today = clientToday(req);
   const scope = currentScope();
-  try {
-    const p = payload as { brands?: unknown } | null | undefined;
-    const brands = p && Array.isArray(p.brands) ? p.brands : [];
-    if (brands.length > 0) {
-      req.log?.warn(
-        { ua: req.get("user-agent"), senderId, brandCount: brands.length, brands },
-        "PURGE-DIAG: client pushed brands",
-      );
-    }
-  } catch {
-    /* diagnostic only */
-  }
+  const staleEpoch = await isStaleResetPush(req, scope);
+  if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
   // populated stored run value (see upsertProtected / protectRunValues).
   const merged = await upsertProtected(today, scope, payload);
@@ -219,6 +251,8 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (!isValidDate(date)) { res.status(400).json({ error: "Invalid date format" }); return; }
   const { senderId = "", payload } = req.body as { senderId?: string; payload: unknown };
   const scope = currentScope();
+  const staleEpoch = await isStaleResetPush(req, scope);
+  if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic per-run protective merge (see /sync/today): an empty run value can't
   // clobber a populated stored one on scheduled days either.
   const merged = await upsertProtected(date, scope, payload);
@@ -239,5 +273,35 @@ router.delete("/sync/:date", async (req: Request<{ date: string }>, res: Respons
     .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, currentScope())));
   res.json({ ok: true });
 });
+
+// ── Full data reset (admin-only) ─────────────────────────────────────────────
+// The single, reliable "wipe back to a clean slate" action. In ONE transaction it
+// deletes every daily_sync row for the caller's scope (today + all scheduled days)
+// and bumps the scope's reset epoch. It then broadcasts a reset frame so open tabs
+// wipe and reload immediately, and the epoch guard on PUT rejects any in-flight
+// stale push — so the cleared state can't be re-adopted and re-uploaded by a
+// populated client. Manager-only; scope-isolated (a live reset never touches the
+// sandbox and vice-versa).
+router.post(
+  "/sync/reset",
+  requireCapability("manage-staff"),
+  async (_req: Request, res: Response): Promise<void> => {
+    const scope = currentScope();
+    const epoch = await db.transaction(async (tx) => {
+      await tx.delete(dailySyncTable).where(eq(dailySyncTable.scope, scope));
+      const [row] = await tx
+        .insert(dataResetTable)
+        .values({ scope, epoch: 1, resetAt: new Date() })
+        .onConflictDoUpdate({
+          target: dataResetTable.scope,
+          set: { epoch: sql`${dataResetTable.epoch} + 1`, resetAt: new Date() },
+        })
+        .returning();
+      return row?.epoch ?? 0;
+    });
+    broadcastReset(scope, epoch);
+    res.json({ ok: true, epoch });
+  },
+);
 
 export default router;

@@ -109,7 +109,8 @@ import {
   applyIngredientDedupeMigrationIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
   applyMixCheeseOverlapDedupeIfNeeded,
-  applyOneTimeLocalWipeIfNeeded,
+  getStoredResetEpoch,
+  applyResetWipe,
   purgeOrphanedProfilesIfNeeded,
   deleteProfilesForBrand,
   deleteProfileEntry,
@@ -390,15 +391,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-// One-time full local wipe (user-requested 2026-07-03 data purge). MUST run
-// before every migration below so they run against the blank slate, and
-// before any sync starts so the old local copy can't re-upload itself.
-applyOneTimeLocalWipeIfNeeded();
-
-// Factory-data seeds (mix/spec-profile/die/dough/sauce/cheese) intentionally
-// NOT called since the 2026-07-03 purge: the app now starts completely empty
-// and the user re-imports their own spec sheets. Data-hygiene migrations below
-// are kept — they are no-ops on empty data but still heal devices with data.
+// Data resets are now server-driven (a manager runs POST /api/sync/reset, which
+// bumps a per-scope epoch). The local wipe is applied reactively when this device
+// sees a newer epoch — on boot via GET /api/sync/reset-epoch and live over SSE —
+// see applyResetWipe below. The old one-time local-wipe marker was retired.
+//
+// Data-hygiene migrations below are kept — they are no-ops on empty data but still
+// heal devices that carry legacy data.
 applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
@@ -3693,7 +3692,7 @@ export default function Home() {
       // from the still-stale server copy. Best-effort: the local tombstone filter
       // is the backstop if this push fails.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}`, {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3835,7 +3834,7 @@ export default function Home() {
         // Non-fatal: the merge itself already succeeded; learning is additive.
       }
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}`, {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3915,7 +3914,7 @@ export default function Home() {
       // Push the merged payload (with its deletion tombstones) immediately so an
       // incoming sync-pull's additive union can't re-add the merged-away names.
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}`, {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3989,7 +3988,7 @@ export default function Home() {
       refreshAfterMerge();
       setChangeHistory(loadChangeHistory());
       try {
-        await fetch(`/api/sync/today?today=${todayStr()}`, {
+        await fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -4718,6 +4717,23 @@ export default function Home() {
     };
   });
 
+  // ── Boot reset check (once on mount) ──
+  // Ask the server for the current data-reset epoch. If it is newer than what
+  // this device has honoured, a manager reset the data while we were away: wipe
+  // local state and reload onto the clean slate before sync starts. Best-effort —
+  // a failure just leaves existing behavior unchanged (the SSE reset frame and
+  // the PUT epoch guard are the live backstops).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/sync/reset-epoch");
+        if (!res.ok) return;
+        const { epoch } = (await res.json()) as { epoch: number };
+        if (typeof epoch === "number" && applyResetWipe(epoch)) window.location.reload();
+      } catch {}
+    })();
+  }, []);
+
   // SSE connection — receives updates from other clients
   useEffect(() => {
     const es = new EventSource(`/api/sync/events?clientId=${clientId.current}&today=${todayStr()}`);
@@ -4729,7 +4745,17 @@ export default function Home() {
     };
     es.onmessage = (e: MessageEvent) => {
       try {
-        const msg = JSON.parse(e.data as string) as { data: SyncPayload | null };
+        const msg = JSON.parse(e.data as string) as {
+          data?: SyncPayload | null;
+          reset?: boolean;
+          resetEpoch?: number;
+        };
+        // A manager ran a data reset: wipe local state and reload onto the clean
+        // slate. applyResetWipe records the new epoch so this fires exactly once.
+        if (msg.reset && typeof msg.resetEpoch === "number") {
+          if (applyResetWipe(msg.resetEpoch)) window.location.reload();
+          return;
+        }
         if (msg.data) applySyncCallbackRef.current(msg.data);
       } catch {}
     };
