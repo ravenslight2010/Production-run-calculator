@@ -154,6 +154,21 @@ export type EmbeddedBlend = { name: string; rows: RecipeRow[] };
 const BLEND_PAIR_RE = /(\d+(?:\.\d+)?)\s+([A-Za-z][^,()]*)/g;
 
 /**
+ * Strip a leading spec-sheet "Applicator" row label (e.g. "Applicator - ",
+ * "Applicator:", "Applicator ") off a blend/recipe name. Spec grids prefix every
+ * topping/cheese row with this label, but it is never part of the blend's real
+ * name. If it is left on, the deterministic embedded-blend path keeps
+ * "Applicator - Aldo's Cheese Mix" while the AI/cleaned path yields
+ * "Aldo's Cheese Mix", forking ONE blend into two "same" cheese recipes. Only
+ * strips when a real (letter-bearing) name remains. Pure.
+ */
+export function stripApplicatorLabel(name: string): string {
+  const trimmed = (name ?? "").trim();
+  const stripped = trimmed.replace(/^applicators?\b\s*[-–—:]?\s*/i, "").trim();
+  return stripped && /[a-z]/i.test(stripped) ? stripped : trimmed;
+}
+
+/**
  * Parse an applicator-type string that embeds a blend composition. Returns the
  * clean mix name plus its ingredient rows, or null when the string is a plain
  * type name. Guards against false positives: needs 2+ number+ingredient pairs
@@ -177,10 +192,12 @@ export function parseEmbeddedBlend(type: string): EmbeddedBlend | null {
     rows.push({ ingredient, lbs });
   }
   if (firstIdx === null || rows.length < 2) return null;
-  const name = text
-    .slice(0, firstIdx)
-    .replace(/[\s,;:(–-]+$/g, "")
-    .trim();
+  const name = stripApplicatorLabel(
+    text
+      .slice(0, firstIdx)
+      .replace(/[\s,;:(–-]+$/g, "")
+      .trim(),
+  );
   if (name.length < 4) return null;
   return { name, rows };
 }
@@ -434,6 +451,10 @@ export function cleanSpecCheeseRecipeName(name: string): string {
     .map((l) => l.trim())
     .find((l) => /[a-z]/i.test(l));
   if (firstLine) trimmed = firstLine;
+  // Drop a leading "Applicator" row label so a name the AI left un-split
+  // ("Applicator - Aldo's Cheese Mix", no embedded composition) collapses to
+  // the same clean name as the deterministic embedded-blend path.
+  trimmed = stripApplicatorLabel(trimmed);
   const blend = parseEmbeddedBlend(trimmed);
   if (blend && /[a-z]/i.test(blend.name)) trimmed = blend.name;
   const stripped = trimmed

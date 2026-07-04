@@ -3,10 +3,32 @@ import {
   cleanSpecCheeseRecipeName,
   canonicalizeSpecImportCheeseRecipeNames,
   collectSpecImportCheeseRecipes,
+  extractEmbeddedApplicatorBlends,
+  stripApplicatorLabel,
+  parseEmbeddedBlend,
   type ParsedSpecImport,
 } from "./index";
 
 const none = new Set<string>();
+
+describe("stripApplicatorLabel", () => {
+  it("drops a leading 'Applicator' row label with any separator", () => {
+    expect(stripApplicatorLabel("Applicator - Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
+    expect(stripApplicatorLabel("Applicator- Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
+    expect(stripApplicatorLabel("Applicator: Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
+    expect(stripApplicatorLabel("Applicator Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
+  });
+
+  it("leaves names without the label alone", () => {
+    expect(stripApplicatorLabel("Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
+    expect(stripApplicatorLabel("Applicator Grade Cheese")).toBe("Grade Cheese");
+  });
+
+  it("does not strip when only the bare label would remain", () => {
+    expect(stripApplicatorLabel("Applicator")).toBe("Applicator");
+    expect(stripApplicatorLabel("Applicator -")).toBe("Applicator -");
+  });
+});
 
 describe("cleanSpecCheeseRecipeName", () => {
   it("strips a trailing bare weight number", () => {
@@ -46,6 +68,21 @@ describe("cleanSpecCheeseRecipeName", () => {
         "Aldo's Cheese Mix\n2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan",
       ),
     ).toBe("Aldo's Cheese Mix");
+  });
+
+  it("drops a leading 'Applicator' row label, with or without a composition", () => {
+    expect(
+      cleanSpecCheeseRecipeName(
+        "Applicator - Aldo's Cheese Mix 2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan",
+      ),
+    ).toBe("Aldo's Cheese Mix");
+    expect(
+      cleanSpecCheeseRecipeName(
+        "Applicator - Aldo's Cheese Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan",
+      ),
+    ).toBe("Aldo's Cheese Mix");
+    // No embedded composition (AI left the label but not the parts).
+    expect(cleanSpecCheeseRecipeName("Applicator - Aldo's Cheese Mix")).toBe("Aldo's Cheese Mix");
   });
 
   it("does not strip when nothing meaningful would remain", () => {
@@ -107,5 +144,50 @@ describe("canonicalizeSpecImportCheeseRecipeNames", () => {
       recipes: [cheese("Whole Mozz Cheese Mix", { brand: "Bobo", flavor: "Pep" })],
     };
     expect(canonicalizeSpecImportCheeseRecipeNames(input)).toBe(input);
+  });
+});
+
+describe("end-to-end: one blend embedded in 'Applicator - ...' cells → one pool recipe", () => {
+  it("collapses per-weight 'Applicator - Aldo's Cheese Mix' variants across profiles", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        {
+          brand: "Aldo's",
+          flavor: "Cheese",
+          applicators: [
+            {
+              type: "Applicator - Aldo's Cheese Mix 2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan, 0.13 Oregano Flake",
+              ozPerPizza: 3.65,
+            },
+          ],
+          pepperonis: [],
+        },
+        {
+          brand: "Aldo's",
+          flavor: "Pepperoni",
+          applicators: [
+            {
+              type: "Applicator - Aldo's Cheese Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan, 0.05 Oregano Flake",
+              ozPerPizza: 2.9,
+            },
+          ],
+          pepperonis: [],
+        },
+      ],
+      recipes: [],
+    };
+
+    // Deterministic unpack + name canonicalization is what the import runs.
+    const extracted = extractEmbeddedApplicatorBlends(parsed);
+    const canon = canonicalizeSpecImportCheeseRecipeNames(extracted);
+
+    // Both applicator slots now point at the same clean blend name...
+    for (const p of canon.profiles) {
+      expect(p.applicators[0].type).toBe("Aldo's Cheese Mix");
+    }
+    // ...and the server pool ends up with exactly ONE cheese recipe.
+    const drafts = collectSpecImportCheeseRecipes(canon, none);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].name).toBe("Aldo's Cheese Mix");
   });
 });

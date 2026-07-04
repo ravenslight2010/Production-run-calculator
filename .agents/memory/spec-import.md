@@ -347,6 +347,29 @@ Any change to one app's order/logic must land in the other verbatim.
 - Embedded applicator-blend extraction (client-side, post-sanitize) keeps
   numbers verbatim on purpose (no unit signal in those cells). `doughballOz`
   is oz by definition — untouched.
+
+## Cheese blend identity is its NAME — strip BOTH the "Applicator" label and the per-weight suffix
+- A cheese recipe dedupes by NAME (`collectSpecImportCheeseRecipes` /
+  `addCheeseRecipesIfAbsentByName`). Spec grids express one blend at multiple
+  per-pizza weights AND prefix every topping/cheese row with the label
+  "Applicator - " (e.g. `Applicator - Aldo's Cheese Mix 2.07 Pizella, 1.19
+  Part Skim Mozzarella, ...`). If the name isn't fully normalized, the
+  deterministic path and the AI/clean path diverge and fork ONE blend into TWO
+  "same" pool recipes.
+- **Two normalizations must BOTH be applied on every name-producing path:**
+  (1) strip the trailing/embedded per-weight composition
+  (`cleanSpecCheeseRecipeName` + `parseEmbeddedBlend`), and (2) strip a leading
+  "Applicator" row label (`stripApplicatorLabel`, applied inside BOTH
+  `parseEmbeddedBlend` and `cleanSpecCheeseRecipeName`). Fixing only the weight
+  (an earlier fix) still left `Applicator - Aldo's Cheese Mix` vs
+  `Aldo's Cheese Mix` as a duplicate.
+- **Why:** the label is a spec-sheet row prefix, never part of the blend name;
+  the deterministic fallback (`extractEmbeddedApplicatorBlends`) used to keep it
+  while the AI stripped it.
+- **How to apply:** any new cheese-name-cleaning path must run through the
+  shared helpers so web + mobile stay identical (both consume
+  `@workspace/spec-import`). Existing already-imported duplicates are NOT
+  auto-healed — the manager merges/deletes the stray one once.
 - `rowsUnit` is consumed inside sanitize and never emitted → no OpenAPI change.
 
 ## Pepperoni is a pep TYPE, never a recipe (+ die reviewer false-positive)
