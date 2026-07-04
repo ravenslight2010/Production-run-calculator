@@ -33,3 +33,4 @@ export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";
 export * from "./runTemplates";
 export * from "./supervisorPinSettings";
+export * from "./ingredients";

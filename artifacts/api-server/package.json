@@ -26,6 +26,7 @@
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/mix-reconcile": "workspace:*",
     "@workspace/mixes": "workspace:*",
+    "@workspace/ingredient-catalog": "workspace:*",
     "@workspace/cheese-recipes": "workspace:*",
     "@workspace/named-recipes": "workspace:*",
     "@workspace/premix-import": "workspace:*",

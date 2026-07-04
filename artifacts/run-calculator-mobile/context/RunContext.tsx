@@ -83,6 +83,19 @@ import { collectMergeAliases } from "@workspace/merge-suggest";
 import { moveEntries } from "@workspace/schedule-move";
 import { saveMergeAliases, fetchMergedAwayNames, saveMergedAwayNames, deleteMergedAwayNames, type MergeSuggestCategory } from "./mergeSuggest";
 import { saveAiCorrections } from "./aiCorrections";
+import { useQuery } from "@tanstack/react-query";
+import {
+  buildIngredientIndex,
+  hydrateRecipeRows as hydrateRecipeRowsCatalog,
+  type IngredientCategory,
+} from "@workspace/ingredient-catalog";
+import {
+  fetchIngredients,
+  saveIngredients,
+  deleteIngredients,
+  mergeIngredientsRemote,
+  findOrBuildIngredient,
+} from "./ingredients";
 
 const STORAGE_KEY = "run-calc-mobile-v2";
 // One-time full local wipe marker (user-requested 2026-07-03 data purge) —
@@ -141,6 +154,7 @@ function stableStringify(value: unknown): string {
 export interface RecipeRow {
   ingredient: string;
   lbs: number;
+  ingredientId?: string;
 }
 
 export interface RunSettings {
@@ -1939,6 +1953,75 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
   const streamRef = useRef<SyncStream | null>(null);
   const syncStartedRef = useRef(false);
 
+  // Ingredient catalog (Task #102) — factory-wide server master list. The
+  // local option lists above stay the immediate source of truth for the UI;
+  // this is read to build/resolve catalog entries for the best-effort
+  // dual-write calls below (mirrors web's home.tsx wiring, replit.md parity).
+  const { data: ingredientCatalogData } = useQuery({
+    queryKey: ["ingredients"],
+    queryFn: fetchIngredients,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+  const ingredientCatalog = ingredientCatalogData ?? [];
+  const ingredientCatalogRef = useRef(ingredientCatalog);
+  ingredientCatalogRef.current = ingredientCatalog;
+
+  const INGREDIENT_LIST_CATEGORY: Partial<Record<MasterListKey, IngredientCategory>> = {
+    pepTypes: "pep",
+    cheeseIngredients: "cheese",
+    doughIngredients: "dough",
+    frontlineIngredients: "frontline",
+  };
+
+  function saveCatalogEntry(name: string, category: IngredientCategory) {
+    const built = findOrBuildIngredient(name, category, ingredientCatalogRef.current);
+    return saveIngredients([built]).catch(() => {});
+  }
+  function renameCatalogEntry(oldName: string, newName: string, category: IngredientCategory) {
+    const existing = ingredientCatalogRef.current.find(
+      (i) => i.name.trim().toLowerCase() === oldName.trim().toLowerCase(),
+    );
+    const target = existing
+      ? { ...existing, name: newName }
+      : findOrBuildIngredient(newName, category, ingredientCatalogRef.current);
+    return saveIngredients([target]).catch(() => {});
+  }
+  function deleteCatalogEntryByName(name: string) {
+    const existing = ingredientCatalogRef.current.find(
+      (i) => i.name.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    if (!existing) return Promise.resolve();
+    return deleteIngredients([existing.id]).catch(() => {});
+  }
+  // Mirrors a confirmed manual ingredient merge (any source names -> one
+  // target name) into the server catalog. See web home.tsx for the identical
+  // flow/comment.
+  async function mergeCatalogEntries(sourceNames: string[], targetName: string): Promise<void> {
+    try {
+      let target = ingredientCatalogRef.current.find(
+        (i) => i.name.trim().toLowerCase() === targetName.trim().toLowerCase(),
+      );
+      if (!target) {
+        const built = findOrBuildIngredient(targetName, "general", ingredientCatalogRef.current);
+        const saved = await saveIngredients([built]);
+        target = saved.find((i) => i.id === built.id) ?? built;
+      }
+      const sourceIds = sourceNames
+        .map(
+          (name) =>
+            ingredientCatalogRef.current.find(
+              (i) => i.name.trim().toLowerCase() === name.trim().toLowerCase(),
+            )?.id,
+        )
+        .filter((id): id is string => !!id && id !== target!.id);
+      if (sourceIds.length > 0) await mergeIngredientsRemote(sourceIds, target.id);
+    } catch {
+      // Best-effort: the local merge already succeeded; the catalog will
+      // self-heal next time these names are touched.
+    }
+  }
+
   // Auth hooks read through refs so the boot/sync effects (which run with stable
   // deps) always see the latest callbacks without re-subscribing.
   const { forceSignedOut, revalidate, me } = useAuth();
@@ -2479,6 +2562,58 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       updateCurrentRun((r) => ({ ...r, settings: { ...r.settings, ...partial } })),
     [updateCurrentRun],
   );
+
+  // Keep the current run's recipe rows resolved against the live server
+  // catalog (Task #102, mirrors web home.tsx): a rename/merge made on ANY
+  // device shows up here via ingredientId, without rewriting the recipe row
+  // itself. Only the active run is touched — same scope as web, which only
+  // hydrates the currently-edited form. Other runs/history/presets are
+  // refreshed lazily the next time they become the active run.
+  useEffect(() => {
+    if (ingredientCatalog.length === 0) return;
+    const index = buildIngredientIndex(ingredientCatalog);
+    const r = appState.runs[appState.currentIndex];
+    if (!r) return;
+    // hydrateRecipeRowsCatalog is Array.map-based, so it always returns a NEW
+    // array; per-row identity is preserved only when a row needed no change.
+    // Compare row-by-row (not array-reference) so this bails out cleanly when
+    // the catalog query merely re-resolves (new array, same data) — otherwise
+    // every refetch would re-stamp/push the run.
+    const hydrate = (rows: RecipeRow[]) => {
+      const next = hydrateRecipeRowsCatalog(rows, index);
+      const changed = next.some((row, i) => row !== rows[i]);
+      return changed ? next : rows;
+    };
+    const doughRecipe = hydrate(r.settings.doughRecipe);
+    const app1CheeseRecipe = hydrate(r.settings.app1CheeseRecipe);
+    const app2CheeseRecipe = hydrate(r.settings.app2CheeseRecipe);
+    const app3CheeseRecipe = hydrate(r.settings.app3CheeseRecipe);
+    const app4CheeseRecipe = hydrate(r.settings.app4CheeseRecipe);
+    const frontlineRecipe = hydrate(r.settings.frontlineRecipe);
+    if (
+      doughRecipe === r.settings.doughRecipe &&
+      app1CheeseRecipe === r.settings.app1CheeseRecipe &&
+      app2CheeseRecipe === r.settings.app2CheeseRecipe &&
+      app3CheeseRecipe === r.settings.app3CheeseRecipe &&
+      app4CheeseRecipe === r.settings.app4CheeseRecipe &&
+      frontlineRecipe === r.settings.frontlineRecipe
+    ) {
+      return;
+    }
+    updateCurrentRun((prev) => ({
+      ...prev,
+      settings: {
+        ...prev.settings,
+        doughRecipe,
+        app1CheeseRecipe,
+        app2CheeseRecipe,
+        app3CheeseRecipe,
+        app4CheeseRecipe,
+        frontlineRecipe,
+      },
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ingredientCatalog, appState.currentIndex, appState.runs]);
 
   const updateProgress = useCallback(
     (partial: Partial<RunProgress>) =>
@@ -3214,6 +3349,10 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       if (MERGEABLE_LIST_KEYS.has(list)) {
         void deleteMergedAwayNames([v]).catch(() => {});
       }
+      // Ingredient catalog dual-write (Task #102): keep the server catalog in
+      // step for the lists whose entries recipe rows reference by id.
+      const category = INGREDIENT_LIST_CATEGORY[list];
+      if (category) void saveCatalogEntry(v, category);
     },
     [persist],
   );
@@ -3248,6 +3387,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+      // Ingredient catalog dual-write (Task #102).
+      const category = INGREDIENT_LIST_CATEGORY[list];
+      if (category) void deleteCatalogEntryByName(value);
     },
     [persist],
   );
@@ -3609,6 +3751,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         persist(next);
         return next;
       });
+      // Ingredient catalog dual-write (Task #102).
+      const category = INGREDIENT_LIST_CATEGORY[list];
+      if (category && n) void renameCatalogEntry(oldName, n, category);
     },
     [persist],
   );
@@ -3803,6 +3948,10 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           .filter((src) => src.trim() && src.trim().toLowerCase() !== target.trim().toLowerCase())
           .map((src) => ({ domain: "ingredient", fromText: src, toText: target })),
       );
+      // Ingredient catalog dual-write (Task #102): mirror the confirmed merge
+      // into the server catalog so it stays authoritative for id-referencing
+      // recipe rows. Best-effort — the local merge above already succeeded.
+      void mergeCatalogEntries(sources, target);
     },
     [persistNow],
   );

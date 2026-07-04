@@ -9,6 +9,7 @@ import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/in
 export interface WebRecipeRow {
   ingredient: string;
   lbs: number;
+  ingredientId?: string;
 }
 
 // Web per-run stoppage. NOTE: this differs from the mobile `Stoppage` shape

@@ -3,6 +3,17 @@ import type { IngredientSubstitution, SubstitutionLogEntry } from "@workspace/in
 
 export type { IngredientSubstitution, SubstitutionLogEntry };
 
+// A recipe row references a catalog ingredient by stable id (Task #102);
+// `ingredient` is kept as a plain-text display-name cache/fallback so legacy
+// rows (saved before the catalog existed) and offline rows keep working — see
+// @workspace/ingredient-catalog for how `ingredientId` is resolved back to the
+// live name.
+const recipeRowSchema = z.object({
+  ingredient: z.string().default(""),
+  ingredientId: z.string().optional(),
+  lbs: z.coerce.number().min(0).default(0),
+});
+
 export const formSchema = z.object({
   casesNeeded: z.coerce.number().min(0).default(384),
   crustsPerCycle: z.coerce.number().min(1).default(5),
@@ -62,29 +73,17 @@ export const formSchema = z.object({
   allergen: z.string().default("none"),
   doughRecipeName: z.string().default(""),
   targetDoughballWeight: z.coerce.number().min(0).default(0),
-  doughRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  doughRecipe: z.array(recipeRowSchema).default([]),
   app1CheeseRecipeName: z.string().default(""),
-  app1CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  app1CheeseRecipe: z.array(recipeRowSchema).default([]),
   app2CheeseRecipeName: z.string().default(""),
-  app2CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  app2CheeseRecipe: z.array(recipeRowSchema).default([]),
   app3CheeseRecipeName: z.string().default(""),
-  app3CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  app3CheeseRecipe: z.array(recipeRowSchema).default([]),
   app4CheeseRecipeName: z.string().default(""),
-  app4CheeseRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  app4CheeseRecipe: z.array(recipeRowSchema).default([]),
   frontlineRecipeName: z.string().default(""),
-  frontlineRecipe: z.array(
-    z.object({ ingredient: z.string().default(""), lbs: z.coerce.number().min(0).default(0) })
-  ).default([]),
+  frontlineRecipe: z.array(recipeRowSchema).default([]),
   cartoned: z.string().default("yes"),
   cartonsPerCase: z.coerce.number().min(0).default(0),
   circles: z.string().default("none"),
@@ -118,7 +117,7 @@ export function withTempOverrides<T extends Partial<Record<string, unknown>>>(v:
   };
 }
 
-export type RecipeRow = { ingredient: string; lbs: number };
+export type RecipeRow = { ingredient: string; ingredientId?: string; lbs: number };
 export type DoughRecipePreset = { rows: RecipeRow[] };
 
 export const DEFAULT_VALUES: FormValues = {

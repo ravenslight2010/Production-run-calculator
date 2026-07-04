@@ -44,6 +44,7 @@ import type {
   DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
+  DeleteIngredientsInput,
   DeleteMixesInput,
   DeleteNamedRecipesInput,
   DeleteProductionRulesInput,
@@ -67,6 +68,7 @@ import type {
   IncidentClustersInput,
   IncidentClustersResult,
   IncidentDiagnosis,
+  IngredientList,
   InventoryItem,
   InventoryLedgerEntry,
   InventoryLocation,
@@ -83,6 +85,7 @@ import type {
   MatchPremixInput,
   MatchPremixResult,
   MergeAliasList,
+  MergeIngredientsInput,
   MergeInventoryInput,
   MergeInventoryResult,
   MergedAwayList,
@@ -127,6 +130,7 @@ import type {
   SaveFillMissingValuesInput,
   SaveFreezerPullItemsInput,
   SaveImportAliasesInput,
+  SaveIngredientsInput,
   SaveMergeAliasesInput,
   SaveMergedAwayInput,
   SaveMixesInput,
@@ -6048,6 +6052,300 @@ export const useDeleteMixes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteMixesMutationOptions(options));
+    }
+
+export const getListIngredientsUrl = () => {
+
+
+
+
+  return `/api/ingredients`
+}
+
+/**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
+ * @summary List the factory-wide ingredient catalog
+ */
+export const listIngredients = async ( options?: RequestInit): Promise<IngredientList> => {
+
+  return customFetch<IngredientList>(getListIngredientsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListIngredientsQueryKey = () => {
+    return [
+    `/api/ingredients`
+    ] as const;
+    }
+
+
+export const getListIngredientsQueryOptions = <TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListIngredientsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIngredients>>> = ({ signal }) => listIngredients({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListIngredientsQueryResult = NonNullable<Awaited<ReturnType<typeof listIngredients>>>
+export type ListIngredientsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the factory-wide ingredient catalog
+ */
+
+export function useListIngredients<TData = Awaited<ReturnType<typeof listIngredients>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIngredients>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListIngredientsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveIngredientsUrl = () => {
+
+
+
+
+  return `/api/ingredients`
+}
+
+/**
+ * Upserts a batch of ingredients by id. Each ingredient is normalized and validated server-side; malformed entries are dropped. Renaming is just an upsert of an existing id with a new name — since recipe rows reference the id, the new name is picked up everywhere with no client-side rewrite. Manager role required.
+ * @summary Create or rename ingredients (manager only)
+ */
+export const saveIngredients = async (saveIngredientsInput: SaveIngredientsInput, options?: RequestInit): Promise<IngredientList> => {
+
+  return customFetch<IngredientList>(getSaveIngredientsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveIngredientsInput,)
+  }
+);}
+
+
+
+
+export const getSaveIngredientsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredients>>, TError,{data: BodyType<SaveIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveIngredients>>, TError,{data: BodyType<SaveIngredientsInput>}, TContext> => {
+
+const mutationKey = ['saveIngredients'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveIngredients>>, {data: BodyType<SaveIngredientsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveIngredients(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveIngredientsMutationResult = NonNullable<Awaited<ReturnType<typeof saveIngredients>>>
+    export type SaveIngredientsMutationBody = BodyType<SaveIngredientsInput>
+    export type SaveIngredientsMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or rename ingredients (manager only)
+ */
+export const useSaveIngredients = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredients>>, TError,{data: BodyType<SaveIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveIngredients>>,
+        TError,
+        {data: BodyType<SaveIngredientsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveIngredientsMutationOptions(options));
+    }
+
+export const getDeleteIngredientsUrl = () => {
+
+
+
+
+  return `/api/ingredients`
+}
+
+/**
+ * Marks a batch of ingredients disabled by id (soft delete — the id may still be referenced by historical recipe rows, which keep resolving to its last known name). Manager role required.
+ * @summary Soft-delete ingredients by id (manager only)
+ */
+export const deleteIngredients = async (deleteIngredientsInput: DeleteIngredientsInput, options?: RequestInit): Promise<IngredientList> => {
+
+  return customFetch<IngredientList>(getDeleteIngredientsUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteIngredientsInput,)
+  }
+);}
+
+
+
+
+export const getDeleteIngredientsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIngredients>>, TError,{data: BodyType<DeleteIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteIngredients>>, TError,{data: BodyType<DeleteIngredientsInput>}, TContext> => {
+
+const mutationKey = ['deleteIngredients'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteIngredients>>, {data: BodyType<DeleteIngredientsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteIngredients(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteIngredientsMutationResult = NonNullable<Awaited<ReturnType<typeof deleteIngredients>>>
+    export type DeleteIngredientsMutationBody = BodyType<DeleteIngredientsInput>
+    export type DeleteIngredientsMutationError = ErrorType<void>
+
+    /**
+ * @summary Soft-delete ingredients by id (manager only)
+ */
+export const useDeleteIngredients = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteIngredients>>, TError,{data: BodyType<DeleteIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteIngredients>>,
+        TError,
+        {data: BodyType<DeleteIngredientsInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteIngredientsMutationOptions(options));
+    }
+
+export const getMergeIngredientsUrl = () => {
+
+
+
+
+  return `/api/ingredients/merge`
+}
+
+/**
+ * Collapses each source ingredient into the target: sets the source's `mergedInto` pointer to the target id and disables the source. Any recipe row still referencing a merged-away id resolves to the target's current name via the pointer. Manager role required.
+ * @summary Merge one or more ingredients into a target ingredient (manager only)
+ */
+export const mergeIngredients = async (mergeIngredientsInput: MergeIngredientsInput, options?: RequestInit): Promise<IngredientList> => {
+
+  return customFetch<IngredientList>(getMergeIngredientsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      mergeIngredientsInput,)
+  }
+);}
+
+
+
+
+export const getMergeIngredientsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mergeIngredients>>, TError,{data: BodyType<MergeIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof mergeIngredients>>, TError,{data: BodyType<MergeIngredientsInput>}, TContext> => {
+
+const mutationKey = ['mergeIngredients'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof mergeIngredients>>, {data: BodyType<MergeIngredientsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  mergeIngredients(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MergeIngredientsMutationResult = NonNullable<Awaited<ReturnType<typeof mergeIngredients>>>
+    export type MergeIngredientsMutationBody = BodyType<MergeIngredientsInput>
+    export type MergeIngredientsMutationError = ErrorType<void>
+
+    /**
+ * @summary Merge one or more ingredients into a target ingredient (manager only)
+ */
+export const useMergeIngredients = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof mergeIngredients>>, TError,{data: BodyType<MergeIngredientsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof mergeIngredients>>,
+        TError,
+        {data: BodyType<MergeIngredientsInput>},
+        TContext
+      > => {
+      return useMutation(getMergeIngredientsMutationOptions(options));
     }
 
 export const getListCheeseRecipesUrl = () => {

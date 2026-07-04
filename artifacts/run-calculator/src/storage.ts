@@ -83,6 +83,17 @@ import {
   CHEESE_BRAND_SPECS,
 } from "./specSeed";
 import { genId, todayStr } from "./utils";
+import {
+  hydrateRecipeRows as hydrateRecipeRowsCatalog,
+  buildIngredientIndex,
+  type Ingredient,
+  type IngredientCategory,
+} from "@workspace/ingredient-catalog";
+import {
+  fetchIngredients,
+  saveIngredients as saveIngredientsRemote,
+  findOrBuildIngredient,
+} from "./ingredients";
 import { recipeApplyTargets } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
@@ -929,6 +940,87 @@ export function applyIngredientDedupeMigrationIfNeeded(): void {
     localStorage.setItem(INGREDIENT_DEDUPE_MIGRATION_KEY, "1");
   } catch {}
 }
+
+// ── Server ingredient catalog (Task #102) ───────────────────────────────────
+// The catalog is the factory-wide, server-owned source of truth for
+// ingredient names going forward; recipe rows carry a stable `ingredientId`
+// resolved through it (see @workspace/ingredient-catalog). The legacy
+// per-list localStorage arrays + merge/deletion tombstones above are kept
+// working unchanged (nothing here removes them) so existing sync/parity
+// behavior is unaffected; this only ADDS the catalog as an authoritative,
+// additional source that every recipe row can resolve its live name from.
+const INGREDIENT_CATALOG_MIGRATION_KEY = "run-calc-ingredient-catalog-migration-v1";
+const INGREDIENT_LIST_CATEGORIES: [string, IngredientCategory][] = [
+  [INGREDIENT_TYPES_KEY, "general"],
+  [PEP_TYPES_KEY, "pep"],
+  [CHEESE_INGREDIENTS_KEY, "cheese"],
+  [MIX_INGREDIENTS_KEY, "mix"],
+  [DOUGH_INGREDIENTS_KEY, "dough"],
+  [FRONTLINE_INGREDIENTS_KEY, "frontline"],
+];
+
+// One-time, idempotent: if the server catalog is empty, seed it from today's
+// local option lists so no existing name is lost. Marker-guarded so it only
+// ever runs once per device even if the catalog stays empty (e.g. offline).
+export async function migrateIngredientListsToCatalogIfNeeded(
+  existing: Ingredient[],
+): Promise<Ingredient[]> {
+  if (typeof localStorage === "undefined") return existing;
+  if (localStorage.getItem(INGREDIENT_CATALOG_MIGRATION_KEY)) return existing;
+  if (existing.length > 0) {
+    // Catalog already has data (another device seeded it, or manager added
+    // items) — nothing to migrate, just mark done.
+    try { localStorage.setItem(INGREDIENT_CATALOG_MIGRATION_KEY, "1"); } catch {}
+    return existing;
+  }
+  try {
+    let pool = existing;
+    for (const [key, category] of INGREDIENT_LIST_CATEGORIES) {
+      const names = loadList(key, []);
+      for (const name of names) {
+        if (!name.trim()) continue;
+        const built = findOrBuildIngredient(name, category, pool);
+        if (!pool.some((i) => i.id === built.id)) pool = [...pool, built];
+        else pool = pool.map((i) => (i.id === built.id ? built : i));
+      }
+    }
+    if (pool.length === 0) {
+      localStorage.setItem(INGREDIENT_CATALOG_MIGRATION_KEY, "1");
+      return existing;
+    }
+    const saved = await saveIngredientsRemote(pool);
+    localStorage.setItem(INGREDIENT_CATALOG_MIGRATION_KEY, "1");
+    return saved;
+  } catch {
+    // Network/server unavailable — leave the marker unset so it retries next
+    // load instead of silently skipping the migration forever.
+    return existing;
+  }
+}
+
+// Refresh + backfill `ingredientId`/`ingredient` on every recipe-row array in
+// a FormValues object using the live catalog. Pure passthrough on rows that
+// already have neither a matching id nor name (never drops data).
+export function hydrateRecipeRowsWithCatalog(
+  values: FormValues,
+  catalog: Ingredient[],
+): FormValues {
+  if (catalog.length === 0) return values;
+  const index = buildIngredientIndex(catalog);
+  const hydrate = (rows: RecipeRow[] | undefined) =>
+    rows ? (hydrateRecipeRowsCatalog(rows, index) as RecipeRow[]) : rows;
+  return {
+    ...values,
+    doughRecipe: hydrate(values.doughRecipe) ?? values.doughRecipe,
+    app1CheeseRecipe: hydrate(values.app1CheeseRecipe) ?? values.app1CheeseRecipe,
+    app2CheeseRecipe: hydrate(values.app2CheeseRecipe) ?? values.app2CheeseRecipe,
+    app3CheeseRecipe: hydrate(values.app3CheeseRecipe) ?? values.app3CheeseRecipe,
+    app4CheeseRecipe: hydrate(values.app4CheeseRecipe) ?? values.app4CheeseRecipe,
+    frontlineRecipe: hydrate(values.frontlineRecipe) ?? values.frontlineRecipe,
+  };
+}
+
+export { fetchIngredients };
 
 // Persist a user-driven ingredient merge across every localStorage surface:
 // master-data option lists, recipe presets (dough/sauce/cheese), brand + crust

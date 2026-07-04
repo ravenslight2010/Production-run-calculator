@@ -1982,6 +1982,104 @@ paths:
         "403":
           description: Manager role required
 
+  /ingredients:
+    get:
+      operationId: listIngredients
+      tags: [ingredients]
+      summary: List the factory-wide ingredient catalog
+      description: >-
+        Returns every ingredient in the factory-wide catalog (Task #102). This
+        is global master-data (not part of the per-day sync payload); reading
+        is available to any signed-in user so both apps can resolve recipe rows
+        and build category-scoped pickers, while editing is manager-only.
+      responses:
+        "200":
+          description: All ingredients
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientList"
+    post:
+      operationId: saveIngredients
+      tags: [ingredients]
+      summary: Create or rename ingredients (manager only)
+      description: >-
+        Upserts a batch of ingredients by id. Each ingredient is normalized and
+        validated server-side; malformed entries are dropped. Renaming is just
+        an upsert of an existing id with a new name — since recipe rows
+        reference the id, the new name is picked up everywhere with no
+        client-side rewrite. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveIngredientsInput"
+      responses:
+        "200":
+          description: The full updated ingredient list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteIngredients
+      tags: [ingredients]
+      summary: Soft-delete ingredients by id (manager only)
+      description: >-
+        Marks a batch of ingredients disabled by id (soft delete — the id may
+        still be referenced by historical recipe rows, which keep resolving to
+        its last known name). Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteIngredientsInput"
+      responses:
+        "200":
+          description: The full updated ingredient list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
+  /ingredients/merge:
+    post:
+      operationId: mergeIngredients
+      tags: [ingredients]
+      summary: Merge one or more ingredients into a target ingredient (manager only)
+      description: >-
+        Collapses each source ingredient into the target: sets the source's
+        `mergedInto` pointer to the target id and disables the source. Any
+        recipe row still referencing a merged-away id resolves to the target's
+        current name via the pointer. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeIngredientsInput"
+      responses:
+        "200":
+          description: The full updated ingredient list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
   /cheese-recipes:
     get:
       operationId: listCheeseRecipes
@@ -6828,6 +6926,92 @@ components:
           description: The ids of the mixes to delete
           items:
             type: string
+
+    IngredientCategory:
+      type: string
+      description: >-
+        Which recipe surface(s) an ingredient applies to. "general" ingredients
+        are also offered on every other category's picker.
+      enum: [cheese, dough, frontline, mix, pep, general]
+
+    Ingredient:
+      type: object
+      description: >-
+        A factory-wide catalog entry (Task #102). Recipe rows reference an
+        ingredient by id; renaming/merging/deleting is a server operation that
+        updates every reference with no client-side rewrite.
+      required:
+        - id
+        - name
+        - categories
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Current display name
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientCategory"
+        mergedInto:
+          type: string
+          nullable: true
+          description: >-
+            When set, this ingredient was merged into another ingredient's id;
+            resolve display name by following this pointer.
+        enabled:
+          type: boolean
+          description: false = soft-deleted (kept so old rows still resolve)
+
+    IngredientList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ingredient"
+
+    SaveIngredientsInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of ingredients to create or rename (by id)
+          items:
+            $ref: "#/components/schemas/Ingredient"
+
+    DeleteIngredientsInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the ingredients to soft-delete
+          items:
+            type: string
+
+    MergeIngredientsInput:
+      type: object
+      required:
+        - sourceIds
+        - targetId
+      properties:
+        sourceIds:
+          type: array
+          description: The ingredient ids to merge away
+          items:
+            type: string
+        targetId:
+          type: string
+          description: The ingredient id the sources should merge into
 
     CheeseComponent:
       type: object

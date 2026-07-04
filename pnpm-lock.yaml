@@ -206,6 +206,9 @@ importers:
       '@workspace/incident-cluster':
         specifier: workspace:*
         version: link:../../lib/incident-cluster
+      '@workspace/ingredient-catalog':
+        specifier: workspace:*
+        version: link:../../lib/ingredient-catalog
       '@workspace/integrations-openai-ai-server':
         specifier: workspace:*
         version: link:../../lib/integrations-openai-ai-server
@@ -513,6 +516,9 @@ importers:
       '@workspace/freezer-pull':
         specifier: workspace:*
         version: link:../../lib/freezer-pull
+      '@workspace/ingredient-catalog':
+        specifier: workspace:*
+        version: link:../../lib/ingredient-catalog
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
@@ -796,6 +802,9 @@ importers:
       '@workspace/freezer-pull':
         specifier: workspace:*
         version: link:../../lib/freezer-pull
+      '@workspace/ingredient-catalog':
+        specifier: workspace:*
+        version: link:../../lib/ingredient-catalog
       '@workspace/inventory-math':
         specifier: workspace:*
         version: link:../../lib/inventory-math
@@ -1103,6 +1112,12 @@ importers:
         version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
 
   lib/incident-cluster:
+    devDependencies:
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.6.2)(jiti@2.7.0)(jsdom@29.1.1)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.21.0)(yaml@2.8.4)
+
+  lib/ingredient-catalog:
     devDependencies:
       vitest:
         specifier: ^4.1.9

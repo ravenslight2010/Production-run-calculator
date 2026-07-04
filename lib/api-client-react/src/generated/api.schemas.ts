@@ -2324,6 +2324,57 @@ export interface DeleteMixesInput {
 }
 
 /**
+ * Which recipe surface(s) an ingredient applies to. "general" ingredients are also offered on every other category's picker.
+ */
+export type IngredientCategory = typeof IngredientCategory[keyof typeof IngredientCategory];
+
+
+export const IngredientCategory = {
+  cheese: 'cheese',
+  dough: 'dough',
+  frontline: 'frontline',
+  mix: 'mix',
+  pep: 'pep',
+  general: 'general',
+} as const;
+
+/**
+ * A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming/merging/deleting is a server operation that updates every reference with no client-side rewrite.
+ */
+export interface Ingredient {
+  /** Stable client-generated id */
+  id: string;
+  /** Current display name */
+  name: string;
+  categories: IngredientCategory[];
+  /** When set, this ingredient was merged into another ingredient's id; resolve display name by following this pointer. */
+  mergedInto?: string | null;
+  /** false = soft-deleted (kept so old rows still resolve) */
+  enabled: boolean;
+}
+
+export interface IngredientList {
+  items: Ingredient[];
+}
+
+export interface SaveIngredientsInput {
+  /** The batch of ingredients to create or rename (by id) */
+  items: Ingredient[];
+}
+
+export interface DeleteIngredientsInput {
+  /** The ids of the ingredients to soft-delete */
+  ids: string[];
+}
+
+export interface MergeIngredientsInput {
+  /** The ingredient ids to merge away */
+  sourceIds: string[];
+  /** The ingredient id the sources should merge into */
+  targetId: string;
+}
+
+/**
  * One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.
  */
 export interface CheeseComponent {

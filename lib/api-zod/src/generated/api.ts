@@ -2248,6 +2248,85 @@ export const DeleteMixesResponse = zod.object({
 
 
 /**
+ * Returns every ingredient in the factory-wide catalog (Task #102). This is global master-data (not part of the per-day sync payload); reading is available to any signed-in user so both apps can resolve recipe rows and build category-scoped pickers, while editing is manager-only.
+ * @summary List the factory-wide ingredient catalog
+ */
+export const ListIngredientsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
+})
+
+
+/**
+ * Upserts a batch of ingredients by id. Each ingredient is normalized and validated server-side; malformed entries are dropped. Renaming is just an upsert of an existing id with a new name — since recipe rows reference the id, the new name is picked up everywhere with no client-side rewrite. Manager role required.
+ * @summary Create or rename ingredients (manager only)
+ */
+export const SaveIngredientsBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.')).describe('The batch of ingredients to create or rename (by id)')
+})
+
+export const SaveIngredientsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
+})
+
+
+/**
+ * Marks a batch of ingredients disabled by id (soft delete — the id may still be referenced by historical recipe rows, which keep resolving to its last known name). Manager role required.
+ * @summary Soft-delete ingredients by id (manager only)
+ */
+export const DeleteIngredientsBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the ingredients to soft-delete')
+})
+
+export const DeleteIngredientsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
+})
+
+
+/**
+ * Collapses each source ingredient into the target: sets the source's `mergedInto` pointer to the target id and disables the source. Any recipe row still referencing a merged-away id resolves to the target's current name via the pointer. Manager role required.
+ * @summary Merge one or more ingredients into a target ingredient (manager only)
+ */
+export const MergeIngredientsBody = zod.object({
+  "sourceIds": zod.array(zod.string()).describe('The ingredient ids to merge away'),
+  "targetId": zod.string().describe('The ingredient id the sources should merge into')
+})
+
+export const MergeIngredientsResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Current display name'),
+  "categories": zod.array(zod.enum(['cheese', 'dough', 'frontline', 'mix', 'pep', 'general']).describe('Which recipe surface(s) an ingredient applies to. \"general\" ingredients are also offered on every other category\'s picker.')),
+  "mergedInto": zod.string().nullish().describe('When set, this ingredient was merged into another ingredient\'s id; resolve display name by following this pointer.'),
+  "enabled": zod.boolean().describe('false = soft-deleted (kept so old rows still resolve)')
+}).describe('A factory-wide catalog entry (Task #102). Recipe rows reference an ingredient by id; renaming\/merging\/deleting is a server operation that updates every reference with no client-side rewrite.'))
+})
+
+
+/**
  * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
  * @summary List manager-defined cheese recipes
  */

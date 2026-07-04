@@ -95,6 +95,7 @@
     "@workspace/downtime-trends": "workspace:*",
     "@workspace/fill-missing": "workspace:*",
     "@workspace/freezer-pull": "workspace:*",
+    "@workspace/ingredient-catalog": "workspace:*",
     "@workspace/mixes": "workspace:*",
     "@workspace/inventory-math": "workspace:*",
     "@workspace/merge-suggest": "workspace:*",

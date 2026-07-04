@@ -132,6 +132,8 @@ import {
   undoChange,
   STALE_BRANDS,
   SEED_MIX_RECIPE_NAMES,
+  migrateIngredientListsToCatalogIfNeeded,
+  hydrateRecipeRowsWithCatalog,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
@@ -151,6 +153,14 @@ import { updateSupervisorPin } from "../supervisorPinApi";
 import { buildFreezerPullPlan } from "@workspace/freezer-pull";
 import MixesManager from "../components/MixesManager";
 import { useMixes } from "../hooks/useMixes";
+import { useIngredients } from "../hooks/useIngredients";
+import {
+  saveIngredients as saveIngredientsRemote,
+  deleteIngredients as deleteIngredientsRemote,
+  mergeIngredientsRemote,
+  findOrBuildIngredient,
+} from "../ingredients";
+import type { IngredientCategory } from "@workspace/ingredient-catalog";
 import { buildMixPlan, type Mix } from "@workspace/mixes";
 import {
   buildCycleCountDueList,
@@ -2110,6 +2120,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("ingredientTypes", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "general");
   }
 
   function removeIngredientType(name: string) {
@@ -2118,6 +2129,7 @@ export default function Home() {
     saveList(INGREDIENT_TYPES_KEY, updated);
     tombstoneDeleted("ingredientTypes", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   function renameIngredientType(oldName: string, newName: string) {
@@ -2127,6 +2139,64 @@ export default function Home() {
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
     schedulePush(dayStateRef.current);
+    void renameCatalogEntry(oldName, trimmed, "general");
+  }
+
+  // ── Ingredient catalog dual-write (Task #102) ──────────────────────────────
+  // The 6 local option lists above stay the immediate, offline-first source of
+  // truth for these UI handlers (nothing above changed); these best-effort
+  // calls additionally keep the server catalog in step so it stays populated
+  // and authoritative — every recipe row resolves its display name through it
+  // (see the hydration effect above), so a rename/merge/delete here is what
+  // propagates the change everywhere a row references that ingredient by id.
+  function saveCatalogEntry(name: string, category: IngredientCategory) {
+    const built = findOrBuildIngredient(name, category, ingredientCatalog);
+    return saveIngredientsRemote([built]).catch(() => {});
+  }
+  function renameCatalogEntry(oldName: string, newName: string, category: IngredientCategory) {
+    const existing = ingredientCatalog.find(
+      (i) => i.name.trim().toLowerCase() === oldName.trim().toLowerCase(),
+    );
+    const target = existing
+      ? { ...existing, name: newName }
+      : findOrBuildIngredient(newName, category, ingredientCatalog);
+    return saveIngredientsRemote([target]).catch(() => {});
+  }
+  function deleteCatalogEntryByName(name: string) {
+    const existing = ingredientCatalog.find(
+      (i) => i.name.trim().toLowerCase() === name.trim().toLowerCase(),
+    );
+    if (!existing) return Promise.resolve();
+    return deleteIngredientsRemote([existing.id]).catch(() => {});
+  }
+  // Mirrors a confirmed manual ingredient merge (any source names -> one
+  // target name) into the server catalog: creates the target if it's not in
+  // the catalog yet (e.g. it only ever lived in a local list), then merges any
+  // sources the catalog already knows about into it. Sources with no catalog
+  // entry simply have nothing to merge server-side — they were never
+  // referenced by id, so no recipe row depends on the merge propagating there.
+  async function mergeCatalogEntries(sourceNames: string[], targetName: string): Promise<void> {
+    try {
+      let target = ingredientCatalog.find(
+        (i) => i.name.trim().toLowerCase() === targetName.trim().toLowerCase(),
+      );
+      if (!target) {
+        const built = findOrBuildIngredient(targetName, "general", ingredientCatalog);
+        const saved = await saveIngredientsRemote([built]);
+        target = saved.find((i) => i.id === built.id) ?? built;
+      }
+      const sourceIds = sourceNames
+        .map(
+          (name) =>
+            ingredientCatalog.find((i) => i.name.trim().toLowerCase() === name.trim().toLowerCase())
+              ?.id,
+        )
+        .filter((id): id is string => !!id && id !== target!.id);
+      if (sourceIds.length > 0) await mergeIngredientsRemote(sourceIds, target.id);
+    } catch {
+      // Best-effort: the local merge above already succeeded; the catalog will
+      // self-heal next time these names are touched.
+    }
   }
 
   const [pepTypes, setPepTypes] = useState<string[]>(() => {
@@ -2148,6 +2218,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("pepTypes", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "pep");
   }
 
   function removePepType(name: string) {
@@ -2157,6 +2228,7 @@ export default function Home() {
     saveList(PEP_TYPES_KEY, updated);
     tombstoneDeleted("pepTypes", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   const [dieTypes, setDieTypes] = useState<string[]>(() =>
@@ -2196,6 +2268,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("cheeseIngredients", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "cheese");
   }
 
   function removeCheeseIngredient(name: string) {
@@ -2204,6 +2277,7 @@ export default function Home() {
     saveList(CHEESE_INGREDIENTS_KEY, updated);
     tombstoneDeleted("cheeseIngredients", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   const [mixIngredients, setMixIngredients] = useState<string[]>(() =>
@@ -2219,6 +2293,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("mixIngredients", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "mix");
   }
 
   function removeMixIngredient(name: string) {
@@ -2227,6 +2302,7 @@ export default function Home() {
     saveList(MIX_INGREDIENTS_KEY, updated);
     tombstoneDeleted("mixIngredients", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   const [doughIngredients, setDoughIngredients] = useState<string[]>(() =>
@@ -2242,6 +2318,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("doughIngredients", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "dough");
   }
 
   function removeDoughIngredient(name: string) {
@@ -2250,6 +2327,7 @@ export default function Home() {
     saveList(DOUGH_INGREDIENTS_KEY, updated);
     tombstoneDeleted("doughIngredients", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   const [doughRecipeNames, setDoughRecipeNames] = useState<string[]>(() =>
@@ -2286,6 +2364,7 @@ export default function Home() {
     clearMergedAwayBoth(trimmed);
     clearDeleted("frontlineIngredients", trimmed);
     schedulePush(dayStateRef.current);
+    void saveCatalogEntry(trimmed, "frontline");
   }
   function removeFrontlineIngredient(name: string) {
     const updated = frontlineIngredients.filter(t => t !== name);
@@ -2293,6 +2372,7 @@ export default function Home() {
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
     tombstoneDeleted("frontlineIngredients", name);
     schedulePush(dayStateRef.current);
+    void deleteCatalogEntryByName(name);
   }
 
   const [frontlineRecipeNames, setFrontlineRecipeNames] = useState<string[]>(() =>
@@ -2494,6 +2574,40 @@ export default function Home() {
   });
 
   const v = form.watch();
+
+  // Server ingredient catalog (Task #102): factory-wide, stable ids that
+  // recipe rows reference. Migrating local option lists into it once, and
+  // keeping the current run's recipe rows resolved against it, is enough to
+  // make rename/merge/delete a server operation going forward without
+  // touching every historical surface (profiles/templates/history keep
+  // whatever name was cached until next edited — never lost, just not
+  // eagerly rewritten).
+  const { items: ingredientCatalog } = useIngredients();
+  useEffect(() => {
+    void migrateIngredientListsToCatalogIfNeeded(ingredientCatalog).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (ingredientCatalog.length === 0) return;
+    const hydrated = hydrateRecipeRowsWithCatalog(form.getValues(), ingredientCatalog);
+    (
+      [
+        "doughRecipe",
+        "app1CheeseRecipe",
+        "app2CheeseRecipe",
+        "app3CheeseRecipe",
+        "app4CheeseRecipe",
+        "frontlineRecipe",
+      ] as const
+    ).forEach((key) => {
+      const current = form.getValues(key);
+      const next = hydrated[key];
+      if (JSON.stringify(current) !== JSON.stringify(next)) {
+        form.setValue(key, next as never, { shouldDirty: false });
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ingredientCatalog]);
 
   // Food-safety advisory: allergen transitions across the day's run sequence.
   // The current run uses the live form value; others read persisted run values.
@@ -3504,6 +3618,7 @@ export default function Home() {
       // the merged data shows immediately and the live-sync push carries the
       // merged lists — without tearing down the open Merge panel via a reload.
       applyIngredientMerge(map);
+      void mergeCatalogEntries(srcs, tgt);
       // Persist the merged-away source names to the DURABLE factory-wide
       // tombstone (best effort). Unlike the per-day sync blob, this survives a
       // day boundary and reaches a device that was offline during the merge, so
