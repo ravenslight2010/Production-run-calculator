@@ -325,6 +325,44 @@ describe("linkSpecImportCheeseToExisting", () => {
     };
     expect(linkSpecImportCheeseToExisting(parsed, ["house  blend"])).toBe(parsed);
   });
+
+  it("snaps a name that differs from the saved one only by a filler word (Standard)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    const linked = linkSpecImportCheeseToExisting(parsed, ["Aldo's Standard Cheese Mix"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Aldo's Standard Cheese Mix"]);
+  });
+
+  it("does NOT collapse a MEANINGFUL qualifier (Spicy) onto a different saved recipe", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Spicy Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    expect(linkSpecImportCheeseToExisting(parsed, ["Aldo's Cheese Mix"])).toBe(parsed);
+  });
+
+  it("does NOT auto-link when two distinct saved names collapse to one key (ambiguous)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    // Facility deliberately keeps both — importing the bare name must NOT be
+    // silently relabeled to an arbitrary one of them.
+    expect(
+      linkSpecImportCheeseToExisting(parsed, ["Aldo's Cheese Mix", "Aldo's Standard Cheese Mix"]),
+    ).toBe(parsed);
+  });
+
+  it("still links when the same saved name appears twice (duplicate, not a conflict)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("aldos cheese mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    const linked = linkSpecImportCheeseToExisting(parsed, ["Aldo's Cheese Mix", "Aldo's Cheese Mix"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Aldo's Cheese Mix"]);
+  });
 });
 
 describe("linkSpecImportNamedRecipesToExisting", () => {

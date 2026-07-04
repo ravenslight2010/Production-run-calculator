@@ -169,17 +169,23 @@ export function normalizeMixes(input: unknown): Mix[] {
  */
 // Loose match key mirroring @workspace/spec-import's specImportNameMatchKey:
 // lowercase, drop apostrophes/quotes, fold other punctuation to a single space,
-// collapse whitespace. So an imported mix that differs from an existing one only
-// in case / punctuation / spacing ("Aldo's Mix" vs "Aldos Mix") links to the mix
-// the manager already keeps instead of creating a duplicate. (Kept in lockstep
-// with the spec-import helper of the same behavior; duplicated here to avoid a
-// cross-lib dependency for a five-line pure function.)
+// collapse whitespace, and drop generic "default version" filler tokens
+// ("standard"/"regular"). So an imported mix that differs from an existing one
+// only in case / punctuation / spacing / a filler word ("Aldo's Cheese Mix" vs
+// "Aldo's Standard Cheese Mix") links to the mix the manager already keeps
+// instead of creating a duplicate. (Kept in lockstep with the spec-import helper
+// of the same behavior; duplicated here to avoid a cross-lib dependency.)
+const MIX_FILLER_TOKENS = new Set(["standard", "regular"]);
 function mixNameMatchKey(name: string): string {
-  return (name ?? "")
+  const base = (name ?? "")
     .toLowerCase()
     .replace(/['’`]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  if (!base) return "";
+  const tokens = base.split(" ");
+  const kept = tokens.filter((t) => !MIX_FILLER_TOKENS.has(t));
+  return (kept.length ? kept : tokens).join(" ");
 }
 
 export function addSpecMixesIfAbsent(

@@ -425,24 +425,67 @@ export function collectSpecImportCheeseRecipes(
 }
 
 /**
+ * Generic "default version" filler words that carry no distinguishing meaning in
+ * a master-data name, so an import that includes or omits them still refers to
+ * the SAME item ("Aldo's Cheese Mix" == "Aldo's Standard Cheese Mix"). Dropped
+ * (as whole tokens only) when building a match key. Deliberately tiny and
+ * curated — a MEANINGFUL qualifier ("Spicy", "Premium", "Light", "Whole Milk")
+ * is never listed, so two genuinely different products still stay apart.
+ */
+const SPEC_IMPORT_FILLER_TOKENS = new Set(["standard", "regular"]);
+
+/**
  * Shared loose match key for snapping an imported master-data name onto an
  * EXISTING saved one. Lowercases, drops apostrophes/quotes so "Aldo's" and
  * "Aldos" collapse (instead of splitting into "aldo s" vs "aldos"), folds any
- * other punctuation to a single space, and collapses whitespace. Deliberately
- * conservative (no fuzzy / edit-distance matching) so two genuinely different
- * names never collide. Used by every spec-import "link to existing" pass
- * (cheese / dough / sauce recipes, die types).
+ * other punctuation to a single space, collapses whitespace, and drops generic
+ * "default version" filler tokens (see SPEC_IMPORT_FILLER_TOKENS) so "Aldo's
+ * Cheese Mix" links to a saved "Aldo's Standard Cheese Mix" instead of forking a
+ * duplicate. Still deliberately conservative (no fuzzy / edit-distance matching)
+ * so two genuinely different names never collide. Used by every spec-import
+ * "link to existing" pass (cheese / dough / sauce recipes, die types).
  */
 export function specImportNameMatchKey(name: string): string {
-  return (name ?? "")
+  const base = (name ?? "")
     .toLowerCase()
     .replace(/['’`]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+  if (!base) return "";
+  const tokens = base.split(" ");
+  const kept = tokens.filter((t) => !SPEC_IMPORT_FILLER_TOKENS.has(t));
+  // If a name is ONLY filler words ("Standard"), keep them so it still keys to
+  // something (and only matches another all-filler name), never to "".
+  return (kept.length ? kept : tokens).join(" ");
 }
 
 function cheeseNameMatchKey(name: string): string {
   return specImportNameMatchKey(name);
+}
+
+/**
+ * Build a loose-key → EXACT existing-name map for a "link to existing" pass, with
+ * an AMBIGUITY GUARD: if two genuinely DIFFERENT saved names collapse to the same
+ * loose key (e.g. a facility deliberately keeps both "Cheese Mix" AND "Standard
+ * Cheese Mix" as distinct recipes), that key is DROPPED so an import never gets
+ * silently relabeled to an arbitrary one of them — the imported name is left as-is
+ * for the user to resolve. (Duplicate saved entries of the SAME name, ci, are not
+ * a conflict.) First distinct name otherwise wins. Pure.
+ */
+function buildLinkKeyMap(names: ReadonlyArray<string>): Map<string, string> {
+  const byKey = new Map<string, string>();
+  const ambiguous = new Set<string>();
+  for (const n of names) {
+    const name = (n ?? "").trim();
+    if (!name) continue;
+    const key = specImportNameMatchKey(name);
+    if (!key) continue;
+    const prior = byKey.get(key);
+    if (prior === undefined) byKey.set(key, name);
+    else if (prior.toLowerCase() !== name.toLowerCase()) ambiguous.add(key);
+  }
+  for (const k of ambiguous) byKey.delete(k);
+  return byKey;
 }
 
 /**
@@ -467,13 +510,7 @@ export function linkSpecImportCheeseToExisting(
   parsed: ParsedSpecImport,
   existingCheeseNames: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = new Map<string, string>();
-  for (const n of existingCheeseNames) {
-    const name = (n ?? "").trim();
-    if (!name) continue;
-    const key = cheeseNameMatchKey(name);
-    if (key && !byKey.has(key)) byKey.set(key, name);
-  }
+  const byKey = buildLinkKeyMap(existingCheeseNames);
   if (byKey.size === 0) return parsed;
   const noUserMixes = new Set<string>();
   let changed = false;
@@ -513,13 +550,7 @@ export function linkSpecImportNamedRecipesToExisting(
   kind: "dough" | "sauce",
   existingNames: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = new Map<string, string>();
-  for (const n of existingNames) {
-    const name = (n ?? "").trim();
-    if (!name) continue;
-    const key = specImportNameMatchKey(name);
-    if (key && !byKey.has(key)) byKey.set(key, name);
-  }
+  const byKey = buildLinkKeyMap(existingNames);
   if (byKey.size === 0) return parsed;
   let changed = false;
   const recipes = (parsed.recipes ?? []).map((r) => {
@@ -564,13 +595,7 @@ export function linkSpecImportDieTypesToExisting(
   parsed: ParsedSpecImport,
   existingDieTypes: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = new Map<string, string>();
-  for (const n of existingDieTypes) {
-    const name = (n ?? "").trim();
-    if (!name) continue;
-    const key = specImportNameMatchKey(name);
-    if (key && !byKey.has(key)) byKey.set(key, name);
-  }
+  const byKey = buildLinkKeyMap(existingDieTypes);
   if (byKey.size === 0) return parsed;
   let changed = false;
   const profiles = (parsed.profiles ?? []).map((p) => {

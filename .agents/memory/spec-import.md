@@ -72,9 +72,27 @@ applying (no per-item prompts).
   dough/sauce recipes + mixes did NOT and would create disconnected copies.
 - **Shared loose key:** `specImportNameMatchKey` (exported from `@workspace/spec-import`)
   = lowercase, drop `'`/`` ` ``/`’`, fold other punctuation to a single space,
-  collapse whitespace. **Deliberately conservative — it KEEPS word spacing, so
-  `"12in"` and `"12 in"` stay distinct.** `mixNameMatchKey` in `@workspace/mixes`
-  duplicates the same 5-line logic (avoids a cross-lib dep — keep them in lockstep).
+  collapse whitespace, then drop generic "default version" filler TOKENS
+  (`SPEC_IMPORT_FILLER_TOKENS` = `standard`, `regular`) so `"Aldo's Cheese Mix"`
+  links to a saved `"Aldo's Standard Cheese Mix"` instead of forking a duplicate.
+  **Still conservative — KEEPS word spacing (`"12in"`≠`"12 in"`) and keeps
+  MEANINGFUL qualifiers (`Spicy`/`Premium`/`Light`), so genuinely different
+  products stay apart.** All-filler names (`"Standard"`) fall back to the
+  unstripped tokens (never key to `""`). `mixNameMatchKey` in `@workspace/mixes`
+  duplicates the SAME logic incl. the filler set (avoids a cross-lib dep — keep
+  them in lockstep). **Why filler-stripping:** `"Aldo's Cheese Mix"` and the
+  saved `"Aldo's Standard Cheese Mix"` are the same blend (both contain "cheese"
+  so both live in the CHEESE pool, not Mixes — see `specImportCheeseRecipeIsMix`);
+  the earlier space/punct-only key created a duplicate cheese recipe.
+- **Ambiguity guard (`buildLinkKeyMap`) — REQUIRED with filler stripping.** The
+  three rename passes (cheese/dough/sauce/die) build their key→name map via
+  `buildLinkKeyMap`, which DROPS any loose key that two genuinely different saved
+  names collapse to (e.g. a facility keeps BOTH "Cheese Mix" and "Standard Cheese
+  Mix"), so an import is never silently relabeled to an arbitrary one — it's left
+  as-is for the user. Duplicate saved entries of the SAME name (ci) are not a
+  conflict. **Why:** filler stripping widens what collides, so without this guard
+  loose matching becomes a wrong-link risk. The Mixes path (`addSpecMixesIfAbsent`)
+  only SKIPS-adding, never renames, so it can't mislink and needs no guard.
 - **Snap point for die/dough/sauce = the shared `linkParsed` prepare step** (NOT
   commit): pure, parity-clean, visible in the editable review, and works even where
   the web dough/sauce SERVER-side pool add isn't wired yet. Fns
