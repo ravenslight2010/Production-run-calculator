@@ -66,7 +66,26 @@ the open tab to full-reload (HMR ws reconnect → location.reload()), which is w
 actually loads the new marker; a Vite HMR patch alone does NOT re-run the module-
 scope wipe. The reloaded (now-empty) tab must find daily_sync empty on its first
 GET or it re-adopts again — so keep the marker bump + daily_sync truncate tight
-together, right before the Web restart. Marker now at `h`.
+together, right before the Web restart.
+
+**The trap that made it take several rounds (2026-07-04):** a marker wipe that runs
+while the server row is still populated will wipe, then immediately re-adopt the
+server data on its GET, then re-push it — AND the marker is now set, so no later
+reload will ever wipe again. Symptom: a freshly-pushed daily_sync row (age a few
+seconds) containing the user's REAL master-data (brands/flavors/dieTypes/mixes/
+recipes) even though the code has no seed for those names. The ONLY reliable
+recipe: (1) BUMP the marker to a brand-new value so the wipe is guaranteed to run
+again (a previously-set marker skips the wipe and the client keeps its re-adopted
+data); (2) take the API **down** so nothing can push/re-adopt — `pkill -f
+"index[.]mjs"` (use a regex char-class so the pattern in your OWN command line
+doesn't self-match; `pkill -f "dist/index.mjs"` literal kills the shell → exit
+143; killed API workflows stay down until you restart them); (3) TRUNCATE
+daily_sync while API is down; (4) restart ALL client workflows (Web App AND
+artifacts/run-calculator: web AND mobile expo — there are two web workflows;
+whichever serves the canvas iframe must be reloaded) so every open surface
+reloads and runs the fresh-marker wipe while API is unreachable (GET fails →
+stays empty); (5) bring the API back up — the now-empty clients push empty and it
+holds. Verify daily_sync stays 0 for ~20s+ after API is up. Marker now at `i`.
 
 Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
 dead seed helpers can be retired in a later cleanup once all devices have run
