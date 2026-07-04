@@ -3002,11 +3002,11 @@ export default function Home() {
   const mergeUniverse = useMemo(() => {
     switch (mergeCategory) {
       // The four recipe categories merge that category's RECIPE NAMES (the
-      // picklist labels), not ingredient names. Mixes offers only user-added
-      // names as sources — factory-preset mix names can't be merged away (the
-      // seed would re-add them); a factory name is still a valid TARGET (typed
-      // or picked from the datalist, which unions in the presets below).
-      case "mixes": return dedupSorted(mixRecipeNames);
+      // picklist labels), not ingredient names. Mixes are server-backed
+      // master-data now (the Mixes section), so the picker shows the SAME live
+      // server pool — not the dormant local `mixRecipeNames` list, which held
+      // legacy names that no longer appear in the app.
+      case "mixes": return dedupSorted(serverMixNames);
       case "dough": return dedupSorted(doughRecipeNames);
       case "sauce": return dedupSorted(frontlineRecipeNames);
       case "cheese": {
@@ -3015,7 +3015,7 @@ export default function Home() {
         // local `cheeseRecipeNames` list, which held legacy names that no longer
         // appear in the app. A name that also lives in the user Mix list is a
         // mix, not a cheese recipe, so keep the Cheese tab mix-free.
-        const mixNameSet = new Set(mixRecipeNames.map((n) => n.toLowerCase()));
+        const mixNameSet = new Set(serverMixNames.map((n) => n.toLowerCase()));
         return dedupSorted(serverCheeseNames.filter((n) => !mixNameSet.has(n.toLowerCase())));
       }
       case "brandflavor":
@@ -3036,6 +3036,7 @@ export default function Home() {
             ...cheeseRecipeNames,
             ...MIX_SEED.mixRecipeNames,
             ...mixRecipeNames,
+            ...serverMixNames,
           ].map((n) => n.toLowerCase()),
         );
         // Stray mix/cheese-recipe names (often ending in "Mix") get imported
@@ -3057,7 +3058,7 @@ export default function Home() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, allMixRecipeOptions]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
 
   // Recipe categories are merged by recipe NAME (not ingredient name).
   const isRecipeNameCategory =
@@ -3118,13 +3119,13 @@ export default function Home() {
   // keep (the common case) instead of hunting for it in the full list.
   const mergeTargetOptions = useMemo(
     () => {
-      const base = mergeCategory === "mixes" ? dedupSorted(allMixRecipeOptions) : mergeUniverseRanked;
+      const base = mergeCategory === "mixes" ? dedupSorted([...serverMixNames, ...allMixRecipeOptions]) : mergeUniverseRanked;
       if (mergeSources.length === 0) return base;
       const chosen = new Set(mergeSources);
       return [...mergeSources, ...base.filter(n => !chosen.has(n))];
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mergeCategory, allMixRecipeOptions, mergeUniverseRanked, mergeSources],
+    [mergeCategory, serverMixNames, allMixRecipeOptions, mergeUniverseRanked, mergeSources],
   );
 
   // Gather every value surface a merge would touch, so the confirmation preview
@@ -3177,7 +3178,7 @@ export default function Home() {
       dough: doughRecipeNames,
       sauce: frontlineRecipeNames,
       cheese: serverCheeseNames,
-      mixes: mixRecipeNames,
+      mixes: serverMixNames,
     };
     const { settingsObjects } = collectMergeSurfaces();
     const presetKeyMaps: Record<string, unknown>[] =
@@ -3616,18 +3617,14 @@ export default function Home() {
   ): Promise<boolean> {
     const sourcesAll = sourcesArg ?? mergeSources;
     const tgt = targetArg ?? mergeTarget;
-    // Guardrail: on the Mixes tab only user-added names are mergeable away —
-    // factory-preset mix names would be re-seeded, so silently drop them.
+    // Guardrail: only real (server) mix names are mergeable — mirrors the
+    // Cheese tab, which merges over the live server pool.
     const rawSources = category === "mixes"
-      ? sourcesAll.filter((s) => mixRecipeNames.includes(s))
+      ? sourcesAll.filter((s) => serverMixNames.includes(s))
       : sourcesAll;
     const map = buildMergeMap(rawSources, tgt);
     if (Object.keys(map).length === 0) {
-      setMergeError(
-        category === "mixes" && sourcesAll.length > 0
-          ? "Factory mix recipes can't be merged away — pick a user-added recipe as the source."
-          : "Pick at least one source and a different target.",
-      );
+      setMergeError("Pick at least one source and a different target.");
       return false;
     }
     setMergeBusy(true);
@@ -9090,7 +9087,7 @@ export default function Home() {
                           ? (mergeBfMode === "brands"
                             ? "No brands to merge yet."
                             : (mergeBfBrand ? `No flavors for ${mergeBfBrand} to merge yet.` : "Pick a brand to see its flavors."))
-                          : mergeCategory === "mixes" ? "No user-added mix recipe names to merge yet."
+                          : mergeCategory === "mixes" ? "No mix recipes to merge yet."
                           : mergeCategory === "dough" ? "No dough recipe names to merge yet."
                           : mergeCategory === "sauce" ? "No sauce recipe names to merge yet."
                           : mergeCategory === "cheese" ? "No cheese recipe names to merge yet."

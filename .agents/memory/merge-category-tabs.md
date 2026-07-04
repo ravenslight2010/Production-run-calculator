@@ -14,6 +14,15 @@ web + mobile). All the `"mixes"` wiring (universe, suggest scope, target options
 tab button is absent, so removing/re-adding the tab is a one-line change to the
 category-selector list in each app — don't strip the underlying handling.
 
+**Web Mixes AND Cheese merge over the SERVER pool, not local lists.** Both are
+server master-data now, so the web merge flow sources from `serverMixNames` /
+`serverCheeseNames` (useMemo over `useMixes()` / `useCheeseRecipes()`), NOT the
+dormant local `mixRecipeNames` / `cheeseRecipeNames`. Repoint EVERY merge site
+together (universe, cross-tab exclusion sets, target options, surfaces map,
+`handleApplyRecipeNameMerge` guardrail, dep arrays) or the tab shows phantom or
+empty names. Limitation: merge only re-points day-state refs + tombstones —
+it never deletes the server master-data row.
+
 ## WEB: category tabs merge RECIPE NAMES, Ingredients tab merges ingredients
 (Web-only during the parity pause; see `.local/parity-pause-log.md`. Mobile still
 merges ingredient names on every tab.)
