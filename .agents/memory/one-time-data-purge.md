@@ -87,6 +87,20 @@ reloads and runs the fresh-marker wipe while API is unreachable (GET fails →
 stays empty); (5) bring the API back up — the now-empty clients push empty and it
 holds. Verify daily_sync stays 0 for ~20s+ after API is up. Marker now at `i`.
 
+**Decisive gotcha — the CANVAS IFRAME does NOT auto-reload on a Vite workflow
+restart (2026-07-04).** Restarting the web workflows reloads normal browser tabs
+(HMR ws reconnect → location.reload()) but the Replit canvas iframe
+(`artifact:v3:artifacts/run-calculator`) keeps running its old bundle, so the
+marker wipe never runs there and it keeps re-pushing the user's real master-data.
+Diagnosis: a daily_sync row that reappears seconds after you truncate, containing
+the user's real brands/flavors, while your DB checks show the wipe "should" have
+run. There is NO agent tool to force-reload the canvas iframe — the USER must
+refresh it. Reliable finish: pause the API + truncate daily_sync (steps above),
+then ASK THE USER to refresh the app view while the API stays down (the module-
+scope wipe at home.tsx runs on bundle load regardless of API reachability; GET
+then fails so it can't re-adopt), wait for their confirmation, THEN bring the API
+back up. This is what finally stuck after ~5 failed restart-only rounds.
+
 Auth untouched (web httpOnly cookie, mobile SecureStore). The wipe code and the
 dead seed helpers can be retired in a later cleanup once all devices have run
 the final wipe.
