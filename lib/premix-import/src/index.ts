@@ -384,6 +384,13 @@ export type PremixKnown = {
 
 const MIX_SUFFIX_RE = /\b(veggie\s+mix|cheese\s+mix|sauce\s+mix|topping\s+mix|mix)\s*$/i;
 
+/** Drop a trailing " (N)" tab-dedupe suffix our exporter adds to unique-ify duplicate product tabs. */
+function stripSheetDedupeSuffix(s: string): string {
+  // Require the literal exporter pattern (space + "(N)") so a manually-authored
+  // name ending in "(2)" without a space isn't stripped.
+  return (s ?? "").replace(/\s\(\d+\)\s*$/, "").trim();
+}
+
 /** Strip trailing "… Mix" wording so a flavor reads cleanly. */
 function stripMixSuffix(s: string): string {
   return s.replace(MIX_SUFFIX_RE, "").trim();
@@ -448,7 +455,12 @@ export function splitPremixName(
   // Prefer the sheet TAB name: real workbooks name each tab after the product
   // (brand + flavor) while the block name inside is often a shared base-mix
   // label (e.g. "White Fajita Veggie Mix") that would mis-attribute the mix.
-  const candidates = [sheetName, name].map((c) => c.trim()).filter(Boolean);
+  // Strip a trailing " (N)" tab-dedupe suffix off the TAB name only — our own
+  // exporter appends it to make duplicate product tabs unique, and if it leaks
+  // into the flavor guess (e.g. "Deluxe (2)") the product fails to ground.
+  const candidates = [stripSheetDedupeSuffix(sheetName), name]
+    .map((c) => c.trim())
+    .filter(Boolean);
   const sorted = brands
     .map((brand) => ({ brand, toks: brandTokens(brand).map((t) => t.norm) }))
     .filter((b) => b.toks.length > 0)

@@ -287,6 +287,14 @@ describe("name grounding", () => {
     expect(splitPremixName("Mix", "SOB Supreme", ["SMD"]).brand).toBe("");
   });
 
+  it("ignores a trailing ' (N)' tab-dedupe suffix when grounding the flavor", () => {
+    // Our exporter unique-ifies duplicate product tabs as "Bobo's Deluxe (2)".
+    expect(splitPremixName("Bobo's Deluxe Mix", "Bobo's Deluxe (2)", ["Bobo's"])).toEqual({
+      brand: "Bobo's",
+      flavor: "Deluxe",
+    });
+  });
+
   it("prefers the longest (most-word) brand when several prefix-match", () => {
     expect(
       splitPremixName("Mix", "Lowes 7in Red Fajita", ["Lowes", "Lowes 7in"]),
