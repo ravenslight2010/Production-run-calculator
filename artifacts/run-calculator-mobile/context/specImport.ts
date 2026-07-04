@@ -20,6 +20,7 @@ import {
   canonicalize,
   collectMatchCandidates,
   collectSpecAliases,
+  collectSpecImportMixes,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -63,6 +64,9 @@ import {
 } from "./parseSpecSheet";
 import { requestMatchImport } from "./matchImport";
 import { saveAiCorrections } from "./aiCorrections";
+import { fetchMixes, saveMixes } from "./mixes";
+import { specMixDraftToMix } from "@workspace/premix-import";
+import { addSpecMixesIfAbsent, type Mix } from "@workspace/mixes";
 import type { ReviewVerdict } from "@workspace/ai-review";
 
 export type SpecFlaggedItem = { label: string; review: ReviewVerdict };
@@ -669,12 +673,43 @@ export async function prepareSpecImportMulti(
   return { parsed, summary, newAliases, flagged, discrepancies, ...(note ? { note } : {}) };
 }
 
-/** Apply a prepared import: write profiles + recipes, then persist new aliases. */
+/**
+ * Apply a prepared import: write profiles + recipes, persist new aliases, and
+ * add any mixes detected in the sheet to the factory-wide Mixes list. Returns
+ * how many new mixes were added so the UI can refresh the Mixes screen.
+ * Mirrors the web commitSpecImport (replit.md parity).
+ */
 export async function commitSpecImport(
   prepared: SpecImportPrepared,
   store: SpecImportStore,
-): Promise<void> {
+): Promise<{ mixesAdded: number }> {
   store.apply(prepared.parsed);
+
+  // Add any mixes detected in this import to the factory-wide Mixes list so they
+  // appear on the Mixes screen alongside premix-imported ones. Manager-gated on
+  // the server (saveMixes → 403 for non-managers) and fully best-effort: the
+  // recipes already applied locally, so a failed mix sync must never surface as
+  // an import error. New mixes are matched by name against existing ones so an
+  // import never duplicates (or blanks) a mix the manager already keeps; a spec
+  // sheet can't express per-pizza/batch amounts, so they arrive with those at 0
+  // for the manager to fill in the editor.
+  let mixesAdded = 0;
+  try {
+    const existingMixes = await fetchMixes();
+    const userMixNamesLower = new Set(existingMixes.map((m) => m.name.trim().toLowerCase()));
+    const candidates = collectSpecImportMixes(prepared.parsed, userMixNamesLower)
+      .map((d) => specMixDraftToMix(d))
+      .filter((m): m is Mix => m != null);
+    if (candidates.length) {
+      const { merged, added } = addSpecMixesIfAbsent(existingMixes, candidates);
+      if (added > 0) {
+        await saveMixes(merged);
+        mixesAdded = added;
+      }
+    }
+  } catch {
+    // Best-effort (non-manager 403, offline, sync disabled) — import applied.
+  }
 
   // Snapshot this import server-side (factory-wide; only the two most recent are
   // kept) so it can later be cross-referenced against the current recipe library
@@ -705,4 +740,6 @@ export async function commitSpecImport(
       })),
     );
   }
+
+  return { mixesAdded };
 }

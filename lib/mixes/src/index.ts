@@ -158,6 +158,32 @@ export function normalizeMixes(input: unknown): Mix[] {
   return Array.from(byId.values());
 }
 
+/**
+ * Add spec-import-detected mixes to the existing list, skipping any whose name
+ * already exists (case-insensitive). A spec sheet can only supply a mix's
+ * ingredient NAMES (per-pizza amount and batch size come in blank), so this
+ * only ADDS mixes the manager doesn't already keep — it never clobbers an
+ * existing hand-made or premix-imported mix's real amounts with blanks, and
+ * never produces a duplicate of it. Pure. Returns the merged list plus how many
+ * mixes were actually added.
+ */
+export function addSpecMixesIfAbsent(
+  existing: ReadonlyArray<Mix>,
+  candidates: ReadonlyArray<Mix>,
+): { merged: Mix[]; added: number } {
+  const haveNames = new Set(existing.map((m) => m.name.trim().toLowerCase()));
+  const merged: Mix[] = [...existing];
+  let added = 0;
+  for (const c of candidates) {
+    const key = c.name.trim().toLowerCase();
+    if (!key || haveNames.has(key)) continue;
+    haveNames.add(key);
+    merged.push(c);
+    added++;
+  }
+  return { merged, added };
+}
+
 // ---------------------------------------------------------------------------
 // Plan building
 // ---------------------------------------------------------------------------

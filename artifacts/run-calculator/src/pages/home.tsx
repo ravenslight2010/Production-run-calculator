@@ -6206,9 +6206,12 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      await commitSpecImport(toCommit);
+      const { mixesAdded } = await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
+      // Any mixes detected in the sheet were added to the factory-wide Mixes
+      // list — refresh the Mixes screen so they appear right away.
+      if (mixesAdded > 0) void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
       setShowSpecImport(false);
       setSpecImportPrepared(null);
       // Fire-and-forget: a bump runs the merge-check effect after the new lists
@@ -6217,11 +6220,16 @@ export default function Home() {
       // Auto-run spec cross-reference with the newly saved sheet.
       setSpecReconcileSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
+      const mixNote =
+        mixesAdded > 0
+          ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to the Mixes screen — set batch size and per-pizza amounts there.`
+          : "";
       toast({
         title: "Spec sheet imported",
-        description: importedRecipes
-          ? "Brands, flavors, and recipes have been added."
-          : "Brands and flavors have been added.",
+        description:
+          (importedRecipes
+            ? "Brands, flavors, and recipes have been added."
+            : "Brands and flavors have been added.") + mixNote,
       });
     } catch (err) {
       setSpecImportError(

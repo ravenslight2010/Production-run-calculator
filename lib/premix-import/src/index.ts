@@ -27,6 +27,7 @@ import {
   type CanonicalResult,
   type SheetGrid,
   type SpecImportAlias,
+  type SpecMixDraft,
 } from "@workspace/spec-import";
 import { normalizeMix, type Mix, type MixComponent } from "@workspace/mixes";
 
@@ -672,6 +673,34 @@ export function premixToMix(parsed: ParsedPremix): Mix | null {
     batchSize: parsed.batchSize,
     daysEarly: parsed.daysEarly,
     notes: parsed.notes ?? "",
+    amountAlreadyMade: 0,
+    components,
+    enabled: true,
+  });
+}
+
+/**
+ * Convert a spec-import-detected mix draft into a normalized Mix. Uses the SAME
+ * deterministic id as the premix importer (premixId) so a mix first seen in a
+ * spec sheet and later re-imported from a premix sheet converge onto ONE row
+ * instead of duplicating. The amounts a spec sheet cannot express — per-pizza
+ * ounces and batch size — are left at 0 for the manager to fill in the Mixes
+ * editor; only the ingredient names carry over. Returns null for a blank name.
+ */
+export function specMixDraftToMix(draft: SpecMixDraft): Mix | null {
+  const name = draft.name.trim();
+  if (!name) return null;
+  const components: MixComponent[] = draft.componentIngredients
+    .map((ingredient) => ingredient.trim())
+    .filter((ingredient) => ingredient.length > 0)
+    .map((ingredient) => ({ ingredient, perPizza: 0 }));
+  return normalizeMix({
+    id: premixId({ brand: draft.brand, flavor: draft.flavor, name }),
+    name,
+    brand: draft.brand,
+    flavor: draft.flavor,
+    batchSize: 0,
+    daysEarly: 0,
     amountAlreadyMade: 0,
     components,
     enabled: true,

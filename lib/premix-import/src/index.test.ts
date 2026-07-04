@@ -7,6 +7,7 @@ import {
   matchFlavorBySubsequence,
   premixId,
   premixToMix,
+  specMixDraftToMix,
   sanitizePremixMatches,
   applyPremixMatches,
   summarizePremixImport,
@@ -17,6 +18,11 @@ import {
   type PremixKnown,
   type SheetGrid,
 } from "./index";
+import {
+  collectSpecImportMixes,
+  type ParsedRecipe,
+  type ParsedSpecImport,
+} from "@workspace/spec-import";
 
 // Single-block tab modeled on the real "Bobos Deluxe" sheet (ingredient col 0).
 const BOBOS: SheetGrid = {
@@ -510,5 +516,121 @@ describe("collectPremixFreezerPulls", () => {
   it("skips mixes with a note but no specific ingredient, and mixes with no note", () => {
     const parsed = parsePremixWorkbook([SPINACH, BOBOS]);
     expect(collectPremixFreezerPulls(parsed)).toEqual({});
+  });
+});
+
+// ── Spec-import → Mixes routing ──────────────────────────────────────────────
+
+function specRecipe(r: Partial<ParsedRecipe>): ParsedRecipe {
+  return { kind: "cheese", name: "", rows: [], ...r };
+}
+
+function specParse(recipes: ParsedRecipe[]): ParsedSpecImport {
+  return { profiles: [], recipes };
+}
+
+describe("collectSpecImportMixes", () => {
+  it("routes a 2+ ingredient cheese recipe named like a mix, carrying names + scope", () => {
+    const parsed = specParse([
+      specRecipe({
+        name: "White Fajita Mix",
+        brand: "Hannaford",
+        flavor: "Fajita",
+        rows: [
+          { ingredient: "Mozzarella", lbs: 3 },
+          { ingredient: "Cheddar", lbs: 1 },
+        ],
+      }),
+    ]);
+    const mixes = collectSpecImportMixes(parsed, new Set());
+    expect(mixes).toHaveLength(1);
+    expect(mixes[0]).toMatchObject({
+      name: "White Fajita Mix",
+      brand: "Hannaford",
+      flavor: "Fajita",
+      componentIngredients: ["Mozzarella", "Cheddar"],
+    });
+  });
+
+  it("does NOT route a plain cheese recipe or a single-ingredient 'mix'", () => {
+    const parsed = specParse([
+      specRecipe({ name: "Mozzarella", rows: [{ ingredient: "Mozzarella", lbs: 4 }] }),
+      specRecipe({ name: "Blend Mix", rows: [{ ingredient: "Cheddar", lbs: 4 }] }),
+      specRecipe({ name: "Cheese Mix", rows: [
+        { ingredient: "A", lbs: 1 },
+        { ingredient: "B", lbs: 1 },
+      ] }),
+    ]);
+    expect(collectSpecImportMixes(parsed, new Set())).toEqual([]);
+  });
+
+  it("recognizes a recipe named like a mix the user already keeps", () => {
+    const parsed = specParse([
+      specRecipe({ name: "Secret Topping", rows: [
+        { ingredient: "A", lbs: 1 },
+        { ingredient: "B", lbs: 1 },
+      ] }),
+    ]);
+    expect(collectSpecImportMixes(parsed, new Set())).toEqual([]);
+    const mixes = collectSpecImportMixes(parsed, new Set(["secret topping"]));
+    expect(mixes).toHaveLength(1);
+    expect(mixes[0].name).toBe("Secret Topping");
+  });
+
+  it("honors the review-time forcedCategory override both ways", () => {
+    const parsed = specParse([
+      specRecipe({ name: "Force In", forcedCategory: "mix", rows: [{ ingredient: "A", lbs: 1 }] }),
+      specRecipe({ name: "Fajita Mix", forcedCategory: "cheese", rows: [
+        { ingredient: "A", lbs: 1 },
+        { ingredient: "B", lbs: 1 },
+      ] }),
+    ]);
+    const mixes = collectSpecImportMixes(parsed, new Set());
+    expect(mixes.map((m) => m.name)).toEqual(["Force In"]);
+  });
+
+  it("de-dupes by name and drops duplicate ingredient rows", () => {
+    const parsed = specParse([
+      specRecipe({ name: "Buffalo Mix", rows: [
+        { ingredient: "Sauce", lbs: 1 },
+        { ingredient: "sauce", lbs: 2 },
+      ] }),
+      specRecipe({ name: "buffalo mix", rows: [{ ingredient: "X", lbs: 1 }, { ingredient: "Y", lbs: 1 }] }),
+    ]);
+    const mixes = collectSpecImportMixes(parsed, new Set());
+    expect(mixes).toHaveLength(1);
+    expect(mixes[0].componentIngredients).toEqual(["Sauce"]);
+  });
+});
+
+describe("specMixDraftToMix", () => {
+  it("builds a normalized zero-amount Mix carrying only ingredient names", () => {
+    const mix = specMixDraftToMix({
+      name: "White Fajita Mix",
+      brand: "Hannaford",
+      flavor: "Fajita",
+      componentIngredients: ["Mozzarella", "Cheddar"],
+    });
+    expect(mix).not.toBeNull();
+    expect(mix).toMatchObject({
+      name: "White Fajita Mix",
+      brand: "Hannaford",
+      flavor: "Fajita",
+      batchSize: 0,
+      components: [
+        { ingredient: "Mozzarella", perPizza: 0 },
+        { ingredient: "Cheddar", perPizza: 0 },
+      ],
+    });
+  });
+
+  it("shares premixId so a spec mix and a premix of the same product converge", () => {
+    const draft = { name: "Buffalo Mix", brand: "Bob", flavor: "Buffalo", componentIngredients: ["A"] };
+    const mix = specMixDraftToMix(draft);
+    expect(mix!.id).toBe(premixId({ brand: "Bob", flavor: "Buffalo", name: "Buffalo Mix" }));
+  });
+
+  it("returns null for a blank name", () => {
+    expect(specMixDraftToMix({ name: "  ", brand: "", flavor: "", componentIngredients: [] })).toBeNull();
   });
 });

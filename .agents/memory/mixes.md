@@ -101,3 +101,26 @@ merging removes drift and makes the Settings → Mixes editor the one source of 
 - Migration note: local-only mixes (old "Mix" tab / "save as mix" on a run) were NEVER in the
   server `mixes` table — they don't appear in Mixes and a premix reimport only brings back
   mixes that are actually in a sheet; hand-entered ones must be re-added in the Mixes editor.
+
+## Spec-sheet import ALSO seeds server Mixes (2026-07-04)
+Spec-sheet import now adds any detected pre-blended MIXES to the server Mixes list, so a mix
+first seen in a spec sheet shows up on the Mixes screen without a separate premix import.
+- Detection lives in `@workspace/spec-import`: the AI parser only knows dough/sauce/cheese, so
+  mixes arrive as `kind:"cheese"`. `specImportCheeseRecipeIsMix` treats a name as a mix when
+  it's in the user's existing mix-name set OR has standalone word "mix", no "cheese", AND 2+
+  ingredient rows (single-ingredient tables are not mixes). `forcedCategory` review override
+  wins. `collectSpecImportMixes` dedupes by name, pulls brand/flavor from `recipeTargets(r)[0]`.
+- **A spec sheet CANNOT express per-pizza oz or batch size** (its recipe-row `lbs` are ambiguous
+  BATCH-ratio units, NOT per-pizza — verified). So `specMixDraftToMix` (@workspace/premix-import)
+  carries ONLY ingredient names, sets `perPizza/batchSize/daysEarly/amountAlreadyMade = 0`, and
+  reuses `premixId({brand,flavor,name})` so a later premix reimport of the same product converges
+  onto ONE row instead of duplicating.
+- `addSpecMixesIfAbsent` (@workspace/mixes) is ADD-ONLY by ci name: never clobbers an existing
+  hand-made/premix mix's real amounts with blanks, never duplicates. **Why:** blanks-over-real
+  would wipe amounts the manager already filled.
+- Wiring is BEST-EFFORT in both apps' `commitSpecImport` (web `src/specImport.ts`, mobile
+  `context/specImport.ts`): fetchMixes→collect→map→addIfAbsent→saveMixes inside try/catch AFTER
+  the local apply, so a non-manager 403 / offline never fails the already-applied import. Both
+  return `{mixesAdded}`; callers invalidate `["mixes"]` and append a toast note only when >0.
+- Manager-gated (saveMixes is `manage-inventory`); non-managers silently skip the mix write but
+  still get the recipe/profile import.

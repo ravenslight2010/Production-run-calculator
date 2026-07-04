@@ -248,6 +248,94 @@ export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): Parse
 }
 
 /**
+ * Whether a spec-sheet CHEESE-kind recipe name should really be treated as a
+ * MIX (belongs on the Mixes screen) instead of Cheese. The AI importer only
+ * knows dough/sauce/cheese, so pre-blended topping mixes ("White Fajita Mix")
+ * arrive as `kind: "cheese"`. A name is a mix when the user already keeps it in
+ * their mix list (their categorization always wins) OR when it contains the
+ * standalone word "mix" without mentioning cheese AND actually blends 2+
+ * ingredients (a single-ingredient table is not a mix). Pure.
+ */
+export function specImportCheeseRecipeIsMix(
+  name: string,
+  userMixNamesLower: ReadonlySet<string>,
+  ingredientCount: number,
+): boolean {
+  const t = name.trim().toLowerCase();
+  if (!t) return false;
+  if (userMixNamesLower.has(t)) return true;
+  return ingredientCount >= 2 && /\bmix\b/.test(t) && !/cheese/i.test(t);
+}
+
+/**
+ * Whole-recipe mix test: only cheese-kind recipes can route to Mixes; an
+ * explicit review-time category override ("mix"/"cheese" pick in the import
+ * dialog) always wins over the name heuristic. Pure.
+ */
+export function specImportRecipeIsMix(
+  r: ParsedRecipe,
+  userMixNamesLower: ReadonlySet<string>,
+): boolean {
+  if (r.kind !== "cheese") return false;
+  if (r.forcedCategory === "mix") return true;
+  if (r.forcedCategory === "cheese") return false;
+  return specImportCheeseRecipeIsMix(r.name ?? "", userMixNamesLower, r.rows?.length ?? 0);
+}
+
+/**
+ * A mix detected in a parsed spec import, ready to be turned into a server Mix.
+ * A spec sheet only expresses a mix's ingredient NAMES (its batch blend, in
+ * ambiguous ratio units) — never a reliable per-pizza ounce amount or batch
+ * size — so only the names are carried; amounts are filled in the Mixes editor.
+ */
+export type SpecMixDraft = {
+  name: string;
+  brand: string;
+  flavor: string;
+  /** Component ingredient names, de-duped case-insensitively, order preserved. */
+  componentIngredients: string[];
+};
+
+/**
+ * Collect the mixes detected in a parsed spec import (cheese-kind recipes that
+ * route to Mixes per specImportRecipeIsMix), de-duped by name. `userMixNamesLower`
+ * is the lower-cased set of mix names the user already keeps, so a spec recipe
+ * named like an existing mix is recognized as one. Brand/flavor come from the
+ * recipe's first resolved target (its singular brand/flavor unioned with any
+ * targets); a recipe with no complete brand+flavor yields an unscoped mix. Pure.
+ */
+export function collectSpecImportMixes(
+  parsed: ParsedSpecImport,
+  userMixNamesLower: ReadonlySet<string>,
+): SpecMixDraft[] {
+  const out: SpecMixDraft[] = [];
+  const seen = new Set<string>();
+  for (const r of parsed.recipes ?? []) {
+    const name = (r.name ?? "").trim();
+    if (!name || !(r.rows?.length)) continue;
+    if (!specImportRecipeIsMix(r, userMixNamesLower)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const t0 = recipeTargets(r)[0];
+    const brand = (t0?.brand ?? "").trim();
+    const flavor = (t0?.flavor ?? "").trim();
+    const ingSeen = new Set<string>();
+    const componentIngredients: string[] = [];
+    for (const row of r.rows) {
+      const ing = (row.ingredient ?? "").trim();
+      if (!ing) continue;
+      const k = ing.toLowerCase();
+      if (ingSeen.has(k)) continue;
+      ingSeen.add(k);
+      componentIngredients.push(ing);
+    }
+    out.push({ name, brand, flavor, componentIngredients });
+  }
+  return out;
+}
+
+/**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated
  * (case-insensitive). Entries missing a brand or flavor are dropped. Shared by

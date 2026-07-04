@@ -1708,20 +1708,27 @@ export default function MasterDataScreen() {
     // actually imported (that's where standalone-duplicate ingredients arise).
     const importedRecipes = (specPrepared.summary?.totalRecipes ?? 0) > 0;
     try {
-      await commitSpecImport(specPrepared, buildSpecStore());
+      const { mixesAdded } = await commitSpecImport(specPrepared, buildSpecStore());
       setSpecOpen(false);
       setSpecPrepared(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      // Any mixes detected in the sheet were added to the factory-wide Mixes
+      // list — refresh the Mixes screen so they appear right away.
+      if (mixesAdded > 0) void mixesQc.invalidateQueries({ queryKey: ["mixes"] });
       // Fire-and-forget: tells MergeManager to scan the updated lists once.
       if (importedRecipes) setMergeCheckSignal((c) => c + 1);
       // Auto-run spec cross-reference with the newly saved sheet.
       setReconSignal((c) => c + 1);
       setSheetListSignal((c) => c + 1);
+      const mixNote =
+        mixesAdded > 0
+          ? ` ${mixesAdded} mix${mixesAdded === 1 ? "" : "es"} added to the Mixes screen — set batch size and per-pizza amounts there.`
+          : "";
       showNote(
         "Spec sheet imported",
-        importedRecipes
+        (importedRecipes
           ? "Brands, flavors, and recipes have been added."
-          : "Brands and flavors have been added.",
+          : "Brands and flavors have been added.") + mixNote,
       );
     } catch (e) {
       setSpecError(
