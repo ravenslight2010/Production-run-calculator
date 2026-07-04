@@ -46,7 +46,7 @@ function blankMix(): Mix {
 // the product (brand + flavor) it matches against scheduled runs, a batch size
 // (lbs/batch), an optional "make N days early" window, optional notes, an
 // optional "amount already made", and a list of components (each ingredient and
-// its per-pizza pounds). Mixes are persisted server-side (shared across all
+// its per-pizza ounces). Mixes are persisted server-side (shared across all
 // signed-in users) and drive the Mixes make-day plan. The server enforces the
 // manager role on writes; this card is only rendered for managers.
 export default function MixesManager({
@@ -137,7 +137,7 @@ export default function MixesManager({
         <p className="text-xs text-muted-foreground">
           Define pre-blended mixes made ahead for a product. Match a mix to a
           product by <span className="font-semibold">brand + flavor</span>, set
-          its batch size and components (lbs per pizza). The Mixes tab shows what
+          its batch size and components (oz per pizza). The Mixes tab shows what
           to make for a chosen day — within the{" "}
           <span className="font-semibold text-sky-300">days-early</span> window
           (default {DEFAULT_DAYS_EARLY}).
@@ -474,7 +474,7 @@ function MixEditor({
       {/* Components */}
       <div className="space-y-1.5">
         <p className="text-[11px] font-semibold text-muted-foreground">
-          Components (lbs per pizza)
+          Components (oz per pizza)
         </p>
         {draft.components.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">No components yet.</p>
@@ -506,7 +506,7 @@ function MixEditor({
                   disabled={disabled}
                   className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs font-mono"
                 />
-                <span className="text-[11px] text-muted-foreground">lbs/pizza</span>
+                <span className="text-[11px] text-muted-foreground">oz/pizza</span>
                 <button
                   type="button"
                   onClick={() => removeComponent(idx)}

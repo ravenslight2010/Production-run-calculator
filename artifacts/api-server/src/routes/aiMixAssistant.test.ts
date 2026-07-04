@@ -79,7 +79,7 @@ describe("buildMixAssistPrompt", () => {
       mixes: [mix({ batchSize: 10 })],
     });
     expect(system).toContain("ADVISORY ONLY");
-    expect(user).toContain("Mozzarella: 0.5 lbs/pizza");
+    expect(user).toContain("Mozzarella: 0.5 oz/pizza");
     expect(user).toContain("How much mozzarella per pizza?");
     expect(user).toContain('"answer"');
   });

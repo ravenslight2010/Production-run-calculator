@@ -20,13 +20,14 @@
 // UI can offer a one-tap, manager-confirmed "apply" through the existing saveMixes
 // write path — nothing here mutates anything.
 //
-// Units: a Mix component's `perPizza` is pounds-per-pizza, the SAME unit as a spec
-// recipe row's `lbs` (per-pizza pounds), so amounts compare directly.
+// Units: a Mix component's `perPizza` is ounces-per-pizza, the SAME unit as a spec
+// recipe row's `lbs` field (which the UI shows as oz-per-pizza), so amounts
+// compare directly.
 
 import { type Mix, type MixComponent, normalizeMix } from "@workspace/mixes";
 import { recipeTargets, type ParsedRecipe } from "@workspace/spec-import";
 
-// Default amount tolerance (lbs/pizza). Per-pizza weights are small, so a tiny
+// Default amount tolerance (oz/pizza). Per-pizza weights are small, so a tiny
 // absolute epsilon is enough to ignore floating-point noise while still catching
 // a real recipe change.
 export const DEFAULT_MIX_AMOUNT_TOLERANCE = 0.0005;
@@ -47,9 +48,9 @@ export type MixDiscrepancy = {
   mixName: string;
   /** Ingredient this line is about (omitted for missing-mix and batch-size lines). */
   ingredient?: string;
-  /** The amount the sheet/spec calls for (per-pizza lbs, or batch lbs). */
+  /** The amount the sheet/spec calls for (per-pizza oz, or batch lbs). */
   sheetPerPizza?: number;
-  /** The amount currently in the mix (per-pizza lbs, or batch lbs). */
+  /** The amount currently in the mix (per-pizza oz, or batch lbs). */
   mixPerPizza?: number;
   /** Plain-language description, used for the UI list and the AI prompt. */
   message: string;
@@ -76,10 +77,10 @@ export type MixReconcileOutput = {
   items: MixReconcileItem[];
 };
 
-/** One ingredient + its aggregated per-pizza pounds for a product, from a spec sheet. */
+/** One ingredient + its aggregated per-pizza ounces for a product, from a spec sheet. */
 export type MixSpecRow = { ingredient: string; perPizza: number };
 
-/** A product (brand+flavor) reduced to its per-pizza ingredient pounds, from a spec sheet. */
+/** A product (brand+flavor) reduced to its per-pizza ingredient ounces, from a spec sheet. */
 export type MixSpecProduct = { brand: string; flavor: string; rows: MixSpecRow[] };
 
 function productKey(brand: string, flavor: string): string {
@@ -106,10 +107,10 @@ function productLabel(m: { brand: string; flavor: string }): string {
 }
 
 /**
- * Flatten a parsed spec import into per-product ingredient pounds. Each recipe is
+ * Flatten a parsed spec import into per-product ingredient ounces. Each recipe is
  * tied to every product in its `recipeTargets` (a single recipe can serve many
  * brand/flavor combos), and a product's recipe rows are aggregated by ingredient
- * (summed across dough/sauce/cheese) into a single per-pizza pounds figure — the
+ * (summed across dough/sauce/cheese) into a single per-pizza ounces figure — the
  * canonical basis a pre-blended mix component is compared against. Pure.
  */
 export function specImportToMixProducts(
@@ -227,7 +228,7 @@ export function reconcileMixesWithPremixSheet(input: {
           mixName: current.name,
           ingredient: sc.ingredient,
           sheetPerPizza: sc.perPizza,
-          message: `"${current.name}" is missing ${sc.ingredient} (${fmt(sc.perPizza)} lb/pizza) that the premix sheet lists.`,
+          message: `"${current.name}" is missing ${sc.ingredient} (${fmt(sc.perPizza)} oz/pizza) that the premix sheet lists.`,
         });
       } else if (Math.abs(cc.perPizza - sc.perPizza) > tol) {
         mixDiscs.push({
@@ -239,7 +240,7 @@ export function reconcileMixesWithPremixSheet(input: {
           ingredient: sc.ingredient,
           sheetPerPizza: sc.perPizza,
           mixPerPizza: cc.perPizza,
-          message: `${sc.ingredient} in "${current.name}" is ${fmt(cc.perPizza)} lb/pizza but the premix sheet lists ${fmt(sc.perPizza)}.`,
+          message: `${sc.ingredient} in "${current.name}" is ${fmt(cc.perPizza)} oz/pizza but the premix sheet lists ${fmt(sc.perPizza)}.`,
         });
       }
     }
@@ -253,7 +254,7 @@ export function reconcileMixesWithPremixSheet(input: {
           mixName: current.name,
           ingredient: cc.ingredient,
           mixPerPizza: cc.perPizza,
-          message: `"${current.name}" includes ${cc.ingredient} (${fmt(cc.perPizza)} lb/pizza) that the premix sheet doesn't list.`,
+          message: `"${current.name}" includes ${cc.ingredient} (${fmt(cc.perPizza)} oz/pizza) that the premix sheet doesn't list.`,
         });
       }
     }
@@ -299,7 +300,7 @@ export function reconcileMixesWithPremixSheet(input: {
 /**
  * Reconcile the current mixes against a saved SPEC sheet's per-product recipes.
  * A mix is a subset of a product's recipe, so this reports DRIFT only:
- *   - amount-mismatch: a mix component's per-pizza pounds differs from the spec,
+ *   - amount-mismatch: a mix component's per-pizza ounces differs from the spec,
  *   - extra-component: a mix component the spec recipe doesn't list (renamed/dropped).
  * It never emits missing-mix or missing-component (the spec recipe is a superset;
  * a mix legitimately pre-blends only some ingredients). Only enabled mixes whose
@@ -339,7 +340,7 @@ export function reconcileMixesWithSpec(input: {
           mixName: mix.name,
           ingredient: comp.ingredient,
           mixPerPizza: comp.perPizza,
-          message: `"${mix.name}" includes ${comp.ingredient} (${fmt(comp.perPizza)} lb/pizza), which isn't in the spec sheet for ${productLabel(mix)}.`,
+          message: `"${mix.name}" includes ${comp.ingredient} (${fmt(comp.perPizza)} oz/pizza), which isn't in the spec sheet for ${productLabel(mix)}.`,
         });
         newComponents.push({ ...comp });
         continue;
@@ -354,7 +355,7 @@ export function reconcileMixesWithSpec(input: {
           ingredient: comp.ingredient,
           sheetPerPizza: sr.perPizza,
           mixPerPizza: comp.perPizza,
-          message: `${comp.ingredient} in "${mix.name}" is ${fmt(comp.perPizza)} lb/pizza but the spec sheet calls for ${fmt(sr.perPizza)}.`,
+          message: `${comp.ingredient} in "${mix.name}" is ${fmt(comp.perPizza)} oz/pizza but the spec sheet calls for ${fmt(sr.perPizza)}.`,
         });
         newComponents.push({ ingredient: comp.ingredient, perPizza: sr.perPizza });
       } else {

@@ -116,15 +116,16 @@ function run(date: string, brand: string, flavor: string, pizzas: number, cases 
 describe("buildMixPlan", () => {
   const today = "2026-06-23";
 
-  it("scales components by pizzas, sums total lbs, and computes batches", () => {
+  it("scales components by pizzas (oz→lbs ÷16), sums total lbs, and computes batches", () => {
     const m = mix({
       name: "Veggie Mix",
       brand: "Acme",
       flavor: "Combo",
       batchSize: 40,
+      // per-pizza values are ounces; 1000 pizzas → (oz × 1000) / 16 lbs.
       components: [
-        { ingredient: "Onions", perPizza: 0.05 },
-        { ingredient: "Peppers", perPizza: 0.03 },
+        { ingredient: "Onions", perPizza: 0.8 }, // 0.8 * 1000 / 16 = 50 lbs
+        { ingredient: "Peppers", perPizza: 0.48 }, // 0.48 * 1000 / 16 = 30 lbs
       ],
     });
     const plan = buildMixPlan({
@@ -152,7 +153,8 @@ describe("buildMixPlan", () => {
       flavor: "Combo",
       batchSize: 40,
       amountAlreadyMade: 40,
-      components: [{ ingredient: "Onions", perPizza: 0.08 }],
+      // 1.28 oz/pizza * 1000 / 16 = 80 lbs total.
+      components: [{ ingredient: "Onions", perPizza: 1.28 }],
     });
     const entry = buildMixPlan({
       runs: [run("2026-06-23", "Acme", "Combo", 1000)],
@@ -170,7 +172,8 @@ describe("buildMixPlan", () => {
       brand: "Acme",
       flavor: "Combo",
       batchSize: 0,
-      components: [{ ingredient: "Onions", perPizza: 0.05 }],
+      // 0.8 oz/pizza * 100 / 16 = 5 lbs total.
+      components: [{ ingredient: "Onions", perPizza: 0.8 }],
     });
     const entry = buildMixPlan({
       runs: [run("2026-06-23", "Acme", "Combo", 100)],
@@ -238,7 +241,8 @@ describe("buildMixPlan", () => {
       flavor: "Combo",
       batchSize: 40,
       amountAlreadyMade: 40,
-      components: [{ ingredient: "Onions", perPizza: 0.08 }],
+      // 1.28 oz/pizza * 1000 / 16 = 80 lbs total.
+      components: [{ ingredient: "Onions", perPizza: 1.28 }],
     });
     const plan = buildMixPlan({
       runs: [
@@ -255,7 +259,7 @@ describe("buildMixPlan", () => {
     expect(planRun.pizzas).toBe(1000);
     expect(planRun.cases).toBe(100);
     const entry = planRun.mixes[0];
-    // total = 1000 * 0.08 = 80; amountAlreadyMade subtracted ONCE => 40 remaining, 1 batch.
+    // total = 1.28 * 1000 / 16 = 80 lbs; amountAlreadyMade subtracted ONCE => 40 remaining, 1 batch.
     expect(entry.totalLbs).toBeCloseTo(80);
     expect(entry.remainingLbs).toBeCloseTo(40);
     expect(entry.batches).toBeCloseTo(1);

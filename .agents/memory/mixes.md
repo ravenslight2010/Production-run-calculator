@@ -9,6 +9,18 @@ Manager-defined pre-blended mixes (e.g. dough/sauce blends made ahead). Master-d
 factory-wide, manager-gated writes, **NOT in /sync**, additive DB — mirrors the freezer-pull
 items pattern exactly.
 
+## Units: perPizza is OUNCES, batch/totals are POUNDS (2026-07-04)
+- A Mix component's `perPizza` is **ounces per pizza** — it matches the premix spec sheet's
+  "Per Pizza" column (verified against live data: per-pizza 0.4–2.98, batch sizes ~112–147,
+  cross-check ≈662 pizzas/batch only holds if perPizza=oz & batchSize=lbs). `batchSize`,
+  `amountAlreadyMade`, and all plan totals are **pounds**.
+- **Why:** `buildMixPlan` originally did `lbs = perPizza × pizzas`, treating oz as lbs — 16×
+  too high (showed ~16 batches where 1 was needed). It now divides by `OZ_PER_LB` (16).
+- **How to apply:** any per-pizza display/label must read "oz per pizza" (the field is
+  internally named `lbs` across the recipe system but the UI unit is oz — the run card header
+  already says "Oz / Pizza"). Pull-For-Mix totals stay "lbs" (they're computed pounds). The
+  spec-export "Per Pizza" column header is a structural import anchor — leave it as "Per Pizza".
+
 ## Model & pure logic
 - Lives in shared lib `@workspace/mixes`. Apps keep only platform glue + re-export; tests
   import the lib directly.

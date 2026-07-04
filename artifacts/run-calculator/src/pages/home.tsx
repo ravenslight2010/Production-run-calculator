@@ -8535,7 +8535,7 @@ export default function Home() {
                           {(serverMixRowsByName.get(mgSelectedPreset.trim().toLowerCase()) ?? []).map((row, i) => (
                             <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-muted/30">
                               <span className="text-sm">{row.ingredient}</span>
-                              <span className="text-sm font-mono">{fmtNum(row.lbs, 2)} <span className="text-xs font-sans text-muted-foreground">per pizza</span></span>
+                              <span className="text-sm font-mono">{fmtNum(row.lbs, 2)} <span className="text-xs font-sans text-muted-foreground">oz per pizza</span></span>
                             </div>
                           ))}
                         </div>

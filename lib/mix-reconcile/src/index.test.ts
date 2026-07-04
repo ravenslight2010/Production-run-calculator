@@ -198,6 +198,12 @@ describe("reconcileMixesWithPremixSheet", () => {
     ]);
     expect(out.items[0].suggestedMix.batchSize).toBe(120);
     expect(out.items[0].suggestedMix.id).toBe("current-id");
+    // Per-pizza amounts are ounces, so operator-facing messages must say oz/pizza.
+    const amountMsg = out.discrepancies.find(
+      (d) => d.type === "amount-mismatch" && d.ingredient === "Onion",
+    )?.message;
+    expect(amountMsg).toContain("oz/pizza");
+    expect(amountMsg).not.toContain("lb/pizza");
   });
 
   it("reports nothing when the mix already matches the sheet", () => {

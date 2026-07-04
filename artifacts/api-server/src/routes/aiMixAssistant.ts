@@ -58,7 +58,7 @@ function clamp(s: string, max: number): string {
 function fmtComponents(components: MixAssistInput["mixes"][number]["components"]): string {
   const real = components.filter((c) => c.ingredient.trim());
   if (real.length === 0) return "    (no ingredients)";
-  return real.map((c) => `    - ${c.ingredient.trim()}: ${c.perPizza} lbs/pizza`).join("\n");
+  return real.map((c) => `    - ${c.ingredient.trim()}: ${c.perPizza} oz/pizza`).join("\n");
 }
 
 // Shape the validated input into a compact, model-friendly prompt. The mix

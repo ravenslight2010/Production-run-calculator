@@ -3,7 +3,7 @@
 // …) made ahead for a product. Each mix names the product (brand + flavor) it
 // matches against scheduled runs, a batch size (lbs/batch), an optional "make N
 // days early" window, optional notes, an optional "amount already made", and a
-// list of components (each ingredient and its per-pizza pounds). Mixes are
+// list of components (each ingredient and its per-pizza ounces). Mixes are
 // persisted server-side and drive the Mixes make-day plan. The server enforces
 // the manager role on writes; this card is only rendered for managers.
 
@@ -579,7 +579,7 @@ function MixEditor({
       {/* Components */}
       <View style={{ gap: 8 }}>
         <Text style={{ fontFamily: FONTS.medium, fontSize: 12, color: colors.mutedForeground }}>
-          Components (lbs per pizza)
+          Components (oz per pizza)
         </Text>
         {draft.components.length === 0 ? (
           <Text style={{ fontFamily: FONTS.regular, fontSize: 12, color: colors.mutedForeground }}>
@@ -618,7 +618,7 @@ function MixEditor({
                   style={[inputStyle, { width: 90, fontFamily: FONTS.mono, textAlign: "center" }]}
                 />
                 <Text style={{ fontFamily: FONTS.regular, fontSize: 12, color: colors.mutedForeground }}>
-                  lbs/pizza
+                  oz/pizza
                 </Text>
                 <View style={{ flex: 1 }} />
                 <Pressable onPress={() => removeComponent(idx)} disabled={disabled} hitSlop={8}>

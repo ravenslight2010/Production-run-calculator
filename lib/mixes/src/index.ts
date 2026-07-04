@@ -5,12 +5,12 @@
 // Each mix names the product it belongs to (brand + flavor, so it can be matched
 // against scheduled runs), a batch size (lbs per batch), an optional "make N days
 // early" value, optional notes, an optional "amount already made", and a list of
-// components — each an ingredient with a "per pizza" weight in pounds.
+// components — each an ingredient with a "per pizza" weight in OUNCES.
 //
 // Given a chosen make-day and that day's resolved scheduled runs (product +
 // pizzas), this module computes, per run/product, how many batches to make, the
 // total pounds needed, and a "Pull For Mix" breakdown of pounds per component
-// (pounds = perPizza × that day's pizzas). It honors the "amount already made"
+// (pounds = perPizza-ounces × that day's pizzas ÷ 16). It honors the "amount already made"
 // (which reduces the remaining pounds and therefore the batch count) and the
 // "make N days early" window (mirroring how the freezer-pull window works).
 //
@@ -27,12 +27,18 @@
 // ahead by giving it a positive "make N days early" value.
 export const DEFAULT_DAYS_EARLY = 0;
 
-// One component of a mix: an ingredient and how many pounds of it go into a
-// single pizza's worth of the finished mix.
+// One component of a mix: an ingredient and how many OUNCES of it go into a
+// single pizza's worth of the finished mix (this matches the "Per Pizza" column
+// on the premix spec sheets, which is in ounces). Batch/total weights below are
+// in pounds, so plan math converts ounces → pounds by dividing by 16.
 export interface MixComponent {
   ingredient: string;
   perPizza: number;
 }
+
+// Ounces in a pound — per-pizza component weights are in ounces while batch
+// sizes and totals are in pounds, so the plan converts between them.
+export const OZ_PER_LB = 16;
 
 // A single manager-defined mix. Flat shape (plus a components array) so it
 // serializes cleanly to the API/DB and is easy to edit field-by-field in the UI.
@@ -169,7 +175,7 @@ export interface MixScheduledRun {
 // One component of a mix, scaled to the run's pizza count.
 export interface MixComponentPlan {
   ingredient: string;
-  lbs: number; // perPizza × pizzas
+  lbs: number; // perPizza-ounces × pizzas ÷ 16
 }
 
 // A matched mix for a specific run, fully computed.
@@ -222,7 +228,9 @@ function productKey(brand: string, flavor: string): string {
 function computeEntry(mix: Mix, pizzas: number): MixPlanEntry {
   const components: MixComponentPlan[] = mix.components.map((c) => ({
     ingredient: c.ingredient,
-    lbs: c.perPizza * pizzas,
+    // perPizza is in ounces; batchSize/amountAlreadyMade are in pounds, so
+    // convert to pounds here to keep the whole plan in one unit.
+    lbs: (c.perPizza * pizzas) / OZ_PER_LB,
   }));
   const totalLbs = components.reduce((acc, c) => acc + c.lbs, 0);
   const remainingLbs = Math.max(0, totalLbs - mix.amountAlreadyMade);
