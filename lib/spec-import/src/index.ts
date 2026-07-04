@@ -459,7 +459,7 @@ export function cleanSpecCheeseRecipeName(name: string): string {
   if (blend && /[a-z]/i.test(blend.name)) trimmed = blend.name;
   const stripped = trimmed
     .replace(
-      /[\s(\-\u2013\u2014]+\d+(?:[.,]\d+)?\s*(?:oz|ozs|ounce|ounces|lb|lbs|#)?\)?\s*$/i,
+      /[\s(\-\u2013\u2014#]+\d+(?:[.,]\d+)?\s*(?:oz|ozs|ounce|ounces|lb|lbs|#)?\)?\s*$/i,
       "",
     )
     .trim();
@@ -493,6 +493,71 @@ export function canonicalizeSpecImportCheeseRecipeNames(
     return { ...r, name: cleaned };
   });
   return changed ? { ...parsed, recipes } : parsed;
+}
+
+/**
+ * Merge cheese (non-mix) recipes that share the same (case-insensitive) name into
+ * ONE recipe. After canonicalizeSpecImportCheeseRecipeNames folds a blend the AI
+ * split into per-weight numbered variants ("Aldo's Cheese Mix 1" / "…2") back to a
+ * single name, those still arrive as TWO recipes — so the import review would show
+ * two identical "Aldo's Cheese Mix" rows and, worse, if the variants attach to
+ * different profiles, collapsing them to one pool recipe later would drop a
+ * profile's cheese link. This collapses them up front so review shows a single
+ * recipe attaching to EVERY profile the variants covered.
+ *
+ * The first occurrence wins for rows / app slot / doughball (matching
+ * extractEmbeddedApplicatorBlends' "first composition seen wins"); later
+ * duplicates only contribute their profile targets (singular brand/flavor +
+ * `targets` + `brandAnchors`), unioned onto the survivor so no flavor loses its
+ * cheese link. Non-cheese recipes, mix-routed recipes, and unnamed recipes are
+ * never merged. Pure + non-mutating (returns the same object when nothing merges).
+ */
+export function dedupeSpecImportCheeseRecipes(
+  parsed: ParsedSpecImport,
+): ParsedSpecImport {
+  const noUserMixes = new Set<string>();
+  const survivors: ParsedRecipe[] = [];
+  const indexByName = new Map<string, number>();
+  let merged = false;
+  for (const r of parsed.recipes ?? []) {
+    const name = (r.name ?? "").trim();
+    const mergeable =
+      r.kind === "cheese" &&
+      name.length > 0 &&
+      !specImportRecipeIsMix(r, noUserMixes);
+    if (!mergeable) {
+      survivors.push(r);
+      continue;
+    }
+    const key = name.toLowerCase();
+    const at = indexByName.get(key);
+    if (at == null) {
+      indexByName.set(key, survivors.length);
+      survivors.push(r);
+      continue;
+    }
+    const keep = survivors[at];
+    const withTargets: ParsedRecipe = {
+      ...keep,
+      brand: undefined,
+      flavor: undefined,
+      targets: [...recipeTargets(keep), ...recipeTargets(r)],
+    };
+    const brandAnchors = [
+      ...new Set(
+        [...(keep.brandAnchors ?? []), ...(r.brandAnchors ?? [])]
+          .map((b) => (b ?? "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    survivors[at] = {
+      ...withTargets,
+      targets: recipeTargets(withTargets),
+      ...(brandAnchors.length ? { brandAnchors } : {}),
+    };
+    merged = true;
+  }
+  return merged ? { ...parsed, recipes: survivors } : parsed;
 }
 
 /**

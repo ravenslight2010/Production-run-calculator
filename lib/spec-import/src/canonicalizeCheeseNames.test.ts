@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   cleanSpecCheeseRecipeName,
   canonicalizeSpecImportCheeseRecipeNames,
+  dedupeSpecImportCheeseRecipes,
   collectSpecImportCheeseRecipes,
   extractEmbeddedApplicatorBlends,
+  recipeTargets,
   stripApplicatorLabel,
   parseEmbeddedBlend,
   type ParsedSpecImport,
@@ -144,6 +146,83 @@ describe("canonicalizeSpecImportCheeseRecipeNames", () => {
       recipes: [cheese("Whole Mozz Cheese Mix", { brand: "Bobo", flavor: "Pep" })],
     };
     expect(canonicalizeSpecImportCheeseRecipeNames(input)).toBe(input);
+  });
+
+  it("strips a trailing '#'-prefixed number so '…Mix #1' collapses", () => {
+    expect(cleanSpecCheeseRecipeName("Aldo's Cheese Mix #1")).toBe("Aldo's Cheese Mix");
+    expect(cleanSpecCheeseRecipeName("Aldo's Cheese Mix #2")).toBe("Aldo's Cheese Mix");
+  });
+});
+
+describe("dedupeSpecImportCheeseRecipes", () => {
+  it("merges two numbered variants of one blend into a single recipe (union targets)", () => {
+    // Mirrors the real Aldo's sheet: the blend is embedded in applicator cells at
+    // two weights, the AI splits it into two numbered cheese recipes attaching to
+    // different profiles. After canonicalize both are "Aldo's Cheese Mix".
+    const canon = canonicalizeSpecImportCheeseRecipeNames({
+      profiles: [],
+      recipes: [
+        cheese("Aldo's Cheese Mix 1", {
+          brand: "Aldo's",
+          flavor: "Cheese",
+          app: 1,
+          rows: [
+            { ingredient: "Pizella", lbs: 0.129 },
+            { ingredient: "Part Skim Mozzarella", lbs: 0.074 },
+          ],
+        }),
+        cheese("Aldo's Cheese Mix 2", {
+          brand: "Aldo's",
+          flavor: "Pepperoni",
+          app: 1,
+          targets: [
+            { brand: "Aldo's", flavor: "Meat Lover" },
+            { brand: "Aldo's", flavor: "Supreme" },
+          ],
+          rows: [
+            { ingredient: "Pizella", lbs: 0.109 },
+            { ingredient: "Part Skim Mozzarella", lbs: 0.063 },
+          ],
+        }),
+      ],
+    });
+    const deduped = dedupeSpecImportCheeseRecipes(canon);
+    expect(deduped.recipes).toHaveLength(1);
+    expect(deduped.recipes[0].name).toBe("Aldo's Cheese Mix");
+    // First composition wins (0.129 Pizella), matching the embedded-blend path.
+    expect(deduped.recipes[0].rows[0].lbs).toBe(0.129);
+    // Every profile the variants covered survives on the single recipe.
+    expect(recipeTargets(deduped.recipes[0])).toEqual([
+      { brand: "Aldo's", flavor: "Cheese" },
+      { brand: "Aldo's", flavor: "Pepperoni" },
+      { brand: "Aldo's", flavor: "Meat Lover" },
+      { brand: "Aldo's", flavor: "Supreme" },
+    ]);
+    // …and the pool still holds exactly one.
+    expect(collectSpecImportCheeseRecipes(deduped, none)).toHaveLength(1);
+  });
+
+  it("does not merge cheese recipes with genuinely different names", () => {
+    const input: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese" }),
+        cheese("White Cheese Blend", { brand: "Aldo's", flavor: "Alfredo" }),
+      ],
+    };
+    expect(dedupeSpecImportCheeseRecipes(input).recipes).toHaveLength(2);
+  });
+
+  it("leaves dough/sauce recipes and returns the same object when nothing merges", () => {
+    const input: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        { kind: "dough", name: "Thin Crust", rows: [{ ingredient: "Flour", lbs: 50 }] },
+        { kind: "sauce", name: "House Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] },
+        cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese" }),
+      ],
+    };
+    expect(dedupeSpecImportCheeseRecipes(input)).toBe(input);
   });
 });
 

@@ -663,3 +663,17 @@ number+ingredient pairs → one cheese-kind recipe.
   recipe; the weight lives on the applicator field `app{n}OzPerPizza`, never in
   the name. Skips mix-routed + non-cheese recipes; keeps the name if stripping
   would leave no letters (protects e.g. "5 Cheese Blend").
+- **When the AI PRE-SPLITS one embedded blend into numbered cheese recipes**
+  ("Aldo's Cheese Mix 1" / "…2", i.e. the split happens before our deterministic
+  `extractEmbeddedApplicatorBlends`), canonicalize alone only fixes the NAMES —
+  it still leaves two same-named recipes. `dedupeSpecImportCheeseRecipes` (pure,
+  in the lib) then merges same-name non-mix cheese recipes into ONE:
+  first-occurrence rows/app/doughball win, `targets` + `brandAnchors` are UNIONED
+  so no profile loses its cheese link. **Why:** the split variants attach to
+  DIFFERENT flavors; collapsing them late (the old commit-time-only path) risked
+  dropping a flavor's cheese link, and the review showed two rows. **How:** run
+  `dedupeSpecImportCheeseRecipes(canonicalizeSpecImportCheeseRecipeNames(x))` at
+  PREPARE time (before summary/discrepancies) in ALL FOUR prepare sites (web +
+  mobile, single- + multi-file), so the review shows one recipe. Commit still
+  canonicalizes as an idempotent safety net. `cleanSpecCheeseRecipeName` also
+  strips a `#`-prefixed trailing number ("Mix #1").

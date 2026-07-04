@@ -23,6 +23,7 @@ import {
   collectSpecImportMixes,
   collectSpecImportCheeseRecipes,
   canonicalizeSpecImportCheeseRecipeNames,
+  dedupeSpecImportCheeseRecipes,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -587,7 +588,14 @@ export async function prepareSpecImport(
     await parseGridsCore(grids, store, aliases);
 
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed, matchAliases } = await linkParsed(rawParsed, store);
+  const { parsed: linked, matchAliases } = await linkParsed(rawParsed, store);
+
+  // Collapse per-weight cheese-blend name variants + merge duplicate cheese
+  // recipes into one (union targets) so review shows a single "Aldo's Cheese Mix"
+  // attaching to every flavor, not one per applicator weight. Mirrors web (parity).
+  const parsed = dedupeSpecImportCheeseRecipes(
+    canonicalizeSpecImportCheeseRecipeNames(linked),
+  );
 
   const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
   const newAliases = [...collectSpecAliases(resolved), ...matchAliases];
@@ -661,7 +669,14 @@ export async function prepareSpecImportMulti(
 
   const merged = mergeParsedSpecImports(parsedList);
   // Fold "new" names onto existing saved ones (no dupes) + conservative cross-fill.
-  const { parsed, matchAliases } = await linkParsed(merged, store);
+  const { parsed: linked, matchAliases } = await linkParsed(merged, store);
+
+  // Collapse per-weight cheese-blend name variants + merge duplicate cheese
+  // recipes into one (union targets) so review shows a single "Aldo's Cheese Mix"
+  // attaching to every flavor, not one per applicator weight. Mirrors web (parity).
+  const parsed = dedupeSpecImportCheeseRecipes(
+    canonicalizeSpecImportCheeseRecipeNames(linked),
+  );
 
   const summary = summarizeSpecImport(parsed, store.profileExists, store.recipeExists);
   const newAliases = [...collectSpecAliases(allResolved), ...matchAliases];

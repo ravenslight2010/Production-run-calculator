@@ -19,6 +19,7 @@ import {
   collectSpecImportMixes,
   collectSpecImportCheeseRecipes,
   canonicalizeSpecImportCheeseRecipeNames,
+  dedupeSpecImportCheeseRecipes,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -579,10 +580,18 @@ export async function prepareSpecImport(data: ArrayBuffer): Promise<SpecImportPr
   // Respect the user's prior merges/deletions: an import must not resurrect a
   // brand/flavor or recipe name they tombstoned. Skipped items are surfaced (not
   // silently dropped) so they can be knowingly re-included in review.
-  const { kept: parsed, skipped } = partitionTombstonedParse(
+  const { kept, skipped } = partitionTombstonedParse(
     linked,
     importProfileIsTombstoned,
     recipeNameIsTombstoned,
+  );
+
+  // Collapse per-weight cheese-blend name variants and merge the resulting
+  // duplicate cheese recipes into one (unioning their profile targets) so the
+  // review shows a single "Aldo's Cheese Mix" attaching to every flavor instead
+  // of one numbered recipe per applicator weight. Mirrors mobile (parity).
+  const parsed = dedupeSpecImportCheeseRecipes(
+    canonicalizeSpecImportCheeseRecipeNames(kept),
   );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
@@ -672,10 +681,17 @@ export async function prepareSpecImportMulti(
   const { parsed: linked, matchAliases } = await linkParsed(merged, known);
 
   // Respect prior merges/deletions (see prepareSpecImport).
-  const { kept: parsed, skipped } = partitionTombstonedParse(
+  const { kept, skipped } = partitionTombstonedParse(
     linked,
     importProfileIsTombstoned,
     recipeNameIsTombstoned,
+  );
+
+  // Collapse per-weight cheese-blend name variants + merge duplicate cheese
+  // recipes into one (union targets) so review shows a single "Aldo's Cheese Mix"
+  // attaching to every flavor, not one per applicator weight. Mirrors mobile.
+  const parsed = dedupeSpecImportCheeseRecipes(
+    canonicalizeSpecImportCheeseRecipeNames(kept),
   );
 
   const summary = summarizeSpecImport(parsed, profileExistsForImport, recipeExistsForImport);
