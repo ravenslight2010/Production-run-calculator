@@ -677,3 +677,16 @@ number+ingredient pairs → one cheese-kind recipe.
   mobile, single- + multi-file), so the review shows one recipe. Commit still
   canonicalizes as an idempotent safety net. `cleanSpecCheeseRecipeName` also
   strips a `#`-prefixed trailing number ("Mix #1").
+- **Imported cheese must SNAP onto the EXISTING server pool by name, or the
+  flavor's Cheese card shows blank.** Cheese is server-backed master-data and run
+  applicator Cheese cards are pick-only: they resolve rows from the pool by EXACT
+  lowercased name, and `addCheeseRecipesIfAbsentByName` dedups by exact lowercase
+  too. So an import whose cleaned name differs from the user's saved recipe by
+  case/punctuation/apostrophe/spacing ("Aldo's" vs "Aldos") links the profile to
+  a name absent from the pool → disconnected copy. `linkSpecImportCheeseToExisting`
+  (pure lib) renames imported non-mix cheese recipes to the matching pool name via
+  a conservative loose key (lowercase, DROP apostrophes/quotes, punctuation→space,
+  collapse ws; NO fuzzy — different blends must never collide). **How:** call it
+  in BOTH clients' `commitSpecImport` — fetch the pool BEFORE `applySpecImport`,
+  snap, apply, then reuse the same fetch in the add-to-pool block. Both fetches
+  best-effort (apply with imported names if the pool is unavailable).

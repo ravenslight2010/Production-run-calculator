@@ -20,6 +20,7 @@ import {
   collectSpecImportCheeseRecipes,
   canonicalizeSpecImportCheeseRecipeNames,
   dedupeSpecImportCheeseRecipes,
+  linkSpecImportCheeseToExisting,
   crossFillSpecImport,
   findOverflowColumnRows,
   findTruncatedCells,
@@ -740,6 +741,24 @@ export async function commitSpecImport(
   // server cheese pool both link to a single recipe (the per-pizza weight lives
   // on app{n}OzPerPizza, not in the recipe name). Mirrors mobile (replit.md parity).
   prepared.parsed = canonicalizeSpecImportCheeseRecipeNames(prepared.parsed);
+
+  // Snap imported cheese blends onto the EXISTING server Cheese Recipes pool by
+  // name (loose match on case/punctuation/spacing) BEFORE apply, so a flavor's
+  // applicator links to the recipe the user already saved instead of a
+  // disconnected copy the pick-only Cheese card can't resolve. Best-effort: if
+  // the pool can't be fetched, apply the imported names as-is. Mirrors mobile
+  // (replit.md parity).
+  let existingCheeseForLink: CheeseRecipe[] | null = null;
+  try {
+    existingCheeseForLink = await fetchCheeseRecipes();
+    prepared.parsed = linkSpecImportCheeseToExisting(
+      prepared.parsed,
+      existingCheeseForLink.map((r) => r.name),
+    );
+  } catch {
+    // Best-effort — apply with imported names if the pool is unavailable.
+  }
+
   applySpecImport(prepared.parsed);
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
@@ -784,7 +803,7 @@ export async function commitSpecImport(
       .map((d) => specCheeseDraftToRecipe(d))
       .filter((r): r is CheeseRecipe => r != null);
     if (candidates.length) {
-      const existingCheese = await fetchCheeseRecipes();
+      const existingCheese = existingCheeseForLink ?? (await fetchCheeseRecipes());
       const { merged, added } = addCheeseRecipesIfAbsentByName(existingCheese, candidates);
       if (added > 0) {
         await saveCheeseRecipes(merged);

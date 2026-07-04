@@ -3,6 +3,7 @@ import {
   cleanSpecCheeseRecipeName,
   canonicalizeSpecImportCheeseRecipeNames,
   dedupeSpecImportCheeseRecipes,
+  linkSpecImportCheeseToExisting,
   collectSpecImportCheeseRecipes,
   extractEmbeddedApplicatorBlends,
   recipeTargets,
@@ -268,5 +269,58 @@ describe("end-to-end: one blend embedded in 'Applicator - ...' cells → one poo
     const drafts = collectSpecImportCheeseRecipes(canon, none);
     expect(drafts).toHaveLength(1);
     expect(drafts[0].name).toBe("Aldo's Cheese Mix");
+  });
+});
+
+describe("linkSpecImportCheeseToExisting", () => {
+  it("renames an imported blend to the existing pool name it differs from only by punctuation/case", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    const linked = linkSpecImportCheeseToExisting(parsed, ["Aldos  CHEESE mix"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Aldos  CHEESE mix"]);
+    // Now the pool dedup + pick-only card resolve to the saved recipe's exact name.
+    const drafts = collectSpecImportCheeseRecipes(linked, none);
+    expect(drafts[0].name).toBe("Aldos  CHEESE mix");
+  });
+
+  it("returns the SAME object (no rename) when nothing matches the pool", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Brand New Blend", { brand: "X", flavor: "Y", app: 1 })],
+    };
+    expect(linkSpecImportCheeseToExisting(parsed, ["Totally Different"])).toBe(parsed);
+  });
+
+  it("returns the SAME object when the pool is empty", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    expect(linkSpecImportCheeseToExisting(parsed, [])).toBe(parsed);
+  });
+
+  it("leaves an already-exact-match name unchanged (returns same object)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 })],
+    };
+    expect(linkSpecImportCheeseToExisting(parsed, ["Aldo's Cheese Mix"])).toBe(parsed);
+  });
+
+  it("does not touch mix-routed recipes", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        cheese("House Blend", {
+          brand: "X",
+          flavor: "Y",
+          app: 1,
+          forcedCategory: "mix",
+        }),
+      ],
+    };
+    expect(linkSpecImportCheeseToExisting(parsed, ["house  blend"])).toBe(parsed);
   });
 });

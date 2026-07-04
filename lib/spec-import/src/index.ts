@@ -425,6 +425,67 @@ export function collectSpecImportCheeseRecipes(
 }
 
 /**
+ * Loose match key for reconciling a spec-import cheese-blend name against the
+ * factory-wide server Cheese Recipes pool: lowercased, punctuation/apostrophes
+ * dropped, and whitespace collapsed. Deliberately conservative (no fuzzy /
+ * edit-distance matching) so two genuinely different blends never collide.
+ */
+function cheeseNameMatchKey(name: string): string {
+  return (name ?? "")
+    .toLowerCase()
+    // Drop apostrophes/quotes so "Aldo's" and "Aldos" collapse to one key
+    // instead of splitting into "aldo s" vs "aldos".
+    .replace(/['’`]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Snap imported cheese (non-mix) recipe names onto the EXISTING server Cheese
+ * Recipes pool: when an imported blend's loose key matches a saved recipe's key,
+ * the imported recipe is renamed to the saved recipe's EXACT name.
+ *
+ * Cheese is server-backed master data and the run applicator "Cheese" cards are
+ * pick-only — they resolve rows from the pool by exact (lowercased) name. Without
+ * this snap, an import whose name differs only in case/punctuation/spacing
+ * ("Aldo's Cheese Mix" vs "Aldos Cheese Mix") links the flavor's applicator to a
+ * name that isn't in the pool, so the card shows blank / a disconnected copy.
+ * Renaming to the saved name makes BOTH the profile applicator link and the
+ * server-pool dedup (addCheeseRecipesIfAbsentByName) resolve to the recipe the
+ * user already has, instead of adding a duplicate.
+ *
+ * Only cheese-kind, non-mix, named recipes are touched; the first existing pool
+ * name wins on a tie. Pure and non-mutating — returns the SAME object when
+ * nothing is renamed.
+ */
+export function linkSpecImportCheeseToExisting(
+  parsed: ParsedSpecImport,
+  existingCheeseNames: ReadonlyArray<string>,
+): ParsedSpecImport {
+  const byKey = new Map<string, string>();
+  for (const n of existingCheeseNames) {
+    const name = (n ?? "").trim();
+    if (!name) continue;
+    const key = cheeseNameMatchKey(name);
+    if (key && !byKey.has(key)) byKey.set(key, name);
+  }
+  if (byKey.size === 0) return parsed;
+  const noUserMixes = new Set<string>();
+  let changed = false;
+  const recipes = (parsed.recipes ?? []).map((r) => {
+    const name = (r.name ?? "").trim();
+    if (r.kind !== "cheese" || !name || specImportRecipeIsMix(r, noUserMixes)) {
+      return r;
+    }
+    const existing = byKey.get(cheeseNameMatchKey(name));
+    if (!existing || existing === name) return r;
+    changed = true;
+    return { ...r, name: existing };
+  });
+  return changed ? { ...parsed, recipes } : parsed;
+}
+
+/**
  * Strip a trailing per-pizza weight token off a cheese-blend name so the same
  * blend applied at two different applicator weights collapses to ONE recipe.
  *
