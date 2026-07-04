@@ -71,6 +71,15 @@ export type ParsedRecipe = {
    * forces it to stay under Cheese. Absent = use the heuristic.
    */
   forcedCategory?: "mix" | "cheese";
+  /**
+   * Import review only: the user chose to LINK this recipe to one of their
+   * EXISTING recipes of the same kind (by exact `name`) instead of creating a
+   * new one or overwriting a saved one. When true, the apply path must NOT write
+   * the recipe library or register any name/ingredient from `rows` — it only
+   * ties the existing recipe (loaded fresh from the library) onto this recipe's
+   * profiles, leaving the saved recipe exactly as-is. `rows` are ignored at apply.
+   */
+  referenceOnly?: boolean;
   rows: RecipeRow[];
 };
 

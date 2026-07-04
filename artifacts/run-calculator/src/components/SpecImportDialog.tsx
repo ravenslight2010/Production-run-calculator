@@ -14,6 +14,8 @@ import { buildDiscrepancies } from "@/specImport";
 import {
   profileExistsForImport,
   recipeExistsForImport,
+  existingRecipeNamesForImport,
+  existingDieTypesForImport,
   specImportRecipeDisplayKind,
   type SpecImportDisplayKind,
 } from "@/storage";
@@ -41,6 +43,8 @@ type ProfileItem = {
   orig: ParsedProfile;
   brand: string;
   flavor: string;
+  /** Die type to save; starts from the parsed value, editable to an existing one. */
+  dieType: string;
   include: boolean;
   tombstoned: boolean;
 };
@@ -61,6 +65,11 @@ type RecipeItem = {
   kind: SpecImportDisplayKind;
   brand: string;
   flavor: string;
+  /**
+   * When set, the user chose to reuse this EXISTING saved recipe (by exact name)
+   * instead of creating/overwriting one from the sheet. Empty = create new.
+   */
+  linkExisting?: string;
   include: boolean;
   tombstoned: boolean;
 };
@@ -77,6 +86,7 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
     orig: p,
     brand: p.brand ?? "",
     flavor: p.flavor ?? "",
+    dieType: p.dieType ?? "",
     include: true,
     tombstoned: false,
   }));
@@ -85,6 +95,7 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
     orig: p,
     brand: p.brand ?? "",
     flavor: p.flavor ?? "",
+    dieType: p.dieType ?? "",
     include: false,
     tombstoned: true,
   }));
@@ -191,11 +202,21 @@ export default function SpecImportDialog({
   const edited: ParsedSpecImport = useMemo(() => {
     const outProfiles = profiles
       .filter((p) => p.include)
-      .map((p): ParsedProfile => ({ ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() }));
+      .map((p): ParsedProfile => {
+        const out: ParsedProfile = { ...p.orig, brand: p.brand.trim(), flavor: p.flavor.trim() };
+        const die = p.dieType.trim();
+        if (die) out.dieType = die;
+        else delete out.dieType;
+        return out;
+      });
     const outRecipes = recipes
       .filter((r) => r.include)
       .map((r): ParsedRecipe => {
-        const out: ParsedRecipe = { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
+        const linked = r.linkExisting?.trim();
+        const out: ParsedRecipe = linked
+          ? { ...r.orig, name: linked, kind: parseKindOf(r.kind), referenceOnly: true }
+          : { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
+        if (!linked) delete out.referenceOnly;
         // Cheese-vs-mix is a display split of the same parse kind — record the
         // user's pick so applySpecImport routes by it instead of the heuristic.
         if (r.kind === "mix") out.forcedCategory = "mix";
@@ -248,7 +269,9 @@ export default function SpecImportDialog({
   // Live "would be dropped" attention count across included items.
   const attentionCount =
     edited.profiles.filter((p) => profileApplyIssue(p)).length +
-    edited.recipes.filter((r) => recipeApplyIssue(r)).length;
+    // Reference-only recipes reuse an existing recipe as-is, so name/rows issues
+    // don't apply — their rows come from the saved library, not the sheet.
+    edited.recipes.filter((r) => !r.referenceOnly && recipeApplyIssue(r)).length;
 
   return (
     <div
@@ -381,6 +404,7 @@ export default function SpecImportDialog({
                         onToggle={() => setProfile(p.key, { include: !p.include })}
                         onBrand={(brand) => setProfile(p.key, { brand })}
                         onFlavor={(flavor) => setProfile(p.key, { flavor })}
+                        onDieType={(dieType) => setProfile(p.key, { dieType })}
                       />
                     ))}
                   </ul>
@@ -402,9 +426,12 @@ export default function SpecImportDialog({
                         flavorsByBrand={flavorsByBrand}
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
-                        onKind={(kind) => setRecipe(r.key, { kind })}
+                        onKind={(kind) => setRecipe(r.key, { kind, linkExisting: undefined })}
                         onBrand={(brand) => setRecipe(r.key, { brand })}
                         onFlavor={(flavor) => setRecipe(r.key, { flavor })}
+                        onLinkExisting={(linkExisting) =>
+                          setRecipe(r.key, { linkExisting: linkExisting || undefined })
+                        }
                       />
                     ))}
                   </ul>
@@ -545,6 +572,7 @@ function ProfileRow({
   onToggle,
   onBrand,
   onFlavor,
+  onDieType,
 }: {
   item: ProfileItem;
   brands: string[];
@@ -553,6 +581,7 @@ function ProfileRow({
   onToggle: () => void;
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
+  onDieType: (v: string) => void;
 }) {
   const brand = item.brand.trim();
   const flavor = item.flavor.trim();
@@ -564,6 +593,17 @@ function ProfileRow({
   const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
   const flavorListId = `spec-flavors-${item.key}`;
   const summary = profileSummary(item.orig);
+  // Die-type reuse: offer the user's existing dies so a profile can point at one
+  // instead of creating a new die option. The parsed value stays selectable even
+  // if it isn't a saved die yet.
+  const dieOpts = existingDieTypesForImport();
+  const dieValue = item.dieType.trim();
+  const dieIsNew =
+    !!dieValue && !dieOpts.some((d) => d.trim().toLowerCase() === dieValue.toLowerCase());
+  const dieSelectOptions = [
+    ...dieOpts,
+    ...(dieIsNew ? [dieValue] : []),
+  ];
 
   return (
     <li
@@ -613,6 +653,27 @@ function ProfileRow({
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
             />
           </div>
+
+          {dieSelectOptions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Die:</span>
+              <select
+                value={item.dieType}
+                onChange={(e) => onDieType(e.target.value)}
+                aria-label={`Die type for ${item.orig.brand} ${item.orig.flavor}`}
+                data-testid={`spec-profile-die-${item.key}`}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              >
+                <option value="">No die</option>
+                {dieSelectOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                    {dieIsNew && d === dieValue ? " (new)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {summary && (
             <div className="mt-1.5 text-xs text-muted-foreground">
@@ -671,6 +732,7 @@ function RecipeRow({
   onKind,
   onBrand,
   onFlavor,
+  onLinkExisting,
 }: {
   item: RecipeItem;
   editedProfiles: ParsedProfile[];
@@ -681,21 +743,27 @@ function RecipeRow({
   onKind: (v: SpecImportDisplayKind) => void;
   onBrand: (v: string) => void;
   onFlavor: (v: string) => void;
+  onLinkExisting: (v: string) => void;
 }) {
-  const name = item.name.trim();
+  const linked = item.linkExisting?.trim() ?? "";
+  // Existing saved recipes of this kind the user can reuse instead of creating one.
+  const existingOptions = existingRecipeNamesForImport(item.kind);
+  // Effective name: the linked recipe when reusing, else the (editable) parsed name.
+  const name = linked || item.name.trim();
   const brand = item.brand.trim();
   const flavor = item.flavor.trim();
   const candidate: ParsedRecipe = {
     ...item.orig,
     name,
     kind: parseKindOf(item.kind),
+    ...(linked ? { referenceOnly: true } : {}),
     ...(brand ? { brand } : {}),
     ...(flavor ? { flavor } : {}),
   };
-  const issue = recipeApplyIssue(candidate);
+  const issue = linked ? undefined : recipeApplyIssue(candidate);
   // Mixes live in the same preset library as cheese recipes (only the NAME
   // list differs), so existence checks use the underlying parse kind.
-  const isNew = !name || !recipeExistsForImport(parseKindOf(item.kind), name);
+  const isNew = !linked && (!name || !recipeExistsForImport(parseKindOf(item.kind), name));
   const rowsPreview = recipeRowsPreview(item.orig);
   // Which products this recipe will actually attach to when applied. If empty,
   // the recipe name lands in the library but shows up on NO run — the silent
@@ -731,14 +799,16 @@ function RecipeRow({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              value={item.name}
-              onChange={(e) => onName(e.target.value)}
-              placeholder="Recipe name"
-              aria-label={`Name for recipe ${item.orig.name || "(unnamed)"}`}
-              data-testid={`spec-recipe-name-${item.key}`}
-              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-            />
+            {!linked && (
+              <input
+                value={item.name}
+                onChange={(e) => onName(e.target.value)}
+                placeholder="Recipe name"
+                aria-label={`Name for recipe ${item.orig.name || "(unnamed)"}`}
+                data-testid={`spec-recipe-name-${item.key}`}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              />
+            )}
             <select
               value={item.kind}
               onChange={(e) => onKind(e.target.value as SpecImportDisplayKind)}
@@ -754,7 +824,33 @@ function RecipeRow({
             </select>
           </div>
 
-          {rowsPreview && (
+          {existingOptions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Use existing:</span>
+              <select
+                value={linked}
+                onChange={(e) => onLinkExisting(e.target.value)}
+                aria-label={`Reuse an existing recipe for ${item.orig.name || "(unnamed)"}`}
+                data-testid={`spec-recipe-link-${item.key}`}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              >
+                <option value="">Create new recipe</option>
+                {existingOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {linked && (
+            <div className="mt-1.5 text-xs text-muted-foreground">
+              Using your existing “{linked}” — it won't be changed.
+            </div>
+          )}
+
+          {!linked && rowsPreview && (
             <div className="mt-1.5 text-xs text-muted-foreground">
               Read: {rowsPreview}
             </div>

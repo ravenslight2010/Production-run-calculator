@@ -270,6 +270,31 @@ Any change to one app's order/logic must land in the other verbatim.
   cover both; mobile `SpecImportModal` + `context/specImport.ts` prepare still need
   the tombstone filter + editable review when parity resumes.
 
+## Reuse-existing-recipe on import (`referenceOnly`, WEB ONLY)
+- The review dialog lets a user, per recipe item, REUSE one of their saved recipes
+  (dough/sauce/cheese/mix) instead of creating a new one from the sheet. Signalled
+  by the additive optional `referenceOnly?: boolean` on `ParsedRecipe`
+  (`@workspace/spec-import`); it's a type-only field, NO lib logic branches on it,
+  so no MOBILE_PRELUDE change is needed for the strip-imports harness.
+- **`applySpecImport` (web `storage.ts`) honors `referenceOnly` in THREE loops:**
+  (1) tombstone-clear loop SKIPS it, (2) recipe-library write loop SKIPS it (never
+  overwrites the saved recipe, never registers its name/ingredients), (3) tie-to-
+  profiles loop pulls rows from the EXISTING library via `existingRecipeRowsForImport`
+  (ci lookup) NOT `r.rows`, and if that lookup is empty (stale/tampered pick) it
+  SKIPS the tie entirely so no empty recipe is written onto a profile.
+- **Picker helpers only ever offer REAL saved targets:**
+  `existingRecipeNamesForImport(displayKind)` returns names that actually have saved
+  rows (dough/sauce filter their preset maps by row count; cheese/mix share the
+  cheese preset map but split by which NAME list the name lives in);
+  `existingDieTypesForImport()` = unique+sorted saved die types (DEFAULT_DIE_TYPES
+  is `[]`, so options come from the saved list only).
+- **Dialog gating:** a linked recipe suppresses its own `recipeApplyIssue`, AND the
+  global `attentionCount` must filter out `referenceOnly` recipes too (else a linked
+  recipe with parser-empty rows keeps Apply disabled). ProfileRow also has a die
+  REUSE `<select>`; `onKind` must reset `linkExisting` (kind change invalidates it).
+- **Parity:** intentionally WEB-ONLY — mobile spec import stays a read-only summary.
+  Premix + photo-intake importers already support map-to-existing separately.
+
 ## Import profile-tombstone must use deletedItems ONLY, never the flat mergedAway set
 - **Symptom:** "I import the spec sheet and nothing ever shows up." A parsed
   profile is routed through `importProfileIsTombstoned`; a true result silently

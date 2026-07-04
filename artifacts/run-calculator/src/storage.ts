@@ -2144,6 +2144,49 @@ export function recipeExistsForImport(kind: ParsedRecipe["kind"], name: string):
 }
 
 /**
+ * Existing recipe names the import review can offer as a "use my existing recipe"
+ * link for a given display kind. Only names that ACTUALLY have saved ingredient
+ * rows are returned (so linking always points at a real recipe): dough/sauce read
+ * their own preset maps; cheese and mix share the cheese preset map but are split
+ * by which NAME list the name lives in, so a mix row never offers a cheese recipe
+ * and vice versa.
+ */
+export function existingRecipeNamesForImport(kind: SpecImportDisplayKind): string[] {
+  const sortNames = (xs: string[]) => [...xs].sort((a, b) => a.localeCompare(b));
+  if (kind === "dough") {
+    const p = loadDoughRecipePresets();
+    return sortNames(Object.keys(p).filter(k => (p[k]?.rows?.length ?? 0) > 0));
+  }
+  if (kind === "sauce") {
+    const p = loadFrontlineRecipePresets();
+    return sortNames(Object.keys(p).filter(k => (p[k]?.length ?? 0) > 0));
+  }
+  const cheesePresets = loadCheeseRecipePresets();
+  const cheeseKeysLower = new Set(
+    Object.keys(cheesePresets)
+      .filter(k => (cheesePresets[k]?.length ?? 0) > 0)
+      .map(k => k.trim().toLowerCase()),
+  );
+  const nameList = loadList(kind === "mix" ? MIX_RECIPE_NAMES_KEY : CHEESE_RECIPE_NAMES_KEY, []);
+  return sortNames(nameList.filter(n => cheeseKeysLower.has(n.trim().toLowerCase())));
+}
+
+/** The existing ingredient rows of a saved recipe (case-insensitive lookup). */
+function existingRecipeRowsForImport(kind: ParsedRecipe["kind"], name: string): RecipeRow[] {
+  const map = recipePresetMapForKind(kind);
+  const lower = name.trim().toLowerCase();
+  const key = Object.keys(map).find(k => k.trim().toLowerCase() === lower);
+  return key ? map[key] : [];
+}
+
+/** Existing die-type options the import review can offer as a reuse target. */
+export function existingDieTypesForImport(): string[] {
+  return [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])].sort(
+    (a, b) => a.localeCompare(b),
+  );
+}
+
+/**
  * Whether a spec-import must SKIP a brand+flavor profile. Always false: a prior
  * delete/merge only protects against live-sync resurrection, never against a
  * deliberate re-import (see body). Kept as a predicate so partitionTombstonedParse
@@ -2283,6 +2326,9 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   };
 
   for (const r of parsed.recipes) {
+    // A reference-only recipe links to an EXISTING saved recipe (kept as-is), so
+    // it neither registers a name nor needs a tombstone cleared.
+    if (r.referenceOnly) continue;
     const name = r.name.trim();
     if (!name || r.rows.length === 0) continue;
     clearDeleted(routesToMix(r) ? "mixRecipeNames" : RECIPE_KIND_DELETE_NAMESPACE[r.kind], name);
@@ -2302,6 +2348,9 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   const newMixNames: string[] = [];
 
   for (const r of parsed.recipes) {
+    // Reference-only recipes reuse a saved recipe untouched — never overwrite the
+    // library or register the name/ingredients from this import.
+    if (r.referenceOnly) continue;
     const name = r.name.trim();
     if (!name || r.rows.length === 0) continue;
     const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
@@ -2431,7 +2480,15 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     ),
   ];
   for (const r of parsed.recipes) {
-    const rows = r.rows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
+    // Reference-only recipes tie the user's EXISTING saved recipe onto the
+    // import's profiles — pull its rows fresh from the library (never r.rows).
+    // If the saved recipe is gone (stale/tampered pick), skip the tie entirely
+    // rather than writing an empty recipe onto the profile.
+    const sourceRows = r.referenceOnly
+      ? existingRecipeRowsForImport(r.kind, r.name)
+      : r.rows;
+    if (r.referenceOnly && sourceRows.length === 0) continue;
+    const rows = sourceRows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
     for (const { brand, flavor } of recipeApplyTargets(r, applyProfilePool)) {
       registerBrandFlavor(brand, flavor);
       const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };

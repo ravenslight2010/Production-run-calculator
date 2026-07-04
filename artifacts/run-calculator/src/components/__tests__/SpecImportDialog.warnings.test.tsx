@@ -17,6 +17,9 @@ vi.mock("@/specImport", () => ({
 vi.mock("@/storage", () => ({
   profileExistsForImport: () => false,
   recipeExistsForImport: () => false,
+  existingRecipeNamesForImport: () => [],
+  existingDieTypesForImport: () => [],
+  specImportRecipeDisplayKind: (r: { kind: string }) => r.kind,
 }));
 
 afterEach(() => cleanup());
