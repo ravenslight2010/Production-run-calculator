@@ -231,9 +231,9 @@ const MOBILE_FILE = path.resolve(here, "../../run-calculator-mobile/context/spec
 const MOBILE_PRELUDE = `
 const {
   applyNameMatches, canonicalize, collectMatchCandidates, collectSpecAliases,
-  crossFillSpecImport, findOverflowColumnRows, findTruncatedCells,
-  formatOverflowColumnsNote, formatTruncatedCellsNote, gridSanityIssue,
-  gridsToPromptText, mergeParsedSpecImports, recipeTargets,
+  crossFillSpecImport, extractEmbeddedApplicatorBlends, findOverflowColumnRows,
+  findTruncatedCells, formatOverflowColumnsNote, formatTruncatedCellsNote,
+  gridSanityIssue, gridsToPromptText, mergeParsedSpecImports, recipeTargets,
   resolveRetriedParsePass, shouldRetryParsePass, splitGridsForPrompt,
   summarizeSpecImport,
 } = globalThis.__SPEC_IMPORT_LIB__;
