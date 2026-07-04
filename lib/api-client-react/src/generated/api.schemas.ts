@@ -2324,6 +2324,53 @@ export interface DeleteMixesInput {
 }
 
 /**
+ * One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.
+ */
+export interface CheeseComponent {
+  /** Ingredient name */
+  ingredient: string;
+  /** Pounds of this ingredient per batch */
+  lbs: number;
+}
+
+/**
+ * A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer's cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.
+ */
+export interface CheeseRecipe {
+  /** Stable client-generated id */
+  id: string;
+  /** Display name of the cheese recipe */
+  name: string;
+  /** Customer this recipe belongs to (empty = any) */
+  brand: string;
+  /** Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor / "All Varieties". */
+  flavors: string[];
+  /** The customer's cheese-shredder setting as printed on the sheet */
+  shredderSetting: string;
+  /** Optional cellulose metadata from the sheet */
+  cellulose?: string;
+  /** Optional free-form notes */
+  notes?: string;
+  /** The ingredients that make up one batch of the recipe */
+  components: CheeseComponent[];
+  enabled: boolean;
+}
+
+export interface CheeseRecipeList {
+  items: CheeseRecipe[];
+}
+
+export interface SaveCheeseRecipesInput {
+  /** The batch of cheese recipes to create or update (by id) */
+  items: CheeseRecipe[];
+}
+
+export interface DeleteCheeseRecipesInput {
+  /** The ids of the cheese recipes to delete */
+  ids: string[];
+}
+
+/**
  * A manager-defined factory-wide cycle-count schedule: a warehouse section that must be counted every `cadenceDays` days. `lastCountedAt` is the date it was last counted (null = never). Disabled schedules are kept but produce no reminder.
  */
 export interface CycleCountSchedule {

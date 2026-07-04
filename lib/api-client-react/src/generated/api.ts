@@ -32,6 +32,7 @@ import type {
   AuthResponse,
   ChangePasswordCredentials,
   CheckUsernameAvailableParams,
+  CheeseRecipeList,
   CommandInput,
   ConsumeInput,
   ConsumeResult,
@@ -40,6 +41,7 @@ import type {
   CreateInventoryLocationInput,
   CreateRole,
   CycleCountScheduleList,
+  DeleteCheeseRecipesInput,
   DeleteCycleCountSchedulesInput,
   DeleteFreezerPullItemsInput,
   DeleteMixesInput,
@@ -116,6 +118,7 @@ import type {
   RoleDefinition,
   RunTemplateList,
   SaveAiCorrectionsInput,
+  SaveCheeseRecipesInput,
   SaveCycleCountSchedulesInput,
   SaveDeniedMergesInput,
   SaveFacilityKnowledgeInput,
@@ -6042,6 +6045,228 @@ export const useDeleteMixes = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getDeleteMixesMutationOptions(options));
+    }
+
+export const getListCheeseRecipesUrl = () => {
+
+
+
+
+  return `/api/cheese-recipes`
+}
+
+/**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined cheese recipes
+ */
+export const listCheeseRecipes = async ( options?: RequestInit): Promise<CheeseRecipeList> => {
+
+  return customFetch<CheeseRecipeList>(getListCheeseRecipesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListCheeseRecipesQueryKey = () => {
+    return [
+    `/api/cheese-recipes`
+    ] as const;
+    }
+
+
+export const getListCheeseRecipesQueryOptions = <TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListCheeseRecipesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listCheeseRecipes>>> = ({ signal }) => listCheeseRecipes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListCheeseRecipesQueryResult = NonNullable<Awaited<ReturnType<typeof listCheeseRecipes>>>
+export type ListCheeseRecipesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List manager-defined cheese recipes
+ */
+
+export function useListCheeseRecipes<TData = Awaited<ReturnType<typeof listCheeseRecipes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listCheeseRecipes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListCheeseRecipesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveCheeseRecipesUrl = () => {
+
+
+
+
+  return `/api/cheese-recipes`
+}
+
+/**
+ * Upserts a batch of cheese recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update cheese recipes (manager only)
+ */
+export const saveCheeseRecipes = async (saveCheeseRecipesInput: SaveCheeseRecipesInput, options?: RequestInit): Promise<CheeseRecipeList> => {
+
+  return customFetch<CheeseRecipeList>(getSaveCheeseRecipesUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveCheeseRecipesInput,)
+  }
+);}
+
+
+
+
+export const getSaveCheeseRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCheeseRecipes>>, TError,{data: BodyType<SaveCheeseRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveCheeseRecipes>>, TError,{data: BodyType<SaveCheeseRecipesInput>}, TContext> => {
+
+const mutationKey = ['saveCheeseRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveCheeseRecipes>>, {data: BodyType<SaveCheeseRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveCheeseRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveCheeseRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof saveCheeseRecipes>>>
+    export type SaveCheeseRecipesMutationBody = BodyType<SaveCheeseRecipesInput>
+    export type SaveCheeseRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Create or update cheese recipes (manager only)
+ */
+export const useSaveCheeseRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveCheeseRecipes>>, TError,{data: BodyType<SaveCheeseRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveCheeseRecipes>>,
+        TError,
+        {data: BodyType<SaveCheeseRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getSaveCheeseRecipesMutationOptions(options));
+    }
+
+export const getDeleteCheeseRecipesUrl = () => {
+
+
+
+
+  return `/api/cheese-recipes`
+}
+
+/**
+ * Removes a batch of cheese recipes by id. Manager role required.
+ * @summary Delete cheese recipes by id (manager only)
+ */
+export const deleteCheeseRecipes = async (deleteCheeseRecipesInput: DeleteCheeseRecipesInput, options?: RequestInit): Promise<CheeseRecipeList> => {
+
+  return customFetch<CheeseRecipeList>(getDeleteCheeseRecipesUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      deleteCheeseRecipesInput,)
+  }
+);}
+
+
+
+
+export const getDeleteCheeseRecipesMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseRecipes>>, TError,{data: BodyType<DeleteCheeseRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseRecipes>>, TError,{data: BodyType<DeleteCheeseRecipesInput>}, TContext> => {
+
+const mutationKey = ['deleteCheeseRecipes'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteCheeseRecipes>>, {data: BodyType<DeleteCheeseRecipesInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  deleteCheeseRecipes(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteCheeseRecipesMutationResult = NonNullable<Awaited<ReturnType<typeof deleteCheeseRecipes>>>
+    export type DeleteCheeseRecipesMutationBody = BodyType<DeleteCheeseRecipesInput>
+    export type DeleteCheeseRecipesMutationError = ErrorType<void>
+
+    /**
+ * @summary Delete cheese recipes by id (manager only)
+ */
+export const useDeleteCheeseRecipes = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCheeseRecipes>>, TError,{data: BodyType<DeleteCheeseRecipesInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteCheeseRecipes>>,
+        TError,
+        {data: BodyType<DeleteCheeseRecipesInput>},
+        TContext
+      > => {
+      return useMutation(getDeleteCheeseRecipesMutationOptions(options));
     }
 
 export const getListCycleCountSchedulesUrl = () => {

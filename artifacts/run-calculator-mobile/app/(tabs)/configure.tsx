@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   CardSection,
   NumericField,
+  ReadOnlyRecipe,
   RecipeEditor,
   SectionHeader,
   SelectField,
@@ -23,6 +24,8 @@ import {
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useMixes } from "@/hooks/useMixes";
+import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
+import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
 import {
@@ -216,6 +219,10 @@ export default function ConfigureScreen() {
   // (alongside the allergen advisory); "strict" rules block starting the run.
   const { rules: productionRules } = useProductionRules();
   const { items: serverMixes } = useMixes();
+  // Factory-wide cheese recipes (server master-data). The applicator "Cheese"
+  // cards pick one of these by name and hydrate their rows read-only from it —
+  // cheese is deliberately NOT routed through Mixes.
+  const { items: cheeseRecipesList } = useCheeseRecipes();
   const ruleViolations = React.useMemo(() => {
     const s = run.settings;
     const effectiveLineSpeed =
@@ -309,6 +316,70 @@ export default function ConfigureScreen() {
         .map((c) => ({ ingredient: c.ingredient, lbs: c.perPizza })),
     }))
     .filter((p) => p.ingredients.length > 0);
+
+  // ── Cheese pick-only support (mirrors web home.tsx). A picked cheese-recipe
+  // NAME hydrates the applicator rows read-only from the server pool, and lets
+  // us surface the recipe's shredder setting / cellulose note. ──
+  const enabledCheeseRecipes = React.useMemo(
+    () => cheeseRecipesList.filter((r) => r.enabled !== false),
+    [cheeseRecipesList],
+  );
+  // Name (case-insensitive) → full recipe, so a picked name can show its
+  // shredder setting / assigned flavors.
+  const serverCheeseByName = React.useMemo(() => {
+    const map = new Map<string, CheeseRecipe>();
+    for (const r of enabledCheeseRecipes) {
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, r);
+    }
+    return map;
+  }, [enabledCheeseRecipes]);
+  // Recipe rows ({ ingredient, lbs }) for a picked cheese recipe — a straight
+  // copy of its components (already the per-batch-lbs RecipeRow shape).
+  const serverCheeseRowsByName = React.useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of enabledCheeseRecipes) {
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [enabledCheeseRecipes]);
+  const serverCheeseNames = React.useMemo(
+    () =>
+      [
+        ...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean)),
+      ].sort((a, b) => a.localeCompare(b)),
+    [enabledCheeseRecipes],
+  );
+  // Names filtered to the current run's brand/flavor: prefer recipes for this
+  // customer (brand) and — among those — ones assigned to this flavor (or "all
+  // varieties", i.e. no flavors). Returns ALL names when nothing matches so the
+  // operator is never stuck without a choice. Verbatim mirror of web.
+  const cheeseNamesForRun = React.useMemo(() => {
+    return (brand: string, flavor: string): string[] => {
+      const b = brand.trim().toLowerCase();
+      const f = flavor.trim().toLowerCase();
+      if (!b) return serverCheeseNames;
+      const brandMatches = enabledCheeseRecipes.filter(
+        (r) => r.brand.trim().toLowerCase() === b,
+      );
+      if (brandMatches.length === 0) return serverCheeseNames;
+      const flavorMatches = f
+        ? brandMatches.filter(
+            (r) =>
+              r.flavors.length === 0 ||
+              r.flavors.some((x) => x.trim().toLowerCase() === f),
+          )
+        : brandMatches;
+      const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
+      return [
+        ...new Set(pool.map((r) => r.name.trim()).filter(Boolean)),
+      ].sort((x, y) => x.localeCompare(y));
+    };
+  }, [enabledCheeseRecipes, serverCheeseNames]);
 
   const webTop = Platform.OS === "web" ? 67 : 0;
   const webBottom = Platform.OS === "web" ? 34 : 0;
@@ -859,6 +930,26 @@ export default function ConfigureScreen() {
           const recipeNameKey = `app${n}CheeseRecipeName` as keyof RunSettings;
           const rows = run.settings[recipeKey] as RecipeRow[];
           const recipeName = run.settings[recipeNameKey] as string;
+          // A "mix" applicator keeps the editable RecipeEditor (mixes still edit
+          // freely); anything else is a cheese blend that PICKS from the server
+          // cheese pool. Default (blank type) is treated as cheese.
+          const isMixApplicator = (form[typeKey] as string)
+            .toLowerCase()
+            .includes("mix");
+          const pickedCheese = recipeName.trim()
+            ? serverCheeseByName.get(recipeName.trim().toLowerCase())
+            : undefined;
+          // Options scoped to this run's brand/flavor, but always include the
+          // currently-picked name so a recipe assigned elsewhere (or since
+          // disabled) still shows instead of silently clearing.
+          const scopedCheeseNames = cheeseNamesForRun(
+            run.settings.brand ?? "",
+            run.settings.flavor ?? "",
+          );
+          const cheeseOptionsForApp =
+            recipeName.trim() && !scopedCheeseNames.includes(recipeName)
+              ? [recipeName, ...scopedCheeseNames]
+              : scopedCheeseNames;
           return (
             <React.Fragment key={n}>
               <SectionHeader title={`Applicator ${n}`} />
@@ -886,45 +977,117 @@ export default function ConfigureScreen() {
                   placeholder="0"
                   unit="lbs"
                 />
-                <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
-                  Recipe (overrides batch weight when set)
-                </Text>
-                <RecipeEditor
-                  rows={rows}
-                  onChange={(r) =>
-                    updateSettings({ [recipeKey]: r } as Partial<RunSettings>)
-                  }
-                  ingredientOptions={cheeseIngredients}
-                  onAddIngredient={(v) => addListItem("cheeseIngredients", v)}
-                  onRemoveIngredient={(v) => removeListItem("cheeseIngredients", v)}
-                  name={recipeName}
-                  onNameChange={(nm) =>
-                    updateSettings({ [recipeNameKey]: nm } as Partial<RunSettings>)
-                  }
-                  presetNames={cheeseNames}
-                  onSavePreset={() =>
-                    saveRecipePreset("cheese", recipeName, rows)
-                  }
-                  onApplyPreset={(presetName) => {
-                    const preset = cheeseRecipePresets[presetName];
-                    if (preset)
-                      updateSettings({
-                        [recipeKey]: preset.map((r) => ({ ...r })),
-                        [recipeNameKey]: presetName,
-                      } as Partial<RunSettings>);
-                  }}
-                  onDeletePreset={(presetName) =>
-                    deleteRecipePreset("cheese", presetName)
-                  }
-                  factoryPresets={serverMixPresets}
-                  factoryLabel="Mixes"
-                  onApplyFactory={(fp) =>
-                    updateSettings({
-                      [recipeKey]: fp.ingredients.map((r) => ({ ...r })),
-                      [recipeNameKey]: fp.name,
-                    } as Partial<RunSettings>)
-                  }
-                />
+                {isMixApplicator ? (
+                  <>
+                    <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+                      Recipe (overrides batch weight when set)
+                    </Text>
+                    <RecipeEditor
+                      rows={rows}
+                      onChange={(r) =>
+                        updateSettings({ [recipeKey]: r } as Partial<RunSettings>)
+                      }
+                      ingredientOptions={cheeseIngredients}
+                      onAddIngredient={(v) => addListItem("cheeseIngredients", v)}
+                      onRemoveIngredient={(v) => removeListItem("cheeseIngredients", v)}
+                      name={recipeName}
+                      onNameChange={(nm) =>
+                        updateSettings({ [recipeNameKey]: nm } as Partial<RunSettings>)
+                      }
+                      presetNames={cheeseNames}
+                      onSavePreset={() =>
+                        saveRecipePreset("cheese", recipeName, rows)
+                      }
+                      onApplyPreset={(presetName) => {
+                        const preset = cheeseRecipePresets[presetName];
+                        if (preset)
+                          updateSettings({
+                            [recipeKey]: preset.map((r) => ({ ...r })),
+                            [recipeNameKey]: presetName,
+                          } as Partial<RunSettings>);
+                      }}
+                      onDeletePreset={(presetName) =>
+                        deleteRecipePreset("cheese", presetName)
+                      }
+                      factoryPresets={serverMixPresets}
+                      factoryLabel="Mixes"
+                      onApplyFactory={(fp) =>
+                        updateSettings({
+                          [recipeKey]: fp.ingredients.map((r) => ({ ...r })),
+                          [recipeNameKey]: fp.name,
+                        } as Partial<RunSettings>)
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.recipeHint, { color: colors.mutedForeground }]}>
+                      Cheese Blend — pick a recipe (managers add these under
+                      Manage Lists → Cheese Recipes)
+                    </Text>
+                    <SelectField
+                      label="Cheese Recipe"
+                      value={recipeName}
+                      onChange={(val) => {
+                        const hydrated = val.trim()
+                          ? serverCheeseRowsByName.get(val.trim().toLowerCase())
+                          : undefined;
+                        updateSettings({
+                          [recipeNameKey]: val,
+                          [recipeKey]: (hydrated ?? []).map((r) => ({ ...r })),
+                        } as Partial<RunSettings>);
+                      }}
+                      options={cheeseOptionsForApp}
+                      allowAdd={false}
+                      allowClear
+                      placeholder="Pick a cheese recipe…"
+                    />
+                    {pickedCheese &&
+                    (pickedCheese.shredderSetting.trim() ||
+                      pickedCheese.cellulose.trim()) ? (
+                      <View style={styles.cheeseMetaRow}>
+                        {pickedCheese.shredderSetting.trim() ? (
+                          <Text
+                            style={[
+                              styles.cheeseMeta,
+                              { color: colors.mutedForeground },
+                            ]}
+                          >
+                            Shredder setting:{" "}
+                            <Text
+                              style={[styles.cheeseMetaVal, { color: colors.foreground }]}
+                            >
+                              {pickedCheese.shredderSetting}
+                            </Text>
+                          </Text>
+                        ) : null}
+                        {pickedCheese.cellulose.trim() ? (
+                          <Text
+                            style={[
+                              styles.cheeseMeta,
+                              { color: colors.mutedForeground },
+                            ]}
+                          >
+                            Cellulose:{" "}
+                            <Text
+                              style={[styles.cheeseMetaVal, { color: colors.foreground }]}
+                            >
+                              {pickedCheese.cellulose}
+                            </Text>
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                    <ReadOnlyRecipe
+                      rows={rows}
+                      emptyText={
+                        recipeName.trim()
+                          ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
+                          : "Pick a cheese recipe above to load its ingredients."
+                      }
+                    />
+                  </>
+                )}
               </CardSection>
             </React.Fragment>
           );
@@ -1203,6 +1366,21 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontStyle: "italic",
     fontFamily: FONTS.regular,
+  },
+  cheeseMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    columnGap: 16,
+    rowGap: 4,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  cheeseMeta: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+  },
+  cheeseMetaVal: {
+    fontFamily: FONTS.mono,
   },
   chip: {
     paddingHorizontal: 14,

@@ -348,6 +348,11 @@ import type { ParsedSpecImport } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 import type { PremixFreezerPull } from "@workspace/premix-import";
+import CheeseRecipesManager from "@/components/CheeseRecipesManager";
+import CheeseImportDialog from "@/components/CheeseImportDialog";
+import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
+import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
+import type { CheeseRecipe } from "@workspace/cheese-recipes";
 
 import {
   Form,
@@ -817,6 +822,133 @@ function CheeseRecipeCard({
       <button type="button" onClick={onAppend} className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-semibold transition-colors">
         <Plus className="w-3.5 h-3.5" /> Add Ingredient
       </button>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        <Separator className="my-3 opacity-30" />
+        <div className="flex items-center gap-2 justify-between mb-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
+          {recipeSelector}
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+        </div>
+        {body}
+      </>
+    );
+  }
+
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden">
+      <div className="h-1 bg-amber-500/70 w-full" />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center gap-3 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
+          {recipeSelector}
+          <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">{body}</CardContent>
+    </Card>
+  );
+}
+
+// Pick-only cheese card for the run applicators. Cheese blends are now
+// factory-wide server master-data (managed on the Manage Lists → Cheese Recipes
+// screen and imported from the "Cheese Mix Recipe Specs" workbook), so on the
+// run the operator only PICKS one — its ingredient rows and shredder setting are
+// read-only here. Picking hydrates the run's recipe rows so cheese still
+// consumes exactly as before (cheese type → batches). Mirrors the mobile
+// applicator cheese card (replit.md parity).
+function CheesePickCard({
+  label,
+  batches,
+  recipe,
+  recipeName,
+  recipeNameOptions,
+  shredderSetting,
+  cellulose,
+  onRecipeNameChange,
+  embedded,
+}: {
+  label: string;
+  batches: number;
+  recipe: RecipeRow[];
+  recipeName: string;
+  recipeNameOptions: string[];
+  shredderSetting: string;
+  cellulose: string;
+  onRecipeNameChange: (v: string) => void;
+  embedded?: boolean;
+}) {
+  const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  // Always include the currently-picked name so a recipe assigned to another
+  // brand/flavor (or since disabled) still shows instead of silently clearing.
+  const options =
+    recipeName.trim() && !recipeNameOptions.includes(recipeName)
+      ? [recipeName, ...recipeNameOptions]
+      : recipeNameOptions;
+
+  const recipeSelector = (
+    <div className="flex-1 max-w-xs">
+      <select
+        value={recipeName}
+        onChange={e => onRecipeNameChange(e.target.value)}
+        className="h-8 w-full px-2 rounded bg-muted/40 border border-border/40 text-xs sm:text-sm outline-none focus:border-primary/60"
+      >
+        <option value="">Pick a cheese recipe…</option>
+        {options.map(name => (
+          <option key={name} value={name}>{name}</option>
+        ))}
+      </select>
+    </div>
+  );
+
+  const body = (
+    <>
+      {(shredderSetting.trim() || cellulose.trim()) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-muted-foreground">
+          {shredderSetting.trim() && (
+            <span>Shredder setting: <span className="font-mono text-foreground">{shredderSetting}</span></span>
+          )}
+          {cellulose.trim() && (
+            <span>Cellulose: <span className="font-mono text-foreground">{cellulose}</span></span>
+          )}
+        </div>
+      )}
+      {recipe.length === 0 ? (
+        <p className="text-xs text-muted-foreground mb-1">
+          {recipeName.trim()
+            ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
+            : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."}
+        </p>
+      ) : (
+        <div className="w-full mb-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mb-1 px-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
+          </div>
+          <div className="space-y-1.5">
+            {recipe.map((row, idx) => {
+              const rowLbs = Number(row.lbs ?? 0);
+              return (
+                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 items-center">
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">{row.ingredient || "—"}</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs, 1)}</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+            <span className="text-xs font-semibold text-muted-foreground">Total</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs</span>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -2494,6 +2626,66 @@ export default function Home() {
     () => [...new Set(mixes.flatMap((m) => (m.components ?? []).map((c) => c.ingredient.trim()).filter(Boolean)))].sort((a, b) => a.localeCompare(b)),
     [mixes],
   );
+  // Factory-wide cheese recipes (server master-data, like Mixes but a SEPARATE
+  // pool). The per-run applicator "Cheese" cards pick one of these and hydrate
+  // their rows from it — cheese presets are no longer stored per-device in the
+  // synced day-state.
+  const { items: cheeseRecipesList } = useCheeseRecipes();
+  const enabledCheeseRecipes = useMemo(
+    () => cheeseRecipesList.filter((r) => r.enabled !== false),
+    [cheeseRecipesList],
+  );
+  // Name (case-insensitive) → full recipe, so a picked name hydrates rows and we
+  // can show its shredder setting / assigned flavors.
+  const serverCheeseByName = useMemo(() => {
+    const map = new Map<string, CheeseRecipe>();
+    for (const r of enabledCheeseRecipes) {
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, r);
+    }
+    return map;
+  }, [enabledCheeseRecipes]);
+  // Recipe rows ({ ingredient, lbs }) for a picked cheese recipe — a straight
+  // copy of its components (already the per-batch-lbs RecipeRow shape).
+  const serverCheeseRowsByName = useMemo(() => {
+    const map = new Map<string, RecipeRow[]>();
+    for (const r of enabledCheeseRecipes) {
+      const rows = r.components
+        .filter((c) => c.ingredient.trim())
+        .map((c) => ({ ingredient: c.ingredient, lbs: c.lbs }));
+      const key = r.name.trim().toLowerCase();
+      if (key) map.set(key, rows);
+    }
+    return map;
+  }, [enabledCheeseRecipes]);
+  const serverCheeseNames = useMemo(
+    () => [...new Set(enabledCheeseRecipes.map((r) => r.name.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [enabledCheeseRecipes],
+  );
+  // Names filtered to the current run's brand/flavor: prefer recipes for this
+  // customer (brand) and — among those — ones assigned to this flavor (or "all
+  // varieties", i.e. no flavors). Returns ALL names when nothing matches so the
+  // operator is never stuck without a choice. Pure over the run's identity.
+  const cheeseNamesForRun = useMemo(() => {
+    return (brand: string, flavor: string): string[] => {
+      const b = brand.trim().toLowerCase();
+      const f = flavor.trim().toLowerCase();
+      if (!b) return serverCheeseNames;
+      const brandMatches = enabledCheeseRecipes.filter(
+        (r) => r.brand.trim().toLowerCase() === b,
+      );
+      if (brandMatches.length === 0) return serverCheeseNames;
+      const flavorMatches = f
+        ? brandMatches.filter(
+            (r) =>
+              r.flavors.length === 0 ||
+              r.flavors.some((x) => x.trim().toLowerCase() === f),
+          )
+        : brandMatches;
+      const pool = flavorMatches.length > 0 ? flavorMatches : brandMatches;
+      return [...new Set(pool.map((r) => r.name.trim()).filter(Boolean))].sort((x, y) => x.localeCompare(y));
+    };
+  }, [enabledCheeseRecipes, serverCheeseNames]);
   // The make-day chosen on the Mixes tab (defaults to today).
   const [mixMakeDay, setMixMakeDay] = useState<string>(() => todayStr());
   // Factory-wide cycle-count schedules (open to all signed-in users) — drives the
@@ -3581,6 +3773,13 @@ export default function Home() {
   const [premixImportPrepared, setPremixImportPrepared] = useState<PremixImportPrepared | null>(null);
   const [premixImportProgress, setPremixImportProgress] = useState<{ done: number; total: number } | null>(null);
   const premixImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [showCheeseImport, setShowCheeseImport] = useState(false);
+  const [cheeseImportLoading, setCheeseImportLoading] = useState(false);
+  const [cheeseImportApplying, setCheeseImportApplying] = useState(false);
+  const [cheeseImportError, setCheeseImportError] = useState<string | null>(null);
+  const [cheeseImportPrepared, setCheeseImportPrepared] = useState<CheeseImportPrepared | null>(null);
+  const [cheeseImportProgress, setCheeseImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const cheeseImportInputRef = useRef<HTMLInputElement | null>(null);
   const [importIntoEditor, setImportIntoEditor] = useState(false);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importDefaultDate, setImportDefaultDate] = useState(todayStr());
@@ -6324,6 +6523,66 @@ export default function Home() {
     }
   }
 
+  // "Cheese Mix Recipe Specs" importer: read the .xlsx, DETERMINISTICALLY parse
+  // each customer tab into cheese recipes (shredder setting, per-flavor
+  // assignment lines, per-batch pounds), and show a single review screen.
+  // Nothing is written until the user confirms; re-importing updates existing
+  // cheese recipes by id.
+  async function handleCheeseImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []).slice(0, MAX_CHEESE_IMPORT_FILES);
+    e.target.value = "";
+    noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
+    if (files.length === 0) return;
+    setCheeseImportPrepared(null);
+    setCheeseImportError(null);
+    setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
+    setCheeseImportLoading(true);
+    setShowCheeseImport(true);
+    try {
+      const buffers: ArrayBuffer[] = [];
+      for (const f of files) {
+        buffers.push(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      }
+      const prepared = await prepareCheeseImport(
+        buffers,
+        (done, total) => setCheeseImportProgress(total > 1 ? { done, total } : null),
+        files.map((f) => f.name),
+      );
+      prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
+      setCheeseImportPrepared(prepared);
+    } catch (err) {
+      setCheeseImportError(
+        err instanceof Error ? err.message : "Could not read or interpret that workbook.",
+      );
+    } finally {
+      setCheeseImportLoading(false);
+      setCheeseImportProgress(null);
+    }
+  }
+
+  async function handleCheeseImportConfirm(recipesToApply: CheeseRecipe[]) {
+    if (!cheeseImportPrepared) return;
+    setCheeseImportApplying(true);
+    try {
+      const result = await commitCheeseImport(cheeseImportPrepared, recipesToApply);
+      // Refresh the shared cheese-recipes query so imported recipes appear
+      // immediately in the manager list and the run "Cheese" pickers.
+      void cycleCountQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      setShowCheeseImport(false);
+      setCheeseImportPrepared(null);
+      toast({
+        title: "Cheese recipes imported",
+        description: `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
+      });
+    } catch (err) {
+      setCheeseImportError(
+        err instanceof Error ? err.message : "Import failed while saving. Please try again.",
+      );
+    } finally {
+      setCheeseImportApplying(false);
+    }
+  }
+
   // Excel upload triggered from within the Schedule editor: extracts rows into
   // the in-memory editor (scoped to the day being planned) instead of writing
   // to the server directly, so the user reviews then hits "Save Schedule".
@@ -8378,7 +8637,8 @@ export default function Home() {
         const groupedTabs = [
           { key: "dough",   label: "Dough",  namesLabel: "Recipe Names", names: doughRecipeNames,     onAddName: histAdd("Dough Recipe Names", addDoughRecipeName),     onRemoveName: histRemove("Dough Recipe Names", removeDoughRecipeName),     onRenameName: histRename("Dough Recipe Names", renameDoughRecipeName),     ingLabel: "Ingredients", ingredients: doughIngredients,     onAddIng: histAdd("Dough Ingredients", addDoughIngredient),     onRemoveIng: histRemove("Dough Ingredients", removeDoughIngredient),     onRenameIng: histRename("Dough Ingredients", renameDoughIngredient) },
           { key: "sauce",   label: "Sauce",  namesLabel: "Recipe Names", names: frontlineRecipeNames, onAddName: histAdd("Sauce Recipe Names", addFrontlineRecipeName), onRemoveName: histRemove("Sauce Recipe Names", removeFrontlineRecipeName), onRenameName: histRename("Sauce Recipe Names", renameFrontlineRecipeName), ingLabel: "Ingredients", ingredients: frontlineIngredients, onAddIng: histAdd("Sauce Ingredients", addFrontlineIngredient), onRemoveIng: histRemove("Sauce Ingredients", removeFrontlineIngredient), onRenameIng: histRename("Sauce Ingredients", renameFrontlineIngredient) },
-          { key: "cheese",  label: "Cheese", namesLabel: "Recipe Names", names: cheeseRecipeNames,    onAddName: histAdd("Cheese Recipe Names", addCheeseRecipeName),    onRemoveName: histRemove("Cheese Recipe Names", removeCheeseRecipeName),    onRenameName: histRename("Cheese Recipe Names", renameCheeseRecipeName),    ingLabel: "Ingredients", ingredients: cheeseIngredients,    onAddIng: histAdd("Cheese Ingredients", addCheeseIngredient),   onRemoveIng: histRemove("Cheese Ingredients", removeCheeseIngredient),   onRenameIng: histRename("Cheese Ingredients", renameCheeseIngredient) },
+          // Cheese recipes are now factory-wide server master-data — managed on the
+          // dedicated "Cheese Recipes" settings tab (below), not this local editor.
         ];
 
         const settingsTabs: { key: string; label: string }[] = [
@@ -8386,6 +8646,7 @@ export default function Home() {
           ...(canEditRules ? [{ key: "rules", label: "Rules" }] : []),
           ...(canManageInventory ? [{ key: "freezer", label: "Freezer Pull" }] : []),
           ...(canManageInventory ? [{ key: "mixes", label: "Mixes" }] : []),
+          ...(canManageInventory ? [{ key: "cheeseRecipes", label: "Cheese Recipes" }] : []),
           ...(canManageInventory ? [{ key: "cycleCount", label: "Cycle Counts" }] : []),
           ...(canManageStaff || canApproveResets ? [{ key: "staff", label: "Staff" }] : []),
         ];
@@ -8399,7 +8660,7 @@ export default function Home() {
           const base: Record<string, { ingOptions: string[]; load: (n: string) => RecipeRow[]; save: (n: string, rows: RecipeRow[]) => void }> = {
             dough:  { ingOptions: doughIngredients,     load: (n) => loadDoughRecipePresets()[n]?.rows ?? [],    save: (n, rows) => { const p = loadDoughRecipePresets(); p[n] = { rows }; saveDoughRecipePresets(p); schedulePush(dayStateRef.current); } },
             sauce:  { ingOptions: frontlineIngredients, load: (n) => loadFrontlineRecipePresets()[n] ?? [],      save: (n, rows) => { const p = loadFrontlineRecipePresets(); p[n] = rows; saveFrontlineRecipePresets(p); schedulePush(dayStateRef.current); } },
-            cheese: { ingOptions: cheeseIngredients,    load: (n) => loadCheeseRecipePresets()[n] ?? [],         save: (n, rows) => { const p = loadCheeseRecipePresets(); p[n] = rows; saveCheeseRecipePresets(p); schedulePush(dayStateRef.current); } },
+            // "cheese" preset editing retired — cheese recipes are server master-data now.
             mix:    { ingOptions: mixIngredients,       load: (n) => loadCheeseRecipePresets()[n] ?? [],         save: (n, rows) => { const p = loadCheeseRecipePresets(); p[n] = rows; saveCheeseRecipePresets(p); schedulePush(dayStateRef.current); } },
           };
           return base[manageCategory] ?? null;
@@ -9073,6 +9334,30 @@ export default function Home() {
                     />
                     <MixReconcilePanel isManager={isManager} refreshSignal={sheetListSignal} />
                     <MixAssistChat />
+                  </div>
+                )}
+
+                {/* Cheese recipes (factory-wide cheese blends, server master-data) */}
+                {manageCategory === "cheeseRecipes" && canManageInventory && (
+                  <div className="space-y-3">
+                    {isManager && (
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Cheese Sheet clicked (picker opening)"); cheeseImportInputRef.current?.click(); }}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
+                        <Upload className="w-4 h-4" /> Import Cheese Mix Recipe Specs
+                      </button>
+                    )}
+                    <CheeseRecipesManager
+                      brands={brands}
+                      brandFlavors={brandFlavors}
+                      ingredientSuggestions={[
+                        ...cheeseIngredients,
+                        ...doughIngredients,
+                        ...frontlineIngredients,
+                        ...mixIngredients,
+                        ...ingredientTypes,
+                        ...pepTypes,
+                      ]}
+                    />
                   </div>
                 )}
 
@@ -12425,30 +12710,21 @@ export default function Home() {
                         );
                       })()}
                       {v.app1Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
+                        <CheesePickCard
                           embedded
                           label={v.app1Type || "Applicator 1"}
                           batches={calc.app1Batches}
-                          fields={cheese1Fields}
                           recipe={v.app1CheeseRecipe ?? []}
-                          fieldPrefix="app1CheeseRecipe"
                           recipeName={v.app1CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app1CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese1({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese1}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          shredderSetting={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
                             form.setValue("app1CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app1CheeseRecipe", preset, { shouldDirty: true }); replaceCheese1(preset); }
-                            }
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app1CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese1(copy);
                           }}
                         />
                       )}
@@ -12497,30 +12773,21 @@ export default function Home() {
                         );
                       })()}
                       {v.app2Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
+                        <CheesePickCard
                           embedded
                           label={v.app2Type || "Applicator 2"}
                           batches={calc.app2Batches}
-                          fields={cheese2Fields}
                           recipe={v.app2CheeseRecipe ?? []}
-                          fieldPrefix="app2CheeseRecipe"
                           recipeName={v.app2CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app2CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese2({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese2}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          shredderSetting={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
                             form.setValue("app2CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app2CheeseRecipe", preset, { shouldDirty: true }); replaceCheese2(preset); }
-                            }
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app2CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese2(copy);
                           }}
                         />
                       )}
@@ -12569,30 +12836,21 @@ export default function Home() {
                         );
                       })()}
                       {v.app3Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
+                        <CheesePickCard
                           embedded
                           label={v.app3Type || "Applicator 3"}
                           batches={calc.app3Batches}
-                          fields={cheese3Fields}
                           recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
                           recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
                             form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app3CheeseRecipe", preset, { shouldDirty: true }); replaceCheese3(preset); }
-                            }
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app3CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese3(copy);
                           }}
                         />
                       )}
@@ -12641,30 +12899,21 @@ export default function Home() {
                         );
                       })()}
                       {v.app4Type.trim().toLowerCase() === "cheese" && (
-                        <CheeseRecipeCard
+                        <CheesePickCard
                           embedded
                           label={v.app4Type || "Applicator 4"}
                           batches={calc.app4Batches}
-                          fields={cheese4Fields}
                           recipe={v.app4CheeseRecipe ?? []}
-                          fieldPrefix="app4CheeseRecipe"
                           recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseRecipeNames}
-                          register={form.register}
-                          ingredientOptions={cheeseIngredients}
-                          onAddIngredient={addCheeseIngredient}
-                          onRemoveIngredient={removeCheeseIngredient}
-                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese4}
-                          onAddRecipeName={addCheeseRecipeName}
-                          onRemoveRecipeName={removeCheeseRecipeName}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
                             form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            if (val.trim()) {
-                              const preset = loadCheeseRecipePresets()[val.trim()];
-                              if (preset) { form.setValue("app4CheeseRecipe", preset, { shouldDirty: true }); replaceCheese4(preset); }
-                            }
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app4CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese4(copy);
                           }}
                         />
                       )}
@@ -14129,6 +14378,16 @@ export default function Home() {
             onChange={handlePremixImportFile}
           />
         )}
+        {isManager && (
+          <input
+            ref={cheeseImportInputRef}
+            type="file"
+            accept=".xlsx"
+            multiple
+            className="hidden"
+            onChange={handleCheeseImportFile}
+          />
+        )}
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
@@ -14189,6 +14448,18 @@ export default function Home() {
           prepared={premixImportPrepared}
           applying={premixImportApplying}
           onConfirm={handlePremixImportConfirm}
+        />
+
+        {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}
+        <CheeseImportDialog
+          open={showCheeseImport}
+          onClose={() => { setShowCheeseImport(false); setCheeseImportPrepared(null); setCheeseImportError(null); }}
+          loading={cheeseImportLoading}
+          progress={cheeseImportProgress}
+          error={cheeseImportError}
+          prepared={cheeseImportPrepared}
+          applying={cheeseImportApplying}
+          onConfirm={handleCheeseImportConfirm}
         />
 
         {/* ── Schedule Future Days Dialog ──────────────────────────────────── */}

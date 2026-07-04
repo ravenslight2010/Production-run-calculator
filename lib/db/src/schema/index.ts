@@ -25,6 +25,7 @@ export * from "./aiConversationTurns";
 export * from "./productionRules";
 export * from "./freezerPullItems";
 export * from "./mixes";
+export * from "./cheeseRecipes";
 export * from "./cycleCountSchedules";
 export * from "./proactiveAlertSettings";
 export * from "./qualityChecks";

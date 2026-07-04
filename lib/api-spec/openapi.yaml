@@ -28,6 +28,7 @@ tags:
     description: Manager-defined factory-wide production rules
   - name: aiMemory
     description: Shared AI memory (facility knowledge + per-user conversation history)
+  - name: cheeseRecipes
   - name: runTemplates
     description: Facility-wide saved run-setup templates
   - name: supervisorPin
@@ -1976,6 +1977,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MixList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+
+  /cheese-recipes:
+    get:
+      operationId: listCheeseRecipes
+      tags: [cheeseRecipes]
+      summary: List manager-defined cheese recipes
+      description: >-
+        Returns every factory-wide cheese recipe (a named cheese blend a customer
+        uses on the line, with per-batch component pounds, the flavors it is
+        assigned to, and the customer's shredder setting). These are global master
+        data (not part of the per-day sync payload). Reading is available to any
+        signed-in user so the run applicator "Cheese" cards can hydrate their rows
+        from a chosen recipe; editing is manager-only.
+      responses:
+        "200":
+          description: All cheese recipes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheeseRecipeList"
+    post:
+      operationId: saveCheeseRecipes
+      tags: [cheeseRecipes]
+      summary: Create or update cheese recipes (manager only)
+      description: >-
+        Upserts a batch of cheese recipes by id. Each recipe is normalized and
+        validated server-side; malformed recipes are dropped. Manager role
+        required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveCheeseRecipesInput"
+      responses:
+        "200":
+          description: The full updated cheese-recipe list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheeseRecipeList"
+        "400":
+          description: Invalid input
+        "403":
+          description: Manager role required
+    delete:
+      operationId: deleteCheeseRecipes
+      tags: [cheeseRecipes]
+      summary: Delete cheese recipes by id (manager only)
+      description: >-
+        Removes a batch of cheese recipes by id. Manager role required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteCheeseRecipesInput"
+      responses:
+        "200":
+          description: The full updated cheese-recipe list after removal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheeseRecipeList"
         "400":
           description: Invalid input
         "403":
@@ -6623,6 +6692,106 @@ components:
         ids:
           type: array
           description: The ids of the mixes to delete
+          items:
+            type: string
+
+    CheeseComponent:
+      type: object
+      description: >-
+        One ingredient of a cheese recipe and how many pounds of it go into a
+        single batch of the finished blend.
+      required:
+        - ingredient
+        - lbs
+      properties:
+        ingredient:
+          type: string
+          description: Ingredient name
+        lbs:
+          type: number
+          description: Pounds of this ingredient per batch
+
+    CheeseRecipe:
+      type: object
+      description: >-
+        A manager-defined factory-wide cheese recipe (a named cheese blend a
+        customer uses on the line). Belongs to a customer (brand), carries the
+        product flavors it is assigned to, the customer's cheese-shredder setting,
+        an optional cellulose note, and a list of components — each an ingredient
+        and its PER-BATCH pounds. The run applicator "Cheese" cards pick one and
+        hydrate their rows from its components. Disabled recipes are kept but
+        hidden from run pickers.
+      required:
+        - id
+        - name
+        - brand
+        - flavors
+        - shredderSetting
+        - components
+        - enabled
+      properties:
+        id:
+          type: string
+          description: Stable client-generated id
+        name:
+          type: string
+          description: Display name of the cheese recipe
+        brand:
+          type: string
+          description: Customer this recipe belongs to (empty = any)
+        flavors:
+          type: array
+          description: >-
+            Product flavors this recipe is assigned to (the per-flavor assignment
+            lines). Empty = applies to any flavor / "All Varieties".
+          items:
+            type: string
+        shredderSetting:
+          type: string
+          description: The customer's cheese-shredder setting as printed on the sheet
+        cellulose:
+          type: string
+          description: Optional cellulose metadata from the sheet
+        notes:
+          type: string
+          description: Optional free-form notes
+        components:
+          type: array
+          description: The ingredients that make up one batch of the recipe
+          items:
+            $ref: "#/components/schemas/CheeseComponent"
+        enabled:
+          type: boolean
+
+    CheeseRecipeList:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheeseRecipe"
+
+    SaveCheeseRecipesInput:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          description: The batch of cheese recipes to create or update (by id)
+          items:
+            $ref: "#/components/schemas/CheeseRecipe"
+
+    DeleteCheeseRecipesInput:
+      type: object
+      required:
+        - ids
+      properties:
+        ids:
+          type: array
+          description: The ids of the cheese recipes to delete
           items:
             type: string
 

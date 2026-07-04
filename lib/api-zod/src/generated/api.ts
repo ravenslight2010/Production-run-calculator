@@ -2248,6 +2248,93 @@ export const DeleteMixesResponse = zod.object({
 
 
 /**
+ * Returns every factory-wide cheese recipe (a named cheese blend a customer uses on the line, with per-batch component pounds, the flavors it is assigned to, and the customer's shredder setting). These are global master data (not part of the per-day sync payload). Reading is available to any signed-in user so the run applicator "Cheese" cards can hydrate their rows from a chosen recipe; editing is manager-only.
+ * @summary List manager-defined cheese recipes
+ */
+export const ListCheeseRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the cheese recipe'),
+  "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
+  "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
+  "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Upserts a batch of cheese recipes by id. Each recipe is normalized and validated server-side; malformed recipes are dropped. Manager role required.
+ * @summary Create or update cheese recipes (manager only)
+ */
+export const SaveCheeseRecipesBody = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the cheese recipe'),
+  "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
+  "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
+  "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.')).describe('The batch of cheese recipes to create or update (by id)')
+})
+
+export const SaveCheeseRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the cheese recipe'),
+  "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
+  "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
+  "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
+ * Removes a batch of cheese recipes by id. Manager role required.
+ * @summary Delete cheese recipes by id (manager only)
+ */
+export const DeleteCheeseRecipesBody = zod.object({
+  "ids": zod.array(zod.string()).describe('The ids of the cheese recipes to delete')
+})
+
+export const DeleteCheeseRecipesResponse = zod.object({
+  "items": zod.array(zod.object({
+  "id": zod.string().describe('Stable client-generated id'),
+  "name": zod.string().describe('Display name of the cheese recipe'),
+  "brand": zod.string().describe('Customer this recipe belongs to (empty = any)'),
+  "flavors": zod.array(zod.string()).describe('Product flavors this recipe is assigned to (the per-flavor assignment lines). Empty = applies to any flavor \/ \"All Varieties\".'),
+  "shredderSetting": zod.string().describe('The customer\'s cheese-shredder setting as printed on the sheet'),
+  "cellulose": zod.string().optional().describe('Optional cellulose metadata from the sheet'),
+  "notes": zod.string().optional().describe('Optional free-form notes'),
+  "components": zod.array(zod.object({
+  "ingredient": zod.string().describe('Ingredient name'),
+  "lbs": zod.number().describe('Pounds of this ingredient per batch')
+}).describe('One ingredient of a cheese recipe and how many pounds of it go into a single batch of the finished blend.')).describe('The ingredients that make up one batch of the recipe'),
+  "enabled": zod.boolean()
+}).describe('A manager-defined factory-wide cheese recipe (a named cheese blend a customer uses on the line). Belongs to a customer (brand), carries the product flavors it is assigned to, the customer\'s cheese-shredder setting, an optional cellulose note, and a list of components — each an ingredient and its PER-BATCH pounds. The run applicator \"Cheese\" cards pick one and hydrate their rows from its components. Disabled recipes are kept but hidden from run pickers.'))
+})
+
+
+/**
  * Returns every factory-wide cycle-count schedule (warehouse sections to count on a cadence, with the date each was last counted). These are global policy (not part of the per-day sync payload). Reading is available to any signed-in user so both apps can build the warehouse "Time to Count" card; editing is manager-only.
  * @summary List manager-defined cycle-count schedules
  */

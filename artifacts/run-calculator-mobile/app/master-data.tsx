@@ -25,6 +25,8 @@ import FreezerPullItemsManager from "@/components/FreezerPullItemsManager";
 import MixesManager from "@/components/MixesManager";
 import MixReconcilePanel from "@/components/MixReconcilePanel";
 import MixAssistChat from "@/components/MixAssistChat";
+import CheeseRecipesManager from "@/components/CheeseRecipesManager";
+import CheeseImportModal from "@/components/CheeseImportModal";
 import CycleCountManager from "@/components/CycleCountManager";
 import { DEFAULT_CYCLE_COUNT_SECTIONS } from "@workspace/cycle-count";
 import StaffRolesCard from "@/components/StaffRolesCard";
@@ -78,6 +80,13 @@ import {
   type PremixImportStore,
 } from "@/context/premixImport";
 import type { PremixFreezerPull } from "@workspace/premix-import";
+import {
+  prepareCheeseImport,
+  commitCheeseImport,
+  MAX_CHEESE_IMPORT_FILES,
+  type CheeseImportPrepared,
+} from "@/context/cheeseImport";
+import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { Mix } from "@workspace/mixes";
 import {
   fetchSavedSpecSheets,
@@ -1423,6 +1432,17 @@ export default function MasterDataScreen() {
   const [premixError, setPremixError] = useState<string | null>(null);
   const [premixPrepared, setPremixPrepared] = useState<PremixImportPrepared | null>(null);
   const [premixProgress, setPremixProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // ── "Cheese Mix Recipe Specs" import (manager only; mirrors web Cheese
+  // Recipes section). Cheese is its OWN factory-wide pool — NOT routed into
+  // Mixes — so it has its own deterministic importer and modal. ──
+  const [cheeseOpen, setCheeseOpen] = useState(false);
+  const [cheeseLoading, setCheeseLoading] = useState(false);
+  const [cheeseApplying, setCheeseApplying] = useState(false);
+  const [cheeseError, setCheeseError] = useState<string | null>(null);
+  const [cheesePrepared, setCheesePrepared] = useState<CheeseImportPrepared | null>(null);
+  const [cheeseProgress, setCheeseProgress] = useState<{ done: number; total: number } | null>(null);
+
   // Bumped after a recipe import to make MergeManager auto-run a merge check
   // (imported recipe ingredients can duplicate standalone individual ones).
   const [mergeCheckSignal, setMergeCheckSignal] = useState(0);
@@ -1837,6 +1857,77 @@ export default function MasterDataScreen() {
       );
     } finally {
       setPremixApplying(false);
+    }
+  }
+
+  async function handleCheeseImportPick() {
+    setCheeseError(null);
+    setCheesePrepared(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: [
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "application/vnd.ms-excel",
+          "*/*",
+        ],
+        copyToCacheDirectory: true,
+        multiple: true,
+      });
+      if (picked.canceled || !picked.assets?.length) return;
+      const assets = picked.assets.slice(0, MAX_CHEESE_IMPORT_FILES);
+      setCheeseOpen(true);
+      setCheeseProgress(assets.length > 1 ? { done: 0, total: assets.length } : null);
+      setCheeseLoading(true);
+      const readGrids = async (uri: string) =>
+        Platform.OS === "web"
+          ? readWorkbookGridsFromArrayBuffer(await (await fetch(uri)).arrayBuffer())
+          : readWorkbookGridsFromBase64(await Promise.resolve(new File(uri).base64()));
+      // Read each workbook independently so one unreadable file doesn't sink the
+      // batch — prepareCheeseImport skips empties and throws only if every file
+      // failed. Sequential reads with a yield between files so a big batch can't
+      // freeze/crash the app while parsing workbooks back-to-back. Mirrors premix.
+      const settled: SheetGrid[][] = [];
+      for (const a of assets) {
+        await new Promise((r) => setTimeout(r, 0));
+        settled.push(await readGrids(a.uri).catch(() => []));
+      }
+      const prepared = await prepareCheeseImport(
+        settled,
+        (done, total) => setCheeseProgress({ done, total }),
+        assets.map((a) => a.name ?? ""),
+      );
+      setCheesePrepared(prepared);
+    } catch (e) {
+      setCheeseError(
+        e instanceof Error ? e.message : "Could not read or interpret that file.",
+      );
+    } finally {
+      setCheeseLoading(false);
+      setCheeseProgress(null);
+    }
+  }
+
+  async function handleCheeseImportConfirm(recipesToApply: CheeseRecipe[]) {
+    if (!cheesePrepared) return;
+    setCheeseApplying(true);
+    try {
+      const result = await commitCheeseImport(cheesePrepared, recipesToApply);
+      // Refresh the shared cheese-recipes query so imported recipes appear
+      // immediately in the manager list and the run "Cheese" pickers.
+      void mixesQc.invalidateQueries({ queryKey: ["cheeseRecipes"] });
+      setCheeseOpen(false);
+      setCheesePrepared(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showNote(
+        "Cheese recipes imported",
+        `${result.count} cheese recipe${result.count === 1 ? "" : "s"} saved.`,
+      );
+    } catch (e) {
+      setCheeseError(
+        e instanceof Error ? e.message : "Could not apply the import. Please retry.",
+      );
+    } finally {
+      setCheeseApplying(false);
     }
   }
 
@@ -2352,6 +2443,56 @@ export default function MasterDataScreen() {
           </>
         ) : null}
 
+        {/* Cheese Recipes (manage-inventory capability; mirrors web). Cheese is
+            its OWN factory-wide master-data pool — deliberately NOT routed into
+            Mixes. Managers import "Cheese Mix Recipe Specs" workbooks; the run
+            "Cheese" cards pick from this pool. */}
+        {canManageInventory ? (
+          <>
+            <SectionHeader title="Cheese Recipes" />
+            <CardSection>
+              {isManager ? (
+                <>
+                  <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                    Import a &quot;Cheese Mix Recipe Specs&quot; Excel (.xlsx)
+                    workbook. Each customer tab becomes cheese recipes with the
+                    shredder setting and per-batch pounds; you&apos;ll see a
+                    summary before anything is saved. Re-importing updates
+                    existing recipes instead of duplicating.
+                  </Text>
+                  <Pressable
+                    onPress={handleCheeseImportPick}
+                    style={({ pressed }) => [
+                      styles.importBtn,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderWidth: 1,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.7 : 1,
+                        marginBottom: 12,
+                      },
+                    ]}
+                  >
+                    <Feather name="upload" size={16} color={colors.foreground} />
+                    <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                      Import Cheese Recipe Specs…
+                    </Text>
+                  </Pressable>
+                </>
+              ) : null}
+              <CheeseRecipesManager
+                brands={brands}
+                brandFlavors={brandFlavors}
+                ingredientSuggestions={[
+                  ...cheeseIngredients,
+                  ...frontlineIngredients,
+                  ...doughIngredients,
+                ]}
+              />
+            </CardSection>
+          </>
+        ) : null}
+
         {/* Cycle-count schedules (manage-inventory capability; mirrors web) */}
         {canManageInventory ? (
           <>
@@ -2546,6 +2687,21 @@ export default function MasterDataScreen() {
         prepared={premixPrepared}
         applying={premixApplying}
         onConfirm={handlePremixImportConfirm}
+      />
+
+      <CheeseImportModal
+        visible={cheeseOpen}
+        onClose={() => {
+          setCheeseOpen(false);
+          setCheesePrepared(null);
+          setCheeseError(null);
+        }}
+        loading={cheeseLoading}
+        progress={cheeseProgress}
+        error={cheeseError}
+        prepared={cheesePrepared}
+        applying={cheeseApplying}
+        onConfirm={handleCheeseImportConfirm}
       />
 
       <ExcelImportModal

@@ -25,6 +25,12 @@
       "path": "./lib/inventory-math"
     },
     {
+      "path": "./lib/cheese-recipes"
+    },
+    {
+      "path": "./lib/cheese-import"
+    },
+    {
       "path": "./lib/voice-commands"
     },
     {
