@@ -614,12 +614,24 @@ number+ingredient pairs → one cheese-kind recipe.
 - **Prompt compliance is probabilistic — a deterministic unpacker is the real
   guarantee.** `extractEmbeddedApplicatorBlends` in the lib parses any
   composition the model leaves embedded (clean name → type, pairs → one
-  cheese recipe; "(variant N)" for same base name w/ different composition).
+  cheese recipe).
+- **A cheese blend's identity is its NAME — same base name = ONE pool recipe,
+  never a per-weight "(variant N)" copy.** Spec sheets express cheese as
+  per-pizza OUNCES, so one named mix legitimately shows different component
+  amounts across pizzas (e.g. 2.07 oz on a plain-cheese pizza, 1.75 oz on a
+  topped one). The old unpacker forked a "(variant N)" whenever the same base
+  name had a different composition, which — because per-pizza oz ALWAYS differs
+  — split one mix into two ("Aldo's Cheese Mix" bug). Now `extractEmbeddedApplicatorBlends`
+  keys by base name (first composition seen wins; manager refines batch lbs
+  later), matching `collectSpecImportCheeseRecipes`'s name-dedupe. **Why:** the
+  variant behavior was the lone name-keying outlier and contradicted the rest
+  of the importer. `cleanSpecCheeseRecipeName` also strips an embedded
+  composition (first line + `parseEmbeddedBlend` name) so an AI-emitted
+  name-with-breakdown collapses the same way.
 - **The unpacker MUST run once over the MERGED workbook parse, never per
-  chunk** (so NOT in the server's per-chunk sanitize): per-chunk extraction
-  lets two chunks emit the same base name for different compositions, and the
-  later-wins recipe merge then collapses one variant and mislinks applicator
-  types. Both clients call it at `rawMerged` before `canonicalizeParsed`.
+  chunk** (so NOT in the server's per-chunk sanitize): running once keeps
+  applicator relinking consistent within a single pass. Both clients call it at
+  `rawMerged` before `canonicalizeParsed`.
 - **One blend at two applicator weights = ONE cheese pool recipe.** The AI
   sometimes suffixes the per-pizza weight onto the cheese name ("Aldo's Cheese
   Mix 2.07" / "(2.07)"). `canonicalizeSpecImportCheeseRecipeNames` (runs on the

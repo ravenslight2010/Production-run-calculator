@@ -27,6 +27,27 @@ describe("cleanSpecCheeseRecipeName", () => {
     expect(cleanSpecCheeseRecipeName("Basha's Ultra Thin 5 Cheese")).toBe("Basha's Ultra Thin 5 Cheese");
   });
 
+  it("strips an embedded per-pizza composition after the blend name", () => {
+    expect(
+      cleanSpecCheeseRecipeName(
+        "Aldo's Cheese Mix 2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan",
+      ),
+    ).toBe("Aldo's Cheese Mix");
+    expect(
+      cleanSpecCheeseRecipeName(
+        "Aldo's Cheese Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan",
+      ),
+    ).toBe("Aldo's Cheese Mix");
+  });
+
+  it("keeps only the blend name when the composition sits on a second line", () => {
+    expect(
+      cleanSpecCheeseRecipeName(
+        "Aldo's Cheese Mix\n2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan",
+      ),
+    ).toBe("Aldo's Cheese Mix");
+  });
+
   it("does not strip when nothing meaningful would remain", () => {
     expect(cleanSpecCheeseRecipeName("2.07")).toBe("2.07");
     expect(cleanSpecCheeseRecipeName("  ")).toBe("");

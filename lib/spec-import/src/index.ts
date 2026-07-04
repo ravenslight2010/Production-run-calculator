@@ -190,30 +190,32 @@ export function parseEmbeddedBlend(type: string): EmbeddedBlend | null {
  * the applicator's `type` becomes the clean mix name and the composition is
  * emitted ONCE as a cheese-kind library recipe (apply-time routing then files
  * "mix"-named ones under the Mix category). A clean name the AI already
- * emitted a cheese recipe for is reused, never duplicated; the same base name
- * with a DIFFERENT composition becomes a distinct "(variant N)" recipe.
+ * emitted a cheese recipe for is reused, never duplicated.
+ *
+ * A cheese blend's identity is its NAME — the same way `collectSpecImportCheeseRecipes`
+ * and the rest of the importer key cheese recipes. A spec sheet expresses cheese
+ * as per-pizza OUNCES, so ONE named blend legitimately shows different component
+ * amounts across pizzas (e.g. "Aldo's Cheese Mix" at 2.07 oz on a plain-cheese
+ * pizza but 1.75 oz on a topped one). Every applicator that shares a base name
+ * therefore resolves to a SINGLE pool recipe (first composition seen wins; the
+ * manager refines per-batch pounds later) — it is never forked into a per-weight
+ * duplicate, which would surface as two "same" cheese mixes.
  *
  * IMPORTANT: run this ONCE over the fully MERGED workbook parse (after
- * mergeParsedSpecImports), never per chunk — variant naming is only consistent
- * within a single pass, and a per-chunk pass would let two chunks emit the same
- * base name for different compositions, which the later-wins recipe merge then
- * collapses into one (losing a variant and mislinking applicators). Pure.
+ * mergeParsedSpecImports), never per chunk — a per-chunk pass would let two
+ * chunks each emit the same base name, which the later-wins recipe merge would
+ * then collapse anyway, but running once keeps applicator relinking consistent
+ * within a single pass. Pure.
  */
 export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): ParsedSpecImport {
   // Every taken cheese-recipe name (pre-existing AND newly generated) so a
-  // generated variant name can never silently collide with either.
+  // generated name can never silently collide with an AI-emitted one.
   const takenCheese = new Set(
     parsed.recipes.filter((r) => r.kind === "cheese").map((r) => r.name.trim().toLowerCase()),
   );
   const added: ParsedRecipe[] = [];
-  const variantsByBase = new Map<string, ParsedRecipe[]>();
-  const sameRows = (a: RecipeRow[], b: RecipeRow[]) =>
-    a.length === b.length &&
-    a.every(
-      (x, i) =>
-        x.ingredient.toLowerCase() === b[i].ingredient.toLowerCase() &&
-        Math.abs(x.lbs - b[i].lbs) < 1e-9,
-    );
+  // One extracted recipe per clean base name (blends are name-keyed).
+  const extractedByBase = new Map<string, ParsedRecipe>();
 
   const profiles = parsed.profiles.map((p) => ({
     ...p,
@@ -221,26 +223,19 @@ export function extractEmbeddedApplicatorBlends(parsed: ParsedSpecImport): Parse
       const blend = parseEmbeddedBlend(a.type);
       if (!blend) return a;
       const baseLower = blend.name.toLowerCase();
-      const variants = variantsByBase.get(baseLower) ?? [];
-      // Same composition already extracted in this pass → reuse its name.
-      const match = variants.find((v) => sameRows(v.rows, blend.rows));
-      if (match) return { ...a, type: match.name };
-      // The AI already emitted a cheese recipe under this clean name (and no
-      // extracted variant claimed it) — trust its version, just clean the type.
-      if (variants.length === 0 && takenCheese.has(baseLower)) {
-        return { ...a, type: blend.name };
-      }
-      // New composition: base name if free, else the next free "(variant N)".
-      let name = blend.name;
-      for (let n = 2; takenCheese.has(name.trim().toLowerCase()); n++) {
-        name = `${blend.name} (variant ${n})`;
-      }
-      const rec: ParsedRecipe = { kind: "cheese", name, rows: blend.rows };
+      // Already extracted this base name in this pass → reuse it. Same named
+      // blend at a different per-pizza weight stays ONE recipe.
+      const existing = extractedByBase.get(baseLower);
+      if (existing) return { ...a, type: existing.name };
+      // The AI already emitted a cheese recipe under this clean name — trust
+      // its version, just clean the applicator type.
+      if (takenCheese.has(baseLower)) return { ...a, type: blend.name };
+      // First sighting of this base name: emit the pool recipe once.
+      const rec: ParsedRecipe = { kind: "cheese", name: blend.name, rows: blend.rows };
       added.push(rec);
-      takenCheese.add(name.trim().toLowerCase());
-      variants.push(rec);
-      variantsByBase.set(baseLower, variants);
-      return { ...a, type: name };
+      takenCheese.add(baseLower);
+      extractedByBase.set(baseLower, rec);
+      return { ...a, type: blend.name };
     }),
   }));
 
@@ -426,8 +421,21 @@ export function collectSpecImportCheeseRecipes(
  * Pure.
  */
 export function cleanSpecCheeseRecipeName(name: string): string {
-  const trimmed = (name ?? "").trim();
+  let trimmed = (name ?? "").trim();
   if (!trimmed) return "";
+  // A cell often crams the whole per-pizza composition into the same cell as
+  // the blend name, sometimes on a second line: "Aldo's Cheese Mix\n2.07
+  // Pizella, 1.19 Part Skim Mozzarella, ...". Keep only the blend name so the
+  // same blend at different applicator weights collapses to ONE recipe: take
+  // the first line that has letters, then drop any embedded
+  // "<amount> <ingredient>" composition that follows the name.
+  const firstLine = trimmed
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .find((l) => /[a-z]/i.test(l));
+  if (firstLine) trimmed = firstLine;
+  const blend = parseEmbeddedBlend(trimmed);
+  if (blend && /[a-z]/i.test(blend.name)) trimmed = blend.name;
   const stripped = trimmed
     .replace(
       /[\s(\-\u2013\u2014]+\d+(?:[.,]\d+)?\s*(?:oz|ozs|ounce|ounces|lb|lbs|#)?\)?\s*$/i,

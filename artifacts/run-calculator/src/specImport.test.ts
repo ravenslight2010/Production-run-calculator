@@ -2577,19 +2577,27 @@ describe("embedded applicator blends (deterministic unpack)", () => {
       expect(out.recipes[0].rows).toEqual([{ ingredient: "Pizella", lbs: 2 }]);
     });
 
-    it("same base name with a different composition becomes a distinct variant", () => {
-      const other = "Aldo's Cheese Mix 2.0 Pizella, 0.5 Part Skim Mozzarella";
+    it("collapses the SAME named mix applied at different per-pizza weights to ONE recipe", () => {
+      // Real spec sheets express cheese as per-pizza ounces, so one named blend
+      // legitimately shows different component amounts across pizzas. It must
+      // stay a single pool recipe (first composition wins), never split in two.
+      const heavier = "Aldo's Cheese Mix 2.07 Pizella, 1.19 Part Skim Mozzarella, 0.26 Grated Parmesan";
       const out = extractEmbeddedApplicatorBlends({
-        profiles: [prof([ALDOS]), { ...prof([other]), flavor: "Deluxe" }],
+        profiles: [{ ...prof([heavier]), flavor: "Cheese" }, { ...prof([ALDOS]), flavor: "Deluxe" }],
         recipes: [],
       });
-      const names = out.recipes.map((r) => r.name);
-      expect(names).toContain("Aldo's Cheese Mix");
-      expect(names).toContain("Aldo's Cheese Mix (variant 2)");
-      expect(out.profiles[1].applicators[0].type).toBe("Aldo's Cheese Mix (variant 2)");
+      const cheese = out.recipes.filter((r) => r.kind === "cheese");
+      expect(cheese.length).toBe(1);
+      expect(cheese[0].name).toBe("Aldo's Cheese Mix");
+      // First composition seen wins.
+      expect(cheese[0].rows.find((r) => /pizella/i.test(r.ingredient))?.lbs).toBe(2.07);
+      expect(out.profiles.map((p) => p.applicators[0].type)).toEqual([
+        "Aldo's Cheese Mix",
+        "Aldo's Cheese Mix",
+      ]);
     });
 
-    it("same lbs vector but different ingredients still becomes a distinct variant", () => {
+    it("collapses a same-named blend even when the ingredients differ (name is the identity)", () => {
       const a = "House Blend Mix 1.0 Mozzarella, 0.5 Provolone";
       const b = "House Blend Mix 1.0 Cheddar, 0.5 Monterey Jack";
       const out = extractEmbeddedApplicatorBlends({
@@ -2597,13 +2605,13 @@ describe("embedded applicator blends (deterministic unpack)", () => {
         recipes: [],
       });
       const cheese = out.recipes.filter((r) => r.kind === "cheese");
-      expect(cheese.length).toBe(2);
-      expect(new Set(cheese.map((r) => r.name)).size).toBe(2);
-      expect(out.profiles[0].applicators[0].type).not.toBe(out.profiles[1].applicators[0].type);
+      expect(cheese.length).toBe(1);
+      expect(cheese[0].name).toBe("House Blend Mix");
+      expect(out.profiles[0].applicators[0].type).toBe(out.profiles[1].applicators[0].type);
     });
 
-    it("cross-chunk variants survive when extraction runs AFTER the raw chunk merge", () => {
-      // Two chunks of one workbook, same base name, different compositions —
+    it("collapses same-named blends across chunks when extraction runs AFTER the raw merge", () => {
+      // Two chunks of one workbook, same base name, different per-pizza amounts —
       // the real import path merges raw chunks first, then extracts once.
       const chunkA: ParsedSpecImport = {
         profiles: [{ ...prof([ALDOS]), flavor: "Cheese" }],
@@ -2617,14 +2625,11 @@ describe("embedded applicator blends (deterministic unpack)", () => {
       };
       const out = extractEmbeddedApplicatorBlends(mergeParsedSpecImports([chunkA, chunkB]));
       const cheese = out.recipes.filter((r) => r.kind === "cheese");
-      expect(cheese.length).toBe(2);
+      expect(cheese.length).toBe(1);
+      expect(cheese[0].name).toBe("Aldo's Cheese Mix");
       const typeByFlavor = new Map(out.profiles.map((p) => [p.flavor, p.applicators[0].type]));
       expect(typeByFlavor.get("Cheese")).toBe("Aldo's Cheese Mix");
-      expect(typeByFlavor.get("Deluxe")).toBe("Aldo's Cheese Mix (variant 2)");
-      // Each applicator's type resolves to the recipe with ITS composition.
-      const byName = new Map(cheese.map((r) => [r.name, r.rows]));
-      expect(byName.get("Aldo's Cheese Mix")?.length).toBe(3);
-      expect(byName.get("Aldo's Cheese Mix (variant 2)")?.length).toBe(2);
+      expect(typeByFlavor.get("Deluxe")).toBe("Aldo's Cheese Mix");
     });
 
     it("leaves plain applicator types and existing recipes untouched", () => {
