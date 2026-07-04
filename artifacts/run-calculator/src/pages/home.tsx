@@ -9011,117 +9011,16 @@ export default function Home() {
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
-                    {/* Dough & Sauce recipes are now server-backed factory-wide
-                        master-data (like Cheese Recipes / Mixes). Show the recipe
-                        manager UP TOP — matching the Mixes / Cheese tabs — so it is
-                        the primary editor; the local name / ingredient lists follow
-                        below. The run form's Dough / Sauce cards pick one by name
-                        and hydrate their rows from the chosen recipe. */}
+                    {/* Dough & Sauce recipes are server-backed factory-wide
+                        master-data (like Cheese Recipes / Mixes). The recipe
+                        manager is the only editor here — matching the Mixes /
+                        Cheese tabs. The run form's Dough / Sauce cards pick one
+                        by name and hydrate their rows from the chosen recipe. */}
                     {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
                       <NamedRecipesManager
                         kind={manageCategory === "dough" ? "dough" : "sauce"}
                         ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
                       />
-                    )}
-
-                    <GroupedPanel
-                      namesLabel={groupedTab.namesLabel}
-                      names={groupedTab.names}
-                      onAddName={groupedTab.onAddName}
-                      onRemoveName={groupedTab.onRemoveName}
-                      onRenameName={(groupedTab as any).onRenameName}
-                      onEditName={selectPreset}
-                      selectedName={mgSelectedPreset}
-                      ingLabel={groupedTab.ingLabel}
-                      ingredients={groupedTab.ingredients}
-                      onAddIng={groupedTab.onAddIng}
-                      onRemoveIng={groupedTab.onRemoveIng}
-                      onRenameIng={(groupedTab as any).onRenameIng}
-                      onMoveName={(name, targetKey) => moveRecipeName(name, groupedTab.key as RecipeNameCategory, targetKey as RecipeNameCategory)}
-                      nameMoveTargets={groupedTabs.filter(t => t.key !== groupedTab.key).map(t => ({ key: t.key, label: t.label }))}
-                      namesInput={mgNamesInput}
-                      setNamesInput={setMgNamesInput}
-                      ingInput={mgIngInput}
-                      setIngInput={setMgIngInput}
-                    />
-
-                    {/* Recipe ingredient editor. Mix names that match an imported
-                        (server) mix show its components read-only — the Mixes tab
-                        is the source of truth for those, and the local preset pool
-                        must not shadow it. */}
-                    {mgSelectedPreset && presetConfig && manageCategory === "mix" && serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase()) && (
-                      <div className="border border-primary/30 rounded-lg overflow-hidden">
-                        <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
-                          <div className="flex items-center gap-2">
-                            <ClipboardList className="w-3.5 h-3.5 text-primary" />
-                            <span className="text-xs font-semibold text-primary">{mgSelectedPreset}</span>
-                            <span className="text-[10px] text-muted-foreground">(imported mix{canManageInventory ? " — edit it on the Mixes tab" : ""})</span>
-                          </div>
-                          <button type="button" onClick={() => { setMgSelectedPreset(null); setMgPresetRows([]); }} className="text-muted-foreground hover:text-foreground">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="p-3 space-y-1.5">
-                          {(serverMixRowsByName.get(mgSelectedPreset.trim().toLowerCase()) ?? []).map((row, i) => (
-                            <div key={i} className="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-muted/30">
-                              <span className="text-sm">{row.ingredient}</span>
-                              <span className="text-sm font-mono">{fmtNum(row.lbs, 2)} <span className="text-xs font-sans text-muted-foreground">oz per pizza</span></span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {mgSelectedPreset && presetConfig && manageCategory === "mix" && !serverMixRowsByName.has(mgSelectedPreset.trim().toLowerCase()) && (
-                      <div className="border border-primary/30 rounded-lg overflow-hidden">
-                        <div className="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-primary/20">
-                          <div className="flex items-center gap-2">
-                            <ClipboardList className="w-3.5 h-3.5 text-primary" />
-                            <span className="text-xs font-semibold text-primary">{mgSelectedPreset}</span>
-                            <span className="text-[10px] text-muted-foreground">(click ingredient to edit, lbs is per batch)</span>
-                          </div>
-                          <button type="button" onClick={() => { setMgSelectedPreset(null); setMgPresetRows([]); }} className="text-muted-foreground hover:text-foreground">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                        <div className="p-3 space-y-1.5">
-                          {mgPresetRows.length === 0 && (
-                            <p className="text-xs text-muted-foreground text-center py-2">No ingredients saved yet — add a row below.</p>
-                          )}
-                          {mgPresetRows.map((row, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <select
-                                value={row.ingredient}
-                                onChange={e => updatePresetRow(i, "ingredient", e.target.value)}
-                                className="flex-1 border border-input rounded px-2 py-1 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring"
-                              >
-                                {row.ingredient === "" && <option value="">— ingredient —</option>}
-                                {presetConfig.ingOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                              </select>
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.1}
-                                value={row.lbs === 0 ? "" : row.lbs}
-                                onChange={e => updatePresetRow(i, "lbs", e.target.value)}
-                                placeholder="0"
-                                className="w-20 border border-input rounded px-2 py-1 text-sm bg-background/50 focus:outline-none focus:ring-1 focus:ring-ring text-right"
-                              />
-                              <span className="text-xs text-muted-foreground shrink-0">lbs</span>
-                              <button type="button" onClick={() => removePresetRow(i)} className="text-muted-foreground hover:text-destructive shrink-0">
-                                <X className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                          <button
-                            type="button"
-                            onClick={addPresetRow}
-                            className="mt-1 flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 font-medium"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                            Add ingredient row
-                          </button>
-                        </div>
-                      </div>
                     )}
                   </div>
                 )}
