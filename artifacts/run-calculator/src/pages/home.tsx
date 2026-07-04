@@ -3221,13 +3221,14 @@ export default function Home() {
   const mergeUniverse = useMemo(() => {
     switch (mergeCategory) {
       // The four recipe categories merge that category's RECIPE NAMES (the
-      // picklist labels), not ingredient names. Mixes are server-backed
-      // master-data now (the Mixes section), so the picker shows the SAME live
-      // server pool — not the dormant local `mixRecipeNames` list, which held
-      // legacy names that no longer appear in the app.
+      // picklist labels), not ingredient names. Mixes, Dough, Sauce and Cheese
+      // are all server-backed master-data now (their sections under Manage
+      // Lists), so each picker shows the SAME live server pool — not the dormant
+      // local `mixRecipeNames` / `doughRecipeNames` / `frontlineRecipeNames`
+      // lists, which held legacy names that no longer appear in the app.
       case "mixes": return dedupSorted(serverMixNames);
-      case "dough": return dedupSorted(doughRecipeNames);
-      case "sauce": return dedupSorted(frontlineRecipeNames);
+      case "dough": return dedupSorted(serverDoughNames);
+      case "sauce": return dedupSorted(serverSauceNames);
       case "cheese": {
         // Cheese is server-backed master-data now (the Cheese Recipes section),
         // so the merge picker must show the SAME live pool — not the dormant
@@ -3249,6 +3250,8 @@ export default function Home() {
         // brand/flavor, so mix names for other brands/flavors would leak in.
         const recipeNameSet = new Set(
           [
+            ...serverDoughNames,
+            ...serverSauceNames,
             ...doughRecipeNames,
             ...frontlineRecipeNames,
             ...serverCheeseNames,
@@ -3277,7 +3280,7 @@ export default function Home() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
+  }, [mergeCategory, mergeBfMode, mergeBfBrand, brands, brandFlavors, ingredientTypes, pepTypes, serverDoughNames, serverSauceNames, doughRecipeNames, frontlineRecipeNames, serverCheeseNames, cheeseRecipeNames, mixRecipeNames, serverMixNames, allMixRecipeOptions]);
 
   // Recipe categories are merged by recipe NAME (not ingredient name).
   const isRecipeNameCategory =
@@ -3394,8 +3397,8 @@ export default function Home() {
   // re-pointed, and the category's recipe-preset map (its KEYS get folded).
   function collectRecipeNameSurfaces(category: RecipeNameMergeCategory) {
     const listMap: Record<RecipeNameMergeCategory, string[]> = {
-      dough: doughRecipeNames,
-      sauce: frontlineRecipeNames,
+      dough: serverDoughNames,
+      sauce: serverSauceNames,
       cheese: serverCheeseNames,
       mixes: serverMixNames,
     };
