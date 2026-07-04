@@ -192,7 +192,8 @@ const {
   findTruncatedCells, formatOverflowColumnsNote, formatTruncatedCellsNote,
   gridSanityIssue, gridsToPromptText, mergeParsedSpecImports, recipeTargets,
   resolveRetriedParsePass, shouldRetryParsePass, splitGridsForPrompt,
-  summarizeSpecImport,
+  summarizeSpecImport, canonicalizeSpecImportCheeseRecipeNames,
+  dedupeSpecImportCheeseRecipes, linkSpecImportCheeseToExisting,
 } = globalThis.__SPEC_IMPORT_LIB__;
 const { reconcileSpecWithRecipes, toReconcileRecipes } = globalThis.__SPEC_RECONCILE_LIB__;
 const {
