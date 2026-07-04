@@ -1551,11 +1551,42 @@ export function TypeDropdown({
   const [open, setOpen] = useState(false);
   const [inputVal, setInputVal] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [dropUp, setDropUp] = useState(false);
+  const [rect, setRect] = useState<{ top: number; bottom: number; right: number } | null>(null);
   const confirmDeleteRef = useRef<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const scrollKeep = useDropdownScrollKeeper(open);
   const filtered = options.filter(o =>
     o.toLowerCase().includes(inputVal.toLowerCase())
   );
+
+  const MENU_W = 176;
+  function openDropdown() {
+    setInputVal("");
+    setConfirmDelete(null);
+    confirmDeleteRef.current = null;
+    if (triggerRef.current) {
+      const r = triggerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r.bottom;
+      const dropdownH = Math.min(filtered.length * 32 + 80, 240);
+      setDropUp(spaceBelow < dropdownH && r.top > dropdownH);
+      setRect({ top: r.top, bottom: r.bottom, right: r.right });
+    }
+    setOpen(true);
+  }
+
+  const dropStyle: React.CSSProperties = rect
+    ? {
+        position: "fixed",
+        left: Math.max(4, Math.min(rect.right - MENU_W, window.innerWidth - MENU_W - 8)),
+        width: MENU_W,
+        zIndex: 9999,
+        ...(dropUp
+          ? { bottom: window.innerHeight - rect.top + 4 }
+          : { top: rect.bottom + 4 }),
+      }
+    : {};
+
   return (
     <div className="flex items-center justify-between mb-2 mt-5 first:mt-0">
       <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -1563,8 +1594,9 @@ export function TypeDropdown({
       </p>
       <div className="relative">
         <button
+          ref={triggerRef}
           type="button"
-          onClick={() => { setInputVal(""); setConfirmDelete(null); confirmDeleteRef.current = null; setOpen(true); }}
+          onClick={openDropdown}
           className="flex items-center gap-1 px-2 py-0.5 rounded bg-muted/40 border border-border/40 text-xs font-semibold hover:bg-muted/70 transition-colors min-w-[110px] justify-between"
         >
           <span className={value ? "text-foreground" : "text-muted-foreground/50"}>
@@ -1573,7 +1605,10 @@ export function TypeDropdown({
           <ChevronDown className="w-3 h-3 text-muted-foreground shrink-0" />
         </button>
         {open && (
-          <div className="absolute z-50 top-full mt-1 right-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1">
+          <div
+            style={dropStyle}
+            className="bg-popover border border-border rounded-md shadow-lg py-1"
+          >
             <input
               autoFocus
               value={inputVal}

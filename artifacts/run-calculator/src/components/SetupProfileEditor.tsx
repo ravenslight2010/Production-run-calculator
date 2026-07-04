@@ -30,7 +30,6 @@ import { toast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ChevronDown, Settings, Package, Save, X } from "lucide-react";
 
 type ApplicatorNum = 1 | 2 | 3 | 4;
@@ -358,15 +357,27 @@ export default function SetupProfileEditor({
     );
   }
 
+  if (!open) return null;
   return (
-    <Dialog open={open} onOpenChange={o => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="w-4 h-4" /> Setup Profiles
-          </DialogTitle>
-        </DialogHeader>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+          <div className="flex items-center gap-2">
+            <Settings className="w-4 h-4 text-primary" />
+            <h2 className="font-bold text-base">Setup Profiles</h2>
+          </div>
+          <button type="button" onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
         {!isSupervisor ? (
           <p className="text-sm text-muted-foreground py-6 text-center">
             Supervisor access required to edit setup profiles.
@@ -743,7 +754,8 @@ export default function SetupProfileEditor({
             </div>
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>
   );
 }
