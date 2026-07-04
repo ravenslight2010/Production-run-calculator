@@ -9008,6 +9008,19 @@ export default function Home() {
                 {/* Grouped panel (Dough / Sauce / Cheese / Mix) */}
                 {isGrouped && groupedTab && (
                   <div className="space-y-4">
+                    {/* Dough & Sauce recipes are now server-backed factory-wide
+                        master-data (like Cheese Recipes / Mixes). Show the recipe
+                        manager UP TOP — matching the Mixes / Cheese tabs — so it is
+                        the primary editor; the local name / ingredient lists follow
+                        below. The run form's Dough / Sauce cards pick one by name
+                        and hydrate their rows from the chosen recipe. */}
+                    {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
+                      <NamedRecipesManager
+                        kind={manageCategory === "dough" ? "dough" : "sauce"}
+                        ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
+                      />
+                    )}
+
                     <GroupedPanel
                       namesLabel={groupedTab.namesLabel}
                       names={groupedTab.names}
@@ -9028,17 +9041,6 @@ export default function Home() {
                       ingInput={mgIngInput}
                       setIngInput={setMgIngInput}
                     />
-
-                    {/* Dough & Sauce recipes are now server-backed factory-wide
-                        master-data (like Cheese Recipes / Mixes). Managers edit
-                        them here; the run form's Dough / Sauce cards pick one by
-                        name and hydrate their rows from the chosen recipe. */}
-                    {(manageCategory === "dough" || manageCategory === "sauce") && canManageInventory && (
-                      <NamedRecipesManager
-                        kind={manageCategory === "dough" ? "dough" : "sauce"}
-                        ingredientSuggestions={manageCategory === "dough" ? doughIngredients : frontlineIngredients}
-                      />
-                    )}
 
                     {/* Recipe ingredient editor. Mix names that match an imported
                         (server) mix show its components read-only — the Mixes tab
