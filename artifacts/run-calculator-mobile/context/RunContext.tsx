@@ -8,6 +8,14 @@ import { MIX_SEED } from "@/data/mixSeed";
 import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, resolveCheeseApplicatorSlots, specImportRecipeIsMix, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
+import {
+  PROFILE_CLEANUP_MARKER,
+  PROFILE_REBUILD_OVERLAYS,
+  PROFILE_REBUILD_DOUGHBALL_OZ,
+  splitProfileKey,
+  planProfileCleanup,
+  brandsToRemoveAfterDeletes,
+} from "@workspace/profile-cleanup";
 import React, {
   createContext,
   useCallback,
@@ -1894,6 +1902,109 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
     return () => {
       clearInterval(interval);
       sub.remove();
+    };
+  }, [bootDone]);
+
+  // One-time spec-sheet reconciliation cleanup (web parity). Deletes duplicate
+  // BLANK brand/flavor profiles, rebuilds a handful of profiles that lost their
+  // recipe data from the factory spec sheets, and drops any brand whose flavor
+  // list empties out. The concrete plan lives in @workspace/profile-cleanup so
+  // web and mobile apply exactly the same fix. Guarded by a marker in its own
+  // AsyncStorage key and deferred until boot completes; deletions are tombstoned
+  // (per-flavor namespace + "brands") so the additive sync union can't resurrect
+  // them, and rebuilds clear any stale tombstone so the healed profile sticks.
+  useEffect(() => {
+    if (!bootDone) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const done = await AsyncStorage.getItem(PROFILE_CLEANUP_MARKER);
+        if (done || cancelled) return;
+        // Plan from the current profiles (brandProfiles is LOCAL-only, so it is
+        // safe to compute the delete/rebuild sets from a snapshot). Everything
+        // that is synced (brands / brandFlavors / deletedItems) is re-derived
+        // from the latest `prev` inside the functional update below so a remote
+        // sync landing concurrently can't be clobbered by this migration.
+        const snap = appStateRef.current;
+        if (snap.brands.length === 0) return; // defer until brands are loaded
+
+        const getProfile = (key: string): Record<string, unknown> | null => {
+          const s = splitProfileKey(key);
+          if (!s) return null;
+          return (snap.brandProfiles[key] as Record<string, unknown>) ?? null;
+        };
+        const { deleteKeys, rebuildKeys } = planProfileCleanup(getProfile);
+        if (deleteKeys.length === 0 && rebuildKeys.length === 0) {
+          await AsyncStorage.setItem(PROFILE_CLEANUP_MARKER, "1");
+          return;
+        }
+        if (cancelled) return;
+
+        setAppState((prev) => {
+          const brandProfiles = { ...prev.brandProfiles };
+          const brandFlavors: Record<string, string[]> = {};
+          for (const [b, fl] of Object.entries(prev.brandFlavors)) brandFlavors[b] = [...fl];
+          let deletedItems = prev.deletedItems;
+
+          const brandsToRemove = brandsToRemoveAfterDeletes(prev.brandFlavors, deleteKeys);
+          const removeBrandSet = new Set(brandsToRemove.map((b) => b.toLowerCase().trim()));
+
+          // 1) Delete the duplicate blank profiles + tombstone each flavor.
+          const delByBrand: Record<string, Set<string>> = {};
+          for (const key of deleteKeys) {
+            const s = splitProfileKey(key);
+            if (!s) continue;
+            delete brandProfiles[key];
+            deletedItems = tombstoneDeletedItemNs(deletedItems, flavorNamespace(s.brand), s.flavor);
+            (delByBrand[s.brand] ??= new Set()).add(s.flavor);
+          }
+
+          // 2) Strip the deleted flavors from each brand's flavor list.
+          for (const [brandKey, flavors] of Object.entries(brandFlavors)) {
+            const del = delByBrand[brandKey.toLowerCase().trim()];
+            if (!del) continue;
+            brandFlavors[brandKey] = flavors.filter((f) => !del.has(f.toLowerCase().trim()));
+          }
+
+          // 3) Remove brands whose flavor list emptied out.
+          let brands = prev.brands;
+          if (brandsToRemove.length > 0) {
+            brands = prev.brands.filter((b) => !removeBrandSet.has(b.toLowerCase().trim()));
+            for (const b of brandsToRemove) {
+              deletedItems = tombstoneDeletedItemNs(deletedItems, "brands", b);
+              const matchKey = Object.keys(brandFlavors).find(
+                (k) => k.toLowerCase().trim() === b.toLowerCase().trim(),
+              );
+              if (matchKey) delete brandFlavors[matchKey];
+            }
+          }
+
+          // 4) Rebuild the profiles that lost their recipe data.
+          for (const key of rebuildKeys) {
+            const s = splitProfileKey(key);
+            if (!s) continue;
+            const overlay = PROFILE_REBUILD_OVERLAYS[key];
+            if (!overlay) continue;
+            const base = (brandProfiles[key] ?? {}) as RunProfile;
+            const merged = { ...base, ...overlay } as RunProfile;
+            const dough = PROFILE_REBUILD_DOUGHBALL_OZ[key];
+            if (typeof dough === "number") merged.doughballWeightOz = dough;
+            brandProfiles[key] = merged;
+            deletedItems = clearDeletedItemNs(deletedItems, flavorNamespace(s.brand), s.flavor);
+            deletedItems = clearDeletedItemNs(deletedItems, "brands", s.brand);
+          }
+
+          const next: AppState = { ...prev, brands, brandFlavors, brandProfiles, deletedItems };
+          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          return next;
+        });
+        await AsyncStorage.setItem(PROFILE_CLEANUP_MARKER, "1");
+      } catch {
+        /* fail-safe: leave data untouched, retry on a later boot */
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
   }, [bootDone]);
 

@@ -85,6 +85,14 @@ import type {
   ParsedRecipe,
   SpecImportAlias,
 } from "@workspace/spec-import";
+import {
+  PROFILE_CLEANUP_MARKER,
+  PROFILE_REBUILD_OVERLAYS,
+  PROFILE_REBUILD_DOUGHBALL_OZ,
+  splitProfileKey,
+  planProfileCleanup,
+  brandsToRemoveAfterDeletes,
+} from "@workspace/profile-cleanup";
 
 export function loadList(key: string, fallback: string[]): string[] {
   try {
@@ -1595,6 +1603,96 @@ export function purgeOrphanedProfilesIfNeeded(): void {
       try { localStorage.removeItem(k); } catch {}
     }
     localStorage.setItem(PURGE_ORPHANED_PROFILES_KEY, "1");
+  } catch {}
+}
+
+/**
+ * One-time spec-sheet reconciliation cleanup: delete duplicate BLANK brand/flavor
+ * profiles (an empty twin left beside a populated one), rebuild a handful of
+ * profiles that lost their recipe data using the values recovered from the
+ * factory spec sheets, and drop any brand whose flavor list becomes empty after
+ * the blank deletions. The concrete plan (delete pairs + rebuild overlays) lives
+ * in @workspace/profile-cleanup so web and mobile apply exactly the same fix.
+ *
+ * Guarded by a version marker AND deferred until the Brands list is populated so
+ * a transient empty list (before seeds/sync) can't be misread as "nothing to
+ * keep". Deletions are tombstoned (per-flavor namespace + "brands") so the
+ * additive live-sync union can't resurrect them from a stale peer; rebuilds
+ * clear any stale tombstone so the healed profile sticks.
+ */
+export function applyProfileCleanupIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(PROFILE_CLEANUP_MARKER)) return;
+  try {
+    const brands = loadList(BRANDS_KEY, []);
+    if (brands.length === 0) return; // defer until brands are seeded/loaded
+
+    const getProfile = (key: string): Record<string, unknown> | null => {
+      const s = splitProfileKey(key);
+      if (!s) return null;
+      return loadRawProfile(s.brand, s.flavor);
+    };
+    const { deleteKeys, rebuildKeys } = planProfileCleanup(getProfile);
+
+    // Compute brands to drop BEFORE mutating the flavor lists (uses the current
+    // flavor lists + the delete keys to decide which brands empty out).
+    const brandFlavors = loadBrandFlavors();
+    const brandsToRemove = brandsToRemoveAfterDeletes(brandFlavors, deleteKeys);
+    const removeBrandSet = new Set(brandsToRemove.map((b) => b.toLowerCase().trim()));
+
+    // 1) Delete the duplicate blank profiles + tombstone each flavor.
+    const delByBrand: Record<string, Set<string>> = {};
+    for (const key of deleteKeys) {
+      const s = splitProfileKey(key);
+      if (!s) continue;
+      deleteProfileEntry(s.brand, s.flavor);
+      tombstoneDeleted(flavorNamespace(s.brand), s.flavor);
+      (delByBrand[s.brand] ??= new Set()).add(s.flavor);
+    }
+
+    // 2) Strip the deleted flavors from each brand's flavor list.
+    for (const [brandKey, flavors] of Object.entries(brandFlavors)) {
+      const del = delByBrand[brandKey.toLowerCase().trim()];
+      if (!del) continue;
+      brandFlavors[brandKey] = flavors.filter((f) => !del.has(f.toLowerCase().trim()));
+    }
+
+    // 3) Remove brands whose flavor list emptied out (list + tombstone + profiles).
+    if (brandsToRemove.length > 0) {
+      const brandsList = loadList(BRANDS_KEY, []);
+      saveList(
+        BRANDS_KEY,
+        brandsList.filter((b) => !removeBrandSet.has(b.toLowerCase().trim())),
+      );
+      for (const b of brandsToRemove) {
+        tombstoneDeleted("brands", b);
+        deleteProfilesForBrand(b);
+        const matchKey = Object.keys(brandFlavors).find(
+          (k) => k.toLowerCase().trim() === b.toLowerCase().trim(),
+        );
+        if (matchKey) delete brandFlavors[matchKey];
+      }
+    }
+    saveBrandFlavors(brandFlavors);
+
+    // 4) Rebuild the profiles that lost their recipe data.
+    for (const key of rebuildKeys) {
+      const s = splitProfileKey(key);
+      if (!s) continue;
+      const overlay = PROFILE_REBUILD_OVERLAYS[key];
+      if (!overlay) continue;
+      const base = loadProfile(s.brand, s.flavor) ?? { ...DEFAULT_VALUES };
+      const merged = { ...base, ...overlay } as FormValues;
+      const dough = PROFILE_REBUILD_DOUGHBALL_OZ[key];
+      if (typeof dough === "number") {
+        (merged as Record<string, unknown>).targetDoughballWeight = dough;
+      }
+      clearDeleted(flavorNamespace(s.brand), s.flavor);
+      clearDeleted("brands", s.brand);
+      saveProfile(s.brand, s.flavor, merged);
+    }
+
+    localStorage.setItem(PROFILE_CLEANUP_MARKER, "1");
   } catch {}
 }
 

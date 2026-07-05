@@ -70,6 +70,9 @@
       "path": "./lib/scheduled-recipe-check"
     },
     {
+      "path": "./lib/profile-cleanup"
+    },
+    {
       "path": "./lib/downtime-trends"
     },
     {

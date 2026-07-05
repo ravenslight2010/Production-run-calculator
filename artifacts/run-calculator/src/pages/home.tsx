@@ -114,6 +114,7 @@ import {
   getStoredResetEpoch,
   applyResetWipe,
   purgeOrphanedProfilesIfNeeded,
+  applyProfileCleanupIfNeeded,
   deleteProfilesForBrand,
   deleteProfileEntry,
   applyIngredientMerge,
@@ -406,6 +407,7 @@ applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
 applyMixCheeseOverlapDedupeIfNeeded();
+applyProfileCleanupIfNeeded();
 purgeOrphanedProfilesIfNeeded();
 
 type NeedRow = { label: string; value: string; sub?: string };
