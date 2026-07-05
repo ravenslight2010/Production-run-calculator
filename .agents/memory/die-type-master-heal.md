@@ -52,6 +52,26 @@ new name. Renaming onto an existing name is allowed (it MERGES) so the user can
 consolidate leftover duplicates. Same principle for any master list whose value is
 also cached in profiles/runs.
 
+**EVERY master-list rename must tombstone the old name (not just die types).** The
+same "2 of each" bug exists on any rename that only rewrites the list without a
+tombstone: renames were single-device-safe but a stale peer's additive sync union
+re-adds the old spelling. Die types alone had a fix because they also self-heal from
+profiles; the rest silently duplicated across devices. The fix, mirrored web+mobile,
+is the delete-handler pattern applied to EVERY rename: `tombstoneDeleted(namespace,
+oldName)` + `clearDeleted(namespace, newName)`. Namespaces are the payload list keys
+(`brands`, `pepTypes`, `ingredientTypes`, `{dough,frontline,cheese,mix}Ingredients`,
+`{dough,frontline,cheese,mix}RecipeNames`) and `flavorNamespace(brand)` for flavors.
+Web renames are inline in `home.tsx`; mobile is the generic branch of
+`renameListItem` plus `renameBrand`/`renameFlavor`.
+
+**Recipe-name renames must ALSO move the preset key old→new (web only).** Recipe
+presets are keyed by name and are synced on web, so tombstoning the old recipe name
+makes the sync-receive `dropTombstonedPresetKeys` delete the old preset — losing the
+recipe rows. Carry the value across first (shared `moveRecipePresetKey` helper; works
+for both `{rows}` and `RecipeRow[]` shapes; mix rows live in the cheese preset map).
+Mobile recipe presets stay **local** (not synced) and `renameRecipePreset` already
+moves the key, so no tombstone is needed there.
+
 **Known remaining mobile gap (deferred):** the ingredient-merge *apply* path in
 mobile `RunContext` still rewrites `dieTypes` via the merge map; web excludes die
 types from that rewrite. Unrelated to variant consolidation (that uses the rename

@@ -3775,9 +3775,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         }
         const arr = prev[list];
         if (!arr.includes(oldName) || arr.includes(n)) return prev;
+        // Tombstone the old name (+ un-tombstone the new) so a stale peer's
+        // additive sync union can't resurrect the old spelling as a duplicate
+        // (matches the dieTypes branch above + web parity).
+        let deletedItems = tombstoneDeletedItem(prev.deletedItems, list, oldName);
+        deletedItems = clearDeletedItem(deletedItems, list, n);
         const next = withChangeRecord(
           prev,
-          { ...prev, [list]: arr.map((x) => (x === oldName ? n : x)) },
+          { ...prev, [list]: arr.map((x) => (x === oldName ? n : x)), deletedItems },
           "rename",
           `Renamed "${oldName}" to "${n}" in ${LIST_LABELS[list]}`,
         );
@@ -3813,9 +3818,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             delete brandProfiles[oldKey];
           }
         }
+        // Tombstone the old brand (+ un-tombstone the new) so a stale peer's
+        // additive sync union can't resurrect it as a duplicate (web parity).
+        let deletedItems = tombstoneDeletedItemNs(prev.deletedItems, "brands", oldName);
+        deletedItems = clearDeletedItemNs(deletedItems, "brands", n);
         const next = withChangeRecord(
           prev,
-          { ...prev, brands, brandFlavors, brandProfiles },
+          { ...prev, brands, brandFlavors, brandProfiles, deletedItems },
           "rename",
           `Renamed brand "${oldName}" to "${n}"`,
         );
@@ -3844,9 +3853,13 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           brandProfiles[newKey] = brandProfiles[oldKey];
           delete brandProfiles[oldKey];
         }
+        // Tombstone the old flavor (+ un-tombstone the new) under this brand's
+        // flavor namespace so a stale peer's sync union can't resurrect it (web parity).
+        let deletedItems = tombstoneDeletedItemNs(prev.deletedItems, flavorNamespace(brand), oldFlavor);
+        deletedItems = clearDeletedItemNs(deletedItems, flavorNamespace(brand), f);
         const next = withChangeRecord(
           prev,
-          { ...prev, brandFlavors, brandProfiles },
+          { ...prev, brandFlavors, brandProfiles, deletedItems },
           "rename",
           `Renamed flavor "${oldFlavor}" to "${f}" in ${brand}`,
         );

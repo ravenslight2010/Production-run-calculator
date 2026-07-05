@@ -2224,6 +2224,10 @@ export default function Home() {
     const updated = ingredientTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setIngredientTypes(updated);
     saveList(INGREDIENT_TYPES_KEY, updated);
+    // Tombstone the old name (+ un-tombstone the new) so a stale peer's additive
+    // sync union can't resurrect the old spelling as a duplicate (see renameDieType).
+    tombstoneDeleted("ingredientTypes", oldName);
+    clearDeleted("ingredientTypes", trimmed);
     schedulePush(dayStateRef.current);
     void renameCatalogEntry(oldName, trimmed, "general");
   }
@@ -5558,6 +5562,10 @@ export default function Home() {
     const updated = brands.map(b => b === oldName ? trimmed : b).sort((a, b) => a.localeCompare(b));
     setBrands(updated);
     saveList(BRANDS_KEY, updated);
+    // Tombstone the old brand (+ un-tombstone the new) so a stale peer's additive
+    // sync union can't resurrect it as a duplicate (mirrors delete/merge brand).
+    tombstoneDeleted("brands", oldName);
+    clearDeleted("brands", trimmed);
     // Move flavors over to new brand name
     if (brandFlavors[oldName]) {
       const next = { ...brandFlavors, [trimmed]: brandFlavors[oldName] };
@@ -5614,6 +5622,10 @@ export default function Home() {
     const next = { ...brandFlavors, [b]: current.map(f => f === oldName ? trimmed : f).sort((a, bv) => a.localeCompare(bv)) };
     setBrandFlavors(next);
     saveBrandFlavors(next);
+    // Tombstone the old flavor (+ un-tombstone the new) under this brand's flavor
+    // namespace so a stale peer's sync union can't resurrect it as a duplicate.
+    tombstoneDeleted(flavorNamespace(b), oldName);
+    clearDeleted(flavorNamespace(b), trimmed);
     // Update any open runs that reference this flavor
     const ds = dayStateRef.current;
     const updatedRuns = ds.runs.map(r => (r.brand === b && r.flavor === oldName) ? { ...r, flavor: trimmed } : r);
@@ -5623,12 +5635,35 @@ export default function Home() {
     schedulePush(newDs);
   }
 
+  // Move a recipe's saved rows from one preset-map key to another on rename.
+  // Recipe presets are keyed by name and synced, so a bare rename would leave the
+  // rows under the old key — which the sync-receive tombstone drop then deletes.
+  // Carry the value across (don't clobber an existing target), then the caller
+  // tombstones the old name. Works for both preset value shapes ({rows} vs rows[]).
+  function moveRecipePresetKey<T>(
+    load: () => Record<string, T>,
+    save: (p: Record<string, T>) => void,
+    oldName: string,
+    newName: string,
+  ) {
+    const p = load();
+    if (p[oldName] === undefined) return;
+    if (p[newName] === undefined) p[newName] = p[oldName];
+    delete p[oldName];
+    save(p);
+  }
+
   function renameMixRecipeName(oldName: string, newName: string) {
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldName || mixRecipeNames.includes(trimmed)) return;
     const updated = mixRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setMixRecipeNames(updated);
     saveList(MIX_RECIPE_NAMES_KEY, updated);
+    // Mix rows share the cheese preset map (see moveRecipeName); carry them to the
+    // new name, then tombstone the old name so the sync union can't re-add it.
+    moveRecipePresetKey(loadCheeseRecipePresets, saveCheeseRecipePresets, oldName, trimmed);
+    tombstoneDeleted("mixRecipeNames", oldName);
+    clearDeleted("mixRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -5638,6 +5673,9 @@ export default function Home() {
     const updated = doughRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setDoughRecipeNames(updated);
     saveList(DOUGH_RECIPE_NAMES_KEY, updated);
+    moveRecipePresetKey(loadDoughRecipePresets, saveDoughRecipePresets, oldName, trimmed);
+    tombstoneDeleted("doughRecipeNames", oldName);
+    clearDeleted("doughRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -5647,6 +5685,9 @@ export default function Home() {
     const updated = frontlineRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setFrontlineRecipeNames(updated);
     saveList(FRONTLINE_RECIPE_NAMES_KEY, updated);
+    moveRecipePresetKey(loadFrontlineRecipePresets, saveFrontlineRecipePresets, oldName, trimmed);
+    tombstoneDeleted("frontlineRecipeNames", oldName);
+    clearDeleted("frontlineRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -5656,6 +5697,9 @@ export default function Home() {
     const updated = cheeseRecipeNames.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setCheeseRecipeNames(updated);
     saveList(CHEESE_RECIPE_NAMES_KEY, updated);
+    moveRecipePresetKey(loadCheeseRecipePresets, saveCheeseRecipePresets, oldName, trimmed);
+    tombstoneDeleted("cheeseRecipeNames", oldName);
+    clearDeleted("cheeseRecipeNames", trimmed);
     schedulePush(dayStateRef.current);
   }
 
@@ -5665,6 +5709,8 @@ export default function Home() {
     const updated = doughIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setDoughIngredients(updated);
     saveList(DOUGH_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("doughIngredients", oldName);
+    clearDeleted("doughIngredients", trimmed);
     const ds = dayStateRef.current;
     const now = Date.now();
     for (const run of ds.runs) {
@@ -5687,6 +5733,8 @@ export default function Home() {
     const updated = frontlineIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setFrontlineIngredients(updated);
     saveList(FRONTLINE_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("frontlineIngredients", oldName);
+    clearDeleted("frontlineIngredients", trimmed);
     const ds = dayStateRef.current;
     const now = Date.now();
     for (const run of ds.runs) {
@@ -5708,6 +5756,8 @@ export default function Home() {
     const updated = cheeseIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setCheeseIngredients(updated);
     saveList(CHEESE_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("cheeseIngredients", oldName);
+    clearDeleted("cheeseIngredients", trimmed);
     const ds = dayStateRef.current;
     const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
     const now = Date.now();
@@ -5732,6 +5782,8 @@ export default function Home() {
     const updated = mixIngredients.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setMixIngredients(updated);
     saveList(MIX_INGREDIENTS_KEY, updated);
+    tombstoneDeleted("mixIngredients", oldName);
+    clearDeleted("mixIngredients", trimmed);
     const ds = dayStateRef.current;
     const appFields = ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"] as const;
     const now = Date.now();
@@ -5757,6 +5809,10 @@ export default function Home() {
     const updated = pepTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
     setPepTypes(updated);
     saveList(PEP_TYPES_KEY, updated);
+    // Tombstone the old name (+ un-tombstone the new) so a stale peer's additive
+    // sync union can't resurrect the old spelling as a duplicate (see renameDieType).
+    tombstoneDeleted("pepTypes", oldName);
+    clearDeleted("pepTypes", trimmed);
     schedulePush(dayStateRef.current);
   }
 
