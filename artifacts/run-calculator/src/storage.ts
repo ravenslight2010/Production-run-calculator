@@ -2162,6 +2162,12 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     // only when the sheet designated one, so this never clobbers with "none".
     if (p.allergen) values.allergen = p.allergen;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
+    // Case pack read from the sheet (how many pizzas per case). Only present when
+    // the sheet stated a positive count, so this never clobbers with a default.
+    if (p.pizzasPerCase != null && p.pizzasPerCase > 0) values.pizzasPerCase = p.pizzasPerCase;
+    // Sauce barrel size — fallback only. When a mixed sauce recipe imports too,
+    // the run form's recipe-driven effect zeroes this so the row-sum wins.
+    if (p.sauceBarrelLbs != null && p.sauceBarrelLbs > 0) values.sauceBarrelLbs = p.sauceBarrelLbs;
     // Named bought/ready-made sauce (e.g. BBQ, Ranch): the sheet names the
     // sauce but there's no mixing recipe — record the name so needs/consumption
     // pull it as-is by name. Never clobber an existing mixed sauce recipe or a
@@ -2198,6 +2204,11 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
       if (!type) return;
       (values as Record<string, unknown>)[`app${slot}Type`] = type;
       (values as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
+      // Batch size — fallback only; a cheese recipe on this slot zeroes it at
+      // run time so the recipe row-sum wins.
+      if (a.batchLbs != null && a.batchLbs > 0) {
+        (values as Record<string, unknown>)[`app${slot}BatchLbs`] = a.batchLbs;
+      }
       newAppTypes.push(type);
     });
     for (const link of cheeseLinks) {
@@ -2210,6 +2221,9 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
       (values as Record<string, unknown>)[`pep${slot}Type`] = type;
       (values as Record<string, unknown>)[`pep${slot}Sticks`] = pp.sticks;
       (values as Record<string, unknown>)[`pep${slot}OzPerPizza`] = pp.ozPerPizza;
+      if (pp.batchLbs != null && pp.batchLbs > 0) {
+        (values as Record<string, unknown>)[`pep${slot}BatchLbs`] = pp.batchLbs;
+      }
       newPepTypes.push(type);
     });
     // A spec sheet with 2+ distinct pep types means the two applicators run
@@ -2255,6 +2269,9 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
         values.doughRecipeName = r.name;
         values.doughRecipe = rows;
         if (r.doughballOz != null) values.targetDoughballWeight = r.doughballOz;
+        // Crusts-per-batch yield — fallback only; when the dough rows + doughball
+        // weight are both present the run form derives the yield and zeroes this.
+        if (r.doughBatchYield != null && r.doughBatchYield > 0) values.doughBatchYield = r.doughBatchYield;
       } else if (r.kind === "sauce") {
         values.frontlineRecipeName = r.name;
         values.frontlineRecipe = rows;

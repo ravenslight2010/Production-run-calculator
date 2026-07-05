@@ -161,6 +161,26 @@ rule; the lib's levenshtein fuzzy is safe here — ratio ≫0.34).
   field) — `PROFILE_KEY`, `mergeParsedSpecImports`, `mergeImportRuns`. Separation
   works ONLY because the distinguishing text lives in the brand string itself.
 
+## Case pack + batch/yield import (fallback-only for batch sizes)
+- Importer also pulls **case pack** (`ParsedProfile.pizzasPerCase`) and **batch/yield
+  sizes** (`ParsedApplicator.batchLbs`, `ParsedPepperoni.batchLbs`,
+  `ParsedProfile.sauceBarrelLbs`, `ParsedRecipe.doughBatchYield`). All optional; sanitize
+  keeps them only when `>0` (case pack + dough yield rounded to whole counts).
+- **CRITICAL semantic: cheese/sauce/dough batch sizes are ALREADY auto-derived from
+  imported recipe rows** — the calc uses `sumRecipe(...) > 0 ? sumRecipe : <field>` for
+  the effective batch (web `home.tsx`, mobile `computeCalc`), and run-form effects ZERO
+  `app{n}BatchLbs`/`sauceBarrelLbs`/`doughBatchYield` when a recipe is present. So the
+  imported batch fields are **FALLBACK-only** (used only when a slot has no recipe, e.g.
+  a ready-made sauce/topping or a bare pepperoni). Case pack is the one always-applicable
+  gap. **Why:** don't add a redundant "batch size" UI or expect it to override a recipe;
+  importing it alongside a recipe is safe because the derive-from-recipe path still wins.
+- Fields flow: AI prompt JSON shape (`aiParseSpecSheet.ts`) → sanitize (`lib/spec-import`)
+  → OpenAPI `SpecImport{Applicator,Pepperoni,Profile,Recipe}` (regen codegen) → apply in
+  BOTH web `storage.ts` and mobile `RunContext.tsx`. Prompt says NEVER compute batch sizes
+  from rows — only read an explicitly-stated made-batch number.
+- **Freezer time, line-speed, and packaging were explicitly OUT of scope** (user declined
+  freezer/line-speed; packaging deferred until they locate a workbook with that info).
+
 ## Mobile summary parity
 - Mobile `buildSpecStore().profileExists` must mirror web `profileObjHasRealData`:
   any non-empty recipe array (dough/frontline/app{1-4}CheeseRecipe) OR any

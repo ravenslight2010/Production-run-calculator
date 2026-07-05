@@ -16,6 +16,10 @@ export interface SpecImportProfile {
   sauceOzPerPizza?: number;
   /** Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name. */
   sauceName?: string;
+  /** Case pack: how many pizzas go in one case, when the sheet states it. Optional. */
+  pizzasPerCase?: number;
+  /** Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional. */
+  sauceBarrelLbs?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
   review?: ReviewVerdict;

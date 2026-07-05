@@ -3613,6 +3613,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           // with "none".
           if (p.allergen) prof.allergen = p.allergen;
           if (p.sauceOzPerPizza != null) prof.sauceOzPerPizza = p.sauceOzPerPizza;
+          // Case pack read from the sheet (how many pizzas per case). Only present
+          // when the sheet stated a positive count, so this never clobbers a default.
+          if (p.pizzasPerCase != null && p.pizzasPerCase > 0) prof.pizzasPerCase = p.pizzasPerCase;
+          // Sauce barrel size — fallback only; a mixed sauce recipe's row-sum wins
+          // over this in the batch math when a recipe is present.
+          if (p.sauceBarrelLbs != null && p.sauceBarrelLbs > 0) prof.sauceBarrelLbs = p.sauceBarrelLbs;
           // Detect cheese applicator slots and re-type them to the literal
           // "cheese" (the run form's pick-only Cheese card gates on that exactly);
           // record the blend name so it hydrates from the server pool, and the
@@ -3627,6 +3633,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             if (!type) return;
             (prof as Record<string, unknown>)[`app${slot}Type`] = type;
             (prof as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
+            // Batch size — fallback only; a cheese recipe on this slot's row-sum
+            // wins over this in the batch math when a recipe is present.
+            if (a.batchLbs != null && a.batchLbs > 0) {
+              (prof as Record<string, unknown>)[`app${slot}BatchLbs`] = a.batchLbs;
+            }
           });
           for (const link of cheeseLinks) {
             (prof as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
@@ -3638,6 +3649,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             (prof as Record<string, unknown>)[`pep${slot}Type`] = type;
             (prof as Record<string, unknown>)[`pep${slot}Sticks`] = pp.sticks;
             (prof as Record<string, unknown>)[`pep${slot}OzPerPizza`] = pp.ozPerPizza;
+            if (pp.batchLbs != null && pp.batchLbs > 0) {
+              (prof as Record<string, unknown>)[`pep${slot}BatchLbs`] = pp.batchLbs;
+            }
             newPepTypes.push(type);
           });
           brandProfiles[key] = prof;
@@ -3659,6 +3673,9 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
               prof.doughRecipeName = r.name;
               prof.doughRecipe = rows;
               if (r.doughballOz != null) prof.doughballWeightOz = r.doughballOz;
+              // Crusts-per-batch yield — fallback only; when the dough rows +
+              // doughball weight are present the calc derives the yield instead.
+              if (r.doughBatchYield != null && r.doughBatchYield > 0) prof.doughBatchYield = r.doughBatchYield;
             } else if (r.kind === "sauce") {
               prof.frontlineRecipeName = r.name;
               prof.frontlineRecipe = rows;

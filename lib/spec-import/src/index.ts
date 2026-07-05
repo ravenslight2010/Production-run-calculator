@@ -12,8 +12,24 @@
 
 export type RecipeRow = { ingredient: string; lbs: number };
 
-export type ParsedApplicator = { type: string; ozPerPizza: number };
-export type ParsedPepperoni = { type: string; sticks: number; ozPerPizza: number };
+export type ParsedApplicator = {
+  type: string;
+  ozPerPizza: number;
+  /**
+   * Batch size in lbs one made batch of this topping weighs, when the sheet
+   * states it. Used only as a FALLBACK — when the profile has a cheese/topping
+   * recipe for this slot, the batch math derives the batch size from the recipe
+   * row sum instead. Omitted when the sheet doesn't state a batch size.
+   */
+  batchLbs?: number;
+};
+export type ParsedPepperoni = {
+  type: string;
+  sticks: number;
+  ozPerPizza: number;
+  /** Batch size in lbs one made pepperoni batch weighs, when the sheet states it. */
+  batchLbs?: number;
+};
 
 /** One brand+flavor spec sheet, as interpreted by the AI (pre-canonicalization). */
 export type ParsedProfile = {
@@ -35,6 +51,18 @@ export type ParsedProfile = {
    * inherits the allergen (and its food-safety sequencing warnings).
    */
   allergen?: string;
+  /**
+   * Case pack: how many pizzas go in one case, when the sheet states it (the
+   * apply step writes it onto the profile as `pizzasPerCase`). Omitted when not
+   * stated so the profile keeps its default.
+   */
+  pizzasPerCase?: number;
+  /**
+   * Sauce barrel size in lbs one made barrel weighs, when the sheet states it.
+   * FALLBACK only — when the profile has a mixed sauce (frontline) recipe, the
+   * batch math derives the barrel size from the recipe row sum instead.
+   */
+  sauceBarrelLbs?: number;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
 };
@@ -67,6 +95,12 @@ export type ParsedRecipe = {
   brandAnchors?: string[];
   /** Dough only: target doughball weight in oz. */
   doughballOz?: number;
+  /**
+   * Dough only: how many crusts one dough batch yields, when the sheet states
+   * it. FALLBACK only — when the dough recipe rows and doughball weight are both
+   * present the batch math derives the yield instead. Omitted when not stated.
+   */
+  doughBatchYield?: number;
   /** Cheese only: applicator slot (1-4) the recipe should tie to. */
   app?: number;
   /**
@@ -2378,7 +2412,12 @@ export function sanitizeParsedSpecImport(
           message: `No oz-per-pizza was read for applicator "${type}" — shown as 0 oz. Please verify against the sheet.`,
         });
       }
-      applicators.push({ type, ozPerPizza: ozPerPizza ?? 0 });
+      const appBatchLbs = num(ao.batchLbs);
+      applicators.push({
+        type,
+        ozPerPizza: ozPerPizza ?? 0,
+        ...(appBatchLbs != null && appBatchLbs > 0 ? { batchLbs: appBatchLbs } : {}),
+      });
     }
     const pepperonis: ParsedPepperoni[] = [];
     const rawPeps = Array.isArray(o.pepperonis) ? o.pepperonis : [];
@@ -2395,10 +2434,12 @@ export function sanitizeParsedSpecImport(
           message: `No oz-per-pizza was read for pepperoni "${type}" — shown as 0 oz. Please verify against the sheet.`,
         });
       }
+      const pepBatchLbs = num(po.batchLbs);
       pepperonis.push({
         type,
         sticks: num(po.sticks) ?? 0,
         ozPerPizza: ppOz ?? 0,
+        ...(pepBatchLbs != null && pepBatchLbs > 0 ? { batchLbs: pepBatchLbs } : {}),
       });
     }
     const profile: ParsedProfile = { brand, flavor, applicators, pepperonis };
@@ -2445,6 +2486,14 @@ export function sanitizeParsedSpecImport(
     if (allergenRaw && !SPEC_NONE_ALLERGENS.has(allergenRaw)) {
       profile.allergen = allergenRaw;
     }
+    // Case pack (pizzas per case): a whole-count field, so round. Only set when
+    // the sheet stated a positive count; otherwise the profile keeps its default.
+    const ppc = num(o.pizzasPerCase);
+    if (ppc != null && ppc > 0) profile.pizzasPerCase = Math.round(ppc);
+    // Sauce barrel size (lbs). Fallback only — the apply step still lets a mixed
+    // sauce recipe's row-sum win over this at run time.
+    const sbl = num(o.sauceBarrelLbs);
+    if (sbl != null && sbl > 0) profile.sauceBarrelLbs = sbl;
     profiles.push(profile);
   }
 
@@ -2614,6 +2663,10 @@ export function sanitizeParsedSpecImport(
     if (kind === "dough") {
       const oz = num(o.doughballOz);
       if (oz != null) recipe.doughballOz = oz;
+      // Crusts-per-batch yield: a whole-count fallback used only when the recipe
+      // rows + doughball weight can't derive the yield at run time.
+      const dby = num(o.doughBatchYield);
+      if (dby != null && dby > 0) recipe.doughBatchYield = Math.round(dby);
     }
     if (kind === "cheese") {
       const app = num(o.app);

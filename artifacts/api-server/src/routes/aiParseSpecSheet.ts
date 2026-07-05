@@ -298,18 +298,24 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "Return ONLY JSON of the exact shape: " +
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
       '"sauceOzPerPizza":number,"sauceName":string,"allergen":string,' +
-      '"applicators":[{"type":string,"ozPerPizza":number}],' +
-      '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
+      '"pizzasPerCase":number,"sauceBarrelLbs":number,' +
+      '"applicators":[{"type":string,"ozPerPizza":number,"batchLbs":number}],' +
+      '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number,"batchLbs":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
       '"flavor":string,"targets":[{"brand":string,"flavor":string}],' +
-      '"doughballOz":number,"app":number,"rowsUnit":"lbs"|"oz",' +
+      '"doughballOz":number,"doughBatchYield":number,"app":number,"rowsUnit":"lbs"|"oz",' +
       '"rows":[{"ingredient":string,"lbs":number}]}],"note":string}. ' +
       "Omit any field or row you cannot determine. Prefer `targets` for a recipe that " +
       "serves multiple brand/flavor profiles (one recipe, many targets); use the singular " +
       "brand/flavor only when it ties to exactly one. For cheese recipes, set \"app\" to the " +
       "applicator slot number (1-4) it belongs to when discernible. Set \"allergen\" to the food " +
       "allergen the sheet designates for a product (e.g. \"egg\", \"soy\", or another named " +
-      "allergen); use \"none\" or omit it when the sheet lists no allergen. Use \"note\" only for a " +
+      "allergen); use \"none\" or omit it when the sheet lists no allergen. Set " +
+      "\"pizzasPerCase\" to the case pack (how many pizzas per case) when the sheet states it. " +
+      "Set batch/yield sizes ONLY when the sheet explicitly states a made-batch size — never " +
+      "compute or guess them from ingredient rows: \"batchLbs\" is the pounds one made batch of a " +
+      "topping or pepperoni weighs, \"sauceBarrelLbs\" the pounds one sauce barrel weighs, and " +
+      "\"doughBatchYield\" the number of crusts one dough batch yields. Use \"note\" only for a " +
       "brief overall comment (e.g. what you could not parse).",
   );
 

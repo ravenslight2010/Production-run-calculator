@@ -1708,14 +1708,18 @@ export const AiParseSpecSheetResponse = zod.object({
   "dieType": zod.string().optional(),
   "sauceOzPerPizza": zod.number().optional(),
   "sauceName": zod.string().optional().describe('Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought\/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name.'),
+  "pizzasPerCase": zod.number().optional().describe('Case pack: how many pizzas go in one case, when the sheet states it. Optional.'),
+  "sauceBarrelLbs": zod.number().optional().describe('Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional.'),
   "applicators": zod.array(zod.object({
   "type": zod.string(),
-  "ozPerPizza": zod.number()
+  "ozPerPizza": zod.number(),
+  "batchLbs": zod.number().optional().describe('Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese\/topping recipe for this slot derives the batch size from its row sum instead. Optional.')
 })),
   "pepperonis": zod.array(zod.object({
   "type": zod.string(),
   "sticks": zod.number(),
-  "ozPerPizza": zod.number()
+  "ozPerPizza": zod.number(),
+  "batchLbs": zod.number().optional().describe('Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional.')
 })),
   "review": zod.object({
   "status": zod.enum(['ok', 'warn', 'reject']).describe('ok = looks fine, warn = double-check, reject = likely wrong\/unsafe'),
@@ -1732,6 +1736,7 @@ export const AiParseSpecSheetResponse = zod.object({
   "flavor": zod.string()
 })).optional().describe('Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand\/flavor. Unioned with the singular brand\/flavor.'),
   "doughballOz": zod.number().optional(),
+  "doughBatchYield": zod.number().optional().describe('Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional.'),
   "app": zod.number().optional(),
   "rows": zod.array(zod.object({
   "ingredient": zod.string(),

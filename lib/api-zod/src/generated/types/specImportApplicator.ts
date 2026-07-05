@@ -9,4 +9,6 @@
 export interface SpecImportApplicator {
   type: string;
   ozPerPizza: number;
+  /** Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional. */
+  batchLbs?: number;
 }

@@ -309,6 +309,47 @@ describe("sanitizeParsedSpecImport", () => {
     const cheese = out.recipes.find((r) => r.kind === "cheese");
     expect(cheese?.app).toBeUndefined(); // 9 is out of 1-4 range
   });
+  it("reads case pack and batch/yield sizes when the sheet states them", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "Tombstone", flavor: "Pepperoni",
+          pizzasPerCase: "16", sauceBarrelLbs: 500,
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 55 }],
+          pepperonis: [{ type: "Pep", sticks: 2, ozPerPizza: 1.5, batchLbs: 25 }] },
+      ],
+      recipes: [
+        { kind: "dough", name: "Std Dough", doughballOz: 16, doughBatchYield: "640",
+          rows: [{ ingredient: "Flour", lbs: 50 }] },
+      ],
+    });
+    const p = out.profiles[0];
+    expect(p.pizzasPerCase).toBe(16);
+    expect(p.sauceBarrelLbs).toBe(500);
+    expect(p.applicators[0].batchLbs).toBe(55);
+    expect(p.pepperonis[0].batchLbs).toBe(25);
+    const dough = out.recipes.find((r) => r.kind === "dough");
+    expect(dough?.doughBatchYield).toBe(640);
+  });
+  it("omits case pack and batch/yield sizes that are absent or non-positive", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "Tombstone", flavor: "Cheese",
+          pizzasPerCase: 0, sauceBarrelLbs: 0,
+          applicators: [{ type: "Cheese", ozPerPizza: 4, batchLbs: 0 }],
+          pepperonis: [] },
+      ],
+      recipes: [
+        { kind: "dough", name: "Std Dough", doughballOz: 16, doughBatchYield: 0,
+          rows: [{ ingredient: "Flour", lbs: 50 }] },
+      ],
+    });
+    const p = out.profiles[0];
+    expect(p.pizzasPerCase).toBeUndefined();
+    expect(p.sauceBarrelLbs).toBeUndefined();
+    expect(p.applicators[0].batchLbs).toBeUndefined();
+    const dough = out.recipes.find((r) => r.kind === "dough");
+    expect(dough?.doughBatchYield).toBeUndefined();
+  });
   it("keeps a real ready-made sauceName but drops generic placeholders", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [

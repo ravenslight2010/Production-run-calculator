@@ -10,4 +10,6 @@ export interface SpecImportPepperoni {
   type: string;
   sticks: number;
   ozPerPizza: number;
+  /** Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional. */
+  batchLbs?: number;
 }

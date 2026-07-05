@@ -7460,6 +7460,12 @@ components:
           type: string
         ozPerPizza:
           type: number
+        batchLbs:
+          type: number
+          description: >-
+            Batch size in lbs one made batch of this topping weighs, when the
+            sheet states it. Fallback only — a cheese/topping recipe for this
+            slot derives the batch size from its row sum instead. Optional.
 
     SpecImportPepperoni:
       type: object
@@ -7474,6 +7480,11 @@ components:
           type: number
         ozPerPizza:
           type: number
+        batchLbs:
+          type: number
+          description: >-
+            Batch size in lbs one made pepperoni batch weighs, when the sheet
+            states it. Optional.
 
     SpecImportProfile:
       type: object
@@ -7497,6 +7508,17 @@ components:
             Name of the sauce when the sheet names a specific one (e.g. BBQ,
             Ranch). Bought/ready-made sauces have no mixing recipe in the
             workbook; the name lets the app pull them as-is by name.
+        pizzasPerCase:
+          type: number
+          description: >-
+            Case pack: how many pizzas go in one case, when the sheet states it.
+            Optional.
+        sauceBarrelLbs:
+          type: number
+          description: >-
+            Sauce barrel size in lbs one made barrel weighs, when the sheet
+            states it. Fallback only — a mixed sauce recipe derives the barrel
+            size from its row sum instead. Optional.
         applicators:
           type: array
           items:
@@ -7556,6 +7578,12 @@ components:
             $ref: "#/components/schemas/SpecImportRecipeTarget"
         doughballOz:
           type: number
+        doughBatchYield:
+          type: number
+          description: >-
+            Dough only: how many crusts one dough batch yields, when the sheet
+            states it. Fallback only — the recipe rows + doughball weight derive
+            the yield instead when both are present. Optional.
         app:
           type: number
         rows:

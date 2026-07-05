@@ -18,6 +18,8 @@ export interface SpecImportRecipe {
   /** Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand/flavor. Unioned with the singular brand/flavor. */
   targets?: SpecImportRecipeTarget[];
   doughballOz?: number;
+  /** Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional. */
+  doughBatchYield?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
   review?: ReviewVerdict;

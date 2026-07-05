@@ -2588,12 +2588,16 @@ export interface ParseSpecSheetInput {
 export interface SpecImportApplicator {
   type: string;
   ozPerPizza: number;
+  /** Batch size in lbs one made batch of this topping weighs, when the sheet states it. Fallback only — a cheese/topping recipe for this slot derives the batch size from its row sum instead. Optional. */
+  batchLbs?: number;
 }
 
 export interface SpecImportPepperoni {
   type: string;
   sticks: number;
   ozPerPizza: number;
+  /** Batch size in lbs one made pepperoni batch weighs, when the sheet states it. Optional. */
+  batchLbs?: number;
 }
 
 export interface SpecImportProfile {
@@ -2603,6 +2607,10 @@ export interface SpecImportProfile {
   sauceOzPerPizza?: number;
   /** Name of the sauce when the sheet names a specific one (e.g. BBQ, Ranch). Bought/ready-made sauces have no mixing recipe in the workbook; the name lets the app pull them as-is by name. */
   sauceName?: string;
+  /** Case pack: how many pizzas go in one case, when the sheet states it. Optional. */
+  pizzasPerCase?: number;
+  /** Sauce barrel size in lbs one made barrel weighs, when the sheet states it. Fallback only — a mixed sauce recipe derives the barrel size from its row sum instead. Optional. */
+  sauceBarrelLbs?: number;
   applicators: SpecImportApplicator[];
   pepperonis: SpecImportPepperoni[];
   review?: ReviewVerdict;
@@ -2635,6 +2643,8 @@ export interface SpecImportRecipe {
   /** Brand+flavor profiles this one recipe applies to. Lets a single recipe tie to many profiles instead of being duplicated per brand/flavor. Unioned with the singular brand/flavor. */
   targets?: SpecImportRecipeTarget[];
   doughballOz?: number;
+  /** Dough only: how many crusts one dough batch yields, when the sheet states it. Fallback only — the recipe rows + doughball weight derive the yield instead when both are present. Optional. */
+  doughBatchYield?: number;
   app?: number;
   rows: SpecImportRecipeRow[];
   review?: ReviewVerdict;
