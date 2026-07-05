@@ -79,7 +79,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -1932,6 +1932,14 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   const newAppTypes: string[] = [];
   const newPepTypes: string[] = [];
   const profileSauceNames: string[] = [];
+  // Every profile this import writes to (applicator types and/or recipe ties) —
+  // the post-loop cheese-mirror pass revisits each to fill any cheese applicator
+  // left blank by a single-blend spec.
+  const touchedProfiles = new Map<string, { brand: string; flavor: string }>();
+  const markTouched = (brand: string, flavor: string): void => {
+    if (!brand || !flavor) return;
+    touchedProfiles.set(`${brand.toLowerCase()}\u0000${flavor.toLowerCase()}`, { brand, flavor });
+  };
 
   function registerBrandFlavor(brand: string, flavor: string): void {
     if (!brand || !flavor) return;
@@ -1945,6 +1953,7 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     const flavor = p.flavor.trim();
     if (!brand || !flavor) continue;
     registerBrandFlavor(brand, flavor);
+    markTouched(brand, flavor);
     const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
     if (p.dieType) values.dieType = p.dieType;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
@@ -2024,6 +2033,7 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     const rows = sourceRows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
     for (const { brand, flavor } of recipeApplyTargets(r, applyProfilePool)) {
       registerBrandFlavor(brand, flavor);
+      markTouched(brand, flavor);
       const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
       if (r.kind === "dough") {
         values.doughRecipeName = r.name;
@@ -2039,6 +2049,31 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
       }
       saveProfile(brand, flavor, values);
     }
+  }
+
+  // ── Mirror a single cheese blend across multiple cheese applicators ──
+  // A product can run two "Cheese" applicators on the SAME blend at different
+  // per-pizza weights (weight lives on the applicator). The spec then defines
+  // the blend once and the tie loop above fills only one slot, leaving the other
+  // cheese applicator blank. Fill those blanks from the lone blend so both
+  // stations show the recipe (no-op when 2+ distinct blends — user resolves).
+  for (const { brand, flavor } of touchedProfiles.values()) {
+    const saved = loadProfile(brand, flavor);
+    if (!saved) continue;
+    const values: FormValues = { ...DEFAULT_VALUES, ...saved };
+    const rec = values as Record<string, unknown>;
+    const slots = [1, 2, 3, 4].map((n) => ({
+      type: String(rec[`app${n}Type`] ?? ""),
+      cheeseRecipeName: String(rec[`app${n}CheeseRecipeName`] ?? ""),
+      cheeseRecipe: (rec[`app${n}CheeseRecipe`] as RecipeRow[] | undefined) ?? [],
+    }));
+    const mirrored = mirrorSingleCheeseAcrossApplicators(slots);
+    if (mirrored === slots) continue;
+    mirrored.forEach((s, i) => {
+      rec[`app${i + 1}CheeseRecipeName`] = s.cheeseRecipeName;
+      rec[`app${i + 1}CheeseRecipe`] = s.cheeseRecipe;
+    });
+    saveProfile(brand, flavor, values);
   }
 
   // ── Register brands/flavors + new option-list entries ──

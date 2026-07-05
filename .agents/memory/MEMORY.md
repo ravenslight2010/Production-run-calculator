@@ -136,3 +136,4 @@
 - [Dual API workflows](dual-api-workflows.md) — browser hits the artifact API workflow (8080), not the 5000 duplicate; after pkill restart BOTH and verify via public domain, not localhost.
 - [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.
 - [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
+- [Cheese blend across applicators](cheese-mirror-applicators.md) — spec import: one distinct cheese blend must fill EVERY blank cheese applicator slot (weight is per-applicator); shared mirrorSingleCheeseAcrossApplicators post-loop pass, web+mobile parity.

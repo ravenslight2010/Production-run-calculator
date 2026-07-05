@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { showNote } from "@/utils/notify";
 import { MIX_SEED } from "@/data/mixSeed";
-import { recipeApplyTargets } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
 import React, {
@@ -3398,6 +3398,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           }
         };
 
+        // Every profile key this import writes to — the post-loop cheese-mirror
+        // pass revisits each to fill any cheese applicator left blank by a
+        // single-blend spec.
+        const touchedKeys = new Set<string>();
+
         // ── Recipe libraries (overwrite by name) ──
         for (const r of parsed.recipes) {
           const name = r.name.trim();
@@ -3422,6 +3427,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           if (!brand || !flavor) continue;
           registerBrandFlavor(brand, flavor);
           const key = profileKey(brand, flavor);
+          touchedKeys.add(key);
           const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
           if (p.dieType) {
             prof.dieType = p.dieType;
@@ -3457,6 +3463,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           for (const { brand, flavor } of recipeApplyTargets(r, parsed.profiles)) {
             registerBrandFlavor(brand, flavor);
             const key = profileKey(brand, flavor);
+            touchedKeys.add(key);
             const prof: RunProfile = { ...(brandProfiles[key] ?? {}) };
             if (r.kind === "dough") {
               prof.doughRecipeName = r.name;
@@ -3472,6 +3479,32 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             }
             brandProfiles[key] = prof;
           }
+        }
+
+        // ── Mirror a single cheese blend across multiple cheese applicators ──
+        // A product can run two "Cheese" applicators on the SAME blend at
+        // different per-pizza weights (weight lives on the applicator). The spec
+        // then defines the blend once and the tie loop above fills only one slot,
+        // leaving the other cheese applicator blank. Fill those blanks from the
+        // lone blend (no-op when 2+ distinct blends — user resolves). Mirrors web.
+        for (const key of touchedKeys) {
+          const prof = brandProfiles[key];
+          if (!prof) continue;
+          const rec = prof as Record<string, unknown>;
+          const slots = [1, 2, 3, 4].map((n) => ({
+            type: String(rec[`app${n}Type`] ?? ""),
+            cheeseRecipeName: String(rec[`app${n}CheeseRecipeName`] ?? ""),
+            cheeseRecipe: (rec[`app${n}CheeseRecipe`] as RecipeRow[] | undefined) ?? [],
+          }));
+          const mirrored = mirrorSingleCheeseAcrossApplicators(slots);
+          if (mirrored === slots) continue;
+          const nextProf: RunProfile = { ...prof };
+          const nextRec = nextProf as Record<string, unknown>;
+          mirrored.forEach((s, i) => {
+            nextRec[`app${i + 1}CheeseRecipeName`] = s.cheeseRecipeName;
+            nextRec[`app${i + 1}CheeseRecipe`] = s.cheeseRecipe;
+          });
+          brandProfiles[key] = nextProf;
         }
 
         const next: AppState = {

@@ -754,6 +754,68 @@ export function dedupeSpecImportCheeseRecipes(
   return merged ? { ...parsed, recipes: survivors } : parsed;
 }
 
+/** One applicator slot's cheese state, in slot order (app1..app4). */
+export type CheeseApplicatorSlot = {
+  /** Applicator type string (a cheese applicator is type "cheese", ci). */
+  type: string;
+  /** Currently-assigned cheese recipe name ("" if none). */
+  cheeseRecipeName: string;
+  /** Currently-assigned cheese recipe rows (empty if none). */
+  cheeseRecipe: RecipeRow[];
+};
+
+const isCheeseApplicatorType = (type: string): boolean =>
+  (type ?? "").trim().toLowerCase() === "cheese";
+
+/**
+ * Mirror a lone cheese blend across a product's cheese applicators. A pizza can
+ * run TWO "cheese" applicators using the SAME blend at different per-pizza
+ * weights (the weight lives on the applicator, not the recipe), so a spec sheet
+ * that defines the blend ONCE ties it to a single applicator slot and leaves the
+ * other cheese applicator blank. This fills every EMPTY cheese applicator slot
+ * from that single blend so both stations show the recipe.
+ *
+ * Conservative by design: only fills when EXACTLY ONE distinct cheese recipe is
+ * present across the cheese slots. Two or more distinct blends are left as-is —
+ * genuinely different cheeses, and it's ambiguous which empty slot each belongs
+ * to, so the user resolves those. Non-cheese slots and already-filled cheese
+ * slots are never touched. Pure — returns a new array only when something
+ * changes, otherwise the input array unchanged. Shared by web + mobile apply so
+ * the two apps can't drift.
+ */
+export function mirrorSingleCheeseAcrossApplicators(
+  slots: ReadonlyArray<CheeseApplicatorSlot>,
+): ReadonlyArray<CheeseApplicatorSlot> {
+  const distinct = new Map<string, { name: string; recipe: RecipeRow[] }>();
+  for (const s of slots) {
+    if (!isCheeseApplicatorType(s.type)) continue;
+    const name = (s.cheeseRecipeName ?? "").trim();
+    if (!name) continue;
+    // Only a blend with real component rows is a valid mirror source — never
+    // propagate a named-but-empty recipe (malformed/partial import) into other
+    // slots; that would amplify bad data instead of containing it to one slot.
+    const recipe = (s.cheeseRecipe ?? []).filter((r) => (r.ingredient ?? "").trim());
+    if (recipe.length === 0) continue;
+    const key = name.toLowerCase();
+    if (!distinct.has(key)) distinct.set(key, { name, recipe });
+  }
+  if (distinct.size !== 1) return slots;
+  const only = [...distinct.values()][0];
+  let changed = false;
+  const out = slots.map((s) => {
+    if (isCheeseApplicatorType(s.type) && !(s.cheeseRecipeName ?? "").trim()) {
+      changed = true;
+      return {
+        type: s.type,
+        cheeseRecipeName: only.name,
+        cheeseRecipe: only.recipe.map((r) => ({ ingredient: r.ingredient, lbs: r.lbs })),
+      };
+    }
+    return s;
+  });
+  return changed ? out : slots;
+}
+
 /**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated
