@@ -129,6 +129,68 @@ describe("SpecImportDialog reuse-existing-recipe picker", () => {
     expect(screen.queryByText(/Won't show on any product yet/)).toBeNull();
   });
 
+  it("keeps the flavor selector visible after a brand is chosen (does not vanish + attach to all)", () => {
+    // Regression: a recipe with no brand/flavor shows the attach editor. The
+    // moment a brand is typed it matches every flavor of that brand, which used
+    // to flip the row out of the "attaches to nothing" state and REMOVE the
+    // whole editor — so the flavor field disappeared before the user could pick
+    // one and the recipe silently stuck to all flavors.
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    renderDialog(
+      makePrepared(recipe, [
+        { brand: "Corner Booth", flavor: "PLAIN" },
+        { brand: "Corner Booth", flavor: "PEPPERONI" },
+      ]),
+      () => {},
+    );
+
+    // Starts in the "attaches to nothing" state with the flavor field visible.
+    expect(screen.getByText(/Won't show on any product yet/)).toBeTruthy();
+    expect(screen.getByTestId("spec-recipe-flavor-rk0")).toBeTruthy();
+
+    // Type just a brand — it now matches all flavors of that brand.
+    fireEvent.change(screen.getByTestId("spec-recipe-brand-rk0"), {
+      target: { value: "Corner Booth" },
+    });
+
+    // The flavor field must remain so the user can still narrow to one flavor.
+    expect(screen.getByTestId("spec-recipe-flavor-rk0")).toBeTruthy();
+    expect(screen.getByText(/Attaching to every flavor/)).toBeTruthy();
+    expect(screen.queryByText(/Won't show on any product yet/)).toBeNull();
+  });
+
+  it("emits a brand+flavor-scoped recipe once the user picks a specific flavor", () => {
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared(recipe, [
+        { brand: "Corner Booth", flavor: "PLAIN" },
+        { brand: "Corner Booth", flavor: "PEPPERONI" },
+      ]),
+      onConfirm,
+    );
+
+    fireEvent.change(screen.getByTestId("spec-recipe-brand-rk0"), {
+      target: { value: "Corner Booth" },
+    });
+    fireEvent.change(screen.getByTestId("spec-recipe-flavor-rk0"), {
+      target: { value: "PLAIN" },
+    });
+
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.recipes[0]).toMatchObject({ brand: "Corner Booth", flavor: "PLAIN" });
+  });
+
   it("does NOT mark a recipe referenceOnly when 'Create new recipe' stays selected", () => {
     const recipe: ParsedRecipe = {
       kind: "dough",

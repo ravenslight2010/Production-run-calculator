@@ -780,6 +780,14 @@ function RecipeRow({
   // "it didn't import" miss the user reported.
   const targets = recipeApplyTargets(candidate, editedProfiles);
   const attachesToNothing = item.include && !linked && !issue && targets.length === 0;
+  // Brand chosen but no flavor yet → the recipe currently attaches to EVERY flavor
+  // of that brand. Keep the brand+flavor editor on screen in this state so the
+  // flavor field doesn't vanish the instant a brand is typed (which silently left
+  // the recipe attached to all flavors). The user can then narrow to one flavor or
+  // deliberately leave it applying to all.
+  const attachesToAllFlavors =
+    item.include && !linked && !issue && brand !== "" && flavor === "" && targets.length > 0;
+  const showAttachEditor = attachesToNothing || attachesToAllFlavors;
   const flavorMatch = Object.keys(flavorsByBrand).find(
     (b) => b.trim().toLowerCase() === brand.toLowerCase(),
   );
@@ -883,11 +891,24 @@ function RecipeRow({
             </div>
           )}
 
-          {attachesToNothing && (
-            <div className="mt-2 rounded-md border border-amber-400/60 bg-amber-500/10 p-2">
-              <div className="text-xs font-medium text-amber-700">
-                Won't show on any product yet — set the brand & flavor it belongs to.
-              </div>
+          {showAttachEditor && (
+            <div
+              className={`mt-2 rounded-md border p-2 ${
+                attachesToNothing
+                  ? "border-amber-400/60 bg-amber-500/10"
+                  : "border-border bg-muted/40"
+              }`}
+            >
+              {attachesToNothing ? (
+                <div className="text-xs font-medium text-amber-700">
+                  Won't show on any product yet — set the brand & flavor it belongs to.
+                </div>
+              ) : (
+                <div className="text-xs font-medium text-foreground">
+                  Attaching to every flavor of “{brand}” — add a flavor below to attach
+                  it to just one.
+                </div>
+              )}
               <datalist id={flavorListId}>
                 {flavorOpts.map((f) => (
                   <option key={f} value={f} />
@@ -913,7 +934,11 @@ function RecipeRow({
                   className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
                 />
               </div>
-              <p className="mt-1 text-[11px] text-amber-700/80">
+              <p
+                className={`mt-1 text-[11px] ${
+                  attachesToNothing ? "text-amber-700/80" : "text-muted-foreground"
+                }`}
+              >
                 Enter both, or set just a brand to attach to every matching product in
                 this import. The recipe is still saved to your library either way.
               </p>
