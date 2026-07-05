@@ -190,6 +190,93 @@ describe("parseCheeseWorkbook", () => {
   });
 });
 
+// Non-recipe "noise" lines (revision stamps, dates, the bare "Cellulose"
+// summary label, and example-calculation text) can sit in the name column right
+// above a real recipe block. Because the block's "LBS" marker falls within the
+// next few rows, the scanner used to latch the ingredients onto the noise line,
+// producing a junk-named recipe and losing the real one. These fixtures mirror
+// the exact junk seen in the real workbook.
+describe("parseCheeseSheet - rejects non-recipe noise headers", () => {
+  it("skips a calc-text line and attaches ingredients to the real recipe", () => {
+    const sheet = parseCheeseSheet({
+      name: "Edwardo",
+      rows: [
+        ["Edwardo Cheese", ""],
+        ["Cheese Shredder Setting: #1", ""],
+        ["8.19 total mix in pounds *0.8 = 6.6 pounds total parmesan", ""],
+        ["Edwardo's Parmesan Oregano Mix", ""],
+        ["", "LBS"],
+        ["Parmesan Grated", "5"],
+        ["Oregano Flake", "1.25"],
+        ["Total", "6.25"],
+      ],
+    });
+    expect(sheet.recipes.map((r) => r.name)).toEqual([
+      "Edwardo's Parmesan Oregano Mix",
+    ]);
+    expect(sheet.recipes[0].components).toEqual([
+      { ingredient: "Parmesan Grated", lbs: 5 },
+      { ingredient: "Oregano Flake", lbs: 1.25 },
+    ]);
+  });
+
+  it("skips a date / revision stamp above a real block", () => {
+    const sheet = parseCheeseSheet({
+      name: "Lowe",
+      rows: [
+        ["Lowe Cheese", ""],
+        ["Cheese Shredder Setting: #1", ""],
+        ["3/4/2025 Rev. 20", ""],
+        ["Lowe's Grilled Vegetable Cheese Mix", ""],
+        ["", "LBS"],
+        ["Whole Milk Mozzarella", "20"],
+        ["Provolone", "20"],
+        ["Fontina", "20"],
+        ["Cellulose", "0.3"],
+        ["Total", "60.3"],
+      ],
+    });
+    expect(sheet.recipes.map((r) => r.name)).toEqual([
+      "Lowe's Grilled Vegetable Cheese Mix",
+    ]);
+  });
+
+  it("skips a bare 'Cellulose' summary label used as a header", () => {
+    const sheet = parseCheeseSheet({
+      name: "Corner Booth",
+      rows: [
+        ["Corner Booth Cheese", ""],
+        ["Cheese Shredder Setting: #1", ""],
+        ["Cellulose", ""],
+        ["Corner Booth Five Cheese Mix", ""],
+        ["", "LBS"],
+        ["Whole Mozzarella", "40"],
+        ["Cellulose", "0.3"],
+        ["Total", "40.3"],
+      ],
+    });
+    expect(sheet.recipes.map((r) => r.name)).toEqual([
+      "Corner Booth Five Cheese Mix",
+    ]);
+  });
+
+  it("collapses runs of whitespace in a captured recipe name", () => {
+    const sheet = parseCheeseSheet({
+      name: "SMD",
+      rows: [
+        ["Cheese Shredder Setting: #1", ""],
+        ["SMD Supreme Cheese Mix          (same as Lowe's Grilled Veggie)", ""],
+        ["", "LBS"],
+        ["Whole Milk Mozzarella", "20"],
+        ["Total", "20"],
+      ],
+    });
+    expect(sheet.recipes.map((r) => r.name)).toEqual([
+      "SMD Supreme Cheese Mix (same as Lowe's Grilled Veggie)",
+    ]);
+  });
+});
+
 describe("summary + candidates", () => {
   const wb = parseCheeseWorkbook([ALDO]);
   const existingId = wb.recipes[0].id;

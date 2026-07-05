@@ -75,6 +75,25 @@ function isKeyword(s: string): boolean {
   return KEYWORDS.has(s.toLowerCase());
 }
 
+/**
+ * Header-column strings that are structural noise rather than recipe names:
+ * revision stamps ("3/4/2025 Rev. 20", "02/06/26 Revision 11"), the "Cellulose"
+ * summary label, and example-calculation lines ("8.19 total mix in pounds *0.8 =
+ * 6.6 pounds total parmesan"). These can sit in the name column right above a
+ * real recipe block, so without this guard the block's LBS marker (within the
+ * next few rows) latches onto the noise line and the ingredients get attached to
+ * a garbage "recipe" name instead of the real one.
+ */
+function isNonRecipeName(s: string): boolean {
+  const t = collapseWs(s).toLowerCase();
+  if (!t) return true;
+  if (t === "cellulose") return true;
+  if (/\brev(\.|ision)?\s*\d/.test(t)) return true; // "rev. 20", "revision 11"
+  if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(t)) return true; // dates like 3/4/2025
+  if (/[=*]/.test(t)) return true; // calculation / example text
+  return false;
+}
+
 function collapseWs(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
@@ -204,13 +223,14 @@ function scanColumnBlocks(rows: string[][], nameCol: number): RawBlock[] {
   const blocks: RawBlock[] = [];
   let r = 0;
   while (r < rows.length) {
-    const name = cell(rows, r, nameCol);
+    const name = collapseWs(cell(rows, r, nameCol));
     // A header candidate: a non-empty, non-keyword name with no colon and not a
     // note/shredder line, that has a "LBS" marker within the next few rows.
     const lower = name.toLowerCase();
     const looksHeader =
       !!name &&
       !isKeyword(name) &&
+      !isNonRecipeName(name) &&
       !name.includes(":") &&
       !name.startsWith("**") &&
       !lower.includes("note") &&
