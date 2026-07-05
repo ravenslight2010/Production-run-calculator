@@ -1995,7 +1995,7 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
           }
 
           const next: AppState = { ...prev, brands, brandFlavors, brandProfiles, deletedItems };
-          void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+          persist(next);
           return next;
         });
         await AsyncStorage.setItem(PROFILE_CLEANUP_MARKER, "1");

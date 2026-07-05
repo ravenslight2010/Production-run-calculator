@@ -36,3 +36,13 @@ reverts runs/day-state that a remote apply just landed. Plan (deleteKeys/rebuild
 may be computed from a snapshot because `brandProfiles` is LOCAL-only, but the synced
 lists must be re-derived from `prev`. Web has no such race — it runs synchronously at
 module import, before React mounts / any sync.
+
+**Gotcha — stamp-funnel guard (fixed):** `mobileRunValueStampGuard.test.ts` (lives in
+the WEB package, scans the mobile file as text) forbids a raw
+`AsyncStorage.setItem(STORAGE_KEY, …)` inside a `setAppState` updater. Persist the
+migrated state with `persist(next)` (or `persistNow`) INSIDE the updater instead — the
+guard's Rule 4 accepts a persist call `insideCallTo(setAppState)`, but Rule 5 rejects a
+direct STORAGE_KEY write there. `persist`/`persistNow` are declared later in the file
+than this effect; referencing them inside the nested `setAppState` callback is fine (TS
+forward-ref is allowed for nested-function uses) — just don't put them in the effect
+dep array (that IS a real TS use-before-declaration error).
