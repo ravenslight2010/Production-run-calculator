@@ -14,7 +14,6 @@ import { buildDiscrepancies } from "@/specImport";
 import {
   profileExistsForImport,
   recipeExistsForImport,
-  existingRecipeNamesForImport,
   existingDieTypesForImport,
   specImportRecipeDisplayKind,
   type SpecImportDisplayKind,
@@ -30,6 +29,14 @@ type Props = {
   error: string | null;
   prepared: SpecImportPrepared | null;
   applying: boolean;
+  /**
+   * Existing recipe names, per display kind, the "use my existing recipe" picker
+   * can offer. Cheese and mix are server-backed factory master-data (and dough /
+   * sauce too), so the parent sources these from the live server pools — NOT the
+   * dormant local presets — or the picker would only list the one-time local seed
+   * (e.g. a single "Aldo's Standard Cheese Mix").
+   */
+  existingRecipeNamesByKind: Record<SpecImportDisplayKind, string[]>;
   /** Confirm with the edited, kept-only import the user chose to apply. */
   onConfirm: (parsed: ParsedSpecImport) => void;
 };
@@ -174,6 +181,7 @@ export default function SpecImportDialog({
   error,
   prepared,
   applying,
+  existingRecipeNamesByKind,
   onConfirm,
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
@@ -424,6 +432,7 @@ export default function SpecImportDialog({
                         editedProfiles={edited.profiles}
                         brands={brands}
                         flavorsByBrand={flavorsByBrand}
+                        existingOptions={existingRecipeNamesByKind[r.kind] ?? []}
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
                         onKind={(kind) => setRecipe(r.key, { kind, linkExisting: undefined })}
@@ -727,6 +736,7 @@ function RecipeRow({
   editedProfiles,
   brands,
   flavorsByBrand,
+  existingOptions,
   onToggle,
   onName,
   onKind,
@@ -738,6 +748,8 @@ function RecipeRow({
   editedProfiles: ParsedProfile[];
   brands: string[];
   flavorsByBrand: Record<string, string[]>;
+  /** Existing saved recipes of this kind the user can reuse instead of creating one. */
+  existingOptions: string[];
   onToggle: () => void;
   onName: (v: string) => void;
   onKind: (v: SpecImportDisplayKind) => void;
@@ -746,8 +758,6 @@ function RecipeRow({
   onLinkExisting: (v: string) => void;
 }) {
   const linked = item.linkExisting?.trim() ?? "";
-  // Existing saved recipes of this kind the user can reuse instead of creating one.
-  const existingOptions = existingRecipeNamesForImport(item.kind);
   // Effective name: the linked recipe when reusing, else the (editable) parsed name.
   const name = linked || item.name.trim();
   const brand = item.brand.trim();

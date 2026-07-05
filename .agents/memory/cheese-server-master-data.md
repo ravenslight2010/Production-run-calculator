@@ -30,6 +30,14 @@ per-BATCH lbs — different units, different importer, different pool.
   hydrated rows/name downstream to calc + consumption, and removing the synced preset
   map would break the additive live-sync union. Leave them dormant.
 
+**Dormant-preset trap:** any UI that lists cheese/dough/sauce/mix recipe NAMES must read
+the LIVE server pools, not the dormant local presets. The spec-import "Use my existing
+recipe" picker (web-only reuse feature) regressed to offering only the one-time local seed
+("Aldo's...") because it read `existingRecipeNamesForImport` (local presets). Fix: source
+the picker from the server pools (`serverCheeseNames`/`serverMixNames`/`serverDoughNames`/
+`serverSauceNames`), unioned with local names for back-compat. When wiring a new name
+picker, ask whether the pool is server-backed now — most are.
+
 **No migration of old local presets to the server.** Since the 2026-07-03 data purge the
 apps start empty and users re-import their own spec sheets (see one-time-data-purge.md);
 seeding/migrating cheese would resurrect purged data and break web+mobile parity (web did

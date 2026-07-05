@@ -137,6 +137,8 @@ import {
   SEED_MIX_RECIPE_NAMES,
   migrateIngredientListsToCatalogIfNeeded,
   hydrateRecipeRowsWithCatalog,
+  existingRecipeNamesForImport,
+  type SpecImportDisplayKind,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
 import { MIX_SEED } from "../mixSeed";
@@ -2911,6 +2913,23 @@ export default function Home() {
     () => [...new Set([...serverSauceNames, ...frontlineRecipeNames].map((n) => n.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
     [serverSauceNames, frontlineRecipeNames],
   );
+  // "Use my existing recipe" options for the spec-import review, per kind. Dough,
+  // sauce, cheese and mixes are all server-backed factory master-data now, so the
+  // picker must list the LIVE server pool names — unioned with any dormant local
+  // presets for backward compat — not just the one-time local seed (which held a
+  // single "Aldo's Standard Cheese Mix" and made every import offer only "Aldos").
+  const existingImportRecipeNames = useMemo<Record<SpecImportDisplayKind, string[]>>(() => {
+    const union = (server: string[], kind: SpecImportDisplayKind) =>
+      [...new Set([...server, ...existingRecipeNamesForImport(kind)].map((n) => n.trim()).filter(Boolean))].sort(
+        (a, b) => a.localeCompare(b),
+      );
+    return {
+      dough: union(serverDoughNames, "dough"),
+      sauce: union(serverSauceNames, "sauce"),
+      cheese: union(serverCheeseNames, "cheese"),
+      mix: union(serverMixNames, "mix"),
+    };
+  }, [serverDoughNames, serverSauceNames, serverCheeseNames, serverMixNames]);
   // Names filtered to the current run's brand/flavor: prefer recipes for this
   // customer (brand) and — among those — ones assigned to this flavor (or "all
   // varieties", i.e. no flavors). Returns ALL names when nothing matches so the
@@ -14700,6 +14719,7 @@ export default function Home() {
           error={specImportError}
           prepared={specImportPrepared}
           applying={specImportApplying}
+          existingRecipeNamesByKind={existingImportRecipeNames}
           onConfirm={handleSpecImportConfirm}
         />
 

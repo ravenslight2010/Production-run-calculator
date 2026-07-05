@@ -63,6 +63,7 @@ function renderDialog(prepared: SpecImportPrepared) {
       error={null}
       prepared={prepared}
       applying={false}
+      existingRecipeNamesByKind={{ dough: [], sauce: [], cheese: [], mix: [] }}
       onConfirm={() => {}}
     />,
   );

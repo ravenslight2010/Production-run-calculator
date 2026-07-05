@@ -17,8 +17,6 @@ vi.mock("@/specImport", () => ({
 vi.mock("@/storage", () => ({
   profileExistsForImport: () => false,
   recipeExistsForImport: () => false,
-  existingRecipeNamesForImport: (kind: string) =>
-    kind === "dough" ? ["House Dough", "Thin Crust"] : [],
   existingDieTypesForImport: () => [],
   specImportRecipeDisplayKind: (r: ParsedRecipe) => r.kind,
 }));
@@ -55,6 +53,12 @@ function renderDialog(prepared: SpecImportPrepared, onConfirm: (p: ParsedSpecImp
       error={null}
       prepared={prepared}
       applying={false}
+      existingRecipeNamesByKind={{
+        dough: ["House Dough", "Thin Crust"],
+        sauce: [],
+        cheese: [],
+        mix: [],
+      }}
       onConfirm={onConfirm}
     />,
   );
