@@ -6,7 +6,7 @@ import {
   MAX_KNOWN_LIST,
   type ParseSpecSheetInput,
 } from "./aiParseSpecSheet";
-import { isPepperoniOnlyCheeseRecipe } from "@workspace/spec-import";
+import { isStickPepOnlyCheeseRecipe } from "@workspace/spec-import";
 
 function input(overrides: Partial<ParseSpecSheetInput> = {}): ParseSpecSheetInput {
   return {
@@ -170,9 +170,10 @@ describe("buildParseSpecSheetPrompt numeric accuracy", () => {
 // and the sanitizer deterministically drops any that slip through — so the
 // import review UI never flags a bogus "cheese recipe" for what is a pep type.
 describe("pepperoni is a pep type, not a cheese recipe", () => {
-  it("tells the model pepperoni is a profile pepperoni, never a recipe", () => {
+  it("tells the model stick-applied peps (pepperoni + cheese sticks) are profile pepperonis, never a recipe", () => {
     const { system } = buildParseSpecSheetPrompt(input());
-    expect(system).toContain("PEPPERONI IS NOT A RECIPE");
+    expect(system).toContain("STICK-APPLIED TOPPINGS ARE NOT A RECIPE");
+    expect(system).toContain("cheese sticks");
     expect(system).toContain("`pepperonis`");
     expect(system).toContain("EXCEPTION IS DICED PEPPERONI");
   });
@@ -185,6 +186,21 @@ describe("pepperoni is a pep type, not a cheese recipe", () => {
           kind: "cheese",
           name: "Pepperoni Stick",
           rows: [{ ingredient: "Pepperoni Stick", lbs: 5 }],
+        },
+      ],
+    };
+    const out = sanitizeParseSpecSheet(raw);
+    expect(out.recipes).toHaveLength(0);
+  });
+
+  it("drops a cheese recipe whose ingredients are purely cheese sticks (a pep type)", () => {
+    const raw = {
+      profiles: [],
+      recipes: [
+        {
+          kind: "cheese",
+          name: "Cheese Stick",
+          rows: [{ ingredient: "Cheese Stick", lbs: 5 }],
         },
       ],
     };
@@ -227,25 +243,37 @@ describe("pepperoni is a pep type, not a cheese recipe", () => {
     expect(out.recipes[0].name).toBe("Diced Pepperoni");
   });
 
-  it("isPepperoniOnlyCheeseRecipe: true only when every row is non-diced pepperoni", () => {
-    expect(isPepperoniOnlyCheeseRecipe([{ ingredient: "Pep Stick", lbs: 3 }])).toBe(true);
+  it("isStickPepOnlyCheeseRecipe: true only when every row is a non-diced stick pep", () => {
+    expect(isStickPepOnlyCheeseRecipe([{ ingredient: "Pep Stick", lbs: 3 }])).toBe(true);
+    // Cheese sticks are stick-applied pep types too, not a cheese recipe.
+    expect(isStickPepOnlyCheeseRecipe([{ ingredient: "Cheese Stick", lbs: 3 }])).toBe(true);
+    expect(isStickPepOnlyCheeseRecipe([{ ingredient: "Mozzarella Stick", lbs: 3 }])).toBe(
+      true,
+    );
     expect(
-      isPepperoniOnlyCheeseRecipe([
+      isStickPepOnlyCheeseRecipe([
         { ingredient: "Pepperoni", lbs: 3 },
         { ingredient: "Provolone", lbs: 10 },
       ]),
     ).toBe(false);
+    // A real cheese blend that merely lists a cheese among its rows is kept.
+    expect(
+      isStickPepOnlyCheeseRecipe([
+        { ingredient: "Cheese Stick", lbs: 3 },
+        { ingredient: "Provolone", lbs: 10 },
+      ]),
+    ).toBe(false);
     // Diced pepperoni is a topping, not a stick pep type -> keep the recipe.
-    expect(isPepperoniOnlyCheeseRecipe([{ ingredient: "Diced Pepperoni", lbs: 6 }])).toBe(
+    expect(isStickPepOnlyCheeseRecipe([{ ingredient: "Diced Pepperoni", lbs: 6 }])).toBe(
       false,
     );
     expect(
-      isPepperoniOnlyCheeseRecipe([
+      isStickPepOnlyCheeseRecipe([
         { ingredient: "Pepperoni Stick", lbs: 3 },
         { ingredient: "Diced Pepperoni", lbs: 6 },
       ]),
     ).toBe(false);
-    expect(isPepperoniOnlyCheeseRecipe([])).toBe(false);
+    expect(isStickPepOnlyCheeseRecipe([])).toBe(false);
   });
 });
 

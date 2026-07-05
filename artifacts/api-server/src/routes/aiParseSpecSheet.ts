@@ -198,12 +198,15 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "substitute). When a table lists cheeses/toppings by the pound it is CHEESE, not " +
     "SAUCE, even if it sits near the sauce section; only a tomato-based blend is " +
     "SAUCE. Use the section heading and the ingredient names together — do not " +
-    "assume position alone. PEPPERONI IS NOT A RECIPE: pepperoni (including " +
-    "'pepperoni sticks') is a profile PEPPERONI — capture it in that profile's " +
-    "`pepperonis` list (type + sticks + oz per pizza) and NEVER emit it as a " +
-    "cheese or topping recipe; do not create a recipe whose ingredients are " +
-    "pepperoni. THE ONE EXCEPTION IS DICED PEPPERONI: diced pepperoni is a " +
-    "topping and stays part of a CHEESE/topping recipe, NOT a profile pepperoni. " +
+    "assume position alone. STICK-APPLIED TOPPINGS ARE NOT A RECIPE: a topping " +
+    "applied as whole sticks through the stick applicator — pepperoni (including " +
+    "'pepperoni sticks') AND cheese sticks (e.g. 'Cheese Stick', 'Mozzarella " +
+    "Stick') — is a profile PEPPERONI (that is the stick-type slot): capture it " +
+    "in that profile's `pepperonis` list (type + sticks + oz per pizza) and NEVER " +
+    "emit it as a cheese or topping recipe; do not create a recipe whose " +
+    "ingredients are only such sticks. THE ONE EXCEPTION IS DICED PEPPERONI: " +
+    "diced pepperoni is a topping and stays part of a CHEESE/topping recipe, NOT " +
+    "a profile pepperoni. " +
     "EMBEDDED BLENDS: some spec grids pack a full blend recipe into ONE applicator " +
     "cell — a mix name followed by number+ingredient pairs, e.g. \"Aldo's Cheese " +
     "Mix 1.75 Pizella, 1.0 Part Skim Mozzarella, 0.1 Grated Parmesan\" or 'White " +

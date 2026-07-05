@@ -1807,26 +1807,29 @@ export function isCatchAllFlavor(flavor: string, kind: string): boolean {
   return false;
 }
 
-/** Matches a pepperoni ingredient/recipe name ("Pepperoni", "Pep Stick"). Pure. */
-const PEPPERONI_NAME_RE = /pepp?eroni|pep\s*stick/i;
+/** Matches a stick-applied pep name — a topping applied as whole sticks through
+ * the stick applicator: pepperoni ("Pepperoni", "Pep Stick") OR a cheese stick
+ * ("Cheese Stick", "Mozzarella Stick"). These are pep TYPES, not recipes. Pure. */
+const STICK_PEP_NAME_RE = /pepp?eroni|pep\s*stick|(?:cheese|mozz\w*)\s*stick/i;
 
 /** DICED pepperoni is a topping ingredient (part of a cheese/topping blend), NOT
  * a stick pep type — the ONE pepperoni exception that stays a cheese recipe. Pure. */
 const DICED_RE = /diced/i;
 
 /**
- * True when a CHEESE-kind recipe is really just pepperoni STICKS — a pep TYPE,
- * not a cheese/topping blend. Pepperoni sticks are captured on a profile's
- * `pepperonis` (type + sticks + oz per pizza), never as a recipe, so the importer
- * drops such recipes instead of creating a bogus "cheese recipe". Conservative:
- * fires only when EVERY ingredient row is (non-diced) pepperoni (a real cheese
- * blend that merely lists pepperoni among its cheeses is kept). DICED pepperoni
- * is a topping and is the exception — a recipe containing it is kept. Pure. */
-export function isPepperoniOnlyCheeseRecipe(rows: ReadonlyArray<RecipeRow>): boolean {
+ * True when a CHEESE-kind recipe is really just stick-applied pep — pepperoni
+ * STICKS or CHEESE STICKS — a pep TYPE, not a cheese/topping blend. Sticks are
+ * captured on a profile's `pepperonis` (type + sticks + oz per pizza), never as a
+ * recipe, so the importer drops such recipes instead of creating a bogus "cheese
+ * recipe". Conservative: fires only when EVERY ingredient row is a (non-diced)
+ * stick pep (a real cheese blend that merely lists pepperoni among its cheeses is
+ * kept). DICED pepperoni is a topping and is the exception — a recipe containing
+ * it is kept. Pure. */
+export function isStickPepOnlyCheeseRecipe(rows: ReadonlyArray<RecipeRow>): boolean {
   return (
     rows.length > 0 &&
     rows.every(
-      (r) => PEPPERONI_NAME_RE.test(r.ingredient) && !DICED_RE.test(r.ingredient),
+      (r) => STICK_PEP_NAME_RE.test(r.ingredient) && !DICED_RE.test(r.ingredient),
     )
   );
 }
@@ -2532,10 +2535,11 @@ export function sanitizeParsedSpecImport(
       rows.push({ ingredient, lbs });
     }
     if (rows.length === 0) continue;
-    // Pepperoni is a pep TYPE (captured on the profile's `pepperonis`), not a
-    // recipe. Drop a cheese recipe whose ingredients are purely pepperoni so it
-    // never imports as a bogus "cheese recipe".
-    if (kind === "cheese" && isPepperoniOnlyCheeseRecipe(rows)) continue;
+    // A stick-applied pep (pepperoni sticks OR cheese sticks) is a pep TYPE
+    // (captured on the profile's `pepperonis`), not a recipe. Drop a cheese
+    // recipe whose ingredients are purely such sticks so it never imports as a
+    // bogus "cheese recipe".
+    if (kind === "cheese" && isStickPepOnlyCheeseRecipe(rows)) continue;
     const recipe: ParsedRecipe = { kind, name, rows };
     // Grounding backstop for RECIPE brands, same semantics as profiles: a
     // paraphrased recipe brand silently attaches a dough/sauce/cheese recipe
