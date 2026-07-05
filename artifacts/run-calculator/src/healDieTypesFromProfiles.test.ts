@@ -41,6 +41,20 @@ describe("healDieTypesFromProfiles", () => {
     expect(healDieTypesFromProfiles()).toEqual(["12in"]);
   });
 
+  it("folds variant 11-inch die spellings into the single canonical 11\" name", () => {
+    localStorage.setItem(PROFILE_KEY("Aldo's", "Pep"), JSON.stringify({ dieType: "11" }));
+    localStorage.setItem(PROFILE_KEY("Craft", "Supreme"), JSON.stringify({ dieType: '11" dies' }));
+    localStorage.setItem(PROFILE_KEY("Corner", "Cheese"), JSON.stringify({ dieType: '11"' }));
+
+    expect(healDieTypesFromProfiles()).toEqual(['11"']);
+    expect(JSON.parse(localStorage.getItem(DIE_TYPES_KEY) ?? "[]")).toEqual(['11"']);
+  });
+
+  it("collapses stale variant names already saved in the master list", () => {
+    saveList(DIE_TYPES_KEY, ["11", '11"', '11" dies']);
+    expect(healDieTypesFromProfiles()).toEqual(['11"']);
+  });
+
   it("folds in extra (live-run) die types passed by the caller", () => {
     localStorage.setItem(PROFILE_KEY("Craft", "Supreme"), JSON.stringify({ dieType: "12in" }));
     expect(healDieTypesFromProfiles(["Argus", "  ", "12in"])).toEqual(["12in", "Argus"]);

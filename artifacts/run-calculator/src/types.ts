@@ -438,6 +438,14 @@ export const INGREDIENT_RENAMES: Record<string, string> = {
 // Pep-type names that were recategorized as applicator types and must be dropped
 // from the pep-type list (still usable as an applicator type / cheese ingredient).
 export const RETIRED_PEP_TYPES = ["Diced Pepperoni"];
+// Variant die-type spellings folded to one canonical name. Imports created three
+// separate entries for the same physical 11" die; map them so the picker lists a
+// single option. Applied to the master list + saved dieType fields on every load.
+export const DIE_TYPE_RENAMES: Record<string, string> = {
+  "11": '11"',
+  '11" dies': '11"',
+};
+
 export const DIE_TYPES_KEY = "run-calc-die-types";
 export const DEFAULT_DIE_TYPES: string[] = [];
 export const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";

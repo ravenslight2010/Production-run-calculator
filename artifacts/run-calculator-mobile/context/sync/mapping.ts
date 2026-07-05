@@ -19,6 +19,7 @@ import {
   DEFAULT_PROGRESS,
   DEFAULT_SETTINGS,
   renameIngredientList,
+  DIE_TYPE_RENAMES,
   renameIngredientSettings,
   renamePepList,
   renamePepSettings,
@@ -652,7 +653,16 @@ export function applyPayloadToState(
   // Clean incoming pep types (rename legacy + drop retired) so a legacy peer can't
   // reintroduce "Pep - Cured"/"Pep - Natural"/"Diced Pepperoni" via sync.
   if (payload.pepTypes) patch.pepTypes = dropDeleted(dropTomb(renamePepList(unionList(prev.pepTypes, payload.pepTypes)), tomb), deletedItems, "pepTypes");
-  if (payload.dieTypes) patch.dieTypes = dropDeleted(dropTomb(unionList(prev.dieTypes, payload.dieTypes), tomb), deletedItems, "dieTypes");
+  // Die types are excluded from merge (see .agents/memory/die-types-merge-exclusion.md):
+  // do NOT apply the global merged-away tombstone (no dropTomb), or an ingredient
+  // merge whose source name collides with a die would delete it. Fold variant die
+  // spellings on the way in so a stale peer can't re-add "11" / "11" dies". (web parity)
+  if (payload.dieTypes)
+    patch.dieTypes = dropDeleted(
+      unionList(prev.dieTypes, payload.dieTypes).map((t) => DIE_TYPE_RENAMES[t] ?? t),
+      deletedItems,
+      "dieTypes",
+    );
   if (payload.cheeseIngredients) patch.cheeseIngredients = dropDeleted(dropTomb(renameIngredientList(unionList(prev.cheeseIngredients, payload.cheeseIngredients)), tomb), deletedItems, "cheeseIngredients");
   if (payload.doughIngredients) patch.doughIngredients = dropDeleted(dropTomb(unionList(prev.doughIngredients, payload.doughIngredients), tomb), deletedItems, "doughIngredients");
   if (payload.frontlineIngredients) patch.frontlineIngredients = dropDeleted(dropTomb(unionList(prev.frontlineIngredients, payload.frontlineIngredients), tomb), deletedItems, "frontlineIngredients");

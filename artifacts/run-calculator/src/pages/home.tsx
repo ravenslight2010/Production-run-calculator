@@ -22,6 +22,7 @@ import {
   PEP_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
   INGREDIENT_RENAMES,
+  DIE_TYPE_RENAMES,
   DEFAULT_DIE_TYPES,
   DEFAULT_INGREDIENT_TYPES,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -4695,7 +4696,8 @@ export default function Home() {
         .map(t => PEP_TYPE_RENAMES[t] ?? t)
         .filter(t => !RETIRED_PEP_TYPES.includes(t));
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
-      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, payload.dieTypes, setDieTypes, "dieTypes", false);
+      const cleanedRemoteDie = (payload.dieTypes ?? []).map(t => DIE_TYPE_RENAMES[t] ?? t);
+      mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, cleanedRemoteDie, setDieTypes, "dieTypes", false);
       const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
       mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");

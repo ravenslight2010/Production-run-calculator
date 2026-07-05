@@ -392,6 +392,13 @@ export const PEP_TYPE_RENAMES: Record<string, string> = {
   "Pep - Cured": "Pepperoni Stick",
   "Pep - Natural": "Pepperoni Stick - NATURAL",
 };
+// Variant die-type spellings folded to one canonical name (imports created three
+// entries for the same physical 11" die). Applied to the die list + saved dieType
+// fields on every load. Mirrors the web map.
+export const DIE_TYPE_RENAMES: Record<string, string> = {
+  "11": '11"',
+  '11" dies': '11"',
+};
 // Near-duplicate applicator/cheese-ingredient names collapsed onto a single
 // canonical spelling. Genuinely different products are intentionally NOT mapped:
 // all "FR" (fire roasted) variants, the three Parmesan forms (Grated / Shredded /
@@ -1520,6 +1527,10 @@ export function renamePepSettings<T extends Partial<RunSettings>>(s: T): T {
     const val = out[k];
     if (typeof val === "string" && PEP_TYPE_RENAMES[val]) out[k] = PEP_TYPE_RENAMES[val];
   }
+  // Fold variant die-type spellings so a saved run/profile still matches the
+  // single canonical option in the picker.
+  const die = out.dieType;
+  if (typeof die === "string" && DIE_TYPE_RENAMES[die]) out.dieType = DIE_TYPE_RENAMES[die];
   return out as T;
 }
 
@@ -1627,20 +1638,27 @@ function healDieTypesFromProfiles(
   brandProfiles: Record<string, RunProfile> | undefined,
   deletedItems: Record<string, string[]> | undefined,
 ): string[] {
-  const current = dieTypes ?? [...DEFAULT_DIE_TYPES];
-  const seen = new Set(current.map((d) => d.toLowerCase()));
-  const deleted = new Set((deletedItems?.["dieTypes"] ?? []).map((d) => d.toLowerCase()));
-  const additions: string[] = [];
+  const raw: string[] = [];
+  for (const name of dieTypes ?? [...DEFAULT_DIE_TYPES]) {
+    const t = (name ?? "").trim();
+    if (t) raw.push(t);
+  }
   for (const prof of Object.values(brandProfiles ?? {})) {
     const dt = typeof prof?.dieType === "string" ? prof.dieType.trim() : "";
-    if (!dt) continue;
-    const lower = dt.toLowerCase();
+    if (dt) raw.push(dt);
+  }
+  const deleted = new Set((deletedItems?.["dieTypes"] ?? []).map((d) => d.toLowerCase()));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const name of raw) {
+    // Fold variant spellings onto the canonical die name before de-duping.
+    const renamed = DIE_TYPE_RENAMES[name] ?? name;
+    const lower = renamed.toLowerCase();
     if (seen.has(lower) || deleted.has(lower)) continue;
     seen.add(lower);
-    additions.push(dt);
+    out.push(renamed);
   }
-  if (additions.length === 0) return current;
-  return [...current, ...additions].sort((a, b) => a.localeCompare(b));
+  return out.sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "history"> {

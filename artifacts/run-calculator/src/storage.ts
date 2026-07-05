@@ -34,6 +34,7 @@ import {
   DEFAULT_PEP_TYPES,
   PEP_TYPE_RENAMES,
   INGREDIENT_RENAMES,
+  DIE_TYPE_RENAMES,
   RETIRED_PEP_TYPES,
   CHEESE_INGREDIENTS_KEY,
   DEFAULT_CHEESE_INGREDIENTS,
@@ -232,6 +233,12 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
     if (typeof val === "string" && PEP_TYPE_RENAMES[val]) {
       (o as Record<string, unknown>)[k] = PEP_TYPE_RENAMES[val];
     }
+  }
+  // Fold variant die-type spellings (e.g. "11" / "11" dies" → "11"") so a saved
+  // run/profile still matches the single canonical option in the picker.
+  const die = o.dieType;
+  if (typeof die === "string" && DIE_TYPE_RENAMES[die]) {
+    (o as Record<string, unknown>).dieType = DIE_TYPE_RENAMES[die];
   }
   normalizeIngredientFields(o);
   return o;
@@ -1836,11 +1843,11 @@ export function existingDieTypesForImport(): string[] {
  * types into its master list. Returns the effective master list.
  */
 export function healDieTypesFromProfiles(extra: string[] = []): string[] {
-  const current = loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES);
-  const found = new Set<string>();
-  for (const name of extra) {
+  const stored = loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES);
+  const raw: string[] = [];
+  for (const name of [...stored, ...extra]) {
     const t = (name ?? "").trim();
-    if (t) found.add(t);
+    if (t) raw.push(t);
   }
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -1853,7 +1860,7 @@ export function healDieTypesFromProfiles(extra: string[] = []): string[] {
       try {
         const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
         const dt = obj && typeof obj.dieType === "string" ? obj.dieType.trim() : "";
-        if (dt) found.add(dt);
+        if (dt) raw.push(dt);
       } catch {
         // Skip an unreadable profile — never let one bad row block the heal.
       }
@@ -1861,13 +1868,21 @@ export function healDieTypesFromProfiles(extra: string[] = []): string[] {
   } catch {
     // localStorage unavailable (SSR / privacy mode) — nothing to heal from.
   }
-  const seen = new Set(current.map((d) => d.toLowerCase()));
-  const additions = [...found].filter((d) => !seen.has(d.toLowerCase()));
-  const allowed = dropDeleted(additions, loadDeletedItems(), "dieTypes");
-  if (allowed.length === 0) return current;
-  const merged = [...new Set([...current, ...allowed])].sort((a, b) => a.localeCompare(b));
-  saveList(DIE_TYPES_KEY, merged);
-  return merged;
+  // Fold variant spellings onto their canonical die name, then de-dupe
+  // case-insensitively (keep the first spelling seen).
+  const seen = new Set<string>();
+  const canon: string[] = [];
+  for (const name of raw) {
+    const renamed = DIE_TYPE_RENAMES[name] ?? name;
+    const lower = renamed.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    canon.push(renamed);
+  }
+  const allowed = dropDeleted(canon, loadDeletedItems(), "dieTypes").sort((a, b) => a.localeCompare(b));
+  // Persist only when the effective list actually changed (avoid needless writes).
+  if (JSON.stringify(allowed) !== JSON.stringify(stored)) saveList(DIE_TYPES_KEY, allowed);
+  return allowed;
 }
 
 /**
