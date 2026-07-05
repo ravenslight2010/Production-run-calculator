@@ -84,7 +84,9 @@ export const formSchema = z.object({
   app4CheeseRecipe: z.array(recipeRowSchema).default([]),
   frontlineRecipeName: z.string().default(""),
   frontlineRecipe: z.array(recipeRowSchema).default([]),
-  cartoned: z.string().default("yes"),
+  cartoned: z.string().default("cartoned"),
+  // Only meaningful when cartoned === "labeled": top / bottom / both.
+  labelPosition: z.string().default(""),
   cartonsPerCase: z.coerce.number().min(0).default(0),
   circles: z.string().default("none"),
   shipper: z.string().default(""),
@@ -185,7 +187,8 @@ export const DEFAULT_VALUES: FormValues = {
   app4CheeseRecipe: [],
   frontlineRecipeName: "",
   frontlineRecipe: [],
-  cartoned: "yes",
+  cartoned: "cartoned",
+  labelPosition: "",
   cartonsPerCase: 0,
   circles: "none",
   shipper: "",
@@ -201,7 +204,7 @@ export const DEFAULT_VALUES: FormValues = {
 // Settings and surfaced in the Packaging tab. circles are counted per pizza and
 // shippers per case in the warehouse needs roll-up (grouped by selected value).
 export const PACKAGING_FIELDS = [
-  { name: "cartoned", label: "Cartoned", options: ["yes", "no"] },
+  { name: "cartoned", label: "Packaging Type", options: ["cartoned", "labeled", "n-a"] },
   { name: "circles", label: "Circles", options: ["none", "microwave", "7in", "11in", "12in"] },
   { name: "shipper", label: "Shipper", options: ["costco", "12in", "11in", "7in", "edwardos"] },
   { name: "skidStacking", label: "Skid Stacking Style", options: ["lucia", "hannaford", "column"] },
@@ -209,6 +212,39 @@ export const PACKAGING_FIELDS = [
   { name: "slipSheets", label: "Slip Sheets", options: ["yes", "no"] },
 ] as const;
 export type PackagingFieldName = (typeof PACKAGING_FIELDS)[number]["name"];
+
+// Packaging-type choices with their capitalized display labels. Replaces the old
+// yes/no toggle. Legacy stored `yes`/`no` are migrated on load (see storage
+// normalizePackagingFields): yes → cartoned, no → labeled.
+export const PACKAGING_TYPE_OPTIONS = [
+  { value: "cartoned", label: "Cartoned" },
+  { value: "labeled", label: "Labeled" },
+  { value: "n-a", label: "N/A" },
+] as const;
+
+// Label-position sub-choice, shown only when Packaging Type is Labeled.
+export const LABEL_POSITION_OPTIONS = [
+  { value: "top", label: "Top Label" },
+  { value: "bottom", label: "Bottom Label" },
+  { value: "both", label: "Both" },
+] as const;
+
+/** Display label for a stored labelPosition value ("" when unset/unknown). */
+export function labelPositionLabel(val: string | undefined): string {
+  const v = (val ?? "").trim().toLowerCase();
+  return LABEL_POSITION_OPTIONS.find((o) => o.value === v)?.label ?? "";
+}
+
+/**
+ * True when a run's Packaging Type counts as cartoned for the warehouse roll-up.
+ * Accepts the new "cartoned" value AND legacy stored "yes" so old data (and the
+ * mobile app, which still stores "yes") keeps working unchanged. "labeled" /
+ * "n-a" / legacy "no" all contribute nothing.
+ */
+export function isCartonedValue(val: string | undefined): boolean {
+  const v = (val ?? "").trim().toLowerCase();
+  return v === "cartoned" || v === "yes";
+}
 
 export const CRUST_FIELDS = [
   "crustsPerCycle", "cycleSpeed", "speedAdjustment", "doughballsPerTray",
@@ -303,6 +339,10 @@ export type SyncPayload = {
   history?: HistoryDay[];
   pepTypes?: string[];
   dieTypes?: string[];
+  circles?: string[];
+  shipper?: string[];
+  skidStacking?: string[];
+  gripSheets?: string[];
   cheeseIngredients?: string[];
   doughIngredients?: string[];
   frontlineIngredients?: string[];
@@ -448,6 +488,17 @@ export const DIE_TYPE_RENAMES: Record<string, string> = {
 
 export const DIE_TYPES_KEY = "run-calc-die-types";
 export const DEFAULT_DIE_TYPES: string[] = [];
+// User-editable packaging option lists (seeded once, then fully user-owned —
+// add/remove with deletion tombstones, synced like die types). The defaults are
+// the options that already worked before these lists became editable.
+export const CIRCLES_KEY = "run-calc-circles";
+export const DEFAULT_CIRCLES: string[] = ["none", "microwave", "7in", "11in", "12in"];
+export const SHIPPER_KEY = "run-calc-shippers";
+export const DEFAULT_SHIPPERS: string[] = ["costco", "12in", "11in", "7in", "edwardos"];
+export const SKID_STACKING_KEY = "run-calc-skid-stacking";
+export const DEFAULT_SKID_STACKING: string[] = ["lucia", "hannaford", "column"];
+export const GRIP_SHEETS_KEY = "run-calc-grip-sheets";
+export const DEFAULT_GRIP_SHEETS: string[] = ["none", "every other layer", "3rd and 5th"];
 export const CHEESE_INGREDIENTS_KEY = "run-calc-cheese-ingredients";
 export const DEFAULT_CHEESE_INGREDIENTS: string[] = [];
 export const MIX_INGREDIENTS_KEY = "run-calc-mix-ingredients";

@@ -6,7 +6,8 @@ import {
   type FormValues,
   type RecipeRow,
   DEFAULT_VALUES,
-  PACKAGING_FIELDS,
+  PACKAGING_TYPE_OPTIONS,
+  LABEL_POSITION_OPTIONS,
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
 import {
@@ -42,6 +43,136 @@ const APPLICATOR_LABELS: Record<ApplicatorNum, string> = {
   4: "Applicator 4",
 };
 
+/**
+ * A selectable chip list backed by a user-editable master list. Clicking a chip
+ * toggles the selected value (click the active one to clear). The trailing "+"
+ * opens an inline text input to add a new option (replacing the old
+ * window.prompt, which is unreliable inside the preview iframe). When onRemove is
+ * provided, each chip shows a small × to delete that option from the master list.
+ * Reused for Die Type (add-only) and the four editable packaging lists.
+ */
+function EditableChipList({
+  label,
+  options,
+  value,
+  onSelect,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  options: string[];
+  value: string;
+  onSelect: (val: string) => void;
+  onAdd: (name: string) => void;
+  onRemove?: (name: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+  const commit = () => {
+    const t = text.trim();
+    if (t) onAdd(t);
+    setText("");
+    setAdding(false);
+  };
+  return (
+    <div>
+      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{label}</label>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {options.map(opt => {
+          const active = value === opt;
+          return (
+            <span
+              key={opt}
+              className={`inline-flex items-center rounded-md text-xs font-semibold border capitalize transition-colors ${active ? "bg-primary text-primary-foreground border-primary" : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"}`}
+            >
+              <button
+                type="button"
+                onClick={() => onSelect(active ? "" : opt)}
+                className="px-2.5 py-1"
+              >
+                {opt}
+              </button>
+              {onRemove && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${opt}`}
+                  onClick={() => onRemove(opt)}
+                  className={`pr-1.5 pl-0.5 py-1 opacity-60 hover:opacity-100 ${active ? "" : "hover:text-foreground"}`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </span>
+          );
+        })}
+        {adding ? (
+          <input
+            autoFocus
+            value={text}
+            onChange={e => setText(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => {
+              if (e.key === "Enter") { e.preventDefault(); commit(); }
+              else if (e.key === "Escape") { setText(""); setAdding(false); }
+            }}
+            placeholder="New…"
+            className="w-24 px-2 py-1 rounded-md text-xs border border-border/50 bg-background text-foreground focus:outline-none focus:border-primary"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="px-2 py-1 rounded-md text-xs border border-dashed border-border/50 text-muted-foreground/60 hover:text-muted-foreground hover:border-border transition-colors"
+          >
+            +
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A selectable chip list over a FIXED set of {value,label} options (no add/remove). */
+function FixedChipSelect({
+  label,
+  options,
+  value,
+  onSelect,
+  allowClear = true,
+}: {
+  label: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  value: string;
+  onSelect: (val: string) => void;
+  allowClear?: boolean;
+}) {
+  return (
+    <div>
+      <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{label}</label>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map(opt => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onSelect(active && allowClear ? "" : opt.value)}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${active ? "bg-primary text-primary-foreground border-primary" : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"}`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const SLIP_SHEET_OPTIONS = [
+  { value: "yes", label: "Yes" },
+  { value: "no", label: "No" },
+] as const;
+
 export interface SetupProfileEditorProps {
   open: boolean;
   onClose: () => void;
@@ -58,7 +189,18 @@ export interface SetupProfileEditorProps {
   onRemoveFlavor: (name: string, brand?: string) => void;
   dieTypes: string[];
   onAddDieType: (name: string) => void;
-  onRemoveDieType: (name: string) => void;
+  circles: string[];
+  onAddCircle: (name: string) => void;
+  onRemoveCircle: (name: string) => void;
+  shipperOptions: string[];
+  onAddShipper: (name: string) => void;
+  onRemoveShipper: (name: string) => void;
+  skidStackingOptions: string[];
+  onAddSkidStacking: (name: string) => void;
+  onRemoveSkidStacking: (name: string) => void;
+  gripSheetsOptions: string[];
+  onAddGripSheets: (name: string) => void;
+  onRemoveGripSheets: (name: string) => void;
   ingredientTypes: string[];
   onAddIngredientType: (name: string) => void;
   onRemoveIngredientType: (name: string) => void;
@@ -101,7 +243,18 @@ export default function SetupProfileEditor({
   onRemoveFlavor,
   dieTypes,
   onAddDieType,
-  onRemoveDieType,
+  circles,
+  onAddCircle,
+  onRemoveCircle,
+  shipperOptions,
+  onAddShipper,
+  onRemoveShipper,
+  skidStackingOptions,
+  onAddSkidStacking,
+  onRemoveSkidStacking,
+  gripSheetsOptions,
+  onAddGripSheets,
+  onRemoveGripSheets,
   ingredientTypes,
   onAddIngredientType,
   onRemoveIngredientType,
@@ -433,28 +586,15 @@ export default function SetupProfileEditor({
                         <button type="button" onClick={() => setLineType("crusts")} className={`px-4 py-1.5 rounded-md text-sm font-semibold transition-colors ${lineType === "crusts" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Crust</button>
                       </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Die Type</label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {dieTypes.map(dt => (
-                          <button
-                            key={dt}
-                            type="button"
-                            onClick={() => form.setValue("dieType", v.dieType === dt ? "" : dt, { shouldDirty: true })}
-                            className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${v.dieType === dt ? "bg-primary text-primary-foreground border-primary" : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"}`}
-                          >
-                            {dt}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => { const name = window.prompt("New die type name?"); if (name?.trim()) onAddDieType(name.trim()); }}
-                          className="px-2 py-1 rounded-md text-xs border border-dashed border-border/50 text-muted-foreground/60 hover:text-muted-foreground hover:border-border transition-colors"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
+                    {lineType !== "crusts" && (
+                      <EditableChipList
+                        label="Die Type"
+                        options={dieTypes}
+                        value={v.dieType ?? ""}
+                        onSelect={val => form.setValue("dieType", val, { shouldDirty: true })}
+                        onAdd={onAddDieType}
+                      />
+                    )}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Allergen</label>
                       <div className="flex flex-wrap gap-1.5">
@@ -519,29 +659,58 @@ export default function SetupProfileEditor({
                     <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
                   </summary>
                   <div className="border-t border-border/40 px-5 pb-5 pt-4 space-y-4">
-                    {PACKAGING_FIELDS.map(f => {
-                      const cur = (v[f.name] as string) ?? "";
-                      return (
-                        <div key={f.name}>
-                          <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">{f.label}</label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {f.options.map(opt => {
-                              const active = cur === opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  onClick={() => form.setValue(f.name, active ? "" : opt, { shouldDirty: true })}
-                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border capitalize transition-colors ${active ? "bg-primary text-primary-foreground border-primary" : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"}`}
-                                >
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
+                    <FixedChipSelect
+                      label="Packaging Type"
+                      options={PACKAGING_TYPE_OPTIONS}
+                      value={(v.cartoned as string) ?? ""}
+                      onSelect={val => form.setValue("cartoned", val, { shouldDirty: true })}
+                    />
+                    {((v.cartoned as string) ?? "").trim().toLowerCase() === "labeled" && (
+                      <FixedChipSelect
+                        label="Label Position"
+                        options={LABEL_POSITION_OPTIONS}
+                        value={(v.labelPosition as string) ?? ""}
+                        onSelect={val => form.setValue("labelPosition", val, { shouldDirty: true })}
+                      />
+                    )}
+                    <EditableChipList
+                      label="Circles"
+                      options={circles}
+                      value={(v.circles as string) ?? ""}
+                      onSelect={val => form.setValue("circles", val, { shouldDirty: true })}
+                      onAdd={onAddCircle}
+                      onRemove={onRemoveCircle}
+                    />
+                    <EditableChipList
+                      label="Shipper"
+                      options={shipperOptions}
+                      value={(v.shipper as string) ?? ""}
+                      onSelect={val => form.setValue("shipper", val, { shouldDirty: true })}
+                      onAdd={onAddShipper}
+                      onRemove={onRemoveShipper}
+                    />
+                    <EditableChipList
+                      label="Skid Stacking"
+                      options={skidStackingOptions}
+                      value={(v.skidStacking as string) ?? ""}
+                      onSelect={val => form.setValue("skidStacking", val, { shouldDirty: true })}
+                      onAdd={onAddSkidStacking}
+                      onRemove={onRemoveSkidStacking}
+                    />
+                    <EditableChipList
+                      label="Grip Sheets"
+                      options={gripSheetsOptions}
+                      value={(v.gripSheets as string) ?? ""}
+                      onSelect={val => form.setValue("gripSheets", val, { shouldDirty: true })}
+                      onAdd={onAddGripSheets}
+                      onRemove={onRemoveGripSheets}
+                    />
+                    <FixedChipSelect
+                      label="Slip Sheets"
+                      options={SLIP_SHEET_OPTIONS}
+                      value={(v.slipSheets as string) ?? ""}
+                      onSelect={val => form.setValue("slipSheets", val, { shouldDirty: true })}
+                    />
                     <NumField control={form.control} name="cartonsPerCase" label="Cartons Per Case" step="1" />
                   </div>
                 </details>

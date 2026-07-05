@@ -329,8 +329,10 @@ export function computeRunLines(
     else add(`ingredient:${pep2TypeB}:batches`, "ingredient", pep2TypeB, "batches", s.pep2BatchesB);
   }
 
-  // Packaging — only cartoned runs consume packaging
-  if ((vals.cartoned ?? "").trim().toLowerCase() === "yes") {
+  // Packaging — only cartoned runs consume packaging. Accepts the web app's new
+  // "cartoned" value and the legacy/mobile "yes"; "labeled"/"n-a"/"no" consume none.
+  const cartonedVal = (vals.cartoned ?? "").trim().toLowerCase();
+  if (cartonedVal === "cartoned" || cartonedVal === "yes") {
     const circle = (vals.circles ?? "").trim();
     if (circle && circle.toLowerCase() !== "none" && s.totalPizzas > 0) {
       add(`packaging:circles:${circle}`, "packaging", `Circles — ${circle}`, "circles", s.totalPizzas);

@@ -24,6 +24,18 @@ import {
   INGREDIENT_RENAMES,
   DIE_TYPE_RENAMES,
   DEFAULT_DIE_TYPES,
+  CIRCLES_KEY,
+  DEFAULT_CIRCLES,
+  SHIPPER_KEY,
+  DEFAULT_SHIPPERS,
+  SKID_STACKING_KEY,
+  DEFAULT_SKID_STACKING,
+  GRIP_SHEETS_KEY,
+  DEFAULT_GRIP_SHEETS,
+  isCartonedValue,
+  labelPositionLabel,
+  LABEL_POSITION_OPTIONS,
+  PACKAGING_TYPE_OPTIONS,
   DEFAULT_INGREDIENT_TYPES,
   DEFAULT_CHEESE_INGREDIENTS,
   DEFAULT_MIX_INGREDIENTS,
@@ -141,6 +153,8 @@ import {
   hydrateRecipeRowsWithCatalog,
   existingRecipeNamesForImport,
   healDieTypesFromProfiles,
+  healPackagingFromProfiles,
+  normalizePackagingFields,
   rewriteDieTypeInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
@@ -580,9 +594,9 @@ function aggregatePackagingNeeds(valsList: FormValues[]): NeedRow[] {
   const shipperMap = new Map<string, number>();
   let cartonCases = 0;
   for (const vals of valsList) {
-    // Only cartoned runs contribute to packaging needs; "labeled" (cartoned !==
-    // "yes") runs are excluded entirely.
-    if ((vals.cartoned ?? "").trim().toLowerCase() !== "yes") continue;
+    // Only cartoned runs contribute to packaging needs; "labeled" / "n-a" runs
+    // are excluded entirely. Accepts legacy "yes" for pre-migration data.
+    if (!isCartonedValue(vals.cartoned)) continue;
     const s = computeSummaryStats(vals);
     // Cartons are bought by the case: cases = total pizzas / cartons per case.
     const perCase = Number(vals.cartonsPerCase) || 0;
@@ -1957,6 +1971,9 @@ function mergeRunDefaults(raw: Partial<FormValues> | undefined): FormValues {
   const rawHadFlag = typeof (raw as Record<string, unknown> | undefined)?.pep1Combined === "boolean";
   const merged = { ...DEFAULT_VALUES, ...(raw ?? {}) } as FormValues;
   resolvePep1Combined(merged as unknown as Record<string, unknown>, rawHadFlag);
+  // Migrate legacy yes/no packaging values coming in from sync/imports/mobile so
+  // the UI and roll-up gate see the new cartoned/labeled/n-a set consistently.
+  normalizePackagingFields(merged as unknown as Record<string, unknown>);
   return merged;
 }
 
@@ -2357,6 +2374,54 @@ export default function Home() {
     schedulePush(dayStateRef.current);
   }
 
+  // ── User-editable packaging option lists (circles / shipper / skid-stacking /
+  // grip-sheets). Add/remove/persist/sync/tombstone exactly like die types; the
+  // seeded defaults are removable (no DEFAULT guard) since they are user-owned.
+  // Not part of the ingredient merge universe, so no clearMergedAwayBoth. ──────
+  const [circles, setCircles] = useState<string[]>(() =>
+    healPackagingFromProfiles(CIRCLES_KEY, DEFAULT_CIRCLES, "circles", "circles")
+  );
+  const [shipper, setShipper] = useState<string[]>(() =>
+    healPackagingFromProfiles(SHIPPER_KEY, DEFAULT_SHIPPERS, "shipper", "shipper")
+  );
+  const [skidStacking, setSkidStacking] = useState<string[]>(() =>
+    healPackagingFromProfiles(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, "skidStacking", "skidStacking")
+  );
+  const [gripSheets, setGripSheets] = useState<string[]>(() =>
+    healPackagingFromProfiles(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, "gripSheets", "gripSheets")
+  );
+
+  function makePackagingList(
+    list: string[],
+    setList: (v: string[]) => void,
+    key: string,
+    namespace: string,
+  ) {
+    return {
+      add(name: string) {
+        const trimmed = name.trim();
+        if (!trimmed || list.some(t => t.toLowerCase() === trimmed.toLowerCase())) return;
+        const updated = [...list, trimmed].sort((a, b) => a.localeCompare(b));
+        setList(updated);
+        saveList(key, updated);
+        clearDeleted(namespace, trimmed);
+        schedulePush(dayStateRef.current);
+      },
+      remove(name: string) {
+        const updated = list.filter(t => t !== name);
+        setList(updated);
+        saveList(key, updated);
+        tombstoneDeleted(namespace, name);
+        schedulePush(dayStateRef.current);
+      },
+    };
+  }
+
+  const circlesList = makePackagingList(circles, setCircles, CIRCLES_KEY, "circles");
+  const shipperList = makePackagingList(shipper, setShipper, SHIPPER_KEY, "shipper");
+  const skidStackingList = makePackagingList(skidStacking, setSkidStacking, SKID_STACKING_KEY, "skidStacking");
+  const gripSheetsList = makePackagingList(gripSheets, setGripSheets, GRIP_SHEETS_KEY, "gripSheets");
+
   const [cheeseIngredients, setCheeseIngredients] = useState<string[]>(() =>
     [...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b))
   );
@@ -2534,6 +2599,10 @@ export default function Home() {
       return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
     });
     setDieTypes(healDieTypesFromProfiles());
+    setCircles(healPackagingFromProfiles(CIRCLES_KEY, DEFAULT_CIRCLES, "circles", "circles"));
+    setShipper(healPackagingFromProfiles(SHIPPER_KEY, DEFAULT_SHIPPERS, "shipper", "shipper"));
+    setSkidStacking(healPackagingFromProfiles(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, "skidStacking", "skidStacking"));
+    setGripSheets(healPackagingFromProfiles(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, "gripSheets", "gripSheets"));
     setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)));
@@ -4717,6 +4786,11 @@ export default function Home() {
       mergeList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES, cleanedRemotePep, setPepTypes, "pepTypes");
       const cleanedRemoteDie = (payload.dieTypes ?? []).map(t => DIE_TYPE_RENAMES[t] ?? t);
       mergeList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES, cleanedRemoteDie, setDieTypes, "dieTypes", false);
+      // Editable packaging lists: same non-merge-aware union as die types.
+      mergeList(CIRCLES_KEY, DEFAULT_CIRCLES, payload.circles, setCircles, "circles", false);
+      mergeList(SHIPPER_KEY, DEFAULT_SHIPPERS, payload.shipper, setShipper, "shipper", false);
+      mergeList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING, payload.skidStacking, setSkidStacking, "skidStacking", false);
+      mergeList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS, payload.gripSheets, setGripSheets, "gripSheets", false);
       const cleanedRemoteCheese = (payload.cheeseIngredients ?? []).map(t => INGREDIENT_RENAMES[t] ?? t);
       mergeList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS, cleanedRemoteCheese, setCheeseIngredients, "cheeseIngredients");
       mergeList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS, payload.doughIngredients, setDoughIngredients, "doughIngredients");
@@ -5173,6 +5247,10 @@ export default function Home() {
       history: loadHistory(),
       pepTypes: loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
       dieTypes: loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES),
+      circles: loadList(CIRCLES_KEY, DEFAULT_CIRCLES),
+      shipper: loadList(SHIPPER_KEY, DEFAULT_SHIPPERS),
+      skidStacking: loadList(SKID_STACKING_KEY, DEFAULT_SKID_STACKING),
+      gripSheets: loadList(GRIP_SHEETS_KEY, DEFAULT_GRIP_SHEETS),
       cheeseIngredients: loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS),
       doughIngredients: loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS),
       frontlineIngredients: loadList(FRONTLINE_INGREDIENTS_KEY, DEFAULT_FRONTLINE_INGREDIENTS),
@@ -11402,14 +11480,32 @@ export default function Home() {
                   <div className="border-t border-border/40 px-5 pb-5 pt-4 space-y-4">
                     {PACKAGING_FIELDS.map((f) => {
                       const cur = (v[f.name] as string) ?? "";
+                      // The four editable packaging master lists (circles / shipper /
+                      // skidStacking / gripSheets) draw their selectable options from
+                      // the live, user-editable lists so options added in Setup
+                      // Profiles appear here too — mirroring the die-type pattern.
+                      // cartoned (Packaging Type) and slipSheets stay fixed.
+                      const editableList: string[] | null =
+                        f.name === "circles" ? circles
+                        : f.name === "shipper" ? shipper
+                        : f.name === "skidStacking" ? skidStacking
+                        : f.name === "gripSheets" ? gripSheets
+                        : null;
+                      const opts = editableList ?? f.options;
+                      // "cartoned" is the Packaging Type field: render its fixed
+                      // options via their display labels (e.g. "n-a" → "N/A").
+                      const isPackagingType = f.name === "cartoned";
                       return (
                         <div key={f.name}>
                           <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
                             {f.label}
                           </label>
                           <div className="flex flex-wrap gap-1.5">
-                            {f.options.map((opt) => {
+                            {opts.map((opt) => {
                               const active = cur === opt;
+                              const optLabel = isPackagingType
+                                ? PACKAGING_TYPE_OPTIONS.find((o) => o.value === opt)?.label ?? opt
+                                : opt;
                               return (
                                 <button
                                   key={opt}
@@ -11417,17 +11513,47 @@ export default function Home() {
                                   onClick={() =>
                                     form.setValue(f.name, active ? "" : opt, { shouldDirty: true })
                                   }
-                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border capitalize transition-colors ${
+                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${isPackagingType ? "" : "capitalize"} ${
                                     active
                                       ? "bg-primary text-primary-foreground border-primary"
                                       : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
                                   }`}
                                 >
-                                  {opt}
+                                  {optLabel}
                                 </button>
                               );
                             })}
                           </div>
+                          {/* Label position — only relevant for Labeled runs. Shown
+                              directly under the Packaging Type selector. */}
+                          {f.name === "cartoned" && cur.trim().toLowerCase() === "labeled" && (
+                            <div className="mt-3">
+                              <label className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                                Label Position
+                              </label>
+                              <div className="flex flex-wrap gap-1.5">
+                                {LABEL_POSITION_OPTIONS.map((opt) => {
+                                  const active = ((v.labelPosition as string) ?? "") === opt.value;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={() =>
+                                        form.setValue("labelPosition", active ? "" : opt.value, { shouldDirty: true })
+                                      }
+                                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                                        active
+                                          ? "bg-primary text-primary-foreground border-primary"
+                                          : "bg-muted/30 text-muted-foreground border-border/50 hover:border-primary/50 hover:text-foreground"
+                                      }`}
+                                    >
+                                      {opt.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -11451,7 +11577,15 @@ export default function Home() {
                   </CardHeader>
                   <CardContent className="px-4 pb-4">
                     {(() => {
-                      const isCartoned = ((v.cartoned as string) ?? "").trim().toLowerCase() === "yes";
+                      const cartonedVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
+                      const isCartoned = isCartonedValue(cartonedVal);
+                      const isLabeled = cartonedVal === "labeled";
+                      const posLabel = isLabeled ? labelPositionLabel(v.labelPosition as string) : "";
+                      const badgeText = isCartoned
+                        ? "Cartoned"
+                        : isLabeled
+                          ? posLabel ? `Labeled · ${posLabel}` : "Labeled"
+                          : "N/A";
                       return (
                         <span
                           className={`inline-block mb-3 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider border ${
@@ -11460,12 +11594,12 @@ export default function Home() {
                               : "bg-muted/40 text-muted-foreground border-border/60"
                           }`}
                         >
-                          {isCartoned ? "Cartoned" : "Labeled"}
+                          {badgeText}
                         </span>
                       );
                     })()}
                     <div className="space-y-1.5">
-                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "yes" && (
+                      {isCartonedValue(v.cartoned as string) && (
                         <div className="flex items-baseline justify-between gap-2 text-sm">
                           <span className="text-muted-foreground">Cartons / Case</span>
                           <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
@@ -14894,7 +15028,18 @@ export default function Home() {
           onRemoveFlavor={removeFlavor}
           dieTypes={dieTypes}
           onAddDieType={addDieType}
-          onRemoveDieType={removeDieType}
+          circles={circles}
+          onAddCircle={circlesList.add}
+          onRemoveCircle={circlesList.remove}
+          shipperOptions={shipper}
+          onAddShipper={shipperList.add}
+          onRemoveShipper={shipperList.remove}
+          skidStackingOptions={skidStacking}
+          onAddSkidStacking={skidStackingList.add}
+          onRemoveSkidStacking={skidStackingList.remove}
+          gripSheetsOptions={gripSheets}
+          onAddGripSheets={gripSheetsList.add}
+          onRemoveGripSheets={gripSheetsList.remove}
           ingredientTypes={ingredientTypes}
           onAddIngredientType={addIngredientType}
           onRemoveIngredientType={removeIngredientType}

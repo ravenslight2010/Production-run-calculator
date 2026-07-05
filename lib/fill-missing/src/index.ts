@@ -207,7 +207,12 @@ function doughYieldDerivedFromRecipe(rec: Rec): boolean {
 // applicator slot only when that slot is in use, dough vs crust supply fields
 // only in their own mode). Returns false to skip a field.
 function fieldApplies(spec: FieldSpec, rec: Rec): boolean {
-  if (spec.key === "cartonsPerCase") return asString(rec.cartoned) !== "no";
+  if (spec.key === "cartonsPerCase") {
+    // Cartons only matter for cartoned runs. Excludes legacy "no" and the web
+    // app's new non-cartoned "labeled"/"n-a" packaging types.
+    const c = asString(rec.cartoned);
+    return c !== "no" && c !== "labeled" && c !== "n-a";
+  }
   // Dough-mode-only supply fields: irrelevant when the run opens pre-made crusts.
   if (spec.key === "doughballsPerTray") return !isCrustMode(rec);
   if (spec.key === "doughBatchYield") {

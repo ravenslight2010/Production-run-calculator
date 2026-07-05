@@ -240,8 +240,22 @@ function normalizePepFields<T extends Record<string, unknown>>(o: T): T {
   if (typeof die === "string" && DIE_TYPE_RENAMES[die]) {
     (o as Record<string, unknown>).dieType = DIE_TYPE_RENAMES[die];
   }
+  normalizePackagingFields(o);
   normalizeIngredientFields(o);
   return o;
+}
+
+// Migrate the legacy yes/no "Cartoned" toggle to the new "Packaging Type" field:
+// yes → cartoned, no → labeled. New values (cartoned/labeled/n-a) pass through.
+// Applied on every profile/run/template/history read, so old saved data shows the
+// right option and the roll-up gate matches. Idempotent and self-healing.
+export function normalizePackagingFields(o: Record<string, unknown>): void {
+  const c = o.cartoned;
+  if (typeof c === "string") {
+    const lc = c.trim().toLowerCase();
+    if (lc === "yes") o.cartoned = "cartoned";
+    else if (lc === "no") o.cartoned = "labeled";
+  }
 }
 
 // Resolve the "combine applicators 1 & 2" flag when loading a run/profile that
@@ -1910,6 +1924,63 @@ export function healDieTypesFromProfiles(extra: string[] = []): string[] {
   const allowed = dropDeleted(canon, loadDeletedItems(), "dieTypes").sort((a, b) => a.localeCompare(b));
   // Persist only when the effective list actually changed (avoid needless writes).
   if (JSON.stringify(allowed) !== JSON.stringify(stored)) saveList(DIE_TYPES_KEY, allowed);
+  return allowed;
+}
+
+/**
+ * Self-heal an editable packaging option list (circles / shipper / skid-stacking
+ * / grip-sheets) the same way die types heal from profiles. Mirrors
+ * healDieTypesFromProfiles but is generic over the list:
+ *  - Seeds the built-in defaults ONCE (when the key has never been written), so
+ *    the options that already worked are present out of the box. After that the
+ *    list is fully user-owned (add/remove), so a removed option stays removed.
+ *  - Re-adds any value still referenced by a saved profile (import/save may set a
+ *    profile's field without touching the master list), then honors deletion
+ *    tombstones so a removed option is never resurrected.
+ * Dedupes case-insensitively (first spelling wins), sorts, and persists only on
+ * change. Namespace matches the sync payload field name.
+ */
+export function healPackagingFromProfiles(
+  key: string,
+  defaults: string[],
+  field: string,
+  namespace: string,
+): string[] {
+  // Seed defaults exactly once; thereafter read the user-owned stored list.
+  const seeded = localStorage.getItem(key) === null;
+  const stored = seeded ? [...defaults] : loadList(key, defaults);
+  if (seeded) saveList(key, stored);
+  const raw: string[] = [];
+  for (const name of stored) {
+    const t = (name ?? "").trim();
+    if (t) raw.push(t);
+  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+        continue;
+      try {
+        const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+        const val = obj && typeof obj[field] === "string" ? (obj[field] as string).trim() : "";
+        if (val) raw.push(val);
+      } catch {
+        // Skip an unreadable profile — never let one bad row block the heal.
+      }
+    }
+  } catch {
+    // localStorage unavailable (SSR / privacy mode) — nothing to heal from.
+  }
+  const seen = new Set<string>();
+  const canon: string[] = [];
+  for (const name of raw) {
+    const lower = name.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    canon.push(name);
+  }
+  const allowed = dropDeleted(canon, loadDeletedItems(), namespace).sort((a, b) => a.localeCompare(b));
+  if (JSON.stringify(allowed) !== JSON.stringify(stored)) saveList(key, allowed);
   return allowed;
 }
 
