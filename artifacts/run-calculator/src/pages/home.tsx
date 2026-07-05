@@ -9810,6 +9810,20 @@ export default function Home() {
                   <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">Import spec sheets &amp; recipes, or a production schedule, from an Excel workbook.</p>
                     {isManager && (
+                      <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-foreground">Best import order</p>
+                        <p className="text-[11px] text-muted-foreground">Import your building-block sheets first, then the pizza spec last — that way the spec links to them instead of creating duplicates:</p>
+                        <ol className="text-[11px] text-muted-foreground list-decimal pl-4 space-y-0.5">
+                          <li><span className="font-medium text-foreground">Cheese Mix Recipe Specs</span> — Manage Lists ▸ Cheese Recipes</li>
+                          <li><span className="font-medium text-foreground">Pre-Mix Sheets</span> — Manage Lists ▸ Mixes</li>
+                          <li><span className="font-medium text-foreground">Sauce recipe sheets</span> — Import Spec Sheet (below)</li>
+                          <li><span className="font-medium text-foreground">Dough recipe sheets</span> — Import Spec Sheet (below)</li>
+                          <li><span className="font-medium text-foreground">Pizza Spec Sheets</span> — Import Spec Sheet (below), last</li>
+                        </ol>
+                        <p className="text-[11px] text-muted-foreground">If a name still doesn&apos;t match (e.g. an extra word or a typo), confirm the match once in the review step — the app remembers it next time.</p>
+                      </div>
+                    )}
+                    {isManager && (
                       <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Spec Sheet

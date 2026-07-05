@@ -2098,6 +2098,43 @@ export default function MasterDataScreen() {
           </Pressable>
           {isManager ? (
             <>
+              <View
+                style={{
+                  marginTop: 12,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 8,
+                  padding: 12,
+                  gap: 4,
+                }}
+              >
+                <Text style={[styles.importBtnText, { color: colors.foreground }]}>
+                  Best import order
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  Import your building-block sheets first, then the pizza spec last —
+                  that way the spec links to them instead of creating duplicates:
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  1. Cheese Mix Recipe Specs — Cheese Recipes section (below)
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  2. Pre-Mix Sheets — Mixes section (below)
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  3. Sauce recipe sheets — Import Spec Sheet (below)
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  4. Dough recipe sheets — Import Spec Sheet (below)
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  5. Pizza Spec Sheets — Import Spec Sheet (below), last
+                </Text>
+                <Text style={[styles.pinHint, { color: colors.mutedForeground }]}>
+                  If a name still doesn&apos;t match (e.g. an extra word or a typo),
+                  confirm the match once in the review step — the app remembers it next time.
+                </Text>
+              </View>
               <Text
                 style={[
                   styles.pinHint,
