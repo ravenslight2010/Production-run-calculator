@@ -317,6 +317,7 @@ export default function SetupProfileEditor({
             recipe={recipe}
             recipeName={(v[nameKey] as string) ?? ""}
             recipeNameOptions={cheeseNamesForRun(brand, flavor)}
+            recipeMissing={((v[nameKey] as string) ?? "").trim() !== "" && !serverCheeseByName.has(((v[nameKey] as string) ?? "").trim().toLowerCase())}
             shredderSetting={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
             cellulose={serverCheeseByName.get(((v[nameKey] as string) ?? "").trim().toLowerCase())?.cellulose ?? ""}
             onRecipeNameChange={val => {

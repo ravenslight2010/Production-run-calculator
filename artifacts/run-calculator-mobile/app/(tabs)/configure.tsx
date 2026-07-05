@@ -1033,6 +1033,11 @@ export default function ConfigureScreen() {
           const pickedCheese = recipeName.trim()
             ? serverCheeseByName.get(recipeName.trim().toLowerCase())
             : undefined;
+          // A picked name that resolves to nothing in the server cheese pool
+          // (e.g. a spec sheet referenced a blend that was never imported).
+          // Drives an inline "pick a real blend" warning instead of a silent,
+          // confusing blank body. Mirrors web CheesePickCard `recipeMissing`.
+          const cheeseMissing = recipeName.trim() !== "" && !pickedCheese;
           // Options scoped to this run's brand/flavor, but always include the
           // currently-picked name so a recipe assigned elsewhere (or since
           // disabled) still shows instead of silently clearing.
@@ -1172,14 +1177,30 @@ export default function ConfigureScreen() {
                         ) : null}
                       </View>
                     ) : null}
-                    <ReadOnlyRecipe
-                      rows={rows}
-                      emptyText={
-                        recipeName.trim()
-                          ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
-                          : "Pick a cheese recipe above to load its ingredients."
-                      }
-                    />
+                    {cheeseMissing ? (
+                      <View
+                        style={[
+                          styles.cheeseWarn,
+                          {
+                            borderColor: colors.warning,
+                            backgroundColor: colors.warning + "22",
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.cheeseWarnText, { color: colors.warning }]}>
+                          {`No matching cheese recipe found for “${recipeName.trim()}”. Pick a real blend from the dropdown above, or a manager can add it under Manage Lists → Cheese Recipes.`}
+                        </Text>
+                      </View>
+                    ) : (
+                      <ReadOnlyRecipe
+                        rows={rows}
+                        emptyText={
+                          recipeName.trim()
+                            ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
+                            : "Pick a cheese recipe above to load its ingredients."
+                        }
+                      />
+                    )}
                     {(() => {
                       // Pounds of each cheese to pull/mix for this run: the blend
                       // recipe's per-batch pounds scaled by this applicator's batch
@@ -1520,6 +1541,17 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cheeseMeta: {
+    fontSize: 12,
+    fontFamily: FONTS.regular,
+  },
+  cheeseWarn: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 8,
+  },
+  cheeseWarnText: {
     fontSize: 12,
     fontFamily: FONTS.regular,
   },

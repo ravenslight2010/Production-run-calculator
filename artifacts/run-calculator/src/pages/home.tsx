@@ -885,6 +885,7 @@ export function CheesePickCard({
   cellulose,
   onRecipeNameChange,
   embedded,
+  recipeMissing,
 }: {
   label: string;
   batches: number;
@@ -895,6 +896,11 @@ export function CheesePickCard({
   cellulose: string;
   onRecipeNameChange: (v: string) => void;
   embedded?: boolean;
+  // True when a non-empty recipeName does NOT match any recipe in the server
+  // cheese pool (e.g. a spec sheet referenced a blend name that was never
+  // imported). Drives an inline "pick a real blend" warning instead of a
+  // silent, confusing blank body.
+  recipeMissing?: boolean;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
   // Scale each component up to the pounds to pull/mix for this run, using the
@@ -923,8 +929,17 @@ export function CheesePickCard({
     </div>
   );
 
+  const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;
   const body = (
     <>
+      {showMissingWarning && (
+        <div className="flex items-start gap-2 mb-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            No matching cheese recipe found for “{recipeName.trim()}”. Pick a real blend from the dropdown above, or a manager can add it under Manage Lists → Cheese Recipes.
+          </span>
+        </div>
+      )}
       {(shredderSetting.trim() || cellulose.trim()) && (
         <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-muted-foreground">
           {shredderSetting.trim() && (
@@ -936,11 +951,13 @@ export function CheesePickCard({
         </div>
       )}
       {recipe.length === 0 ? (
-        <p className="text-xs text-muted-foreground mb-1">
-          {recipeName.trim()
-            ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
-            : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."}
-        </p>
+        showMissingWarning ? null : (
+          <p className="text-xs text-muted-foreground mb-1">
+            {recipeName.trim()
+              ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."
+              : "Pick a cheese recipe above to load its ingredients. Managers add recipes under Manage Lists → Cheese Recipes."}
+          </p>
+        )
       ) : (
         <div className="w-full mb-1">
           <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mb-1 px-1">
@@ -12945,6 +12962,7 @@ export default function Home() {
                           recipe={v.app1CheeseRecipe ?? []}
                           recipeName={v.app1CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app1CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app1CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app1CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
@@ -13008,6 +13026,7 @@ export default function Home() {
                           recipe={v.app2CheeseRecipe ?? []}
                           recipeName={v.app2CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app2CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app2CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app2CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
@@ -13071,6 +13090,7 @@ export default function Home() {
                           recipe={v.app3CheeseRecipe ?? []}
                           recipeName={v.app3CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
@@ -13134,6 +13154,7 @@ export default function Home() {
                           recipe={v.app4CheeseRecipe ?? []}
                           recipeName={v.app4CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
                           shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
                           cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
                           onRecipeNameChange={val => {
