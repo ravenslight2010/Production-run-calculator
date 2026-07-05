@@ -139,6 +139,7 @@ import {
   migrateIngredientListsToCatalogIfNeeded,
   hydrateRecipeRowsWithCatalog,
   existingRecipeNamesForImport,
+  healDieTypesFromProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
@@ -2314,9 +2315,7 @@ export default function Home() {
     void deleteCatalogEntryByName(name);
   }
 
-  const [dieTypes, setDieTypes] = useState<string[]>(() =>
-    [...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])].sort((a, b) => a.localeCompare(b))
-  );
+  const [dieTypes, setDieTypes] = useState<string[]>(() => healDieTypesFromProfiles());
 
   function addDieType(name: string) {
     const trimmed = name.trim();
@@ -2514,7 +2513,7 @@ export default function Home() {
         .filter(t => !LEGACY_PEP_TYPES.includes(t) && !RETIRED_PEP_TYPES.includes(t));
       return [...new Set([...DEFAULT_PEP_TYPES, ...cleaned])].sort((a, b) => a.localeCompare(b));
     });
-    setDieTypes([...new Set([...DEFAULT_DIE_TYPES, ...loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES)])].sort((a, b) => a.localeCompare(b)));
+    setDieTypes(healDieTypesFromProfiles());
     setCheeseIngredients([...loadList(CHEESE_INGREDIENTS_KEY, DEFAULT_CHEESE_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughIngredients([...loadList(DOUGH_INGREDIENTS_KEY, DEFAULT_DOUGH_INGREDIENTS)].sort((a, b) => a.localeCompare(b)));
     setDoughRecipeNames([...loadList(DOUGH_RECIPE_NAMES_KEY, DEFAULT_DOUGH_RECIPE_NAMES)].sort((a, b) => a.localeCompare(b)));

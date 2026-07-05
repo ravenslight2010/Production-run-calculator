@@ -1825,6 +1825,52 @@ export function existingDieTypesForImport(): string[] {
 }
 
 /**
+ * Recover die types referenced by saved brand/flavor profiles into the selectable
+ * master list (DIE_TYPES_KEY). A spec/recipe import writes each profile's `dieType`
+ * VALUE, but the run form's Die Type picker only lists DIE_TYPES_KEY — and with the
+ * built-in defaults now empty, a data reset can leave the picker blank even though
+ * profiles still name a die. Union those names back in (case-insensitive, keeping
+ * each name's existing spelling) while honoring explicit deletions (deletedItems
+ * "dieTypes") so a die the user removed is never resurrected. `extra` lets callers
+ * fold in die types found on live runs. Mirrors mobile, which unions imported die
+ * types into its master list. Returns the effective master list.
+ */
+export function healDieTypesFromProfiles(extra: string[] = []): string[] {
+  const current = loadList(DIE_TYPES_KEY, DEFAULT_DIE_TYPES);
+  const found = new Set<string>();
+  for (const name of extra) {
+    const t = (name ?? "").trim();
+    if (t) found.add(t);
+  }
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      // dieType normally lives in the main profile object (run-calc-profile-*),
+      // but scan crust profiles (run-calc-crust-profile-*) too so legacy/mixed
+      // saves are still recovered.
+      if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+        continue;
+      try {
+        const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+        const dt = obj && typeof obj.dieType === "string" ? obj.dieType.trim() : "";
+        if (dt) found.add(dt);
+      } catch {
+        // Skip an unreadable profile — never let one bad row block the heal.
+      }
+    }
+  } catch {
+    // localStorage unavailable (SSR / privacy mode) — nothing to heal from.
+  }
+  const seen = new Set(current.map((d) => d.toLowerCase()));
+  const additions = [...found].filter((d) => !seen.has(d.toLowerCase()));
+  const allowed = dropDeleted(additions, loadDeletedItems(), "dieTypes");
+  if (allowed.length === 0) return current;
+  const merged = [...new Set([...current, ...allowed])].sort((a, b) => a.localeCompare(b));
+  saveList(DIE_TYPES_KEY, merged);
+  return merged;
+}
+
+/**
  * Whether a spec-import must SKIP a brand+flavor profile. Always false: a prior
  * delete/merge only protects against live-sync resurrection, never against a
  * deliberate re-import (see body). Kept as a predicate so partitionTombstonedParse

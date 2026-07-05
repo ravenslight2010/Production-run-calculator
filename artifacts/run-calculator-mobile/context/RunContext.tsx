@@ -1615,6 +1615,34 @@ function normalizeRun(r: RunState): RunState {
   };
 }
 
+// Recover die types referenced by saved brand/flavor profiles into the selectable
+// master list. An import writes each profile's `dieType` value, but the run form's
+// Die Type picker only lists `dieTypes` — with the built-in defaults now empty, a
+// data reset can leave the picker blank even though profiles still name a die.
+// Union those names back in (case-insensitive, keeping existing spelling) while
+// honoring explicit deletions (deletedItems "dieTypes"). Mirrors web's
+// healDieTypesFromProfiles (replit.md parity).
+function healDieTypesFromProfiles(
+  dieTypes: string[] | undefined,
+  brandProfiles: Record<string, RunProfile> | undefined,
+  deletedItems: Record<string, string[]> | undefined,
+): string[] {
+  const current = dieTypes ?? [...DEFAULT_DIE_TYPES];
+  const seen = new Set(current.map((d) => d.toLowerCase()));
+  const deleted = new Set((deletedItems?.["dieTypes"] ?? []).map((d) => d.toLowerCase()));
+  const additions: string[] = [];
+  for (const prof of Object.values(brandProfiles ?? {})) {
+    const dt = typeof prof?.dieType === "string" ? prof.dieType.trim() : "";
+    if (!dt) continue;
+    const lower = dt.toLowerCase();
+    if (seen.has(lower) || deleted.has(lower)) continue;
+    seen.add(lower);
+    additions.push(dt);
+  }
+  if (additions.length === 0) return current;
+  return [...current, ...additions].sort((a, b) => a.localeCompare(b));
+}
+
 function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "history"> {
   return {
     currentIndex: parsed.currentIndex ?? 0,
@@ -1631,7 +1659,7 @@ function normalizeState(parsed: Partial<AppState>): Omit<AppState, "runs" | "his
     supervisorPin: parsed.supervisorPin ?? DEFAULT_SUPERVISOR_PIN,
     brands: parsed.brands ?? [...MIX_SEED.brands],
     brandFlavors: parsed.brandFlavors ?? { ...MIX_SEED.brandFlavors },
-    dieTypes: parsed.dieTypes ?? [...DEFAULT_DIE_TYPES],
+    dieTypes: healDieTypesFromProfiles(parsed.dieTypes, parsed.brandProfiles, parsed.deletedItems),
     pepTypes: renamePepList(parsed.pepTypes),
     cheeseIngredients: renameIngredientList(parsed.cheeseIngredients),
     doughIngredients: parsed.doughIngredients ?? [...DEFAULT_DOUGH_INGREDIENTS],
