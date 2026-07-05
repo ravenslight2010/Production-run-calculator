@@ -20,8 +20,14 @@ server master-data now, so the web merge flow sources from `serverMixNames` /
 dormant local `mixRecipeNames` / `cheeseRecipeNames`. Repoint EVERY merge site
 together (universe, cross-tab exclusion sets, target options, surfaces map,
 `handleApplyRecipeNameMerge` guardrail, dep arrays) or the tab shows phantom or
-empty names. Limitation: merge only re-points day-state refs + tombstones —
-it never deletes the server master-data row.
+empty names. **The recipe-name merge MUST also delete the source recipes from the
+server pool** (dough/sauce via `deleteNamedRecipes`, cheese via
+`deleteCheeseRecipes`, mixes via `deleteMixes`, then `setQueryData` the pool's
+query key) — otherwise, because the merge universe is derived from the live server
+pool, a react-query refetch resurrects the merged-away names IMMEDIATELY (the
+local list/tombstone rewrite alone is not enough). This was the "merged recipe
+names come back right away" bug; `handleApplyBrandFlavorMerge` already re-points
+these same pools and is the pattern to mirror.
 
 ## WEB: category tabs merge RECIPE NAMES, Ingredients tab merges ingredients
 (Web-only during the parity pause; see `.local/parity-pause-log.md`. Mobile still

@@ -190,7 +190,7 @@ import {
   repointMixesForFlavorMerge,
   type Mix,
 } from "@workspace/mixes";
-import { fetchMixes, saveMixes } from "@/mixes";
+import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
@@ -395,10 +395,10 @@ import {
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
 } from "@workspace/cheese-recipes";
-import { fetchCheeseRecipes, saveCheeseRecipes } from "@/cheeseRecipes";
+import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
-import { addNamedRecipesToServerIfAbsent } from "@/namedRecipes";
+import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
 import { namedRecipeFromDraft, type NamedRecipe } from "@workspace/named-recipes";
 
 import {
@@ -4108,6 +4108,55 @@ export default function Home() {
         });
       } catch {
         // Non-fatal: tombstones are persisted locally.
+      }
+      // Dough / sauce / cheese / mix recipes are server-backed factory master-
+      // data (NOT in day-state sync), and the merge picker's universe is derived
+      // from those live server pools. Rewriting only localStorage above lets a
+      // react-query refetch immediately resurrect the merged-away source names,
+      // so delete the source recipes from the correct server pool by name (the
+      // target recipe wins and is kept). Best-effort + manager-gated, mirroring
+      // how handleApplyBrandFlavorMerge re-points these same pools.
+      try {
+        const tgtLc = tgt.trim().toLowerCase();
+        const sourceNamesLc = new Set(
+          Object.keys(map)
+            .map((s) => s.trim().toLowerCase())
+            .filter((s) => s && s !== tgtLc),
+        );
+        if (sourceNamesLc.size > 0) {
+          if (category === "cheese") {
+            const pool = await fetchCheeseRecipes();
+            const ids = pool
+              .filter((r) => sourceNamesLc.has(r.name.trim().toLowerCase()))
+              .map((r) => r.id);
+            if (ids.length > 0) {
+              cycleCountQc.setQueryData(["cheeseRecipes"], await deleteCheeseRecipes(ids));
+            }
+          } else if (category === "mixes") {
+            const pool = await fetchMixes();
+            const ids = pool
+              .filter((m) => sourceNamesLc.has(m.name.trim().toLowerCase()))
+              .map((m) => m.id);
+            if (ids.length > 0) {
+              cycleCountQc.setQueryData(["mixes"], await deleteMixes(ids));
+            }
+          } else {
+            // dough | sauce — their own named-recipe pools.
+            const pool = await fetchNamedRecipes(category);
+            const ids = pool
+              .filter((r) => sourceNamesLc.has(r.name.trim().toLowerCase()))
+              .map((r) => r.id);
+            if (ids.length > 0) {
+              cycleCountQc.setQueryData(
+                [category === "dough" ? "doughRecipes" : "sauceRecipes"],
+                await deleteNamedRecipes(category, ids),
+              );
+            }
+          }
+        }
+      } catch {
+        // Non-fatal: the local merge already succeeded; server pool cleanup is
+        // best-effort (the delete endpoints are manager-gated).
       }
       resetMergeForm();
       const label =
