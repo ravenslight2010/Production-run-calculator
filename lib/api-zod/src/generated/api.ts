@@ -1504,7 +1504,7 @@ export const AiScheduleOptimizeBody = zod.object({
   "label": zod.string().describe('Human label for messaging, e.g. \"Run 2 · Margherita\"'),
   "brand": zod.string(),
   "flavor": zod.string(),
-  "allergen": zod.enum(['none', 'egg', 'soy']),
+  "allergen": zod.string().describe('Food allergen for the run (\"none\" = no allergen). Free-form so allergens named on imported spec sheets beyond egg\/soy (e.g. \"milk\") flow into allergen-sequence checks instead of being dropped to none.'),
   "dieType": zod.string().optional().describe('Die\/crust type; a change between adjacent runs is a changeover')
 }).describe('One run planned for the day, in the flat shape both apps produce.')).describe('The runs planned for the day, in their current order'),
   "rules": zod.array(zod.object({

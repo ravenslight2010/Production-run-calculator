@@ -717,7 +717,11 @@ export const requestAnomalies = (
 // is computed deterministically server-side; the AI only narrates it, and only
 // when a strictly better order exists. Advisory and read-only — the manager
 // applies it through the normal move path. Manager-gated.
-export type ScheduleAllergen = "none" | "egg" | "soy";
+// Free-form (see @workspace/allergen): "none" means no allergen; any other
+// lower-cased token is a real allergen, including custom ones imported from a
+// spec sheet. Kept as a string so custom allergens reach the scheduler's
+// end-of-day sequencing instead of being silently coerced to "none".
+export type ScheduleAllergen = string;
 export type ScheduleRunInput = {
   id: string;
   label: string;

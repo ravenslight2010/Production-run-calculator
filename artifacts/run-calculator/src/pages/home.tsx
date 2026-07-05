@@ -247,8 +247,8 @@ import {
 } from "../mergeRecipeNames";
 import { collectMergeAliases, type MergeSuggestion } from "@workspace/merge-suggest";
 import {
-  ALLERGENS,
   allergenMeta,
+  allergenOptions,
   allergenSequenceWarnings,
   isAllergen,
   normalizeAllergen,
@@ -2174,6 +2174,20 @@ export default function Home() {
     [...loadList(BRANDS_KEY, [])].filter(b => !STALE_BRANDS.includes(b)).sort((a, b) => a.localeCompare(b))
   );
   const [brandFlavors, setBrandFlavors] = useState<Record<string, string[]>>(loadBrandFlavors);
+  // Custom allergens (beyond the built-in egg/soy) currently assigned to any
+  // saved brand/flavor profile — e.g. a NEW allergen a spec-sheet import wrote.
+  // Feeding these into the allergen pickers keeps them selectable/re-selectable
+  // instead of vanishing after a run is switched away from them.
+  const customAllergens = useMemo(() => {
+    const set = new Set<string>();
+    for (const [brand, flavors] of Object.entries(brandFlavors)) {
+      for (const flavor of flavors) {
+        const a = normalizeAllergen(loadProfile(brand, flavor)?.allergen);
+        if (a !== "none") set.add(a);
+      }
+    }
+    return [...set];
+  }, [brandFlavors]);
   // Standalone Setup Profiles editor: lets a manager/supervisor pick any
   // brand/flavor and edit its saved setup directly, without touching the
   // current run. Independent of dayState/currentRun.
@@ -11181,7 +11195,7 @@ export default function Home() {
                       <div>
                         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Allergen</label>
                         <div className="flex flex-wrap gap-1.5">
-                          {ALLERGENS.map(m => {
+                          {allergenOptions([...customAllergens, v.allergen]).map(m => {
                             const active = normalizeAllergen(v.allergen) === m.value;
                             return (
                               <button
@@ -14873,6 +14887,7 @@ export default function Home() {
           isSupervisor={isSupervisor}
           brands={brands}
           brandFlavors={brandFlavors}
+          allergenExtra={customAllergens}
           onAddBrand={addBrand}
           onRemoveBrand={removeBrand}
           onAddFlavor={addFlavor}

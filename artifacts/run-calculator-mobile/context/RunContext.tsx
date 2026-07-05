@@ -3607,6 +3607,11 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             prof.dieType = p.dieType;
             newDieTypes.push(p.dieType);
           }
+          // Allergen read from the spec sheet (egg/soy or any new allergen the
+          // sheet named); already a normalized lower-case token from the parser.
+          // Present only when the sheet designated one, so this never clobbers
+          // with "none".
+          if (p.allergen) prof.allergen = p.allergen;
           if (p.sauceOzPerPizza != null) prof.sauceOzPerPizza = p.sauceOzPerPizza;
           // Detect cheese applicator slots and re-type them to the literal
           // "cheese" (the run form's pick-only Cheese card gates on that exactly);

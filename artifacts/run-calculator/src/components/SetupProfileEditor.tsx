@@ -10,7 +10,7 @@ import {
 } from "../types";
 import { loadProfile, saveProfile } from "../storage";
 import {
-  ALLERGENS,
+  allergenOptions,
   normalizeAllergen,
 } from "@workspace/allergen";
 import {
@@ -50,6 +50,8 @@ export interface SetupProfileEditorProps {
   isSupervisor: boolean;
   brands: string[];
   brandFlavors: Record<string, string[]>;
+  /** Custom allergens (beyond egg/soy) already used by saved profiles, so they stay pickable. */
+  allergenExtra?: string[];
   onAddBrand: (name: string) => string;
   onRemoveBrand: (name: string) => void;
   onAddFlavor: (name: string, brand?: string) => string | undefined;
@@ -92,6 +94,7 @@ export default function SetupProfileEditor({
   isSupervisor,
   brands,
   brandFlavors,
+  allergenExtra,
   onAddBrand,
   onRemoveBrand,
   onAddFlavor,
@@ -455,7 +458,7 @@ export default function SetupProfileEditor({
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Allergen</label>
                       <div className="flex flex-wrap gap-1.5">
-                        {ALLERGENS.map(m => {
+                        {allergenOptions([...(allergenExtra ?? []), v.allergen]).map(m => {
                           const active = normalizeAllergen(v.allergen) === m.value;
                           return (
                             <button

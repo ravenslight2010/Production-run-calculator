@@ -297,7 +297,7 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
   lines.push(
     "Return ONLY JSON of the exact shape: " +
       '{"profiles":[{"brand":string,"flavor":string,"dieType":string,' +
-      '"sauceOzPerPizza":number,"sauceName":string,' +
+      '"sauceOzPerPizza":number,"sauceName":string,"allergen":string,' +
       '"applicators":[{"type":string,"ozPerPizza":number}],' +
       '"pepperonis":[{"type":string,"sticks":number,"ozPerPizza":number}]}],' +
       '"recipes":[{"kind":"dough"|"sauce"|"cheese","name":string,"brand":string,' +
@@ -307,7 +307,9 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
       "Omit any field or row you cannot determine. Prefer `targets` for a recipe that " +
       "serves multiple brand/flavor profiles (one recipe, many targets); use the singular " +
       "brand/flavor only when it ties to exactly one. For cheese recipes, set \"app\" to the " +
-      "applicator slot number (1-4) it belongs to when discernible. Use \"note\" only for a " +
+      "applicator slot number (1-4) it belongs to when discernible. Set \"allergen\" to the food " +
+      "allergen the sheet designates for a product (e.g. \"egg\", \"soy\", or another named " +
+      "allergen); use \"none\" or omit it when the sheet lists no allergen. Use \"note\" only for a " +
       "brief overall comment (e.g. what you could not parse).",
   );
 

@@ -5734,7 +5734,10 @@ components:
           type: string
         allergen:
           type: string
-          enum: [none, egg, soy]
+          description: >-
+            Food allergen for the run ("none" = no allergen). Free-form so
+            allergens named on imported spec sheets beyond egg/soy (e.g. "milk")
+            flow into allergen-sequence checks instead of being dropped to none.
         dieType:
           type: string
           description: Die/crust type; a change between adjacent runs is a changeover

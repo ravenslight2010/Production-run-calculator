@@ -1,6 +1,7 @@
 import type { FormValues, RunMeta } from "./types";
 import { buildOptimizeRun } from "./aiOptimize";
-import type { ScheduleRunInput, ScheduleAllergen } from "./inventoryShared";
+import type { ScheduleRunInput } from "./inventoryShared";
+import { normalizeAllergen } from "@workspace/allergen";
 
 // AI schedule-optimizer client builder. Maps the day's planned runs to the
 // compact schedule-run shape the /ai/schedule-optimize endpoint expects, reusing
@@ -9,11 +10,6 @@ import type { ScheduleRunInput, ScheduleAllergen } from "./inventoryShared";
 // allergen straight off the run's form values. Kept in lockstep with the mobile
 // context/aiSchedule.ts so both platforms send identically-shaped data
 // (replit.md parity rule).
-
-function normAllergen(v: unknown): ScheduleAllergen {
-  const s = String(v ?? "none").trim().toLowerCase();
-  return s === "egg" || s === "soy" ? s : "none";
-}
 
 // Build the schedule-optimize input from the day's runs (in their current
 // order). Every run with form values contributes; ordering is advisory only.
@@ -32,7 +28,7 @@ export function buildScheduleInput(args: {
       label: o.label,
       brand: o.brand,
       flavor: o.flavor,
-      allergen: normAllergen(vals.allergen),
+      allergen: normalizeAllergen(vals.allergen),
       dieType: o.dieType,
     });
   }

@@ -28,6 +28,13 @@ export type ParsedProfile = {
    * needs/consumption pull the sauce as-is by name instead of generic "Sauce".
    */
   sauceName?: string;
+  /**
+   * Food allergen the sheet designates for this product (e.g. "egg", "soy", or
+   * another named allergen). Lower-cased free-form token; omitted when the sheet
+   * lists no allergen. The apply step writes it onto the profile so the run
+   * inherits the allergen (and its food-safety sequencing warnings).
+   */
+  allergen?: string;
   applicators: ParsedApplicator[];
   pepperonis: ParsedPepperoni[];
 };
@@ -2256,6 +2263,11 @@ export function groundRecipeName(
   return { kind: "flagged", match: best.name };
 }
 
+// "No allergen" spellings the spec importer treats as absent (the profile keeps
+// its default no-allergen). Mirrors normalizeAllergen's none-aliases in
+// @workspace/allergen without taking a runtime dependency on it.
+const SPEC_NONE_ALLERGENS = new Set(["none", "no", "na", "n/a", "no allergen"]);
+
 /**
  * Coerce a loosely-typed (model-produced) object into a bounded, well-typed
  * ParsedSpecImport. Anything malformed is dropped, never throws. Used on the
@@ -2424,6 +2436,14 @@ export function sanitizeParsedSpecImport(
         }
       }
       profile.sauceName = grounded;
+    }
+    // Allergen the sheet names for this product. Free-form so a NEW allergen
+    // beyond egg/soy survives; "none"-style spellings and blanks are dropped
+    // (the profile keeps its default no-allergen). Lower-cased to match the
+    // app's normalizeAllergen token form.
+    const allergenRaw = clampName(o.allergen, lim.maxNameChars).toLowerCase();
+    if (allergenRaw && !SPEC_NONE_ALLERGENS.has(allergenRaw)) {
+      profile.allergen = allergenRaw;
     }
     profiles.push(profile);
   }

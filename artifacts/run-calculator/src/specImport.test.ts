@@ -323,6 +323,24 @@ describe("sanitizeParsedSpecImport", () => {
     expect(out.profiles[1].sauceName).toBeUndefined();
     expect(out.profiles[2].sauceName).toBeUndefined();
   });
+  it("reads an allergen from the sheet (built-in or new), lower-cased, dropping 'none' spellings", () => {
+    const out = sanitizeParsedSpecImport({
+      profiles: [
+        { brand: "A", flavor: "Egg Wash", allergen: "Egg" },
+        { brand: "A", flavor: "Milk Blend", allergen: "Milk" },
+        { brand: "A", flavor: "Plain", allergen: "None" },
+        { brand: "A", flavor: "Blank", allergen: "" },
+        { brand: "A", flavor: "NA", allergen: "N/A" },
+      ],
+      recipes: [],
+    });
+    expect(out.profiles).toHaveLength(5);
+    expect(out.profiles[0].allergen).toBe("egg");
+    expect(out.profiles[1].allergen).toBe("milk");
+    expect(out.profiles[2].allergen).toBeUndefined();
+    expect(out.profiles[3].allergen).toBeUndefined();
+    expect(out.profiles[4].allergen).toBeUndefined();
+  });
   it("treats recipe rows as OUNCES by default (converts to lbs), including when rowsUnit is oz or missing", () => {
     const out = sanitizeParsedSpecImport({
       profiles: [],

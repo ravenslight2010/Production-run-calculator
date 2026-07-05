@@ -1596,15 +1596,6 @@ export interface AnomalyResult {
   aiGenerated: boolean;
 }
 
-export type ScheduleOptimizeRunInputAllergen = typeof ScheduleOptimizeRunInputAllergen[keyof typeof ScheduleOptimizeRunInputAllergen];
-
-
-export const ScheduleOptimizeRunInputAllergen = {
-  none: 'none',
-  egg: 'egg',
-  soy: 'soy',
-} as const;
-
 /**
  * One run planned for the day, in the flat shape both apps produce.
  */
@@ -1614,7 +1605,8 @@ export interface ScheduleOptimizeRunInput {
   label: string;
   brand: string;
   flavor: string;
-  allergen: ScheduleOptimizeRunInputAllergen;
+  /** Food allergen for the run ("none" = no allergen). Free-form so allergens named on imported spec sheets beyond egg/soy (e.g. "milk") flow into allergen-sequence checks instead of being dropped to none. */
+  allergen: string;
   /** Die/crust type; a change between adjacent runs is a changeover */
   dieType?: string;
 }

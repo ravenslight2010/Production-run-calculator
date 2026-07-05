@@ -27,7 +27,7 @@ import { useMixes } from "@/hooks/useMixes";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useMe } from "@/hooks/useRole";
-import { ALLERGENS, normalizeAllergen } from "@workspace/allergen";
+import { allergenOptions, normalizeAllergen } from "@workspace/allergen";
 
 function toNum(s: string | undefined | null): number {
   if (s == null || s === "") return 0;
@@ -138,6 +138,7 @@ export default function SetupProfilesScreen() {
   const {
     brands,
     brandFlavors,
+    brandProfiles,
     addListItem,
     removeListItem,
     addFlavor,
@@ -235,6 +236,12 @@ export default function SetupProfilesScreen() {
       : null;
 
   const currentAllergen = normalizeAllergen(settings.allergen);
+  // Custom allergens (beyond egg/soy) already used by saved profiles, so an
+  // imported/new allergen stays selectable (and re-selectable) in the picker.
+  const allergenChoices = allergenOptions([
+    ...Object.values(brandProfiles).map((p) => p.allergen ?? "none"),
+    currentAllergen,
+  ]);
 
   const enabledCheeseRecipes = cheeseRecipesList.filter((r) => r.enabled !== false);
   const serverCheeseByName = new Map<string, CheeseRecipe>();
@@ -538,9 +545,9 @@ export default function SetupProfilesScreen() {
                   updateSettings({ allergen: normalizeAllergen(v) });
                   Haptics.selectionAsync();
                 }}
-                options={ALLERGENS.map((m) => m.value)}
-                optionLabel={(v) => ALLERGENS.find((m) => m.value === v)?.label ?? v}
-                optionColor={(v) => ALLERGENS.find((m) => m.value === v)?.color}
+                options={allergenChoices.map((m) => m.value)}
+                optionLabel={(v) => allergenChoices.find((m) => m.value === v)?.label ?? v}
+                optionColor={(v) => allergenChoices.find((m) => m.value === v)?.color}
                 allowAdd={false}
               />
             </CardSection>

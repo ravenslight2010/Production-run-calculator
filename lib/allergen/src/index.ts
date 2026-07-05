@@ -5,7 +5,13 @@
 // non-allergen ("none") product is run again. This module is pure so both apps
 // derive identical colors, labels, and food-safety warnings from it.
 
-export type Allergen = "none" | "egg" | "soy";
+// Allergen designations are free-form: `none` plus the built-ins egg/soy, plus
+// any additional allergen a spec sheet may name (e.g. "milk", "wheat"). Values
+// are lower-cased, whitespace-collapsed tokens; `none` means no allergen. Kept
+// as a plain string (not a closed union) so imported/custom allergens flow
+// through the app — persisted, synced, displayed, and sequence-checked — instead
+// of being silently discarded.
+export type Allergen = string;
 
 export const DEFAULT_ALLERGEN: Allergen = "none";
 
@@ -27,17 +33,64 @@ export const ALLERGENS: readonly AllergenMeta[] = [
   { value: "soy", label: "Soy", color: "#dc2626", textColor: "#ffffff", isAllergen: true },
 ];
 
-// Coerce any persisted/synced value (legacy state, remote payload, blank) onto
-// the small enum. Anything unrecognized fails safe to "none".
+// "No allergen" spellings that must collapse to the neutral `none`.
+const NONE_ALIASES = new Set(["", "none", "no", "na", "n/a", "no allergen"]);
+
+// Coerce any persisted/synced/parsed value onto a clean allergen token. Blank,
+// non-string, or an explicit "no allergen" spelling become `none`; anything
+// else is preserved (lower-cased, whitespace-collapsed) so a NEW allergen named
+// on a spec sheet (e.g. "milk") survives instead of being discarded.
 export function normalizeAllergen(v: unknown): Allergen {
-  const s = typeof v === "string" ? v.trim().toLowerCase() : "";
-  if (s === "egg") return "egg";
-  if (s === "soy") return "soy";
-  return "none";
+  const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, " ") : "";
+  if (NONE_ALIASES.has(s)) return "none";
+  return s;
+}
+
+// A small palette of distinct, dark swatch colors for custom allergens (beyond
+// the built-in egg/soy). Picked deterministically per value so the same allergen
+// always renders the same color across web + mobile.
+const CUSTOM_ALLERGEN_COLORS = [
+  "#7c3aed", "#0891b2", "#c026d3", "#ea580c",
+  "#16a34a", "#db2777", "#0d9488", "#4f46e5",
+];
+
+function hashAllergen(v: string): number {
+  let h = 0;
+  for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function customAllergenColor(v: string): string {
+  return CUSTOM_ALLERGEN_COLORS[hashAllergen(v) % CUSTOM_ALLERGEN_COLORS.length];
+}
+
+// Legible foreground (near-black or white) for text drawn on top of `hex`.
+function contrastText(hex: string): string {
+  const c = hex.replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? "#1c1917" : "#ffffff";
+}
+
+function titleCaseAllergen(v: string): string {
+  return v.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
 export function allergenMeta(a: Allergen): AllergenMeta {
-  return ALLERGENS.find((m) => m.value === normalizeAllergen(a)) ?? ALLERGENS[0];
+  const v = normalizeAllergen(a);
+  const builtin = ALLERGENS.find((m) => m.value === v);
+  if (builtin) return builtin;
+  // Custom (imported) allergen: derive stable, legible presentation metadata.
+  const color = customAllergenColor(v);
+  return {
+    value: v,
+    label: titleCaseAllergen(v),
+    color,
+    textColor: contrastText(color),
+    isAllergen: true,
+  };
 }
 
 export function allergenLabel(a: Allergen): string {
@@ -121,4 +174,23 @@ export function allergenSequenceWarnings(
     }
   }
   return out;
+}
+
+// Build the allergen picker option list: the built-in allergens (none, egg, soy)
+// followed by any additional custom allergens present in `extra` — e.g. values
+// imported from spec sheets or already assigned to other runs/profiles — de-
+// duplicated and sorted. Keeping custom values in the option list means an
+// imported allergen stays selectable (and re-selectable) instead of vanishing
+// once a run is switched away from it.
+export function allergenOptions(extra: Iterable<Allergen> = []): AllergenMeta[] {
+  const seen = new Set(ALLERGENS.map((m) => m.value));
+  const customs: string[] = [];
+  for (const e of extra) {
+    const v = normalizeAllergen(e);
+    if (v === "none" || seen.has(v)) continue;
+    seen.add(v);
+    customs.push(v);
+  }
+  customs.sort((a, b) => a.localeCompare(b));
+  return [...ALLERGENS, ...customs.map((v) => allergenMeta(v))];
 }

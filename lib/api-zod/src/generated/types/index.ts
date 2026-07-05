@@ -269,7 +269,6 @@ export * from './scheduleOptimizeRuleInput';
 export * from './scheduleOptimizeRuleInputEnforcement';
 export * from './scheduleOptimizeRuleInputType';
 export * from './scheduleOptimizeRunInput';
-export * from './scheduleOptimizeRunInputAllergen';
 export * from './signUpCredentials';
 export * from './specImportAlias';
 export * from './specImportAliasKind';

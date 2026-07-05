@@ -1,6 +1,7 @@
 import { buildOptimizeRun } from "./aiOptimize";
-import type { ScheduleRunInput, ScheduleAllergen } from "./inventoryShared";
+import type { ScheduleRunInput } from "./inventoryShared";
 import type { RunState } from "./RunContext";
+import { normalizeAllergen } from "@workspace/allergen";
 
 // AI schedule-optimizer client builder. EXACT mirror of the web src/aiSchedule.ts:
 // maps the day's planned runs to the compact schedule-run shape the
@@ -9,11 +10,6 @@ import type { RunState } from "./RunContext";
 // the optimize/summary features, and pulling the allergen straight off the run's
 // settings. Kept in lockstep with the web builder so both platforms send
 // identically-shaped data (replit.md parity rule).
-
-function normAllergen(v: unknown): ScheduleAllergen {
-  const s = String(v ?? "none").trim().toLowerCase();
-  return s === "egg" || s === "soy" ? s : "none";
-}
 
 // Build the schedule-optimize input from the day's runs (in their current
 // order). Every run contributes; ordering is advisory only.
@@ -28,7 +24,7 @@ export function buildScheduleInput(args: {
       label: o.label,
       brand: o.brand,
       flavor: o.flavor,
-      allergen: normAllergen(run.settings.allergen),
+      allergen: normalizeAllergen(run.settings.allergen),
       dieType: o.dieType,
     };
   });

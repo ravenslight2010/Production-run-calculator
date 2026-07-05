@@ -32,7 +32,7 @@ import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { useMe } from "@/hooks/useRole";
 import { findMixPresets } from "@/data/mixPresets";
 import {
-  ALLERGENS,
+  allergenOptions,
   allergenSequenceWarnings,
   normalizeAllergen,
   type AllergenSequenceItem,
@@ -161,6 +161,7 @@ export default function ConfigureScreen() {
     run,
     runIndex,
     allRuns,
+    brandProfiles,
     updateSettings,
     templates,
     saveTemplate,
@@ -218,6 +219,13 @@ export default function ConfigureScreen() {
       : null;
 
   const currentAllergen = normalizeAllergen(run.settings.allergen);
+  // Custom allergens (beyond egg/soy) used by saved profiles or other runs, so
+  // an imported/new allergen stays selectable (and re-selectable) in the picker.
+  const allergenChoices = allergenOptions([
+    ...Object.values(brandProfiles).map((p) => p.allergen ?? "none"),
+    ...allRuns.map((r) => r.settings.allergen),
+    currentAllergen,
+  ]);
 
   // Food-safety advisory: allergen transitions across the day's run sequence.
   const allergenWarnings = React.useMemo(() => {
@@ -781,9 +789,9 @@ export default function ConfigureScreen() {
               updateSettings({ allergen: normalizeAllergen(v) });
               Haptics.selectionAsync();
             }}
-            options={ALLERGENS.map((m) => m.value)}
-            optionLabel={(v) => ALLERGENS.find((m) => m.value === v)?.label ?? v}
-            optionColor={(v) => ALLERGENS.find((m) => m.value === v)?.color}
+            options={allergenChoices.map((m) => m.value)}
+            optionLabel={(v) => allergenChoices.find((m) => m.value === v)?.label ?? v}
+            optionColor={(v) => allergenChoices.find((m) => m.value === v)?.color}
             allowAdd={false}
           />
           {allergenWarnings.length > 0 && (

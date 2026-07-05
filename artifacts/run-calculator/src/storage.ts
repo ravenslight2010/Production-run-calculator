@@ -2157,6 +2157,10 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     markTouched(brand, flavor);
     const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };
     if (p.dieType) values.dieType = p.dieType;
+    // Allergen read from the spec sheet (egg/soy or any new allergen the sheet
+    // named); already a normalized lower-case token from the parser. Present
+    // only when the sheet designated one, so this never clobbers with "none".
+    if (p.allergen) values.allergen = p.allergen;
     if (p.sauceOzPerPizza != null) values.sauceOzPerPizza = p.sauceOzPerPizza;
     // Named bought/ready-made sauce (e.g. BBQ, Ranch): the sheet names the
     // sauce but there's no mixing recipe — record the name so needs/consumption

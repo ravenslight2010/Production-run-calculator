@@ -4,6 +4,7 @@ import {
   DEFAULT_ALLERGEN,
   allergenLabel,
   allergenMeta,
+  allergenOptions,
   allergenSequenceWarnings,
   allergenTransitionWarning,
   isAllergen,
@@ -21,15 +22,43 @@ describe("normalizeAllergen", () => {
     expect(normalizeAllergen(" Egg ")).toBe("egg");
     expect(normalizeAllergen("SOY")).toBe("soy");
   });
-  it("fails safe to none for junk/missing", () => {
+  it("fails safe to none for blank/missing/non-string or 'no allergen' spellings", () => {
     expect(normalizeAllergen(undefined)).toBe("none");
     expect(normalizeAllergen("")).toBe("none");
-    expect(normalizeAllergen("peanut")).toBe("none");
     expect(normalizeAllergen(42)).toBe("none");
     expect(normalizeAllergen(null)).toBe("none");
+    expect(normalizeAllergen("N/A")).toBe("none");
+    expect(normalizeAllergen(" No Allergen ")).toBe("none");
+  });
+  it("preserves a new/custom allergen named on a spec sheet", () => {
+    expect(normalizeAllergen("peanut")).toBe("peanut");
+    expect(normalizeAllergen(" Milk ")).toBe("milk");
+    expect(normalizeAllergen("Tree  Nuts")).toBe("tree nuts");
   });
   it("DEFAULT_ALLERGEN is none", () => {
     expect(DEFAULT_ALLERGEN).toBe("none");
+  });
+});
+
+describe("custom allergen metadata", () => {
+  it("marks a custom allergen as an allergen with a readable label", () => {
+    expect(isAllergen("milk")).toBe(true);
+    expect(allergenLabel("tree nuts")).toBe("Tree Nuts");
+  });
+  it("derives a stable, deterministic color per custom allergen", () => {
+    expect(allergenMeta("milk").color).toBe(allergenMeta("milk").color);
+    expect(allergenMeta("milk").color).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(allergenMeta("milk").textColor).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});
+
+describe("allergenOptions", () => {
+  it("returns the built-ins when no extras are given", () => {
+    expect(allergenOptions().map((m) => m.value)).toEqual(["none", "egg", "soy"]);
+  });
+  it("appends de-duplicated, sorted custom allergens after the built-ins", () => {
+    const out = allergenOptions(["Milk", "peanut", "milk", "egg", "none", ""]);
+    expect(out.map((m) => m.value)).toEqual(["none", "egg", "soy", "milk", "peanut"]);
   });
 });
 
