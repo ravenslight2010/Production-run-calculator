@@ -816,6 +816,73 @@ export function mirrorSingleCheeseAcrossApplicators(
   return changed ? out : slots;
 }
 
+/** One applicator slot the resolver matched to a cheese blend. `slot` is 1-based. */
+export type CheeseSlotLink = { slot: number; recipeName: string };
+
+/** Result of {@link resolveCheeseApplicatorSlots}. */
+export type ResolvedCheeseApplicators = {
+  /** Applicators with matched slots' `type` normalized to the literal "cheese". */
+  applicators: ParsedApplicator[];
+  /** Which slots matched a cheese blend, with the canonical (cleaned) blend name. */
+  links: CheeseSlotLink[];
+};
+
+/**
+ * Decide which of a profile's applicator slots are CHEESE and normalize them to
+ * the literal type "cheese" so the run form renders its pick-only Cheese card
+ * (the card gates on `type === "cheese"` exactly; a blend name like "Aldo's
+ * Cheese Mix" never opens it).
+ *
+ * A spec grid names a cheese applicator by its BLEND (e.g. "Aldo's Cheese Mix",
+ * sometimes with a per-pizza weight or flavor suffix baked in). We match each
+ * applicator's type against the parse's cheese-blend names by the SAME loose key
+ * used everywhere else (`specImportNameMatchKey` over `cleanSpecCheeseRecipeName`,
+ * which strips a trailing weight token / embedded composition), so
+ * "Aldo's Cheese Mix 1.75" still matches the recipe "Aldo's Cheese Mix". Matched
+ * slots keep their oz (weight lives on the applicator) and are re-typed "cheese";
+ * the returned `links` tell the caller which pool recipe each slot should name so
+ * a product with TWO cheese applicators (e.g. Meat Lover) fills BOTH correct
+ * slots instead of collapsing onto slot 1.
+ *
+ * Only slots whose type loose-matches a candidate blend are touched; slots
+ * already typed "cheese" and any slot that matches nothing are left untouched.
+ * Real Mixes are excluded because the caller keeps them out of
+ * `candidateCheeseNames` (a cheese blend legitimately named "…Mix" like "Aldo's
+ * Cheese Mix" must still match, so no name-substring guard is used here). Pure —
+ * never mutates the input; returns a fresh
+ * applicators array. `candidateCheeseNames` should be the
+ * NON-mix cheese recipe (and/or pool) names available for the run; callers filter
+ * mixes out (via `specImportRecipeIsMix`) before passing them in.
+ */
+export function resolveCheeseApplicatorSlots(
+  applicators: ReadonlyArray<ParsedApplicator>,
+  candidateCheeseNames: ReadonlyArray<string>,
+): ResolvedCheeseApplicators {
+  const byKey = new Map<string, string>();
+  for (const name of candidateCheeseNames) {
+    const clean = cleanSpecCheeseRecipeName(name ?? "");
+    const key = specImportNameMatchKey(clean);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, clean);
+  }
+  if (byKey.size === 0) return { applicators: [...applicators], links: [] };
+  const links: CheeseSlotLink[] = [];
+  let changed = false;
+  const out = applicators.map((a, i) => {
+    const type = (a.type ?? "").trim();
+    if (!type) return a;
+    // Already a cheese applicator — leave it (its name is resolved elsewhere).
+    if (isCheeseApplicatorType(type)) return a;
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
+    const recipeName = key ? byKey.get(key) : undefined;
+    if (!recipeName) return a;
+    links.push({ slot: i + 1, recipeName });
+    changed = true;
+    return { ...a, type: "cheese" };
+  });
+  return { applicators: changed ? out : [...applicators], links };
+}
+
 /**
  * Every brand+flavor profile a recipe should tie to: the union of its singular
  * brand/flavor and its `targets` list, trimmed and de-duplicated

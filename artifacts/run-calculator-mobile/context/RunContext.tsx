@@ -5,7 +5,7 @@ import {
 } from "react-native";
 import { showNote } from "@/utils/notify";
 import { MIX_SEED } from "@/data/mixSeed";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, resolveCheeseApplicatorSlots, specImportRecipeIsMix, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 import { normalizeAllergen, type Allergen } from "@workspace/allergen";
 import React, {
@@ -3421,6 +3421,12 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         }
 
         // ── Profiles (overwrite spec fields, preserve unrelated fields) ──
+        // Every non-mix cheese-blend name the parse carries — used to detect which
+        // of a profile's applicator slots are CHEESE (matched by loose key) so they
+        // render the pick-only Cheese card instead of a raw blend name.
+        const cheeseCandidateNames = parsed.recipes
+          .filter((r) => r.kind === "cheese" && !specImportRecipeIsMix(r, new Set<string>()))
+          .map((r) => r.name);
         for (const p of parsed.profiles) {
           const brand = p.brand.trim();
           const flavor = p.flavor.trim();
@@ -3434,13 +3440,24 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
             newDieTypes.push(p.dieType);
           }
           if (p.sauceOzPerPizza != null) prof.sauceOzPerPizza = p.sauceOzPerPizza;
-          p.applicators.slice(0, 4).forEach((a, i) => {
+          // Detect cheese applicator slots and re-type them to the literal
+          // "cheese" (the run form's pick-only Cheese card gates on that exactly);
+          // record the blend name so it hydrates from the server pool, and the
+          // recipe-tie loop below writes its rows.
+          const { applicators: resolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
+            p.applicators.slice(0, 4),
+            cheeseCandidateNames,
+          );
+          resolvedApps.forEach((a, i) => {
             const slot = i + 1;
             const type = a.type.trim();
             if (!type) return;
             (prof as Record<string, unknown>)[`app${slot}Type`] = type;
             (prof as Record<string, unknown>)[`app${slot}OzPerPizza`] = a.ozPerPizza;
           });
+          for (const link of cheeseLinks) {
+            (prof as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
+          }
           p.pepperonis.slice(0, 2).forEach((pp, i) => {
             const slot = i + 1;
             const type = pp.type.trim();
@@ -3473,9 +3490,31 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
               prof.frontlineRecipeName = r.name;
               prof.frontlineRecipe = rows;
             } else {
-              const slot = r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1;
-              (prof as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
-              (prof as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+              // Place the cheese blend on the applicator slot(s) it actually
+              // belongs to. The profile loop already re-typed real cheese
+              // applicators to "cheese" (slots 2 & 4 for a two-cheese product);
+              // write this blend's rows to every cheese slot whose name matches
+              // (or is still blank). Only fall back to the legacy r.app/slot-1
+              // guess when the profile has NO cheese applicator at all.
+              const rec = prof as Record<string, unknown>;
+              const rKey = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.name));
+              const cheeseSlots = [1, 2, 3, 4].filter(
+                (n) => String(rec[`app${n}Type`] ?? "").trim().toLowerCase() === "cheese",
+              );
+              const matched = cheeseSlots.filter((n) => {
+                const nm = String(rec[`app${n}CheeseRecipeName`] ?? "").trim();
+                return !nm || specImportNameMatchKey(cleanSpecCheeseRecipeName(nm)) === rKey;
+              });
+              const targetSlots = matched.length
+                ? matched
+                : cheeseSlots.length
+                  ? []
+                  : [r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1];
+              const cleanName = cleanSpecCheeseRecipeName(r.name) || r.name;
+              for (const slot of targetSlots) {
+                rec[`app${slot}CheeseRecipeName`] = cleanName;
+                rec[`app${slot}CheeseRecipe`] = rows;
+              }
             }
             brandProfiles[key] = prof;
           }

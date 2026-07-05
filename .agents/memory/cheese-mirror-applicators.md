@@ -1,35 +1,43 @@
 ---
-name: Cheese blend mirrored across applicators
-description: Why a single cheese blend must fill every cheese applicator slot on spec import, and the shared helper that does it.
+name: Cheese blend across applicators on spec import
+description: Durable gotchas for getting a spec-imported cheese blend onto the right applicator slot(s), incl. TWO-cheese products (Meat Lover).
 ---
 
-# Single cheese blend → multiple cheese applicators
+# Spec-imported cheese blends → correct applicator slot(s)
 
-A product can run TWO (or more) "Cheese" applicators on the SAME blend at
-different per-pizza weights (the weight lives on the applicator, not the recipe).
-On spec import this used to leave the second cheese applicator BLANK.
+The run form renders its pick-only **Cheese card** ONLY when an applicator's
+`app{n}Type` is the literal string `"cheese"` (exact match — see the CheesePickCard
+gate in web `home.tsx`). A blend NAME in the type ("Aldo's Cheese Mix") never opens
+the card. A product can run TWO+ cheese applicators (same or different blend) at
+different per-pizza weights — weight lives on the applicator, not the recipe.
 
-**Why:** In `applySpecImport` (web `storage.ts`, mobile `RunContext.tsx`),
-applicator TYPES are assigned by array position (`app${i+1}Type`, so both slots
-correctly become `"cheese"`), but the cheese recipe NAME/rows are tied by the
-parsed recipe's `r.app` field, which defaults to slot 1. `dedupeSpecImportCheeseRecipes`
-also collapses same-name blends. So one distinct blend only ever writes slot 1 →
-slot 2 stays blank.
+## The trap that bit twice
 
-**Fix:** shared pure helper `mirrorSingleCheeseAcrossApplicators(slots)` +
-`CheeseApplicatorSlot` type in `lib/spec-import/src/index.ts`. Both apps call it
-as a POST-LOOP pass over each touched profile (build 4 slots → mirror → save only
-if changed). It fills blank cheese-type slots from the lone distinct blend.
+The AI parse names a cheese applicator by its BLEND, not `"cheese"`, and the parsed
+recipe's `app` field is `undefined`. Symptoms: App 2 stays blank (card never
+renders) and the recipe-tie fallback `slot = r.app ?? 1` dumps every blend onto
+slot 1 (wrong weight on App 1, nothing on App 4).
 
-**How to apply / invariants (keep web+mobile identical):**
-- Fires only when EXACTLY ONE distinct cheese blend is present across cheese
-  slots (case-insensitive by name). 0 or 2+ distinct blends → no-op (user
-  resolves multi-blend ambiguity).
-- A valid mirror source must have real component rows (at least one row with a
-  non-blank ingredient). Never propagate a named-but-empty recipe — that would
-  amplify malformed imports instead of containing them to one slot.
-- Never touches non-cheese slots or already-filled cheese slots; copies rows
-  (fresh arrays, not shared refs); returns the SAME array ref on no-op so callers
-  can `if (mirrored === slots) continue;`.
-- Both apps track a `touchedKeys`/`touchedProfiles` set across the profile loop
-  AND the recipe-tie loop, then run the mirror pass only over touched profiles.
+**A `mirrorSingleCheeseAcrossApplicators` fix was DEAD CODE for this** — it only
+fills slots already typed `"cheese"`, which the import never produced. You must
+first RE-TYPE the matched slots to `"cheese"` before any mirroring can help.
+
+## Durable invariants (keep web+mobile identical)
+
+- Slot re-typing is done by `resolveCheeseApplicatorSlots(applicators,
+  candidateCheeseNames)` in `lib/spec-import`, matching applicator type → candidate
+  blend via the shared loose key (`specImportNameMatchKey(cleanSpecCheeseRecipeName)`).
+  It returns `links[{slot, recipeName}]` so a two-cheese product fills BOTH slots.
+- **Never guard the resolver with a `type.includes("mix")` substring** — a cheese
+  blend is legitimately named "…Cheese **Mix**". Mix exclusion is the CALLER's job:
+  build candidates from `kind==="cheese" && !specImportRecipeIsMix(...)`. That
+  classifier treats a name containing BOTH "mix" and "cheese" as cheese, so real
+  cheese blends survive the filter and true topping-mixes (e.g. "White Fajita Mix")
+  are kept out.
+- The recipe-tie loop must place a blend's rows on EVERY cheese slot whose name
+  matches (or is blank), falling back to `r.app`/slot-1 only when the profile has NO
+  cheese applicator at all.
+- **AI blend naming is nondeterministic** ("… 1.75", "… (S & P)"). The prompt's
+  EMBEDDED BLENDS rule now states: blend name = BASE only (no weight/number/flavor
+  suffix), and one blend = one recipe even at different oz. `cleanSpecCheeseRecipeName`
+  strips any leaked suffix so matching still works if the model drifts.

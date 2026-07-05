@@ -214,11 +214,13 @@ export function buildParseSpecSheetPrompt(input: ParseSpecSheetInput): {
     "named that clean mix name whose rows are the number+ingredient pairs (each " +
     "number is that ingredient's `lbs`). Many profiles often share the same " +
     "embedded blend — emit the recipe ONCE and reuse the clean name in each " +
-    "profile's applicator `type`. If the SAME mix name appears with DIFFERENT " +
-    "numbers on different rows, they are different recipes: keep each and make " +
-    "the names distinct with a short suffix from their composition. NEVER leave " +
-    "the raw composition text inside an applicator `type` — the type must be a " +
-    "short reusable name. " +
+    "profile's applicator `type`. The SAME mix name is ONE recipe even when it " +
+    "appears at different per-pizza amounts or on different flavors: the per-pizza " +
+    "weight belongs on the applicator (`ozPerPizza`), NOT in the recipe name, so " +
+    "give the recipe the BASE blend name only — never append a weight, a number, a " +
+    "flavor, or any other suffix to distinguish copies, and never emit two recipes " +
+    "for one blend. NEVER leave the raw composition text inside an applicator " +
+    "`type` — the type must be that same short reusable base name. " +
     "READ NUMBERS EXACTLY as written — copy the digits verbatim (e.g. 3.5 stays " +
     "3.5, 12 stays 12); never round, rescale, or guess a number. Keep each number " +
     "in its correct field and NEVER swap fields: `ozPerPizza`/`sauceOzPerPizza` are " +
