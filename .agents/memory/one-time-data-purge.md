@@ -32,6 +32,18 @@ default 0, `resetAt`) is the single source of truth.
   the freshly-cleared row in the window before it processes the reset. A missing
   `epoch` param is treated as not-stale (older clients / scheduled PUTs bypass).
 
+**Ops fallback when you can't call the manager-only endpoint** (no manager
+session token handy): do what `POST /sync/reset` does, via SQL — in one tx
+`upsert data_reset(scope) set epoch = epoch + 1` and `DELETE FROM daily_sync`
+(scope 'live'), keeping `users`/`roles`/`user_roles`. Then have each open client
+reload once: on boot it `GET`s `reset-epoch`, sees the higher epoch, wipes, and
+re-pulls the now-empty row. The SQL path skips the SSE broadcast, so already-open
+tabs won't wipe until they reload — but the PUT epoch guard means their stale
+pushes are rejected in the meantime, so they cannot re-seed the cleared row.
+Verify by watching `daily_sync` stay empty for ~20s before asking for the reload
+(if it repopulates, an *old-code* tab with no `?epoch=` param is bypassing the
+guard — get it reloaded onto current code first).
+
 **Why an epoch (not a marker constant):** the marker was a client-side constant
 that had to be hand-bumped and shipped for every purge, and it raced the sync
 loop (a tab that wiped while the server row was still populated re-adopted the
