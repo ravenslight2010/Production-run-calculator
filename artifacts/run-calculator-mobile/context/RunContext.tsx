@@ -2082,9 +2082,14 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
         runs: [{ ...makeNewRun(), seeded: true }],
       };
       // Clear the sync gates so the wiped state doesn't echo the pre-reset sig.
+      // Don't clear runValuesUpdatedAtRef here: the change-watcher funnel owns
+      // per-run stamps and re-stamps off the setAppState(fresh) commit below.
+      // The fresh run has a brand-new id, so pre-reset stamps can't attach to it,
+      // and mapping.ts drops any stray stamp so it never pairs with a live value
+      // server-side. Assigning the ref directly would bypass that stamp funnel
+      // (see .agents/memory/run-meta-lww.md).
       lastRemoteRawRef.current = null;
       lastSyncSigRef.current = "";
-      runValuesUpdatedAtRef.current = {};
       setAppState(fresh);
       persistNow(fresh);
     };
