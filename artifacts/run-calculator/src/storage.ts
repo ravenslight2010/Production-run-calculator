@@ -1570,6 +1570,34 @@ export function deleteProfilesForBrand(brand: string): void {
 }
 
 /**
+ * Rewrite the saved `dieType` value on every profile (dough + crust) from
+ * `oldName` to `newName`. Called on a die-type rename: without it,
+ * healDieTypesFromProfiles re-adds the old name from a stale profile and
+ * recreates the very duplicate the rename was meant to remove. Mirrors mobile,
+ * which rewrites `dieType` on each brandProfiles entry.
+ */
+export function rewriteDieTypeInProfiles(oldName: string, newName: string): void {
+  if (typeof localStorage === "undefined") return;
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from || !to || from === to) return;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || (!k.startsWith("run-calc-profile-") && !k.startsWith("run-calc-crust-profile-")))
+      continue;
+    try {
+      const obj = JSON.parse(localStorage.getItem(k) ?? "null") as Record<string, unknown> | null;
+      if (obj && typeof obj.dieType === "string" && obj.dieType.trim() === from) {
+        obj.dieType = to;
+        localStorage.setItem(k, JSON.stringify(obj));
+      }
+    } catch {
+      // Skip an unreadable profile — never let one bad row block the rewrite.
+    }
+  }
+}
+
+/**
  * Delete the saved profile (dough + crust) for a single brand+flavor. Called on
  * flavor deletion for the same reason as deleteProfilesForBrand: without it the
  * profile entry orphans and can resurrect stale data on a later re-import.

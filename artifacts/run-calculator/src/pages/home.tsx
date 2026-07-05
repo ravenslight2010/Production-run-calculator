@@ -141,6 +141,7 @@ import {
   hydrateRecipeRowsWithCatalog,
   existingRecipeNamesForImport,
   healDieTypesFromProfiles,
+  rewriteDieTypeInProfiles,
   type SpecImportDisplayKind,
 } from "../storage";
 import { findMixPresets, type MixPreset } from "../mixPresets";
@@ -5762,10 +5763,20 @@ export default function Home() {
   function renameDieType(oldName: string, newName: string) {
     if (DEFAULT_DIE_TYPES.includes(oldName)) return;
     const trimmed = newName.trim();
-    if (!trimmed || trimmed === oldName || dieTypes.includes(trimmed)) return;
-    const updated = dieTypes.map(n => n === oldName ? trimmed : n).sort((a, b) => a.localeCompare(b));
+    if (!trimmed || trimmed === oldName) return;
+    // Allow the target name to already exist so renaming a duplicate onto its
+    // canonical spelling MERGES the two — this is how the user consolidates the
+    // stray duplicates an old rename left behind.
+    const updated = Array.from(
+      new Set(dieTypes.map(n => (n === oldName ? trimmed : n))),
+    ).sort((a, b) => a.localeCompare(b));
     setDieTypes(updated);
     saveList(DIE_TYPES_KEY, updated);
+    // The renamed-away name must never be resurrected — by the profile heal or by
+    // a stale peer's sync union — so tombstone it, and clear any tombstone on the
+    // new name in case it was previously deleted.
+    tombstoneDeleted("dieTypes", oldName);
+    clearDeleted("dieTypes", trimmed);
     const ds = dayStateRef.current;
     const now = Date.now();
     for (const run of ds.runs) {
@@ -5778,6 +5789,9 @@ export default function Home() {
         if (run.id === currentRunId) form.setValue("dieType", trimmed);
       }
     }
+    // Rewrite saved profiles too, else healDieTypesFromProfiles re-adds the old
+    // name from a stale profile and recreates the duplicate.
+    rewriteDieTypeInProfiles(oldName, trimmed);
     lastLocalEditRef.current = now;
     schedulePush(ds);
   }

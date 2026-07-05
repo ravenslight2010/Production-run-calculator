@@ -3740,6 +3740,39 @@ export function RunContextProvider({ children }: { children: React.ReactNode }) 
       const n = newName.trim();
       setAppState((prev) => {
         if (!n || n === oldName) return prev;
+        if (list === "dieTypes") {
+          if (!prev.dieTypes.includes(oldName)) return prev;
+          // Consolidate onto the new name (which may already exist, so the user
+          // can merge a duplicate onto its canonical spelling), and rewrite every
+          // place a die value is stored — master list, saved profiles, and live
+          // runs — plus tombstone the old name so the profile heal / sync union
+          // can't resurrect it as a duplicate. Mirrors web renameDieType.
+          const dieTypes = Array.from(
+            new Set(prev.dieTypes.map((x) => (x === oldName ? n : x))),
+          ).sort((a, b) => a.localeCompare(b));
+          const brandProfiles = { ...prev.brandProfiles };
+          for (const key of Object.keys(brandProfiles)) {
+            const prof = brandProfiles[key];
+            if (prof && prof.dieType === oldName) {
+              brandProfiles[key] = { ...prof, dieType: n };
+            }
+          }
+          const runs = prev.runs.map((r) =>
+            r.settings.dieType === oldName
+              ? { ...r, settings: { ...r.settings, dieType: n } }
+              : r,
+          );
+          let deletedItems = tombstoneDeletedItem(prev.deletedItems, "dieTypes", oldName);
+          deletedItems = clearDeletedItem(deletedItems, "dieTypes", n);
+          const next = withChangeRecord(
+            prev,
+            { ...prev, dieTypes, brandProfiles, runs, deletedItems },
+            "rename",
+            `Renamed "${oldName}" to "${n}" in ${LIST_LABELS[list]}`,
+          );
+          persist(next);
+          return next;
+        }
         const arr = prev[list];
         if (!arr.includes(oldName) || arr.includes(n)) return prev;
         const next = withChangeRecord(

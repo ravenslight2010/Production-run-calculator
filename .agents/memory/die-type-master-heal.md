@@ -41,6 +41,17 @@ master list must add/heal the value into that list; to consolidate variant spell
 of an unmergeable list, add a rename map and apply it on every load + sync path,
 honoring deletion tombstones.
 
+**Renaming a die type must rewrite profiles AND tombstone the old name.** The Die
+Type picker's rename used to change only the master list + live run values, leaving
+the old name in the saved profiles — so the profile heal (and a stale peer's sync
+union) re-added it, giving "2 of each". A correct die rename must: fold the master
+list (dedupe), rewrite the `dieType` value on every saved profile (web:
+`run-calc-profile-*` + crust keys; mobile: `brandProfiles` entries) and live run,
+tombstone the old name in `deletedItems["dieTypes"]`, and clear any tombstone on the
+new name. Renaming onto an existing name is allowed (it MERGES) so the user can
+consolidate leftover duplicates. Same principle for any master list whose value is
+also cached in profiles/runs.
+
 **Known remaining mobile gap (deferred):** the ingredient-merge *apply* path in
 mobile `RunContext` still rewrites `dieTypes` via the merge map; web excludes die
 types from that rewrite. Unrelated to variant consolidation (that uses the rename

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { healDieTypesFromProfiles, saveList, tombstoneDeleted } from "./storage";
+import { healDieTypesFromProfiles, saveList, tombstoneDeleted, rewriteDieTypeInProfiles } from "./storage";
 import { PROFILE_KEY, CRUST_PROFILE_KEY, DIE_TYPES_KEY } from "./types";
 
 describe("healDieTypesFromProfiles", () => {
@@ -53,6 +53,21 @@ describe("healDieTypesFromProfiles", () => {
   it("collapses stale variant names already saved in the master list", () => {
     saveList(DIE_TYPES_KEY, ["11", '11"', '11" dies']);
     expect(healDieTypesFromProfiles()).toEqual(['11"']);
+  });
+
+  it("does not resurrect a renamed-away die once its profiles are rewritten + it is tombstoned", () => {
+    // Simulate what renameDieType does: profile held the old name, the rename
+    // rewrites the profile to the new name and tombstones the old one.
+    localStorage.setItem(PROFILE_KEY("Craft", "Supreme"), JSON.stringify({ dieType: "Argus" }));
+    saveList(DIE_TYPES_KEY, ["Argus"]);
+
+    rewriteDieTypeInProfiles("Argus", "Argus Die");
+    tombstoneDeleted("dieTypes", "Argus");
+    saveList(DIE_TYPES_KEY, ["Argus Die"]);
+
+    // The old spelling must not come back as a duplicate.
+    expect(healDieTypesFromProfiles()).toEqual(["Argus Die"]);
+    expect(JSON.parse(localStorage.getItem(PROFILE_KEY("Craft", "Supreme")) ?? "{}").dieType).toBe("Argus Die");
   });
 
   it("folds in extra (live-run) die types passed by the caller", () => {
