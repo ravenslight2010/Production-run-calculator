@@ -59,9 +59,14 @@ const authRateLimit = rateLimit({
 // operator hasn't configured one, sign-up is closed entirely rather than
 // silently left open.
 function timingSafeCodeMatches(supplied: string, expected: string | undefined): boolean {
-  if (!expected) return false;
-  const a = Buffer.from(supplied);
-  const b = Buffer.from(expected);
+  // Trim surrounding whitespace on both sides before comparing. Access codes
+  // never carry meaningful leading/trailing spaces, and secret managers (and
+  // users pasting into a form) commonly append a stray space or trailing
+  // newline — an exact byte compare would then reject the *correct* code.
+  const expectedTrimmed = expected?.trim();
+  if (!expectedTrimmed) return false;
+  const a = Buffer.from(supplied.trim());
+  const b = Buffer.from(expectedTrimmed);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
 }
