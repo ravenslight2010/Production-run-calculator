@@ -185,6 +185,41 @@ export function computeSummaryStats(
   };
 }
 
+// ── Cheese blend "pull for this run" ─────────────────────────────────────────
+// A cheese blend recipe stores each component's PER-BATCH pounds (the "LBS"
+// column on the Cheese Mix Recipe Specs sheet). The run card already shows how
+// many BATCHES of the blend to make (SummaryStats.appNBatches, derived from the
+// spec's oz/pizza). This scales every component up to the pounds the floor must
+// actually weigh out and mix for the run, plus the blend total — connecting the
+// per-pizza spec to the blend recipe so the floor sees pounds of each cheese.
+//
+// Both apps call this so the per-cheese numbers can never drift from the run
+// card's batch/total-lbs figures. At least one batch is assumed
+// (Math.max(1, batches)) so a small run still shows a full batch's worth, which
+// matches the run card's existing "Total Lbs" column exactly. Rows are returned
+// index-aligned with the input recipe (blank rows kept) so callers can render
+// them alongside the per-batch recipe table.
+export interface CheesePullRow {
+  ingredient: string;
+  lbs: number;
+}
+export interface CheesePull {
+  rows: CheesePullRow[];
+  totalLbs: number;
+}
+export function computeCheesePull(
+  recipe: readonly RecipeRow[] | undefined,
+  batches: number,
+): CheesePull {
+  const mult = Math.max(1, Number.isFinite(batches) ? batches : 0);
+  const rows: CheesePullRow[] = (recipe ?? []).map((r) => ({
+    ingredient: (r.ingredient ?? "").toString(),
+    lbs: Number(r.lbs ?? 0) * mult,
+  }));
+  const totalLbs = rows.reduce((s, r) => s + r.lbs, 0);
+  return { rows, totalLbs };
+}
+
 // ── Per-run consumption mapping ──────────────────────────────────────────────
 // Mirrors the warehouse roll-up (aggregateNeedRows + aggregatePackagingNeeds in
 // the web home screen) so inventory item keys line up exactly with production

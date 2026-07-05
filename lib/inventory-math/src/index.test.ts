@@ -5,6 +5,7 @@ import {
   substitutionsForIngredient,
   computeRunConsumptionLines,
   computeSummaryStats,
+  computeCheesePull,
   aggregateRunDemand,
   computeTransferNeeds,
   computeReorderList,
@@ -605,5 +606,68 @@ describe("computeUseFirstList", () => {
     });
     expect(list).toHaveLength(2);
     expect(list.map((e) => e.qtyRemaining)).toEqual([2, 3]);
+  });
+});
+
+describe("computeCheesePull", () => {
+  it("returns no rows and zero total for an empty/undefined recipe", () => {
+    expect(computeCheesePull(undefined, 5)).toEqual({ rows: [], totalLbs: 0 });
+    expect(computeCheesePull([], 5)).toEqual({ rows: [], totalLbs: 0 });
+  });
+
+  it("scales each component by the batch count and sums the total", () => {
+    const pull = computeCheesePull(
+      [
+        { ingredient: "Mozzarella", lbs: 30 },
+        { ingredient: "Provolone", lbs: 10 },
+      ],
+      3,
+    );
+    expect(pull.rows).toEqual([
+      { ingredient: "Mozzarella", lbs: 90 },
+      { ingredient: "Provolone", lbs: 30 },
+    ]);
+    expect(pull.totalLbs).toBe(120);
+  });
+
+  it("assumes at least one batch when batches is 0 or negative", () => {
+    const base = [{ ingredient: "Mozzarella", lbs: 25 }];
+    expect(computeCheesePull(base, 0)).toEqual({
+      rows: [{ ingredient: "Mozzarella", lbs: 25 }],
+      totalLbs: 25,
+    });
+    expect(computeCheesePull(base, -4)).toEqual({
+      rows: [{ ingredient: "Mozzarella", lbs: 25 }],
+      totalLbs: 25,
+    });
+  });
+
+  it("assumes at least one batch when batches is NaN/Infinity", () => {
+    const base = [{ ingredient: "Mozzarella", lbs: 12 }];
+    expect(computeCheesePull(base, NaN).totalLbs).toBe(12);
+    expect(computeCheesePull(base, Infinity).totalLbs).toBe(12);
+  });
+
+  it("supports fractional batch counts", () => {
+    const pull = computeCheesePull([{ ingredient: "Mozzarella", lbs: 40 }], 2.5);
+    expect(pull.rows[0].lbs).toBe(100);
+    expect(pull.totalLbs).toBe(100);
+  });
+
+  it("keeps blank rows index-aligned and coerces missing lbs to 0", () => {
+    const pull = computeCheesePull(
+      [
+        { ingredient: "Mozzarella", lbs: 20 },
+        { ingredient: "", lbs: 0 },
+        { ingredient: "Cheddar" } as unknown as { ingredient: string; lbs: number },
+      ],
+      2,
+    );
+    expect(pull.rows).toEqual([
+      { ingredient: "Mozzarella", lbs: 40 },
+      { ingredient: "", lbs: 0 },
+      { ingredient: "Cheddar", lbs: 0 },
+    ]);
+    expect(pull.totalLbs).toBe(40);
   });
 });

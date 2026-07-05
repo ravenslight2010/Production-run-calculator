@@ -59,6 +59,7 @@ import {
   fmtComma,
   fmtClock,
   computeSummaryStats,
+  computeCheesePull,
   sauceBarrelBreakdown,
   genId,
   todayStr,
@@ -896,6 +897,10 @@ export function CheesePickCard({
   embedded?: boolean;
 }) {
   const totalLbsPerBatch = recipe.reduce((s, r) => s + Number(r.lbs ?? 0), 0);
+  // Scale each component up to the pounds to pull/mix for this run, using the
+  // run's existing batch count so these numbers can never drift from the batch
+  // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
+  const pull = computeCheesePull(recipe, batches);
   // Always include the currently-picked name so a recipe assigned to another
   // brand/flavor (or since disabled) still shows instead of silently clearing.
   const options =
@@ -941,7 +946,7 @@ export function CheesePickCard({
           <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mb-1 px-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Total Lbs</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Pull<span className="hidden sm:inline"> / Run</span></span>
           </div>
           <div className="space-y-1.5">
             {recipe.map((row, idx) => {
@@ -950,7 +955,7 @@ export function CheesePickCard({
                 <div key={idx} className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 items-center">
                   <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">{row.ingredient || "—"}</div>
                   <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs, 1)}</div>
-                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs * Math.max(1, batches), 1)}</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(pull.rows[idx].lbs, 1)}</div>
                 </div>
               );
             })}
@@ -958,7 +963,7 @@ export function CheesePickCard({
           <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
             <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(totalLbsPerBatch * Math.max(1, batches), 1)} lbs</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(pull.totalLbs, 1)} lbs</span>
           </div>
         </div>
       )}

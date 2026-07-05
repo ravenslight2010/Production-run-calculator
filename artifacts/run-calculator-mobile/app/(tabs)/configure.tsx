@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,11 +16,13 @@ import {
 import FillMissingPanel from "@/components/FillMissingPanel";
 import {
   useRun,
+  computeCalc,
   runLabel,
   PACKAGING_FIELDS,
   type RecipeRow,
   type RunSettings,
 } from "@/context/RunContext";
+import { computeCheesePull } from "@workspace/inventory-math";
 import { FONTS } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 import { useMixes } from "@/hooks/useMixes";
@@ -182,6 +184,18 @@ export default function ConfigureScreen() {
   // Managers (server role) bypass the device PIN; operators still need it.
   const { isManager } = useMe();
   const [form, setForm] = useState<FormState>(() => settingsToForm(run.settings));
+  // Clock-INDEPENDENT calc snapshot: recomputed only when `run` changes (not
+  // per-second), so the cheese "pull for this run" breakdown reuses the same
+  // applicator batch counts the run screen shows without subscribing to the
+  // render clock (see render-clock-split). Batches depend on settings/progress,
+  // not the wall clock, so a snapshot is exact for this purpose.
+  const calc = useMemo(() => computeCalc(run, Date.now()), [run]);
+  const appBatchesByN = [
+    calc.app1Batches,
+    calc.app2Batches,
+    calc.app3Batches,
+    calc.app4Batches,
+  ];
   const [tplName, setTplName] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [pinEntry, setPinEntry] = useState("");
@@ -1166,6 +1180,56 @@ export default function ConfigureScreen() {
                           : "Pick a cheese recipe above to load its ingredients."
                       }
                     />
+                    {(() => {
+                      // Pounds of each cheese to pull/mix for this run: the blend
+                      // recipe's per-batch pounds scaled by this applicator's batch
+                      // count. Shared pure helper so numbers match the web card and
+                      // never drift from the batch/total figures.
+                      const batches = appBatchesByN[n - 1];
+                      const pull = computeCheesePull(rows, batches);
+                      const pullRows = pull.rows.filter(
+                        (r) => r.ingredient.trim() !== "" || r.lbs > 0,
+                      );
+                      if (pullRows.length === 0) return null;
+                      return (
+                        <View style={styles.pullBlock}>
+                          <Text
+                            style={[styles.pullTitle, { color: colors.mutedForeground }]}
+                          >
+                            PULL FOR THIS RUN
+                            {batches > 0 ? ` · ≈ ${batches.toFixed(2)} batches` : ""}
+                          </Text>
+                          {pullRows.map((r, i) => (
+                            <View
+                              key={i}
+                              style={[styles.pullRow, { borderBottomColor: colors.border }]}
+                            >
+                              <Text
+                                style={[styles.pullIng, { color: colors.foreground }]}
+                                numberOfLines={1}
+                              >
+                                {r.ingredient || "—"}
+                              </Text>
+                              <Text style={[styles.pullLbs, { color: colors.foreground }]}>
+                                {r.lbs.toFixed(1)} lbs
+                              </Text>
+                            </View>
+                          ))}
+                          <View style={styles.pullTotalRow}>
+                            <Text
+                              style={[styles.pullTotalLabel, { color: colors.mutedForeground }]}
+                            >
+                              Total
+                            </Text>
+                            <Text
+                              style={[styles.pullTotalVal, { color: colors.foreground }]}
+                            >
+                              {pull.totalLbs.toFixed(1)} lbs
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })()}
                   </>
                 )}
               </CardSection>
@@ -1461,6 +1525,46 @@ const styles = StyleSheet.create({
   },
   cheeseMetaVal: {
     fontFamily: FONTS.mono,
+  },
+  pullBlock: {
+    marginTop: 12,
+  },
+  pullTitle: {
+    fontSize: 10,
+    letterSpacing: 0.8,
+    marginBottom: 6,
+    fontFamily: FONTS.semibold,
+  },
+  pullRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  pullIng: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: FONTS.regular,
+    marginRight: 8,
+  },
+  pullLbs: {
+    fontSize: 14,
+    fontFamily: FONTS.mono,
+  },
+  pullTotalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 6,
+  },
+  pullTotalLabel: {
+    fontSize: 12,
+    fontFamily: FONTS.semibold,
+  },
+  pullTotalVal: {
+    fontSize: 14,
+    fontFamily: FONTS.semibold,
   },
   chip: {
     paddingHorizontal: 14,

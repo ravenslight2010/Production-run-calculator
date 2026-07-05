@@ -3,6 +3,10 @@ import { DEFAULT_PEP_TYPES } from "./types";
 import { computeSummaryStats as computeSummaryStatsShared } from "@workspace/inventory-math";
 import { withSubstitutions } from "./substitutionState";
 
+// Pure helper (no per-app injection) re-exported so web call sites keep the
+// single `../utils` import boundary; the formula lives in @workspace/inventory-math.
+export { computeCheesePull } from "@workspace/inventory-math";
+
 export function fmtElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const h = Math.floor(totalSec / 3600);
