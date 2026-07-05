@@ -482,7 +482,7 @@ export function collectSpecImportCheeseRecipes(
  * curated — a MEANINGFUL qualifier ("Spicy", "Premium", "Light", "Whole Milk")
  * is never listed, so two genuinely different products still stay apart.
  */
-const SPEC_IMPORT_FILLER_TOKENS = new Set(["standard", "regular"]);
+const SPEC_IMPORT_FILLER_TOKENS = new Set(["standard", "regular", "pizza"]);
 
 /**
  * Shared loose match key for snapping an imported master-data name onto an
@@ -490,8 +490,9 @@ const SPEC_IMPORT_FILLER_TOKENS = new Set(["standard", "regular"]);
  * "Aldos" collapse (instead of splitting into "aldo s" vs "aldos"), folds any
  * other punctuation to a single space, collapses whitespace, and drops generic
  * "default version" filler tokens (see SPEC_IMPORT_FILLER_TOKENS) so "Aldo's
- * Cheese Mix" links to a saved "Aldo's Standard Cheese Mix" instead of forking a
- * duplicate. Still deliberately conservative (no fuzzy / edit-distance matching)
+ * Cheese Mix" links to a saved "Aldo's Standard Cheese Mix", and "Mystic Sauce"
+ * links to a saved "Mystic Pizza Sauce" (either import order), instead of forking
+ * a duplicate. Still deliberately conservative (no fuzzy / edit-distance matching)
  * so two genuinely different names never collide. Used by every spec-import
  * "link to existing" pass (cheese / dough / sauce recipes, die types).
  */

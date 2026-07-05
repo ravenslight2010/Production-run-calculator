@@ -267,12 +267,14 @@ export function repointMixIngredients(
 // Loose match key mirroring @workspace/spec-import's specImportNameMatchKey:
 // lowercase, drop apostrophes/quotes, fold other punctuation to a single space,
 // collapse whitespace, and drop generic "default version" filler tokens
-// ("standard"/"regular"). So an imported mix that differs from an existing one
-// only in case / punctuation / spacing / a filler word ("Aldo's Cheese Mix" vs
-// "Aldo's Standard Cheese Mix") links to the mix the manager already keeps
-// instead of creating a duplicate. (Kept in lockstep with the spec-import helper
-// of the same behavior; duplicated here to avoid a cross-lib dependency.)
-const MIX_FILLER_TOKENS = new Set(["standard", "regular"]);
+// ("standard"/"regular"/"pizza" — this is a pizza factory, so "pizza" is always a
+// generic descriptor, never a distinguishing qualifier). So an imported mix that
+// differs from an existing one only in case / punctuation / spacing / a filler
+// word ("Aldo's Cheese Mix" vs "Aldo's Standard Cheese Mix") links to the mix the
+// manager already keeps instead of creating a duplicate. (Kept in lockstep with
+// the spec-import helper of the same behavior; duplicated here to avoid a
+// cross-lib dependency.)
+const MIX_FILLER_TOKENS = new Set(["standard", "regular", "pizza"]);
 function mixNameMatchKey(name: string): string {
   const base = (name ?? "")
     .toLowerCase()

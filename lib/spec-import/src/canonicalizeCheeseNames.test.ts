@@ -387,6 +387,47 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
     expect(linked.profiles.map((p) => p.sauceName)).toEqual(["house  sauce"]);
   });
 
+  it("snaps 'Mystic Sauce' onto a saved 'Mystic Pizza Sauce' (pizza is filler)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Mystic", flavor: "Cheese", applicators: [], pepperonis: [], sauceName: "Mystic Sauce" },
+      ],
+      recipes: [{ kind: "sauce", name: "Mystic Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sauce"]);
+    expect(linked.profiles.map((p) => p.sauceName)).toEqual(["Mystic Pizza Sauce"]);
+  });
+
+  it("snaps 'Mystic Pizza Sauce' onto a saved 'Mystic Sauce' (reverse order works too)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [
+        { brand: "Mystic", flavor: "Cheese", applicators: [], pepperonis: [], sauceName: "Mystic Pizza Sauce" },
+      ],
+      recipes: [{ kind: "sauce", name: "Mystic Pizza Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Sauce"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Sauce"]);
+    expect(linked.profiles.map((p) => p.sauceName)).toEqual(["Mystic Sauce"]);
+  });
+
+  it("snaps 'Mystic Dough' onto a saved 'Mystic Pizza Dough'", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "dough", name: "Mystic Pizza Dough", rows: [{ ingredient: "Flour", lbs: 50 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "dough", ["Mystic Dough"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Dough"]);
+  });
+
+  it("does NOT collapse a MEANINGFUL qualifier (Spicy) onto a different saved sauce", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "sauce", name: "Mystic Spicy Sauce", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    expect(linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"])).toBe(parsed);
+  });
+
   it("only touches recipes of the requested kind", () => {
     const parsed: ParsedSpecImport = {
       profiles: [],

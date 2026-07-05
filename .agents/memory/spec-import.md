@@ -73,8 +73,12 @@ applying (no per-item prompts).
 - **Shared loose key:** `specImportNameMatchKey` (exported from `@workspace/spec-import`)
   = lowercase, drop `'`/`` ` ``/`’`, fold other punctuation to a single space,
   collapse whitespace, then drop generic "default version" filler TOKENS
-  (`SPEC_IMPORT_FILLER_TOKENS` = `standard`, `regular`) so `"Aldo's Cheese Mix"`
-  links to a saved `"Aldo's Standard Cheese Mix"` instead of forking a duplicate.
+  (`SPEC_IMPORT_FILLER_TOKENS` = `standard`, `regular`, `pizza`) so `"Aldo's Cheese Mix"`
+  links to a saved `"Aldo's Standard Cheese Mix"`, and `"Mystic Sauce"` links to a
+  saved `"Mystic Pizza Sauce"` (either import order), instead of forking a duplicate.
+  **Why `pizza` is filler:** this is a pizza factory — `pizza` is always a generic
+  descriptor in a dough/sauce name, never a distinguishing qualifier, so dropping it
+  as a whole token is safe (the ambiguity guard still catches any real collision).
   **Still conservative — KEEPS word spacing (`"12in"`≠`"12 in"`) and keeps
   MEANINGFUL qualifiers (`Spicy`/`Premium`/`Light`), so genuinely different
   products stay apart.** All-filler names (`"Standard"`) fall back to the
