@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.expo
+**/.turbo
+.git
+.gitignore
+.local
+.agents
+.env
+.env.*
+**/*.log
+Dockerfile
+docker-compose.yml

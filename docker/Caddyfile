@@ -1,0 +1,15 @@
+# SITE_ADDRESS comes from your .env file.
+#   Real domain (automatic HTTPS):  SITE_ADDRESS=runcalc.yourcompany.com
+#   Local / plain HTTP testing:     SITE_ADDRESS=:80
+{$SITE_ADDRESS} {
+	# API + live-updates stream go to the Node server container.
+	handle /api/* {
+		reverse_proxy api:5000
+	}
+	# Everything else is the built web app (a single-page app).
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

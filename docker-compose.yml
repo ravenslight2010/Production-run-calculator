@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: applies the DB schema, then exits. Runs once per `up`, so an API
+  # crash/restart never re-triggers a schema change. push-force is required
+  # because plain push hangs on an interactive prompt in a container.
+  migrate:
+    build:
+      context: .
+      target: api
+    env_file: .env
+    command: ["pnpm", "--filter", "@workspace/db", "run", "push-force"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    expose:
+      - "5000"
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    # The static web container only needs its address — no app secrets.
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
