@@ -332,14 +332,21 @@ export function loadRawProfile(brand: string, flavor: string): Record<string, un
  */
 function profileObjHasRealData(p: Record<string, unknown>): boolean {
   const arr = (x: unknown) => Array.isArray(x) && x.length > 0;
-  if (arr(p.doughRecipe) || arr(p.frontlineRecipe)) return true;
+  // A dough recipe ALONE does not make a profile "real". Almost every blank/
+  // duplicate profile still carries a default dough recipe, so counting dough
+  // here let a dough-only form be saved as a permanent brand+flavor profile —
+  // which the spec-sheet cleanup (@workspace/profile-cleanup, dough-ignoring)
+  // then couldn't recognize as blank, so the empty setups kept reappearing
+  // ("ghosts"). Keep the dough exclusion in lockstep with profileHasRecipeData
+  // in that lib (the two predicates differ elsewhere, but must agree on dough).
+  if (arr(p.frontlineRecipe)) return true;
   for (const k of ["app1CheeseRecipe", "app2CheeseRecipe", "app3CheeseRecipe", "app4CheeseRecipe"]) {
     if (arr(p[k])) return true;
   }
   for (const k of [
     "app1Type", "app2Type", "app3Type", "app4Type",
     "pep1Type", "pep2Type", "dieType",
-    "doughRecipeName", "frontlineRecipeName",
+    "frontlineRecipeName",
   ]) {
     const val = p[k];
     if (typeof val === "string" && val.trim()) return true;

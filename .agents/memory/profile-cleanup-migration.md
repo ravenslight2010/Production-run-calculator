@@ -37,6 +37,20 @@ may be computed from a snapshot because `brandProfiles` is LOCAL-only, but the s
 lists must be re-derived from `prev`. Web has no such race — it runs synchronously at
 module import, before React mounts / any sync.
 
+**Gotcha — dough-only profiles became ghosts (fixed):** the apps' own
+`profileObjHasRealData` (web `storage.ts`, mobile `RunContext.tsx`) originally counted
+a dough recipe ALONE (`doughRecipe` array / `doughRecipeName`) as "real data", but the
+cleanup's `profileHasRecipeData` IGNORES dough. That split meant a form/profile carrying
+only a default dough recipe was saved as a permanent brand+flavor profile (passed the
+`saveProfile` blank-guard) and propagated via sync, yet the cleanup couldn't see it as a
+blank duplicate — so empty setups kept reappearing ("ghosts"). Fix: dropped dough from
+`profileObjHasRealData` in BOTH apps so it agrees with the cleanup ON DOUGH (the two
+predicates still differ elsewhere — cleanup also treats numeric sauce/app/pep as real).
+Removing dough only STRENGTHENS clobber protection (a blank+dough form no longer
+overwrites a populated profile). Regression test: `doughOnlyProfileGhost.test.ts`.
+**Why:** any "has real recipe" predicate that gates profile persistence must treat dough
+the same way the cleanup does, or the two fight and re-create the ghosts.
+
 **Gotcha — stamp-funnel guard (fixed):** `mobileRunValueStampGuard.test.ts` (lives in
 the WEB package, scans the mobile file as text) forbids a raw
 `AsyncStorage.setItem(STORAGE_KEY, …)` inside a `setAppState` updater. Persist the
