@@ -67,6 +67,31 @@ describe("normalizeCheeseRecipe", () => {
     expect(r!.enabled).toBe(true);
     expect(r!.components).toEqual([{ ingredient: "Mozz", lbs: 40 }]);
   });
+
+  it("collapses whole-brand catch-all flavor labels to empty (= applies to all flavors)", () => {
+    // "All Varieties" (and friends) are not real product flavors — they mean the
+    // blend applies to every flavor of the brand. The model represents that as an
+    // empty list, so an imported/stored "All Varieties" blend is offered for every
+    // flavor in the run/setup pickers instead of being hidden on a specific one.
+    const r = normalizeCheeseRecipe({
+      id: "x",
+      name: "Aldo's Standard Cheese Mix",
+      brand: "Aldo",
+      flavors: ["All Varieties"],
+      components: [{ ingredient: "Mozz", lbs: 40 }],
+    });
+    expect(r!.flavors).toEqual([]);
+    // Catch-all labels are dropped even when mixed with real flavors, leaving the
+    // genuine flavor(s) behind.
+    const mixed = normalizeCheeseRecipe({
+      id: "y",
+      name: "Blend B",
+      brand: "Bobo",
+      flavors: ["All Flavors", "Pepperoni"],
+      components: [{ ingredient: "Mozz", lbs: 40 }],
+    });
+    expect(mixed!.flavors).toEqual(["Pepperoni"]);
+  });
   it("falls back id to the lowercased name when missing", () => {
     const r = normalizeCheeseRecipe({ name: "My Mix" });
     expect(r!.id).toBe("my mix");

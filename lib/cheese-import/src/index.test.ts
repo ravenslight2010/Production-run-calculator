@@ -124,9 +124,12 @@ describe("parseCheeseSheet - Aldo (two columns)", () => {
     expect(std.cellulose).toBe("0.51");
   });
 
-  it("assigns flavors from the assignment lines", () => {
+  it("assigns flavors from the assignment lines, collapsing 'All Varieties' to empty (= all flavors)", () => {
     const std = sheet.recipes.find((r) => r.name === "Aldo's Standard Cheese Mix")!;
-    expect(std.flavors).toEqual(["All Varieties"]);
+    // The sheet assigns this mix to "All Varieties" — a whole-brand catch-all,
+    // which the CheeseRecipe model represents as an empty list so the blend is
+    // offered for EVERY flavor of the brand instead of a fake "All Varieties" one.
+    expect(std.flavors).toEqual([]);
     const parm = sheet.recipes.find((r) => r.name === "Aldo's Parmesan / Oregano Mix")!;
     expect(parm.flavors).toEqual([]);
   });

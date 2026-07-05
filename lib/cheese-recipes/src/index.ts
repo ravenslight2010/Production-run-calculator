@@ -88,8 +88,31 @@ export function normalizeCheeseComponent(input: unknown): CheeseComponent | null
   return { ingredient, lbs };
 }
 
+// Whole-brand "catch-all" flavor labels that mean "applies to EVERY flavor of
+// the brand" rather than naming one specific product flavor. The CheeseRecipe
+// contract represents that as an EMPTY flavors list (see the `flavors` doc
+// above), so these labels are dropped during normalization: an "All Varieties"
+// blend then matches every flavor in the run / setup pickers instead of being
+// hidden the moment a specific flavor (e.g. "Meat Lovers") is selected. Mirrors
+// the CATCH_ALL_FLAVORS set in @workspace/spec-import; kept as a small local
+// copy so this low-level model stays dependency-free.
+const CATCH_ALL_FLAVOR_WORDS = new Set([
+  "all",
+  "all varieties",
+  "all variety",
+  "all flavors",
+  "all flavours",
+  "all flavor",
+  "every variety",
+  "any",
+  "n/a",
+  "na",
+]);
+
 // Clean a raw flavor list into trimmed, de-duplicated (case-insensitive),
-// non-empty labels, preserving first-seen order.
+// non-empty labels, preserving first-seen order. Whole-brand catch-all labels
+// ("All Varieties", etc.) are dropped so they collapse to the empty = "applies
+// to any flavor" representation the rest of the app relies on.
 function normalizeFlavors(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const seen = new Set<string>();
@@ -98,6 +121,7 @@ function normalizeFlavors(input: unknown): string[] {
     const f = coerceStr(raw);
     if (!f) continue;
     const key = f.toLowerCase();
+    if (CATCH_ALL_FLAVOR_WORDS.has(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(f);
