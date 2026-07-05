@@ -38,6 +38,9 @@ import {
   type ParsedProfile,
   type ParsedRecipe,
   type SheetGrid,
+  specImportNameMatchKey,
+  stripApplicatorLabel,
+  linkSpecImportNamedRecipesToExisting,
 } from "@workspace/spec-import";
 import * as specImportLib from "@workspace/spec-import";
 import * as specReconcileLib from "@workspace/spec-reconcile";
@@ -404,4 +407,163 @@ describe("mobile spec-import — commitSpecImport seeds one dough/sauce recipe (
     expect(namedPools.dough.map((r) => r.name)).toEqual([DOUGH_NAME]);
     expect(namedPools.sauce.map((r) => r.name)).toEqual([SAUCE_NAME]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Loose-name-keyed dedup BOUNDARY (web + mobile share these pure helpers).
+//
+// The tests above cover the easy case: the SAME name repeated across flavors
+// collapses to one pool entry. The higher-risk real-world split is when the AI
+// emits the same recipe under NEAR-identical but NOT-identical names (extra
+// "Craft", reordered words, a misspelling, a stray "Applicator - " prefix, or a
+// generic filler word). Dough/sauce dedup keys on the LOOSE key
+// (`specImportNameMatchKey`, see import-order-dedup-keys.md), NOT a fuzzy match,
+// so the collapse-vs-keep boundary is worth pinning down as a regression guard.
+//
+// Pipeline modeled here (the real one a spec import runs for dough/sauce):
+//   1. linkSpecImportNamedRecipesToExisting(parsed, kind, existingNames) — snaps
+//      an imported recipe's name onto a saved pool name when their loose keys
+//      match (renames the imported recipe to the saved EXACT name).
+//   2. namedRecipeFromDraft → addNamedRecipesIfAbsentByName — the pool add,
+//      which dedupes by EXACT (case-insensitive) name. So a recipe the link pass
+//      renamed folds in (added 0); one it left alone forks a parallel entry
+//      (added 1).
+// ---------------------------------------------------------------------------
+
+const DUMMY_ROWS = [{ ingredient: "Flour", lbs: 50 }];
+
+/**
+ * Drive one imported dough/sauce recipe name through the real link + add-if-absent
+ * pipeline against a pool that already holds `existingName`. Returns whether the
+ * link pass snapped the imported name onto the saved one and whether the pool add
+ * folded it in (added 0) or created a parallel entry (added 1).
+ */
+function importAgainstPool(
+  existingName: string,
+  importedName: string,
+  kind: "dough" | "sauce",
+): { linkedName: string; added: number; poolNames: string[] } {
+  const existingRecipe = namedRecipeFromDraft({
+    name: existingName,
+    components: DUMMY_ROWS,
+    idPrefix: kind,
+  });
+  if (!existingRecipe) throw new Error("bad fixture existing recipe");
+
+  const parsed: ParsedSpecImport = {
+    profiles: [],
+    recipes: [
+      { kind, name: importedName, brand: BRAND, flavor: "Cheese", rows: DUMMY_ROWS },
+    ],
+  };
+  const linked = linkSpecImportNamedRecipesToExisting(parsed, kind, [existingName]);
+  const linkedName = linked.recipes[0].name;
+
+  const draft = namedRecipeFromDraft({
+    name: linkedName,
+    components: DUMMY_ROWS,
+    idPrefix: kind,
+  });
+  const { merged, added } = addNamedRecipesIfAbsentByName(
+    [existingRecipe],
+    draft ? [draft] : [],
+  );
+  return { linkedName, added, poolNames: merged.map((r) => r.name) };
+}
+
+describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep", () => {
+  // ---- COLLAPSE: loose key tolerates case / whitespace / punctuation / filler.
+  // These variants must fold onto the saved recipe (no parallel pool entry).
+  const collapseCases: Array<[string, string, "dough" | "sauce"]> = [
+    // Case-only drift.
+    ["House Dough", "HOUSE DOUGH", "dough"],
+    // Collapsed internal whitespace.
+    ["House Dough", "House   Dough", "dough"],
+    // Apostrophe / quote punctuation folding ("Aldo's" == "Aldos").
+    ["Aldo's Dough", "Aldos Dough", "dough"],
+    // Filler token dropped ("standard").
+    ["House Dough", "House Standard Dough", "dough"],
+    // Filler token added the other direction ("regular").
+    ["House Marinara", "House Regular Marinara", "sauce"],
+    // Filler token "pizza" dropped from a sauce name.
+    ["House Marinara", "House Pizza Marinara", "sauce"],
+  ];
+
+  it.each(collapseCases)(
+    "collapses %j ← %j (%s): links to saved name, adds no duplicate",
+    (existingName, importedName, kind) => {
+      const { linkedName, added, poolNames } = importAgainstPool(
+        existingName,
+        importedName,
+        kind,
+      );
+      expect(linkedName).toBe(existingName);
+      expect(added).toBe(0);
+      expect(poolNames).toEqual([existingName]);
+    },
+  );
+
+  // ---- KEEP: the loose key is deliberately conservative (no fuzzy / edit
+  // distance), so a distinguishing extra word, a word reorder, or a misspelling
+  // is a DIFFERENT recipe and forks a parallel pool entry. This documents the
+  // real-world split risk from import-order-dedup-keys.md.
+  const keepCases: Array<[string, string, "dough" | "sauce"]> = [
+    // Extra distinguishing word ("Craft") — not filler.
+    ["House Dough", "House Craft Dough", "dough"],
+    // Reordered words.
+    ["House Dough", "Dough House", "dough"],
+    // Misspelling.
+    ["House Dough", "House Duogh", "dough"],
+    // Sauce: extra word.
+    ["House Marinara", "House Craft Marinara", "sauce"],
+    // Sauce: reordered words.
+    ["House Marinara", "Marinara House", "sauce"],
+  ];
+
+  it.each(keepCases)(
+    "keeps %j vs %j (%s): no link, forks a parallel pool entry",
+    (existingName, importedName, kind) => {
+      const { linkedName, added, poolNames } = importAgainstPool(
+        existingName,
+        importedName,
+        kind,
+      );
+      expect(linkedName).toBe(importedName);
+      expect(added).toBe(1);
+      expect(poolNames).toEqual([existingName, importedName]);
+    },
+  );
+
+  // ---- "Applicator - " prefix boundary.
+  // cleanSpecCheeseRecipeName strips this label for CHEESE recipes, but the
+  // dough/sauce link pass keys on specImportNameMatchKey with NO applicator
+  // strip. So a stray "Applicator - " prefix on a dough/sauce name is treated as
+  // a distinguishing token and FORKS a parallel entry — a known gap, pinned here
+  // so a future change that closes it (or regresses it) is caught deliberately.
+  it("stripApplicatorLabel WOULD normalize the prefix, but the dough/sauce key does not", () => {
+    // The pure strip helper collapses the label to the bare name...
+    expect(stripApplicatorLabel("Applicator - House Dough")).toBe("House Dough");
+    // ...yet the loose match key used by the dough/sauce link pass keeps
+    // "applicator" as a token, so the keys differ and no snap happens.
+    expect(specImportNameMatchKey("Applicator - House Dough")).not.toBe(
+      specImportNameMatchKey("House Dough"),
+    );
+  });
+
+  it.each([
+    ["House Dough", "Applicator - House Dough", "dough"],
+    ["House Marinara", "Applicator - House Marinara", "sauce"],
+  ] as Array<[string, string, "dough" | "sauce"]>)(
+    "does NOT collapse %j vs %j (%s): applicator prefix forks a parallel entry",
+    (existingName, importedName, kind) => {
+      const { linkedName, added, poolNames } = importAgainstPool(
+        existingName,
+        importedName,
+        kind,
+      );
+      expect(linkedName).toBe(importedName);
+      expect(added).toBe(1);
+      expect(poolNames).toEqual([existingName, importedName]);
+    },
+  );
 });
