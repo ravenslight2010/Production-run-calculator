@@ -425,3 +425,64 @@ describe("source-drift guard: web and mobile cheese-pick logic are identical", (
     expect(stripTypes(real)).toBe(stripTypes(transcribed));
   });
 });
+
+// ── 5. Missing-cheese warning parity (web + mobile stay in lockstep) ───────────
+//
+// When a picked recipe NAME has no match in the server cheese pool, both apps
+// show an identical amber "No matching cheese recipe found" callout instead of a
+// silent, confusing blank body. Web renders it via CheesePickCard's
+// `showMissingWarning` (driven by the `recipeMissing` prop the call sites compute
+// from `serverCheeseByName`); mobile computes `cheeseMissing` inline. The warning
+// is rendered inline in a big component on BOTH sides (not importable) — the
+// actual REAL web render is proven in cheeseMissingWarning.render.test.tsx by
+// mounting CheesePickCard, so this block locks the mobile source so it can't
+// silently drift from the web behavior that render test verifies.
+
+describe("missing-cheese warning parity: web and mobile stay in lockstep", () => {
+  const web = fs.readFileSync(WEB_FILE, "utf8");
+  const mobile = fs.readFileSync(MOBILE_FILE, "utf8");
+
+  it("both compute 'missing' as a non-empty picked name absent from the server pool", () => {
+    // Web: the card's internal gate + the call-site prop it is driven by.
+    expect(web).toContain(
+      'const showMissingWarning = recipeName.trim() !== "" && !!recipeMissing;',
+    );
+    expect(web).toMatch(
+      /recipeMissing=\{[^}]*\.trim\(\) !== "" && !serverCheeseByName\.has\(/,
+    );
+    // Mobile: the inline equivalent (pickedCheese resolves from serverCheeseByName).
+    expect(mobile).toContain(
+      'const cheeseMissing = recipeName.trim() !== "" && !pickedCheese;',
+    );
+    expect(mobile).toMatch(
+      /const pickedCheese = recipeName\.trim\(\)[\s\S]{0,120}serverCheeseByName\.get\(recipeName\.trim\(\)\.toLowerCase\(\)\)/,
+    );
+  });
+
+  it("shows the identical user-facing warning sentence on both platforms", () => {
+    const grab = (src: string) => {
+      const m = src.match(
+        /No matching cheese recipe found for[\s\S]*?Manage Lists → Cheese Recipes\./,
+      );
+      if (!m) throw new Error("warning sentence not found");
+      // Normalize the JSX `{expr}` vs template-literal `${expr}` interpolation
+      // and all whitespace, so only the human-visible copy is compared.
+      return m[0].replace(/\$\{/g, "{").replace(/\s+/g, " ").trim();
+    };
+    expect(grab(mobile)).toBe(grab(web));
+  });
+
+  it("renders the warning in place of the empty-ingredients hint (not both, not inverted)", () => {
+    // Web: the "no ingredients yet" hint is suppressed while the warning shows.
+    expect(web).toContain("showMissingWarning ? null : (");
+    // Mobile: the cheeseMissing branch replaces the ReadOnlyRecipe body.
+    expect(mobile).toMatch(/\{cheeseMissing \? \([\s\S]*?<ReadOnlyRecipe/);
+  });
+
+  it("keeps the shared 'no ingredients yet' hint copy identical on both platforms", () => {
+    const hint =
+      "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes.";
+    expect(web).toContain(hint);
+    expect(mobile).toContain(hint);
+  });
+});

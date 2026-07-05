@@ -137,3 +137,4 @@
 - [Setup Profiles editor](setup-profiles-editor.md) — standalone brand/flavor setup editor via saveProfile/loadProfile, never touches run state; "Recipe Setup Needed" routes here not run-jump; web+mobile parity.
 - [Server ingredient catalog](ingredient-catalog.md) — factory-wide ingredients table w/ stable ids, recipe rows get optional ingredientId; hybrid alongside existing local lists; array-identity gotcha in hydration.
 - [Cheese blend across applicators](cheese-mirror-applicators.md) — spec import: one distinct cheese blend must fill EVERY blank cheese applicator slot (weight is per-applicator); shared mirrorSingleCheeseAcrossApplicators post-loop pass, web+mobile parity.
+- [Rendered verification & runTest cleanup](render-verify-and-runtest-cleanup.md) — when runTest is flaky, render real web components under vitest+jsdom (even from home.tsx) + parity-lock mobile; clean stray users runTest created before timing out.
