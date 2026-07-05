@@ -9,6 +9,7 @@ import {
   specCheeseDraftToRecipe,
   mergeCheeseRecipes,
   repointCheeseRecipesForBrandMerge,
+  repointCheeseRecipesForFlavorMerge,
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
   type CheeseRecipe,
@@ -246,6 +247,34 @@ describe("repointCheeseRecipesForBrandMerge", () => {
   it("ignores a source equal to the target (nothing to move)", () => {
     const recipes = [make({ id: "1", brand: "Alpha" })];
     expect(repointCheeseRecipesForBrandMerge(recipes, ["Alpha"], "Alpha")).toEqual([]);
+  });
+
+  describe("flavor merge re-pointing", () => {
+    it("rewrites source flavors to the target only within the merged brand, de-duping", () => {
+      const recipes = [
+        make({ id: "1", brand: "Bobo", flavors: ["Pep", "pepperoni", "Cheese"] }),
+        // Same source flavor, but a DIFFERENT brand — flavor merges are per-brand.
+        make({ id: "2", brand: "Other", flavors: ["Pep"] }),
+        // "All Varieties" (empty flavors) already covers everything — left alone.
+        make({ id: "3", brand: "Bobo", flavors: [] }),
+      ];
+      const changed = repointCheeseRecipesForFlavorMerge(
+        recipes,
+        "Bobo",
+        ["Pep", "pepperoni"],
+        "Pepperoni",
+      );
+      expect(changed.map((r) => r.id)).toEqual(["1"]);
+      // The two sources collapse into one target entry; order preserved.
+      expect(changed[0].flavors).toEqual(["Pepperoni", "Cheese"]);
+    });
+
+    it("returns nothing without a brand, without a target, or on a no-op", () => {
+      const recipes = [make({ id: "1", brand: "Bobo", flavors: ["Pep"] })];
+      expect(repointCheeseRecipesForFlavorMerge(recipes, "   ", ["Pep"], "Pepperoni")).toEqual([]);
+      expect(repointCheeseRecipesForFlavorMerge(recipes, "Bobo", ["Pep"], "   ")).toEqual([]);
+      expect(repointCheeseRecipesForFlavorMerge(recipes, "Bobo", ["Pep"], "Pep")).toEqual([]);
+    });
   });
 
   it("end-to-end: after a brand merge the two brands' cheese recipes collapse into ONE group (the reported bug)", () => {

@@ -91,9 +91,17 @@ import {
   type CheeseImportPrepared,
 } from "@/context/cheeseImport";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
-import { repointCheeseRecipesForBrandMerge } from "@workspace/cheese-recipes";
+import {
+  repointCheeseRecipesForBrandMerge,
+  repointCheeseRecipesForFlavorMerge,
+} from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "@/context/cheeseRecipes";
 import type { Mix } from "@workspace/mixes";
+import {
+  repointMixesForBrandMerge,
+  repointMixesForFlavorMerge,
+} from "@workspace/mixes";
+import { fetchMixes, saveMixes } from "@/context/mixes";
 import {
   fetchSavedSpecSheets,
   reconcileSpecSheet,
@@ -292,20 +300,43 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
   } = useRun();
   const qc = useQueryClient();
 
-  // Cheese recipes are server-backed master-data (NOT in day-state sync), so a
-  // brand merge — which only rewrites local brand/flavor lists and today's runs
-  // — won't touch them. Re-point any that still name a merged-away brand so they
-  // stop showing under the old heading in the Cheese Recipes manager (web
-  // parity: home.tsx handleApplyBrandFlavorMerge).
-  const repointCheeseForBrandMerge = async (srcs: string[], tgt: string) => {
+  // Cheese recipes and mixes are server-backed master-data (NOT in day-state
+  // sync), so a brand/flavor merge — which only rewrites local brand/flavor lists
+  // and today's runs — won't touch them. Re-point any that still name a
+  // merged-away brand (or flavor, within the brand) so they stop showing under
+  // the old label in the Cheese Recipes / Mixes managers (web parity:
+  // home.tsx handleApplyBrandFlavorMerge).
+  const repointServerMasterDataForMerge = async (
+    mode: "brands" | "flavors",
+    srcs: string[],
+    tgt: string,
+    flavorBrand: string,
+  ) => {
     try {
-      const changed = repointCheeseRecipesForBrandMerge(await fetchCheeseRecipes(), srcs, tgt);
+      const cheese = await fetchCheeseRecipes();
+      const changed =
+        mode === "brands"
+          ? repointCheeseRecipesForBrandMerge(cheese, srcs, tgt)
+          : repointCheeseRecipesForFlavorMerge(cheese, flavorBrand, srcs, tgt);
       if (changed.length > 0) {
         const saved = await saveCheeseRecipes(changed);
         qc.setQueryData(["cheeseRecipes"], saved);
       }
     } catch {
-      // Non-fatal: the brand merge itself already succeeded.
+      // Non-fatal: the merge itself already succeeded.
+    }
+    try {
+      const mixesList = await fetchMixes();
+      const changed =
+        mode === "brands"
+          ? repointMixesForBrandMerge(mixesList, srcs, tgt)
+          : repointMixesForFlavorMerge(mixesList, flavorBrand, srcs, tgt);
+      if (changed.length > 0) {
+        const saved = await saveMixes(changed);
+        qc.setQueryData(["mixes"], saved);
+      }
+    } catch {
+      // Non-fatal: the merge itself already succeeded.
     }
   };
 
@@ -571,10 +602,9 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setError("");
     try {
       if (category === "brandflavor") {
-        if (bfMode === "brands") {
-          mergeBrands(srcs, s.target);
-          await repointCheeseForBrandMerge(srcs, s.target);
-        } else mergeFlavors(bfBrand, srcs, s.target);
+        if (bfMode === "brands") mergeBrands(srcs, s.target);
+        else mergeFlavors(bfBrand, srcs, s.target);
+        await repointServerMasterDataForMerge(bfMode, srcs, s.target, bfBrand);
       } else {
         await mergeIngredients(srcs, s.target, suggestScope.category);
       }
@@ -618,10 +648,9 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setError("");
     try {
       if (category === "brandflavor") {
-        if (bfMode === "brands") {
-          mergeBrands(sources, target);
-          await repointCheeseForBrandMerge(sources, target);
-        } else mergeFlavors(bfBrand, sources, target);
+        if (bfMode === "brands") mergeBrands(sources, target);
+        else mergeFlavors(bfBrand, sources, target);
+        await repointServerMasterDataForMerge(bfMode, sources, target, bfBrand);
       } else {
         await mergeIngredients(sources, target, suggestScope.category);
       }

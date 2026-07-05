@@ -158,6 +158,64 @@ export function normalizeMixes(input: unknown): Mix[] {
   return Array.from(byId.values());
 }
 
+// ---------------------------------------------------------------------------
+// Brand / flavor merge re-pointing
+// ---------------------------------------------------------------------------
+//
+// Mixes are brand+flavor-keyed server master-data (NOT part of day-state sync),
+// so a brand or flavor merge in the Merge tool won't touch them. These pure
+// helpers re-point the affected mixes so they stop naming a merged-away brand or
+// flavor. Both return ONLY the changed mixes (the server upserts by id), matched
+// case-insensitively.
+
+/** Re-point mixes whose brand is one of the merged-away sources onto the target. */
+export function repointMixesForBrandMerge(
+  mixes: ReadonlyArray<Mix>,
+  sources: ReadonlyArray<string>,
+  target: string,
+): Mix[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: Mix[] = [];
+  for (const m of mixes) {
+    if (srcSet.has(m.brand.trim().toLowerCase())) changed.push({ ...m, brand: tgt });
+  }
+  return changed;
+}
+
+/**
+ * Re-point mixes when flavors are merged WITHIN a brand. Only mixes of that
+ * brand whose flavor is a merged-away source are rewritten to the target.
+ */
+export function repointMixesForFlavorMerge(
+  mixes: ReadonlyArray<Mix>,
+  brand: string,
+  sources: ReadonlyArray<string>,
+  target: string,
+): Mix[] {
+  const b = brand.trim().toLowerCase();
+  const tgt = target.trim();
+  if (!b || !tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: Mix[] = [];
+  for (const m of mixes) {
+    if (m.brand.trim().toLowerCase() !== b) continue;
+    if (srcSet.has(m.flavor.trim().toLowerCase())) changed.push({ ...m, flavor: tgt });
+  }
+  return changed;
+}
+
 /**
  * Add spec-import-detected mixes to the existing list, skipping any whose name
  * already exists (case-insensitive). A spec sheet can only supply a mix's

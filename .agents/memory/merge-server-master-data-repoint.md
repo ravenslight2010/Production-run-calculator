@@ -10,16 +10,23 @@ those live in their own tables outside day-state sync (e.g. `cheese_recipes`,
 mixes). So after a merge they keep naming the merged-away brand and show under
 the old heading.
 
-**Fixed:** brand merges now re-point cheese recipes via a pure helper
-(`repointCheeseRecipesForBrandMerge` in `@workspace/cheese-recipes`), wired into
-the web + mobile brand-merge apply paths (best-effort, upsert only changed rows,
-refresh the `["cheeseRecipes"]` query). Web+mobile parity.
+**Fixed (both brand AND flavor, cheese AND mixes):** the merge apply path now
+re-points both server-backed pools through pure helpers, best-effort, upserting
+only the changed rows and refreshing the pool's query:
+- `repointCheeseRecipesForBrandMerge` / `repointCheeseRecipesForFlavorMerge`
+  (`@workspace/cheese-recipes`) → refresh `["cheeseRecipes"]`.
+- `repointMixesForBrandMerge` / `repointMixesForFlavorMerge`
+  (`@workspace/mixes`) → refresh `["mixes"]`.
+Flavor merges are per-brand, so the flavor helpers take the brand and only touch
+same-brand rows. Cheese recipes with an empty `flavors[]` ("All Varieties")
+already cover every flavor and are left untouched. Web (`home.tsx`
+`handleApplyBrandFlavorMerge`) + mobile (`master-data.tsx`
+`repointServerMasterDataForMerge`, called from both apply + applySuggestion).
+Web+mobile parity.
 
-**Still latent (not yet handled):**
-- **Flavor** merges → cheese recipes' `flavors[]` (recipe stays under the right
-  brand, so far less visible — the reported bug was brand-level).
-- **Mixes** are also brand+flavor-keyed server master-data with the identical
-  gap for both brand and flavor merges.
+**Gotcha:** the repoint helpers drop any source equal to the target
+case-insensitively (no-op). So a "merge" whose source already matches the target
+spelling correctly produces zero changes — this is right, not a bug.
 
 **Why:** the merge path was designed as a "soft" re-point of local state; nobody
 extended it to the newer server-backed pools. Any future server-backed pool that

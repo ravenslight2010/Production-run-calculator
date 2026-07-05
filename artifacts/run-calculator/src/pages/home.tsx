@@ -167,7 +167,13 @@ import {
   findOrBuildIngredient,
 } from "../ingredients";
 import type { IngredientCategory } from "@workspace/ingredient-catalog";
-import { buildMixPlan, type Mix } from "@workspace/mixes";
+import {
+  buildMixPlan,
+  repointMixesForBrandMerge,
+  repointMixesForFlavorMerge,
+  type Mix,
+} from "@workspace/mixes";
+import { fetchMixes, saveMixes } from "@/mixes";
 import {
   buildCycleCountDueList,
   DEFAULT_CYCLE_COUNT_SECTIONS,
@@ -368,7 +374,10 @@ import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
-import { repointCheeseRecipesForBrandMerge } from "@workspace/cheese-recipes";
+import {
+  repointCheeseRecipesForBrandMerge,
+  repointCheeseRecipesForFlavorMerge,
+} from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
@@ -3902,20 +3911,35 @@ export default function Home() {
       } catch {
         // Non-fatal: tombstones are persisted locally.
       }
-      // Cheese recipes are server-backed master-data (NOT in day-state sync), so
-      // a brand merge won't touch them — re-point any that still name a
-      // merged-away brand so they stop showing under the old heading in the
-      // Cheese Recipes manager.
-      if (mergeBfMode === "brands") {
-        try {
-          const changed = repointCheeseRecipesForBrandMerge(await fetchCheeseRecipes(), srcs, tgt);
-          if (changed.length > 0) {
-            const saved = await saveCheeseRecipes(changed);
-            cycleCountQc.setQueryData(["cheeseRecipes"], saved);
-          }
-        } catch {
-          // Non-fatal: the brand merge itself already succeeded.
+      // Cheese recipes and mixes are server-backed master-data (NOT in day-state
+      // sync), so a brand/flavor merge won't touch them — re-point any that still
+      // name a merged-away brand (or flavor, within the brand) so they stop
+      // showing under the old label in the Cheese Recipes / Mixes managers.
+      try {
+        const cheese = await fetchCheeseRecipes();
+        const changed =
+          mergeBfMode === "brands"
+            ? repointCheeseRecipesForBrandMerge(cheese, srcs, tgt)
+            : repointCheeseRecipesForFlavorMerge(cheese, mergeBfBrand, srcs, tgt);
+        if (changed.length > 0) {
+          const saved = await saveCheeseRecipes(changed);
+          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
         }
+      } catch {
+        // Non-fatal: the merge itself already succeeded.
+      }
+      try {
+        const mixesList = await fetchMixes();
+        const changed =
+          mergeBfMode === "brands"
+            ? repointMixesForBrandMerge(mixesList, srcs, tgt)
+            : repointMixesForFlavorMerge(mixesList, mergeBfBrand, srcs, tgt);
+        if (changed.length > 0) {
+          const saved = await saveMixes(changed);
+          cycleCountQc.setQueryData(["mixes"], saved);
+        }
+      } catch {
+        // Non-fatal: the merge itself already succeeded.
       }
       resetMergeForm();
       const label = mergeBfMode === "brands" ? "brand" : "flavor";

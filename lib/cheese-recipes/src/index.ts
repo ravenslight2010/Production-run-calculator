@@ -313,6 +313,46 @@ export function repointCheeseRecipesForBrandMerge(
   return changed;
 }
 
+// Re-point cheese recipes when flavors are merged WITHIN a brand. A flavor merge
+// keeps the recipe under the same brand, but its per-flavor assignment list
+// (`flavors`) can still name a merged-away flavor. Returns ONLY the recipes of
+// that brand whose `flavors` list actually changed (source flavors rewritten to
+// the target, de-duplicated case-insensitively, order preserved). Recipes with
+// an empty flavors list ("All Varieties") already cover every flavor, so they
+// are left alone.
+export function repointCheeseRecipesForFlavorMerge(
+  recipes: ReadonlyArray<CheeseRecipe>,
+  brand: string,
+  sources: ReadonlyArray<string>,
+  target: string,
+): CheeseRecipe[] {
+  const b = brand.trim().toLowerCase();
+  const tgt = target.trim();
+  if (!b || !tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    if (r.brand.trim().toLowerCase() !== b) continue;
+    if (!r.flavors.some((f) => srcSet.has(f.trim().toLowerCase()))) continue;
+    const seen = new Set<string>();
+    const nextFlavors: string[] = [];
+    for (const f of r.flavors) {
+      const mapped = srcSet.has(f.trim().toLowerCase()) ? tgt : f;
+      const key = mapped.trim().toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nextFlavors.push(mapped);
+    }
+    changed.push({ ...r, flavors: nextFlavors });
+  }
+  return changed;
+}
+
 // ---------------------------------------------------------------------------
 // List browsing (search + brand grouping for the settings UI)
 // ---------------------------------------------------------------------------
