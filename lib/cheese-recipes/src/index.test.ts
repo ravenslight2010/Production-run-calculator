@@ -247,6 +247,22 @@ describe("repointCheeseRecipesForBrandMerge", () => {
     const recipes = [make({ id: "1", brand: "Alpha" })];
     expect(repointCheeseRecipesForBrandMerge(recipes, ["Alpha"], "Alpha")).toEqual([]);
   });
+
+  it("end-to-end: after a brand merge the two brands' cheese recipes collapse into ONE group (the reported bug)", () => {
+    // Two brands, each with its own cheese recipe — the manager merges them.
+    const existing = [
+      make({ id: "1", brand: "Bobo Pizza", name: "Whole Mozz" }),
+      make({ id: "2", brand: "Bobo's", name: "Part-Skim" }),
+    ];
+    // Repoint → upsert only the changed rows (mirrors the app: POST upserts by
+    // id) → group for the manager UI.
+    const changed = repointCheeseRecipesForBrandMerge(existing, ["Bobo Pizza", "Bobo's"], "Bobo");
+    const merged = mergeCheeseRecipes(existing, changed);
+    const groups = groupCheeseRecipesByBrand(merged);
+    // Previously this produced two separate headings; now it is a single brand.
+    expect(groups.map((g) => g.brand)).toEqual(["Bobo"]);
+    expect(groups[0].recipes.map((r) => r.name).sort()).toEqual(["Part-Skim", "Whole Mozz"]);
+  });
 });
 
 describe("cheeseRecipeMatchesQuery", () => {
