@@ -188,6 +188,7 @@ import {
   buildMixPlan,
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
+  repointMixIngredients,
   type Mix,
 } from "@workspace/mixes";
 import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
@@ -394,12 +395,13 @@ import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import {
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
+  repointCheeseRecipeIngredients,
 } from "@workspace/cheese-recipes";
 import { fetchCheeseRecipes, saveCheeseRecipes, deleteCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
-import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
-import { namedRecipeFromDraft, type NamedRecipe } from "@workspace/named-recipes";
+import { addNamedRecipesToServerIfAbsent, fetchNamedRecipes, saveNamedRecipes, deleteNamedRecipes } from "@/namedRecipes";
+import { namedRecipeFromDraft, repointNamedRecipeIngredients, type NamedRecipe } from "@workspace/named-recipes";
 
 import {
   Form,
@@ -3856,6 +3858,50 @@ export default function Home() {
         });
       } catch {
         // Non-fatal: tombstones are persisted locally.
+      }
+      // Dough/sauce/cheese/mix recipes are server-backed master-data (their own
+      // tables, NOT in day-state sync), and their component rows store ingredient
+      // NAMES. The rewrites above only touched local lists/presets/runs, so those
+      // server recipes still name the merged-away ingredient — it would resurface
+      // when a run hydrates rows from the pool (and consume inventory under the
+      // old name). Re-point any affected server recipes to the target so the
+      // merge is complete everywhere, mirroring the brand/flavor merge. Each
+      // block is best-effort (writes need manage-inventory) and updates the
+      // React-Query cache so the merged names show without a refetch.
+      try {
+        const cheese = await fetchCheeseRecipes();
+        const changed = repointCheeseRecipeIngredients(cheese, srcs, tgt);
+        if (changed.length > 0) {
+          const saved = await saveCheeseRecipes(changed);
+          cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+        }
+      } catch {
+        // Non-fatal: the local merge already succeeded.
+      }
+      try {
+        const mixesList = await fetchMixes();
+        const changed = repointMixIngredients(mixesList, srcs, tgt);
+        if (changed.length > 0) {
+          const saved = await saveMixes(changed);
+          cycleCountQc.setQueryData(["mixes"], saved);
+        }
+      } catch {
+        // Non-fatal: the local merge already succeeded.
+      }
+      for (const kind of ["dough", "sauce"] as const) {
+        try {
+          const recipes = await fetchNamedRecipes(kind);
+          const changed = repointNamedRecipeIngredients(recipes, srcs, tgt);
+          if (changed.length > 0) {
+            const saved = await saveNamedRecipes(kind, changed);
+            cycleCountQc.setQueryData(
+              [kind === "dough" ? "doughRecipes" : "sauceRecipes"],
+              saved,
+            );
+          }
+        } catch {
+          // Non-fatal: the local merge already succeeded.
+        }
       }
       // Clear the merge form. The panel stays open so the user can apply more
       // suggestions.

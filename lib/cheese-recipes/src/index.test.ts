@@ -10,6 +10,7 @@ import {
   mergeCheeseRecipes,
   repointCheeseRecipesForBrandMerge,
   repointCheeseRecipesForFlavorMerge,
+  repointCheeseRecipeIngredients,
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
   type CheeseRecipe,
@@ -316,5 +317,38 @@ describe("groupCheeseRecipesByBrand", () => {
     expect(groups.map((g) => g.brand)).toEqual(["Alpha", "Zeta", ""]);
     expect(groups[0].recipes.map((r) => r.name)).toEqual(["A1", "A2"]);
     expect(groups[0].shredderSetting).toBe("5");
+  });
+});
+
+describe("repointCheeseRecipeIngredients", () => {
+  it("rewrites matching component ingredient names (case-insensitive) and returns only changed recipes", () => {
+    const recipes = [
+      make({ id: "1", components: [{ ingredient: "Mozz", lbs: 10 }, { ingredient: "Provolone", lbs: 5 }] }),
+      make({ id: "2", components: [{ ingredient: "Cheddar", lbs: 3 }] }),
+    ];
+    const changed = repointCheeseRecipeIngredients(recipes, ["mozz"], "Mozzarella");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].id).toBe("1");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Mozzarella", lbs: 10 },
+      { ingredient: "Provolone", lbs: 5 },
+    ]);
+  });
+
+  it("keeps both rows (no combine) to preserve total weight", () => {
+    const recipes = [make({ id: "1", components: [{ ingredient: "Mozz", lbs: 10 }, { ingredient: "Mozzarella", lbs: 5 }] })];
+    const changed = repointCheeseRecipeIngredients(recipes, ["Mozz"], "Mozzarella");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Mozzarella", lbs: 10 },
+      { ingredient: "Mozzarella", lbs: 5 },
+    ]);
+    expect(cheeseRecipeTotalLbs(changed[0])).toBe(15);
+  });
+
+  it("returns [] for no matches, empty target, or a source equal to the target", () => {
+    const recipes = [make({ id: "1", components: [{ ingredient: "Mozz", lbs: 10 }] })];
+    expect(repointCheeseRecipeIngredients(recipes, ["Cheddar"], "Cheddar Cheese")).toEqual([]);
+    expect(repointCheeseRecipeIngredients(recipes, ["Mozz"], "   ")).toEqual([]);
+    expect(repointCheeseRecipeIngredients(recipes, ["Mozz"], "Mozz")).toEqual([]);
   });
 });

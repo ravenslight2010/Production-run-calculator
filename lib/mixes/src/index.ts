@@ -217,6 +217,45 @@ export function repointMixesForFlavorMerge(
 }
 
 /**
+ * Re-point mix COMPONENT ingredient names when an ingredient is merged in the
+ * Merge tool. Mixes are server-backed master-data (NOT part of day-state sync),
+ * so an ingredient merge — which only rewrites local lists/presets/runs — leaves
+ * the server mixes naming the merged-away ingredient, and it resurfaces in the
+ * mix plan / Pull-For-Mix lbs. Rewrites each matching component's `ingredient`
+ * to the target; rows are NOT combined (both are kept so the mix's per-pizza
+ * math is preserved exactly, mirroring mergeRecipeRows). Returns ONLY the mixes
+ * that changed, matched case-insensitively.
+ */
+export function repointMixIngredients(
+  mixes: ReadonlyArray<Mix>,
+  sources: ReadonlyArray<string>,
+  target: string,
+): Mix[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: Mix[] = [];
+  for (const m of mixes) {
+    if (!m.components.some((c) => srcSet.has(c.ingredient.trim().toLowerCase())))
+      continue;
+    changed.push({
+      ...m,
+      components: m.components.map((c) =>
+        srcSet.has(c.ingredient.trim().toLowerCase())
+          ? { ...c, ingredient: tgt }
+          : c,
+      ),
+    });
+  }
+  return changed;
+}
+
+/**
  * Add spec-import-detected mixes to the existing list, skipping any whose name
  * already exists (case-insensitive). A spec sheet can only supply a mix's
  * ingredient NAMES (per-pizza amount and batch size come in blank), so this

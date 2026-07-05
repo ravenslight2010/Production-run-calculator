@@ -146,6 +146,47 @@ export function sortNamedRecipesByName(
 }
 
 /**
+ * Re-point named-recipe (dough/sauce) COMPONENT ingredient names when an
+ * ingredient is merged in the Merge tool. Named recipes are server-backed
+ * master-data (their own tables, NOT part of day-state sync), so an ingredient
+ * merge — which only rewrites local lists/presets/runs — leaves the server
+ * recipes naming the merged-away ingredient, and it resurfaces when a run
+ * hydrates its rows from the pool. Rewrites each matching component's
+ * `ingredient` to the target; rows are NOT combined (a recipe that named two
+ * now-merged ingredients keeps both rows so its total weight is preserved
+ * exactly, mirroring mergeRecipeRows). Returns ONLY the recipes that changed
+ * (so the caller can upsert just those), matched case-insensitively.
+ */
+export function repointNamedRecipeIngredients(
+  recipes: ReadonlyArray<NamedRecipe>,
+  sources: ReadonlyArray<string>,
+  target: string,
+): NamedRecipe[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: NamedRecipe[] = [];
+  for (const r of recipes) {
+    if (!r.components.some((c) => srcSet.has(c.ingredient.trim().toLowerCase())))
+      continue;
+    changed.push({
+      ...r,
+      components: r.components.map((c) =>
+        srcSet.has(c.ingredient.trim().toLowerCase())
+          ? { ...c, ingredient: tgt }
+          : c,
+      ),
+    });
+  }
+  return changed;
+}
+
+/**
  * Build a well-formed NamedRecipe from a name + component rows using a
  * deterministic, name-slug id (prefixed so dough and sauce ids never collide,
  * and so re-importing/re-migrating the same name targets the same recipe instead

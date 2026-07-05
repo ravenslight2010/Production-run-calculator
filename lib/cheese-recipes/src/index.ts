@@ -353,6 +353,44 @@ export function repointCheeseRecipesForFlavorMerge(
   return changed;
 }
 
+// Re-point cheese-recipe COMPONENT ingredient names when an ingredient is merged
+// in the Merge tool. Cheese recipes are server-backed master-data (NOT part of
+// day-state sync), so an ingredient merge — which only rewrites local
+// lists/presets/runs — leaves the server recipes naming the merged-away
+// ingredient, and it resurfaces when a run hydrates its rows from the pool.
+// Rewrites each matching component's `ingredient` to the target; rows are NOT
+// combined (both rows are kept so total weight is preserved exactly, mirroring
+// mergeRecipeRows). Returns ONLY the recipes that changed, matched
+// case-insensitively.
+export function repointCheeseRecipeIngredients(
+  recipes: ReadonlyArray<CheeseRecipe>,
+  sources: ReadonlyArray<string>,
+  target: string,
+): CheeseRecipe[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    if (!r.components.some((c) => srcSet.has(c.ingredient.trim().toLowerCase())))
+      continue;
+    changed.push({
+      ...r,
+      components: r.components.map((c) =>
+        srcSet.has(c.ingredient.trim().toLowerCase())
+          ? { ...c, ingredient: tgt }
+          : c,
+      ),
+    });
+  }
+  return changed;
+}
+
 // ---------------------------------------------------------------------------
 // List browsing (search + brand grouping for the settings UI)
 // ---------------------------------------------------------------------------

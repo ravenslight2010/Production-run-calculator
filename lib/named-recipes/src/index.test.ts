@@ -7,8 +7,53 @@ import {
   sortNamedRecipesByName,
   namedRecipeFromDraft,
   addNamedRecipesIfAbsentByName,
+  repointNamedRecipeIngredients,
   type NamedRecipe,
 } from "./index";
+
+function makeNamed(over: Partial<NamedRecipe> = {}): NamedRecipe {
+  return {
+    id: over.id ?? "r1",
+    name: over.name ?? "Dough A",
+    notes: over.notes ?? "",
+    components: over.components ?? [],
+    enabled: over.enabled ?? true,
+    ...(over.scope !== undefined ? { scope: over.scope } : {}),
+  };
+}
+
+describe("repointNamedRecipeIngredients", () => {
+  it("rewrites matching component ingredient names (case-insensitive) and returns only changed recipes", () => {
+    const recipes = [
+      makeNamed({ id: "1", components: [{ ingredient: "Flour", lbs: 50 }, { ingredient: "Water", lbs: 30 }] }),
+      makeNamed({ id: "2", components: [{ ingredient: "Yeast", lbs: 1 }] }),
+    ];
+    const changed = repointNamedRecipeIngredients(recipes, ["flour"], "Bread Flour");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].id).toBe("1");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Bread Flour", lbs: 50 },
+      { ingredient: "Water", lbs: 30 },
+    ]);
+  });
+
+  it("keeps both rows (no combine) to preserve total weight", () => {
+    const recipes = [makeNamed({ id: "1", components: [{ ingredient: "Flour", lbs: 50 }, { ingredient: "Bread Flour", lbs: 20 }] })];
+    const changed = repointNamedRecipeIngredients(recipes, ["Flour"], "Bread Flour");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Bread Flour", lbs: 50 },
+      { ingredient: "Bread Flour", lbs: 20 },
+    ]);
+    expect(namedRecipeTotalLbs(changed[0])).toBe(70);
+  });
+
+  it("returns [] for no matches, empty target, or a source equal to the target", () => {
+    const recipes = [makeNamed({ id: "1", components: [{ ingredient: "Flour", lbs: 50 }] })];
+    expect(repointNamedRecipeIngredients(recipes, ["Water"], "Warm Water")).toEqual([]);
+    expect(repointNamedRecipeIngredients(recipes, ["Flour"], "   ")).toEqual([]);
+    expect(repointNamedRecipeIngredients(recipes, ["Flour"], "Flour")).toEqual([]);
+  });
+});
 
 describe("normalizeNamedRecipe", () => {
   it("returns null without a usable name", () => {

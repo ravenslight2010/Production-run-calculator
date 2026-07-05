@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
+  repointMixIngredients,
   type Mix,
 } from "./index";
 
@@ -60,5 +61,37 @@ describe("repointMixesForFlavorMerge", () => {
     expect(repointMixesForFlavorMerge(mixes, "   ", ["Pep"], "Pepperoni")).toEqual([]);
     expect(repointMixesForFlavorMerge(mixes, "Bobo", ["Pep"], "   ")).toEqual([]);
     expect(repointMixesForFlavorMerge(mixes, "Bobo", ["Pep"], "Pep")).toEqual([]);
+  });
+});
+
+describe("repointMixIngredients", () => {
+  it("rewrites matching component ingredient names (case-insensitive) and returns only changed mixes", () => {
+    const mixes = [
+      make({ id: "1", components: [{ ingredient: "Mozz", perPizza: 2 }, { ingredient: "Sauce", perPizza: 1 }] }),
+      make({ id: "2", components: [{ ingredient: "Cheddar", perPizza: 3 }] }),
+    ];
+    const changed = repointMixIngredients(mixes, ["mozz"], "Mozzarella");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].id).toBe("1");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Mozzarella", perPizza: 2 },
+      { ingredient: "Sauce", perPizza: 1 },
+    ]);
+  });
+
+  it("keeps both rows (no combine) when two components collapse to the same target", () => {
+    const mixes = [make({ id: "1", components: [{ ingredient: "Mozz", perPizza: 2 }, { ingredient: "Mozzarella", perPizza: 3 }] })];
+    const changed = repointMixIngredients(mixes, ["Mozz"], "Mozzarella");
+    expect(changed[0].components).toEqual([
+      { ingredient: "Mozzarella", perPizza: 2 },
+      { ingredient: "Mozzarella", perPizza: 3 },
+    ]);
+  });
+
+  it("returns [] for no matches, empty target, or a source equal to the target", () => {
+    const mixes = [make({ id: "1", components: [{ ingredient: "Mozz", perPizza: 2 }] })];
+    expect(repointMixIngredients(mixes, ["Onion"], "Onions")).toEqual([]);
+    expect(repointMixIngredients(mixes, ["Mozz"], "   ")).toEqual([]);
+    expect(repointMixIngredients(mixes, ["Mozz"], "Mozz")).toEqual([]);
   });
 });
