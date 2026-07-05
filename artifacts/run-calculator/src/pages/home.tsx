@@ -368,6 +368,8 @@ import CheeseImportDialog from "@/components/CheeseImportDialog";
 import { prepareCheeseImport, commitCheeseImport, MAX_CHEESE_IMPORT_FILES, type CheeseImportPrepared } from "@/cheeseImport";
 import { useCheeseRecipes } from "@/hooks/useCheeseRecipes";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
+import { repointCheeseRecipesForBrandMerge } from "@workspace/cheese-recipes";
+import { fetchCheeseRecipes, saveCheeseRecipes } from "@/cheeseRecipes";
 import NamedRecipesManager from "@/components/NamedRecipesManager";
 import { useNamedRecipes } from "@/hooks/useNamedRecipes";
 import { addNamedRecipesToServerIfAbsent } from "@/namedRecipes";
@@ -3899,6 +3901,21 @@ export default function Home() {
         });
       } catch {
         // Non-fatal: tombstones are persisted locally.
+      }
+      // Cheese recipes are server-backed master-data (NOT in day-state sync), so
+      // a brand merge won't touch them — re-point any that still name a
+      // merged-away brand so they stop showing under the old heading in the
+      // Cheese Recipes manager.
+      if (mergeBfMode === "brands") {
+        try {
+          const changed = repointCheeseRecipesForBrandMerge(await fetchCheeseRecipes(), srcs, tgt);
+          if (changed.length > 0) {
+            const saved = await saveCheeseRecipes(changed);
+            cycleCountQc.setQueryData(["cheeseRecipes"], saved);
+          }
+        } catch {
+          // Non-fatal: the brand merge itself already succeeded.
+        }
       }
       resetMergeForm();
       const label = mergeBfMode === "brands" ? "brand" : "flavor";

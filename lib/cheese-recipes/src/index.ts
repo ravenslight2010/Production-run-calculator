@@ -284,6 +284,35 @@ export function mergeCheeseRecipes(
   return order.map((id) => byId.get(id)!).filter(Boolean);
 }
 
+// Re-point cheese recipes when brands are merged. Cheese recipes are
+// server-backed master-data (their own table, NOT part of day-state sync), so a
+// brand merge — which only rewrites local brand/flavor lists and today's runs —
+// leaves them naming the merged-away brand, and they keep showing under the old
+// heading in the Cheese Recipes manager. Returns ONLY the recipes whose brand
+// changed (with `brand` rewritten to the target), so the caller can upsert just
+// those.
+export function repointCheeseRecipesForBrandMerge(
+  recipes: ReadonlyArray<CheeseRecipe>,
+  sources: ReadonlyArray<string>,
+  target: string,
+): CheeseRecipe[] {
+  const tgt = target.trim();
+  if (!tgt) return [];
+  const srcSet = new Set(
+    sources
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s && s !== tgt.toLowerCase()),
+  );
+  if (srcSet.size === 0) return [];
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    if (srcSet.has(r.brand.trim().toLowerCase())) {
+      changed.push({ ...r, brand: tgt });
+    }
+  }
+  return changed;
+}
+
 // ---------------------------------------------------------------------------
 // List browsing (search + brand grouping for the settings UI)
 // ---------------------------------------------------------------------------

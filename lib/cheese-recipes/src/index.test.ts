@@ -8,6 +8,7 @@ import {
   addCheeseRecipesIfAbsentByName,
   specCheeseDraftToRecipe,
   mergeCheeseRecipes,
+  repointCheeseRecipesForBrandMerge,
   cheeseRecipeMatchesQuery,
   groupCheeseRecipesByBrand,
   type CheeseRecipe,
@@ -221,6 +222,30 @@ describe("mergeCheeseRecipes", () => {
     );
     expect(merged.map((r) => r.id)).toEqual(["a", "b", "c"]);
     expect(merged[0].name).toBe("new");
+  });
+});
+
+describe("repointCheeseRecipesForBrandMerge", () => {
+  it("rewrites the brand of recipes naming a merged-away source (case-insensitive)", () => {
+    const recipes = [
+      make({ id: "1", brand: "Bobo Pizza", name: "A" }),
+      make({ id: "2", brand: "bobo's", name: "B" }),
+      make({ id: "3", brand: "Other Co", name: "C" }),
+    ];
+    const changed = repointCheeseRecipesForBrandMerge(recipes, ["Bobo Pizza", "Bobo's"], "Bobo");
+    expect(changed.map((r) => r.id)).toEqual(["1", "2"]);
+    expect(changed.every((r) => r.brand === "Bobo")).toBe(true);
+  });
+
+  it("returns nothing when no recipe names a source, or the target is empty", () => {
+    const recipes = [make({ id: "1", brand: "Alpha" })];
+    expect(repointCheeseRecipesForBrandMerge(recipes, ["Zeta"], "Beta")).toEqual([]);
+    expect(repointCheeseRecipesForBrandMerge(recipes, ["Alpha"], "   ")).toEqual([]);
+  });
+
+  it("ignores a source equal to the target (nothing to move)", () => {
+    const recipes = [make({ id: "1", brand: "Alpha" })];
+    expect(repointCheeseRecipesForBrandMerge(recipes, ["Alpha"], "Alpha")).toEqual([]);
   });
 });
 

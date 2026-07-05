@@ -91,6 +91,8 @@ import {
   type CheeseImportPrepared,
 } from "@/context/cheeseImport";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
+import { repointCheeseRecipesForBrandMerge } from "@workspace/cheese-recipes";
+import { fetchCheeseRecipes, saveCheeseRecipes } from "@/context/cheeseRecipes";
 import type { Mix } from "@workspace/mixes";
 import {
   fetchSavedSpecSheets,
@@ -288,6 +290,24 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     mergeBrands,
     mergeFlavors,
   } = useRun();
+  const qc = useQueryClient();
+
+  // Cheese recipes are server-backed master-data (NOT in day-state sync), so a
+  // brand merge — which only rewrites local brand/flavor lists and today's runs
+  // — won't touch them. Re-point any that still name a merged-away brand so they
+  // stop showing under the old heading in the Cheese Recipes manager (web
+  // parity: home.tsx handleApplyBrandFlavorMerge).
+  const repointCheeseForBrandMerge = async (srcs: string[], tgt: string) => {
+    try {
+      const changed = repointCheeseRecipesForBrandMerge(await fetchCheeseRecipes(), srcs, tgt);
+      if (changed.length > 0) {
+        const saved = await saveCheeseRecipes(changed);
+        qc.setQueryData(["cheeseRecipes"], saved);
+      }
+    } catch {
+      // Non-fatal: the brand merge itself already succeeded.
+    }
+  };
 
   const [sources, setSources] = useState<string[]>([]);
   const [target, setTarget] = useState("");
@@ -551,8 +571,10 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setError("");
     try {
       if (category === "brandflavor") {
-        if (bfMode === "brands") mergeBrands(srcs, s.target);
-        else mergeFlavors(bfBrand, srcs, s.target);
+        if (bfMode === "brands") {
+          mergeBrands(srcs, s.target);
+          await repointCheeseForBrandMerge(srcs, s.target);
+        } else mergeFlavors(bfBrand, srcs, s.target);
       } else {
         await mergeIngredients(srcs, s.target, suggestScope.category);
       }
@@ -596,8 +618,10 @@ function MergeManager({ autoSuggest = 0 }: { autoSuggest?: number }) {
     setError("");
     try {
       if (category === "brandflavor") {
-        if (bfMode === "brands") mergeBrands(sources, target);
-        else mergeFlavors(bfBrand, sources, target);
+        if (bfMode === "brands") {
+          mergeBrands(sources, target);
+          await repointCheeseForBrandMerge(sources, target);
+        } else mergeFlavors(bfBrand, sources, target);
       } else {
         await mergeIngredients(sources, target, suggestScope.category);
       }
