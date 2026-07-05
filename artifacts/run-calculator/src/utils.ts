@@ -5,7 +5,7 @@ import { withSubstitutions } from "./substitutionState";
 
 // Pure helper (no per-app injection) re-exported so web call sites keep the
 // single `../utils` import boundary; the formula lives in @workspace/inventory-math.
-export { computeCheesePull } from "@workspace/inventory-math";
+export { computeCheesePull, computeCheesePerPizzaOz } from "@workspace/inventory-math";
 
 export function fmtElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);

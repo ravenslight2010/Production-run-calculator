@@ -6,6 +6,7 @@ import {
   computeRunConsumptionLines,
   computeSummaryStats,
   computeCheesePull,
+  computeCheesePerPizzaOz,
   aggregateRunDemand,
   computeTransferNeeds,
   computeReorderList,
@@ -669,5 +670,63 @@ describe("computeCheesePull", () => {
       { ingredient: "Cheddar", lbs: 0 },
     ]);
     expect(pull.totalLbs).toBe(40);
+  });
+});
+
+describe("computeCheesePerPizzaOz", () => {
+  it("returns no rows and zero total for an empty/undefined recipe", () => {
+    expect(computeCheesePerPizzaOz(undefined, 2.9)).toEqual({ rows: [], totalOz: 0 });
+    expect(computeCheesePerPizzaOz([], 2.9)).toEqual({ rows: [], totalOz: 0 });
+  });
+
+  it("splits the applicator oz/pizza across components by their batch share", () => {
+    const res = computeCheesePerPizzaOz(
+      [
+        { ingredient: "Whole Mozzarella", lbs: 40 },
+        { ingredient: "Provolone", lbs: 10 },
+      ],
+      3,
+    );
+    // 40/50 and 10/50 of 3 oz.
+    expect(res.rows[0]).toBeCloseTo(2.4, 10);
+    expect(res.rows[1]).toBeCloseTo(0.6, 10);
+    expect(res.totalOz).toBeCloseTo(3, 10);
+  });
+
+  it("total always equals ozPerPizza when the batch has weight", () => {
+    const res = computeCheesePerPizzaOz(
+      [
+        { ingredient: "A", lbs: 33 },
+        { ingredient: "B", lbs: 17 },
+        { ingredient: "C", lbs: 7 },
+      ],
+      2.9,
+    );
+    expect(res.totalOz).toBeCloseTo(2.9, 10);
+  });
+
+  it("yields all-zero rows when the batch has no weight", () => {
+    const res = computeCheesePerPizzaOz(
+      [
+        { ingredient: "A", lbs: 0 },
+        { ingredient: "B", lbs: 0 },
+      ],
+      2.9,
+    );
+    expect(res.rows).toEqual([0, 0]);
+    expect(res.totalOz).toBe(0);
+  });
+
+  it("coerces a missing/negative/NaN oz to 0 and stays index-aligned", () => {
+    expect(computeCheesePerPizzaOz([{ ingredient: "A", lbs: 10 }], -5).rows).toEqual([0]);
+    expect(computeCheesePerPizzaOz([{ ingredient: "A", lbs: 10 }], NaN).rows).toEqual([0]);
+    const res = computeCheesePerPizzaOz(
+      [
+        { ingredient: "A", lbs: 10 },
+        { ingredient: "" } as unknown as { ingredient: string; lbs: number },
+      ],
+      4,
+    );
+    expect(res.rows.length).toBe(2);
   });
 });

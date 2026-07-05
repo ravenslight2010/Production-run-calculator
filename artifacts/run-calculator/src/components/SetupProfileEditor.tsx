@@ -314,6 +314,7 @@ export default function SetupProfileEditor({
             embedded
             label={type || APPLICATOR_LABELS[app]}
             batches={0}
+            ozPerPizza={Number((v[ozKey] as number) ?? 0)}
             recipe={recipe}
             recipeName={(v[nameKey] as string) ?? ""}
             recipeNameOptions={cheeseNamesForRun(brand, flavor)}

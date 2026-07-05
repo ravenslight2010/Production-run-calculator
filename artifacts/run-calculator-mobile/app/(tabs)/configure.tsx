@@ -1083,6 +1083,7 @@ export default function ConfigureScreen() {
                     </Text>
                     <RecipeEditor
                       rows={rows}
+                      unit="oz"
                       onChange={(r) =>
                         updateSettings({ [recipeKey]: r } as Partial<RunSettings>)
                       }
@@ -1194,6 +1195,7 @@ export default function ConfigureScreen() {
                     ) : (
                       <ReadOnlyRecipe
                         rows={rows}
+                        ozPerPizza={Number(form[ozKey]) || 0}
                         emptyText={
                           recipeName.trim()
                             ? "This cheese recipe has no ingredients yet. A manager can edit it under Manage Lists → Cheese Recipes."

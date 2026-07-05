@@ -16,6 +16,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { FONTS } from "@/constants/fonts";
 import type { RecipeRow } from "@/context/RunContext";
+import { computeCheesePerPizzaOz } from "@workspace/inventory-math";
 
 export function MetricCard({
   label,
@@ -760,6 +761,7 @@ export function RecipeEditor({
   onAddIngredient,
   onRemoveIngredient,
   batchScale = false,
+  unit = "lbs",
 }: {
   rows: RecipeRow[];
   onChange: (rows: RecipeRow[]) => void;
@@ -778,6 +780,9 @@ export function RecipeEditor({
   onAddIngredient?: (v: string) => void;
   onRemoveIngredient?: (v: string) => void;
   batchScale?: boolean;
+  // Per-row/total weight unit label. Mixes store per-pizza OZ (not lbs), so the
+  // mix applicator passes unit="oz" to match the web mix card. Defaults to lbs.
+  unit?: string;
 }) {
   const colors = useColors();
   const total = rows.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
@@ -1007,7 +1012,7 @@ export function RecipeEditor({
             </View>
           )}
           <Text style={[recipeStyles.lbsUnit, { color: colors.mutedForeground }]}>
-            lbs
+            {unit}
           </Text>
           {effScale === 1 ? (
             <Pressable onPress={() => removeRow(i)} hitSlop={6}>
@@ -1037,7 +1042,7 @@ export function RecipeEditor({
           {effectiveLabel}
         </Text>
         <Text style={[recipeStyles.totalValue, { color: colors.primary }]}>
-          {total > 0 ? `${(total * effScale).toFixed(1)} lbs` : "—"}
+          {total > 0 ? `${(total * effScale).toFixed(1)} ${unit}` : "—"}
         </Text>
       </View>
     </View>
@@ -1048,10 +1053,15 @@ export function ReadOnlyRecipe({
   rows,
   emptyText = "No recipe configured. Add ingredients in Setup.",
   scalable = false,
+  ozPerPizza,
 }: {
   rows: RecipeRow[];
   emptyText?: string;
   scalable?: boolean;
+  // When provided (cheese/mix cards), shows a per-ingredient "Oz / Pizza"
+  // column whose total equals the applicator's set Oz/Pizza. Optional so the
+  // generic sauce/dough/setup usages stay a plain Ingredient | Lbs table.
+  ozPerPizza?: number;
 }) {
   const colors = useColors();
   // Batch-size scaler: shows the recipe weights at a different batch size.
@@ -1067,6 +1077,12 @@ export function ReadOnlyRecipe({
     (r) => (r.ingredient ?? "").trim() !== "" || (Number(r.lbs) || 0) > 0,
   );
   const total = filtered.reduce((s, r) => s + (Number(r.lbs) || 0), 0);
+  const showOz = typeof ozPerPizza === "number";
+  // Index-aligned with `filtered` (computed on the same array), so per-row oz
+  // lines up and the column total equals the applicator's Oz/Pizza.
+  const perPizzaOz = showOz
+    ? computeCheesePerPizzaOz(filtered, ozPerPizza as number)
+    : null;
   if (filtered.length === 0) {
     return (
       <Text style={[roStyles.empty, { color: colors.mutedForeground }]}>
@@ -1116,7 +1132,17 @@ export function ReadOnlyRecipe({
         <Text style={[roStyles.headIng, { color: colors.mutedForeground }]}>
           INGREDIENT
         </Text>
-        <Text style={[roStyles.headLbs, { color: colors.mutedForeground }]}>
+        {showOz ? (
+          <Text style={[roStyles.headNum, { color: colors.mutedForeground }]}>
+            OZ / PIZZA
+          </Text>
+        ) : null}
+        <Text
+          style={[
+            showOz ? roStyles.headNum : roStyles.headLbs,
+            { color: colors.mutedForeground },
+          ]}
+        >
           LBS / BATCH
         </Text>
       </View>
@@ -1128,7 +1154,17 @@ export function ReadOnlyRecipe({
           <Text style={[roStyles.ing, { color: colors.foreground }]}>
             {r.ingredient || "—"}
           </Text>
-          <Text style={[roStyles.lbs, { color: colors.foreground }]}>
+          {showOz ? (
+            <Text style={[roStyles.numCol, { color: colors.foreground }]}>
+              {(perPizzaOz?.rows[i] ?? 0).toFixed(2)}
+            </Text>
+          ) : null}
+          <Text
+            style={[
+              showOz ? roStyles.numCol : roStyles.lbs,
+              { color: colors.foreground },
+            ]}
+          >
             {((Number(r.lbs) || 0) * scale).toFixed(1)}
           </Text>
         </View>
@@ -1137,7 +1173,17 @@ export function ReadOnlyRecipe({
         <Text style={[roStyles.totalLabel, { color: colors.mutedForeground }]}>
           Total / Batch
         </Text>
-        <Text style={[roStyles.totalValue, { color: colors.foreground }]}>
+        {showOz ? (
+          <Text style={[roStyles.numCol, roStyles.totalOz, { color: colors.foreground }]}>
+            {(perPizzaOz?.totalOz ?? 0).toFixed(2)} oz
+          </Text>
+        ) : null}
+        <Text
+          style={[
+            showOz ? roStyles.numCol : roStyles.totalValue,
+            { color: showOz ? colors.mutedForeground : colors.foreground },
+          ]}
+        >
           {(total * scale).toFixed(1)} lbs
         </Text>
       </View>
@@ -1167,8 +1213,9 @@ const roStyles = StyleSheet.create({
     marginBottom: 4,
     paddingHorizontal: 2,
   },
-  headIng: { fontSize: 10, fontFamily: FONTS.bold, letterSpacing: 0.6 },
+  headIng: { fontSize: 10, flex: 1, fontFamily: FONTS.bold, letterSpacing: 0.6 },
   headLbs: { fontSize: 10, fontFamily: FONTS.bold, letterSpacing: 0.6 },
+  headNum: { fontSize: 10, width: 74, textAlign: "right", fontFamily: FONTS.bold, letterSpacing: 0.6 },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1179,6 +1226,8 @@ const roStyles = StyleSheet.create({
   },
   ing: { fontSize: 14, flex: 1, paddingRight: 8, fontFamily: FONTS.regular },
   lbs: { fontSize: 14, fontFamily: FONTS.mono, fontVariant: ["tabular-nums"] },
+  numCol: { fontSize: 14, width: 74, textAlign: "right", fontFamily: FONTS.mono, fontVariant: ["tabular-nums"] },
+  totalOz: { fontFamily: FONTS.monoBold },
   totalRow: {
     flexDirection: "row",
     justifyContent: "space-between",

@@ -60,6 +60,7 @@ import {
   fmtClock,
   computeSummaryStats,
   computeCheesePull,
+  computeCheesePerPizzaOz,
   sauceBarrelBreakdown,
   genId,
   todayStr,
@@ -878,6 +879,7 @@ function CheeseRecipeCard({
 export function CheesePickCard({
   label,
   batches,
+  ozPerPizza,
   recipe,
   recipeName,
   recipeNameOptions,
@@ -889,6 +891,9 @@ export function CheesePickCard({
 }: {
   label: string;
   batches: number;
+  // The applicator's set Oz/Pizza for this blend. Drives the per-ingredient
+  // "Oz / Pizza" column so its total lines up with what the operator entered.
+  ozPerPizza: number;
   recipe: RecipeRow[];
   recipeName: string;
   recipeNameOptions: string[];
@@ -907,6 +912,10 @@ export function CheesePickCard({
   // run's existing batch count so these numbers can never drift from the batch
   // and total-lbs figures on the card. Shared with mobile via @workspace/inventory-math.
   const pull = computeCheesePull(recipe, batches);
+  // Per-pizza ounces of each component: the applicator's Oz/Pizza split across
+  // ingredients by their share of the batch pounds, so the column total equals
+  // the operator's set Oz/Pizza. Shared with mobile via @workspace/inventory-math.
+  const perPizzaOz = computeCheesePerPizzaOz(recipe, ozPerPizza);
   // Always include the currently-picked name so a recipe assigned to another
   // brand/flavor (or since disabled) still shows instead of silently clearing.
   const options =
@@ -960,8 +969,9 @@ export function CheesePickCard({
         )
       ) : (
         <div className="w-full mb-1">
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mb-1 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 mb-1 px-1">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Oz<span className="hidden sm:inline"> / Pizza</span></span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs<span className="hidden sm:inline"> / Batch</span></span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Pull<span className="hidden sm:inline"> / Run</span></span>
           </div>
@@ -969,18 +979,20 @@ export function CheesePickCard({
             {recipe.map((row, idx) => {
               const rowLbs = Number(row.lbs ?? 0);
               return (
-                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 items-center">
+                <div key={idx} className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 items-center">
                   <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm flex items-center truncate text-foreground/90">{row.ingredient || "—"}</div>
+                  <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(perPizzaOz.rows[idx] ?? 0, 2)}</div>
                   <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(rowLbs, 1)}</div>
                   <div className="h-8 px-1.5 sm:px-2 rounded bg-muted/20 border border-border/20 text-xs sm:text-sm text-right font-mono flex items-center justify-end text-foreground/80">{fmtNum(pull.rows[idx].lbs, 1)}</div>
                 </div>
               );
             })}
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_76px_76px] gap-x-1 sm:grid-cols-[1fr_110px_110px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+          <div className="grid grid-cols-[minmax(0,1fr)_54px_54px_54px] gap-x-1 sm:grid-cols-[1fr_88px_88px_88px] sm:gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
             <span className="text-xs font-semibold text-muted-foreground">Total</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(perPizzaOz.totalOz, 2)} oz</span>
             <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(totalLbsPerBatch, 1)} lbs</span>
-            <span className="text-xs font-mono text-right font-semibold text-foreground">{fmtNum(pull.totalLbs, 1)} lbs</span>
+            <span className="text-xs font-mono text-right text-muted-foreground">{fmtNum(pull.totalLbs, 1)} lbs</span>
           </div>
         </div>
       )}
@@ -12959,6 +12971,7 @@ export default function Home() {
                           embedded
                           label={v.app1Type || "Applicator 1"}
                           batches={calc.app1Batches}
+                          ozPerPizza={v.app1OzPerPizza}
                           recipe={v.app1CheeseRecipe ?? []}
                           recipeName={v.app1CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
@@ -13023,6 +13036,7 @@ export default function Home() {
                           embedded
                           label={v.app2Type || "Applicator 2"}
                           batches={calc.app2Batches}
+                          ozPerPizza={v.app2OzPerPizza}
                           recipe={v.app2CheeseRecipe ?? []}
                           recipeName={v.app2CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
@@ -13087,6 +13101,7 @@ export default function Home() {
                           embedded
                           label={v.app3Type || "Applicator 3"}
                           batches={calc.app3Batches}
+                          ozPerPizza={v.app3OzPerPizza}
                           recipe={v.app3CheeseRecipe ?? []}
                           recipeName={v.app3CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
@@ -13151,6 +13166,7 @@ export default function Home() {
                           embedded
                           label={v.app4Type || "Applicator 4"}
                           batches={calc.app4Batches}
+                          ozPerPizza={v.app4OzPerPizza}
                           recipe={v.app4CheeseRecipe ?? []}
                           recipeName={v.app4CheeseRecipeName ?? ""}
                           recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}

@@ -220,6 +220,28 @@ export function computeCheesePull(
   return { rows, totalLbs };
 }
 
+// Per-pizza ounces of each blend component, so a recipe card can show how the
+// applicator's set Oz/Pizza is split across ingredients. Each component's share
+// of the batch pounds (rowLbs / totalBatchLbs) is applied to the applicator's
+// oz/pizza; the returned rows are index-aligned with the input recipe and their
+// sum equals ozPerPizza (when the batch has weight), so the card total lines up
+// with the operator's "Oz Per Pizza" field. Shared so web + mobile can't drift.
+export interface CheesePerPizzaOz {
+  rows: number[];
+  totalOz: number;
+}
+export function computeCheesePerPizzaOz(
+  recipe: readonly RecipeRow[] | undefined,
+  ozPerPizza: number,
+): CheesePerPizzaOz {
+  const lbs = (recipe ?? []).map((r) => Number(r.lbs ?? 0));
+  const totalLbs = lbs.reduce((s, l) => s + l, 0);
+  const oz = Number.isFinite(ozPerPizza) ? Math.max(0, ozPerPizza) : 0;
+  const rows = lbs.map((l) => (totalLbs > 0 ? (l / totalLbs) * oz : 0));
+  const totalOz = rows.reduce((s, v) => s + v, 0);
+  return { rows, totalOz };
+}
+
 // ── Per-run consumption mapping ──────────────────────────────────────────────
 // Mirrors the warehouse roll-up (aggregateNeedRows + aggregatePackagingNeeds in
 // the web home screen) so inventory item keys line up exactly with production
