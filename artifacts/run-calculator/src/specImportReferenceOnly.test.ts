@@ -67,7 +67,18 @@ describe("applySpecImport referenceOnly recipes", () => {
     saveList(DOUGH_RECIPE_NAMES_KEY, ["House Dough"]);
 
     const imp: ParsedSpecImport = {
-      profiles: [{ brand: "Corner Booth", flavor: "PLAIN", applicators: [], pepperonis: [] }],
+      // The profile carries a real (non-dough) topping so it persists: a
+      // dough recipe ALONE is intentionally not "real" data (ghost-profile
+      // prevention — see doughOnlyProfileGhost.test.ts). This test's point is
+      // that the referenceOnly tie uses the LIBRARY rows, not the sheet rows.
+      profiles: [
+        {
+          brand: "Corner Booth",
+          flavor: "PLAIN",
+          applicators: [{ type: "Diced Pepperoni", ozPerPizza: 0.5 }],
+          pepperonis: [],
+        },
+      ],
       recipes: [
         {
           kind: "dough",
