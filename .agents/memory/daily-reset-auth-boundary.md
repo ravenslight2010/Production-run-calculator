@@ -4,10 +4,25 @@ description: How stateless sessions are force-expired at the daily midnight rese
 ---
 
 Sessions are stateless HMAC tokens (30-day exp). "Stay logged in until the daily
-reset signs everyone out" is enforced by reusing the existing `resetAt` (ms) on
-today's `daily_sync` row (`data.dayState.resetAt`) as a **session boundary**: a
-token whose issued-at predates the latest reset is rejected server-side, so it
-applies to every device — not just the one that detected midnight.
+reset signs everyone out" is enforced by a **session boundary** on today's
+`daily_sync` row: a token whose issued-at predates the latest reset is rejected
+server-side, so it applies to every device — not just the one that detected
+midnight.
+
+**The fence reads `dayState.resetBoundaryAt`, NOT `dayState.resetAt`.** These
+diverged because `resetAt` is client-LOCAL-date keyed but the fence reads the
+SERVER-UTC "today" row (`getSessionBoundaryMs` uses server `todayStr()`), while
+writes/rollover key on the client's `?today=`. West-of-UTC user in the evening:
+their local date is D-1 but the server is already on D, so their scheduled
+"tomorrow" (D) IS the server's UTC today. `writeDayResetAt(future)` stamps
+`resetAt=now` on that D row (harmless override for scheduling), but the fence read
+that row and force-logged-out the whole shift ~2h early ("reset fires before local
+midnight"). Fix: split the concern. `resetAt` still drives `protectRunValues`
+wholesale-adopt (unchanged). A NEW server-derived `resetBoundaryAt` is the fence,
+set by `applyResetBoundary` in `routes/sync.ts` ONLY when the written row's
+`date === clientToday` (a genuine same-day reset); future/past writes never set or
+advance it. Server-authoritative (ignores any client-echoed value). Repro test:
+`sessionBoundary.integration.test.ts` "cross-UTC daily-reset fence".
 
 **Server:** tokens carry `iat`; `verifyToken` returns `{ sub, iat }`. requireAuth
 (now async) 401s when `boundaryMs > 0 && (iat + 1) * 1000 <= boundaryMs`. Boundary

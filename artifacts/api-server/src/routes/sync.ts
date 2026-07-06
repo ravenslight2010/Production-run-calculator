@@ -91,7 +91,48 @@ function isUniqueViolation(e: unknown): boolean {
 // a unique-violation (23505) and we retry — the row now exists, FOR UPDATE locks
 // it, and we merge against it instead of overwriting. Returns the merged payload
 // that was actually written so callers broadcast the same state peers will read.
-async function upsertProtected(date: string, scope: Scope, payload: unknown): Promise<unknown> {
+//
+// The daily-reset SESSION FENCE (see sessionBoundary.getSessionBoundaryMs) reads
+// `dayState.resetBoundaryAt`, NOT `dayState.resetAt`. They mean different things:
+//   - `resetAt` is advanced on FUTURE-day writes too, purely to trigger the
+//     wholesale-adopt merge (protectRunValues) when a scheduled day is
+//     (re)written. It is keyed to the client's LOCAL calendar, so a user behind
+//     UTC stamps their "tomorrow" — which can equal the SERVER's UTC "today". If
+//     the fence read `resetAt`, that future-day override would look like today's
+//     reset and log the whole shift out hours before their real local midnight.
+//   - `resetBoundaryAt` is set ONLY when a row is written as the writer's ACTUAL
+//     current local day (target date === the client's `today`). So only a genuine
+//     same-day rollover can ever fence sessions; a future/past write cannot.
+// Derived server-side (never trusted from the client payload) so the fence stays
+// authoritative regardless of what a client echoes back.
+function applyResetBoundary(
+  merged: unknown,
+  existingData: unknown,
+  isCurrentDay: boolean,
+): void {
+  if (!merged || typeof merged !== "object") return;
+  const day = (merged as { dayState?: Record<string, unknown> }).dayState;
+  if (!day || typeof day !== "object") return;
+  if (isCurrentDay) {
+    const resetAt = day.resetAt;
+    if (typeof resetAt === "number" && resetAt > 0) day.resetBoundaryAt = resetAt;
+    else delete day.resetBoundaryAt;
+  } else {
+    // A future- (or past-) dated write must never establish or advance the fence.
+    // Preserve any boundary a genuine same-day write already recorded on this row.
+    const prev = (existingData as { dayState?: { resetBoundaryAt?: unknown } } | null | undefined)
+      ?.dayState?.resetBoundaryAt;
+    if (typeof prev === "number" && prev > 0) day.resetBoundaryAt = prev;
+    else delete day.resetBoundaryAt;
+  }
+}
+
+async function upsertProtected(
+  date: string,
+  scope: Scope,
+  payload: unknown,
+  clientTodayDate: string,
+): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     try {
       return await db.transaction(async (tx) => {
@@ -101,6 +142,7 @@ async function upsertProtected(date: string, scope: Scope, payload: unknown): Pr
           .where(and(eq(dailySyncTable.date, date), eq(dailySyncTable.scope, scope)))
           .for("update");
         const merged = protectRunValues(payload, existing?.data);
+        applyResetBoundary(merged, existing?.data, date === clientTodayDate);
         if (existing) {
           await tx
             .update(dailySyncTable)
@@ -159,7 +201,7 @@ router.put("/sync/today", async (req: Request, res: Response): Promise<void> => 
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic read-merge-write so an incoming empty-with-real-stamp push can't wipe a
   // populated stored run value (see upsertProtected / protectRunValues).
-  const merged = await upsertProtected(today, scope, payload);
+  const merged = await upsertProtected(today, scope, payload, today);
   // Broadcast the merged result (not the raw push) so peers converge on the same
   // protected state the row was written with.
   broadcast(merged, senderId, scope, today);
@@ -255,7 +297,7 @@ router.put("/sync/:date", async (req: Request<{ date: string }>, res: Response):
   if (staleEpoch !== null) { res.json({ ok: true, stale: true, epoch: staleEpoch }); return; }
   // Atomic per-run protective merge (see /sync/today): an empty run value can't
   // clobber a populated stored one on scheduled days either.
-  const merged = await upsertProtected(date, scope, payload);
+  const merged = await upsertProtected(date, scope, payload, clientToday(req));
   // Broadcast to live SSE clients when writing today's date (supports same-day
   // watchers). "Today" is the client's local date, matching /sync/today's keying.
   if (date === clientToday(req)) {

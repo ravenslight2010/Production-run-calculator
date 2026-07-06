@@ -2,11 +2,20 @@ import { db, dailySyncTable } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 
 // The daily reset doubles as a session boundary: when a client performs the
-// midnight rollover it advances `dayState.resetAt` on today's `daily_sync` row
-// (via the sync endpoints). Any auth token issued before that timestamp is
-// treated as signed out, so the whole shift is forced to re-authenticate for the
-// new production day — enforced here, server-side, so it applies to every device
+// midnight rollover it records the reset on today's `daily_sync` row (via the
+// sync endpoints). Any auth token issued before that timestamp is treated as
+// signed out, so the whole shift is forced to re-authenticate for the new
+// production day — enforced here, server-side, so it applies to every device
 // regardless of which one detected midnight.
+//
+// We read the fence from `dayState.resetBoundaryAt`, NOT `dayState.resetAt`.
+// `resetAt` is also stamped on FUTURE-day writes (to trigger the scheduling
+// wholesale-adopt merge) and is keyed to the CLIENT's local calendar — so a user
+// behind UTC stamps their "tomorrow", which can equal the SERVER's UTC "today".
+// Reading `resetAt` here therefore logged the whole shift out hours before their
+// real local midnight. `resetBoundaryAt` is set (server-side) ONLY when a row is
+// written as the writer's actual current local day, so only a genuine same-day
+// rollover can fence sessions (see applyResetBoundary in routes/sync.ts).
 //
 // We read only today's row (primary-key lookup) and cache the value briefly so
 // requireAuth, which runs on every request including SSE, never pays for a DB
@@ -35,12 +44,12 @@ export async function getSessionBoundaryMs(): Promise<number> {
       .from(dailySyncTable)
       .where(and(eq(dailySyncTable.date, todayStr()), eq(dailySyncTable.scope, "live")));
     const data = row?.data as
-      | { dayState?: { resetAt?: unknown } }
+      | { dayState?: { resetBoundaryAt?: unknown } }
       | null
       | undefined;
-    const resetAt = data?.dayState?.resetAt;
+    const boundary = data?.dayState?.resetBoundaryAt;
     cachedBoundaryMs =
-      typeof resetAt === "number" && resetAt > 0 ? resetAt : 0;
+      typeof boundary === "number" && boundary > 0 ? boundary : 0;
     cachedAt = now;
     return cachedBoundaryMs;
   } catch {

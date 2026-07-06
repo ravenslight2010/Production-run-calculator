@@ -63,6 +63,12 @@ function tomorrowStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function yesterdayStr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 beforeAll(async () => {
   originalDatabaseUrl = process.env.DATABASE_URL;
   if (!originalDatabaseUrl) throw new Error("DATABASE_URL must be set to run integration tests");
@@ -136,14 +142,17 @@ beforeEach(async () => {
   await db.insert(userRolesTable).values({ userId: USER, role: "operator" });
 });
 
-// Write a daily_sync row for `date` carrying a dayState.resetAt boundary.
+// Write a daily_sync row for `date` carrying a reset boundary. The fence reads
+// `resetBoundaryAt` (set only for a genuine same-day reset), so record both it and
+// `resetAt` here to model exactly what a real same-day rollover persists.
 async function writeReset(date: string, resetAtMs: number): Promise<void> {
+  const dayState = { resetAt: resetAtMs, resetBoundaryAt: resetAtMs };
   await db
     .insert(dailySyncTable)
-    .values({ date, data: { dayState: { resetAt: resetAtMs } }, updatedAt: new Date() })
+    .values({ date, data: { dayState }, updatedAt: new Date() })
     .onConflictDoUpdate({
       target: [dailySyncTable.date, dailySyncTable.scope],
-      set: { data: { dayState: { resetAt: resetAtMs } } },
+      set: { data: { dayState } },
     });
 }
 
@@ -346,5 +355,133 @@ describe("daily-reset rollover write", () => {
     // Same token, now rejected: the read side honours the boundary the write
     // side just persisted.
     expect((await meWith(token)).status).toBe(401);
+  });
+});
+
+// PUT a day-state payload for an explicit date while asserting the CLIENT's local
+// "today" via ?today= — exactly how a user behind UTC pushes a scheduled day.
+async function putSyncWithToday(
+  date: string,
+  payload: unknown,
+  clientTodayDate: string,
+  token: string,
+): Promise<Response> {
+  return fetch(`${baseUrl}/api/sync/${date}?today=${clientTodayDate}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ senderId: "test", payload }),
+  });
+}
+
+// Read the persisted dayState.resetBoundaryAt (the fence field) for `date`.
+async function readBoundaryAt(date: string): Promise<number | undefined> {
+  const [row] = await db.select().from(dailySyncTable).where(eq(dailySyncTable.date, date));
+  const data = row?.data as { dayState?: { resetBoundaryAt?: unknown } } | null | undefined;
+  const b = data?.dayState?.resetBoundaryAt;
+  return typeof b === "number" ? b : undefined;
+}
+
+// Regression for the "reset fires ~2 hours early" bug. The server runs in UTC; a
+// user behind UTC in their evening is still on their LOCAL today while the server
+// has already ticked to the next calendar day. Their scheduled "tomorrow" then
+// equals the SERVER's UTC "today". Because writing a future day stamps
+// dayState.resetAt = now (the client's future-day override), a fence that read
+// resetAt off the UTC-today row would sign the whole shift out hours before their
+// real local midnight. The fence must read resetBoundaryAt, set ONLY for a
+// genuine same-day write, so this override can't fence anyone.
+describe("cross-UTC daily-reset fence (server UTC ahead of the operator's local day)", () => {
+  it("does NOT fence when a future scheduled day equals the server's UTC today", async () => {
+    const token = signToken(USER);
+    // Server's UTC "today" (what getSessionBoundaryMs reads) is the operator's
+    // "tomorrow"; the operator's real local day is one behind UTC.
+    const serverToday = todayStr();
+    const operatorToday = yesterdayStr();
+
+    // The operator, in their evening, pushes their scheduled tomorrow (= server
+    // UTC today) with the future-day resetAt=now override, keyed to their own
+    // local date.
+    const res1 = await putSyncWithToday(
+      serverToday,
+      { dayState: { runs: [{ id: "r1", brand: "B", flavor: "F" }], resetAt: Date.now() } },
+      operatorToday,
+      token,
+    );
+    expect(res1.status).toBe(200);
+    clearSessionBoundaryCache();
+
+    // The session must survive — this was a future-day override, not today's reset…
+    expect((await meWith(token)).status).toBe(200);
+    // …and no fence boundary was recorded on that row.
+    expect(await readBoundaryAt(serverToday)).toBeUndefined();
+  });
+
+  it("DOES fence when the operator's real local day rolls over (date === client today)", async () => {
+    const token = signToken(USER);
+    const serverToday = todayStr();
+
+    // Genuine rollover: the operator's local day IS the server's day, so the
+    // write records the fence boundary and older sessions are signed out.
+    const res1 = await putSyncWithToday(
+      serverToday,
+      { dayState: { runs: [], resetAt: Date.now() + 1000 } },
+      serverToday,
+      token,
+    );
+    expect(res1.status).toBe(200);
+    clearSessionBoundaryCache();
+
+    expect((await meWith(token)).status).toBe(401);
+    expect(await readBoundaryAt(serverToday)).toBeGreaterThan(0);
+  });
+
+  it("strips a client-supplied resetBoundaryAt on a future-day write (server-authoritative)", async () => {
+    // The fence is derived server-side; a client must not be able to fence peers
+    // by echoing resetBoundaryAt onto a future-day (non-current) row.
+    const token = signToken(USER);
+    const serverToday = todayStr();
+    const operatorToday = yesterdayStr();
+
+    const res1 = await putSyncWithToday(
+      serverToday,
+      { dayState: { runs: [], resetAt: Date.now(), resetBoundaryAt: Date.now() + 1_000_000 } },
+      operatorToday,
+      token,
+    );
+    expect(res1.status).toBe(200);
+    clearSessionBoundaryCache();
+
+    expect(await readBoundaryAt(serverToday)).toBeUndefined();
+    expect((await meWith(token)).status).toBe(200);
+  });
+
+  it("preserves an existing boundary when a later future-day write targets that row", async () => {
+    // Once a genuine same-day write recorded the boundary, a subsequent write that
+    // treats the same row as a NON-current day (date !== client today) must not
+    // erase it — otherwise a stray future-day push could unfence the shift.
+    const token = signToken(USER);
+    const serverToday = todayStr();
+    const tomorrow = tomorrowStr();
+
+    // Genuine same-day write establishes the boundary.
+    const genuineReset = Date.now() + 1000;
+    const res1 = await putSyncWithToday(
+      serverToday,
+      { dayState: { runs: [], resetAt: genuineReset } },
+      serverToday,
+      token,
+    );
+    expect(res1.status).toBe(200);
+    expect(await readBoundaryAt(serverToday)).toBe(genuineReset);
+
+    // A later write treats serverToday as a NON-current day (client is on tomorrow)
+    // and omits any boundary; the stored boundary must survive.
+    const res2 = await putSyncWithToday(
+      serverToday,
+      { dayState: { runs: [], resetAt: genuineReset } },
+      tomorrow,
+      token,
+    );
+    expect(res2.status).toBe(200);
+    expect(await readBoundaryAt(serverToday)).toBe(genuineReset);
   });
 });

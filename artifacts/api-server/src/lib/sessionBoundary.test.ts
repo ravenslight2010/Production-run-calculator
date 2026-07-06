@@ -1,8 +1,8 @@
 // Unit tests for the cached daily-reset boundary read.
 //
-// getSessionBoundaryMs reads `dayState.resetAt` off TODAY's daily_sync row,
-// caches it briefly (so requireAuth never pays a DB round-trip per request), and
-// must FAIL OPEN on a DB error — a database blip should never log everyone out.
+// getSessionBoundaryMs reads `dayState.resetBoundaryAt` off TODAY's daily_sync
+// row, caches it briefly (so requireAuth never pays a DB round-trip per request),
+// and must FAIL OPEN on a DB error — a database blip should never log everyone out.
 // We mock @workspace/db so we can control the row and force errors deterministically.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -32,11 +32,11 @@ vi.mock("drizzle-orm", async (orig) => {
 
 import { getSessionBoundaryMs, clearSessionBoundaryCache } from "./sessionBoundary";
 
-function setReset(resetAt: number | undefined): void {
+function setReset(resetBoundaryAt: number | undefined): void {
   rows =
-    resetAt === undefined
+    resetBoundaryAt === undefined
       ? [{ data: { dayState: {} } }]
-      : [{ data: { dayState: { resetAt } } }];
+      : [{ data: { dayState: { resetBoundaryAt } } }];
 }
 
 beforeEach(() => {
@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe("getSessionBoundaryMs", () => {
-  it("returns the resetAt recorded on today's row", async () => {
+  it("returns the resetBoundaryAt recorded on today's row", async () => {
     setReset(1_700_000_000_000);
     expect(await getSessionBoundaryMs()).toBe(1_700_000_000_000);
   });
@@ -60,12 +60,12 @@ describe("getSessionBoundaryMs", () => {
     expect(await getSessionBoundaryMs()).toBe(0);
   });
 
-  it("returns 0 when today's row has no resetAt yet", async () => {
+  it("returns 0 when today's row has no resetBoundaryAt yet", async () => {
     setReset(undefined);
     expect(await getSessionBoundaryMs()).toBe(0);
   });
 
-  it("treats a non-positive resetAt as no boundary (0)", async () => {
+  it("treats a non-positive resetBoundaryAt as no boundary (0)", async () => {
     setReset(0);
     expect(await getSessionBoundaryMs()).toBe(0);
   });
