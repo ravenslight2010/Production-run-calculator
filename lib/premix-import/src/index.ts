@@ -671,9 +671,25 @@ export function premixId(parsed: Pick<ParsedPremix, "brand" | "flavor" | "name">
   return `premix-${slug(parsed.brand)}-${slug(parsed.flavor)}-${slug(parsed.name)}`;
 }
 
-/** Convert a parsed (and grounded/matched) premix into a normalized Mix. */
-export function premixToMix(parsed: ParsedPremix): Mix | null {
-  const components: MixComponent[] = parsed.components.map((c) => ({
+/**
+ * Convert a parsed (and grounded/matched) premix into a normalized Mix.
+ *
+ * `perPizzaOnly` (opt-in) drops the per-batch-only rows — the sheet's flat
+ * "prep for the run" additions (e.g. fresh spinach) that carry a Per Batch
+ * amount but no Per Pizza amount. Per the operator's model those rows are NOT
+ * per-pizza mix ingredients; they belong to prep / pull-early, so keeping them
+ * as phantom 0-oz components just clutters the mix and does nothing in make-day
+ * math. Default (false) preserves the legacy behavior (all rows kept) so the
+ * paused mobile glue and existing callers are unaffected.
+ */
+export function premixToMix(
+  parsed: ParsedPremix,
+  opts: { perPizzaOnly?: boolean } = {},
+): Mix | null {
+  const source = opts.perPizzaOnly
+    ? parsed.components.filter((c) => c.perPizza > 0)
+    : parsed.components;
+  const components: MixComponent[] = source.map((c) => ({
     ingredient: c.ingredient,
     perPizza: c.perPizza,
   }));
@@ -717,6 +733,47 @@ export function specMixDraftToMix(draft: SpecMixDraft): Mix | null {
     components,
     enabled: true,
   });
+}
+
+// ── Prep / per-batch-only split ──────────────────────────────────────────────
+
+/** A per-batch-only "prep for the run" row split OUT of a mix (not a per-pizza ingredient). */
+export type PremixPrepItem = {
+  /** The block/product the prep row was listed under (for display context). */
+  mixName: string;
+  ingredient: string;
+  /** Per-batch amount (lbs) straight from the sheet. */
+  perBatch: number;
+};
+
+/**
+ * True when a parsed block has NO per-pizza ingredient at all — every row is a
+ * flat per-batch / prep addition. Such a block is prep, not a mix, so the web
+ * importer skips it (its rows still surface via `collectPremixPrepItems`).
+ */
+export function isPrepOnlyPremix(parsed: ParsedPremix): boolean {
+  return !parsed.components.some((c) => c.perPizza > 0);
+}
+
+/**
+ * Collect the per-batch-only rows split out of the parsed blocks — the "prep for
+ * the run" ingredients (e.g. fresh spinach) the operator does NOT want treated
+ * as per-pizza mix ingredients. Surfaced read-only in the review dialog so the
+ * split is visible and nothing silently vanishes from a mix. Pure.
+ */
+export function collectPremixPrepItems(
+  parsed: ReadonlyArray<ParsedPremix>,
+): PremixPrepItem[] {
+  const out: PremixPrepItem[] = [];
+  for (const p of parsed) {
+    for (const c of p.components) {
+      if (c.perPizza > 0) continue; // a real per-pizza mix ingredient
+      const ingredient = c.ingredient.trim();
+      if (!ingredient) continue;
+      out.push({ mixName: p.name.trim(), ingredient, perBatch: c.perBatch });
+    }
+  }
+  return out;
 }
 
 // ── Freezer-pull suggestions ─────────────────────────────────────────────────

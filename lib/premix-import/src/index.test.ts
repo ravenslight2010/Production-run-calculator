@@ -15,6 +15,8 @@ import {
   rematchPremixCandidate,
   mergePremixIntoMixes,
   collectPremixFreezerPulls,
+  collectPremixPrepItems,
+  isPrepOnlyPremix,
   type PremixKnown,
   type SheetGrid,
 } from "./index";
@@ -420,6 +422,38 @@ describe("conversion + summary", () => {
     expect(mix.batchSize).toBe(147.4875);
     expect(mix.components.find((c) => c.ingredient === "Bacon")?.perPizza).toBe(0.75);
     expect(mix.enabled).toBe(true);
+    // Default keeps the per-batch-only flat add ("1/8 Green Pepper", perPizza 0).
+    expect(mix.components.some((c) => c.ingredient === "1/8 Green Pepper")).toBe(true);
+  });
+
+  it("perPizzaOnly drops the per-batch-only prep rows from the mix", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    const mix = premixToMix(groundPremix(parsed, KNOWN, []).mix, { perPizzaOnly: true })!;
+    // The flat per-batch add is split out; only real per-pizza rows remain.
+    expect(mix.components.some((c) => c.ingredient === "1/8 Green Pepper")).toBe(false);
+    expect(mix.components.every((c) => c.perPizza > 0)).toBe(true);
+    expect(mix.components.find((c) => c.ingredient === "Bacon")?.perPizza).toBe(0.75);
+  });
+
+  it("collectPremixPrepItems surfaces the per-batch-only rows with context", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    const prep = collectPremixPrepItems([parsed]);
+    const gp = prep.find((p) => p.ingredient === "1/8 Green Pepper");
+    expect(gp).toBeTruthy();
+    expect(gp!.perBatch).toBe(10);
+    expect(gp!.mixName).toBe("Bobo's Deluxe Veggie Mix");
+    // Per-pizza ingredients are never reported as prep.
+    expect(prep.some((p) => p.ingredient === "Bacon")).toBe(false);
+  });
+
+  it("isPrepOnlyPremix flags blocks that have no per-pizza ingredient", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    expect(isPrepOnlyPremix(parsed)).toBe(false);
+    const prepOnly = {
+      ...parsed,
+      components: parsed.components.map((c) => ({ ...c, perPizza: 0 })),
+    };
+    expect(isPrepOnlyPremix(prepOnly)).toBe(true);
   });
 
   it("counts new vs updated and merges by id", () => {

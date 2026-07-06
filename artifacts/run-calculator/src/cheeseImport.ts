@@ -7,14 +7,17 @@
 // the manager-gated /api/cheese-recipes path.
 //
 // All pure logic lives in @workspace/cheese-import; the only writes are through
-// the existing /api/cheese-recipes path. This is DETERMINISTIC — no AI, no
-// learned aliases (the workbook layout is regular). Mirrors the mobile glue in
-// artifacts/run-calculator-mobile/context/cheeseImport.ts (replit.md parity).
+// the existing /api/cheese-recipes path. Parsing is DETERMINISTIC (no AI); the
+// only added smarts is a conservative "link to existing" pass that snaps a blend
+// written in shorthand onto the canonical recipe a spec-sheet import already
+// created (same brand, different name), which the manager accepts/rejects per
+// recipe in the review dialog. Web-only (mobile parity paused per replit.md).
 
 import {
   parseCheeseWorkbook,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
+  withCheeseLinks,
   mergeCheeseRecipes,
   type CheeseImportSummary,
   type CheeseImportCandidate,
@@ -89,7 +92,14 @@ export async function prepareCheeseImport(
   const recipes = [...byId.values()];
   const existingIds = new Set(existing.map((r) => r.id));
   const summary = summarizeCheeseImport(recipes, (id) => existingIds.has(id));
-  const candidates = buildCheeseImportCandidates(recipes, (id) => existingIds.has(id));
+  // Attach "link to existing" suggestions so a blend written in shorthand snaps
+  // onto the canonical recipe a spec-sheet import already created (same brand,
+  // different name), instead of forking a duplicate. The dialog lets the manager
+  // accept or reject each proposed link.
+  const candidates = withCheeseLinks(
+    buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
+    existing,
+  );
 
   const noteParts: string[] = [];
   if (errors.length) {

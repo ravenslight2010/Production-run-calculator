@@ -43,6 +43,7 @@ const prepared: PremixImportPrepared = {
   flavorsByBrand: {},
   existingIds: [],
   freezerPulls: {},
+  prepItems: [],
 };
 
 const mix = {
@@ -95,6 +96,30 @@ describe("commitPremixImport freezer-pull application", () => {
   it("skips the freezer-pull read/write entirely when no pulls were selected", async () => {
     const result = await commitPremixImport(prepared, [mix], []);
     expect(saveMixes).toHaveBeenCalledTimes(1);
+    expect(fetchFreezerPullItems).not.toHaveBeenCalled();
+    expect(saveFreezerPullItems).not.toHaveBeenCalled();
+    expect(result.freezerPullCount).toBe(0);
+  });
+
+  it("persists pull reminders from a prep-only sheet even with zero mixes", async () => {
+    // A sheet that is entirely prep/pull-early rows produces no mixes, but its
+    // pull notes must still be saved (they used to be dropped by an early return).
+    const result = await commitPremixImport(prepared, [], [
+      { ingredient: "Fresh Spinach", daysEarly: 2 },
+    ]);
+    expect(saveMixes).not.toHaveBeenCalled();
+    expect(saveFreezerPullItems).toHaveBeenCalledTimes(1);
+    const items = saveFreezerPullItems.mock.calls[0][0] as {
+      ingredient: string;
+      daysEarly: number;
+    }[];
+    expect(items[0].ingredient).toBe("Fresh Spinach");
+    expect(result.freezerPullCount).toBe(1);
+  });
+
+  it("does nothing when there are neither mixes nor pulls", async () => {
+    const result = await commitPremixImport(prepared, [], []);
+    expect(saveMixes).not.toHaveBeenCalled();
     expect(fetchFreezerPullItems).not.toHaveBeenCalled();
     expect(saveFreezerPullItems).not.toHaveBeenCalled();
     expect(result.freezerPullCount).toBe(0);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
-import type { CheeseImportCandidate } from "@workspace/cheese-import";
+import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle, Link2 } from "lucide-react";
+import { resolveCheeseCandidate, type CheeseImportCandidate } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { CheeseImportPrepared } from "@/cheeseImport";
 
@@ -36,14 +36,21 @@ export default function CheeseImportDialog({
 }: Props) {
   const [items, setItems] = useState<Item[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Keys whose proposed "link to existing recipe" the manager is accepting.
+  // Defaults on for every candidate that has a suggested link.
+  const [linkOn, setLinkOn] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (prepared) {
       setItems(prepared.candidates.map((c) => ({ key: c.recipe.id, candidate: c })));
       setSelected(new Set(prepared.candidates.map((c) => c.recipe.id)));
+      setLinkOn(
+        new Set(prepared.candidates.filter((c) => c.linkTo).map((c) => c.recipe.id)),
+      );
     } else {
       setItems([]);
       setSelected(new Set());
+      setLinkOn(new Set());
     }
   }, [prepared]);
 
@@ -61,9 +68,19 @@ export default function CheeseImportDialog({
       return next;
     });
 
+  const toggleLink = (key: string) =>
+    setLinkOn((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   const confirm = () => {
     const included = items.filter((it) => selected.has(it.key));
-    onConfirm(included.map((it) => it.candidate.recipe));
+    onConfirm(
+      included.map((it) => resolveCheeseCandidate(it.candidate, linkOn.has(it.key))),
+    );
   };
 
   return (
@@ -136,6 +153,7 @@ export default function CheeseImportDialog({
                     const c = it.candidate;
                     const r = c.recipe;
                     const isSel = selected.has(it.key);
+                    const linked = !!c.linkTo && linkOn.has(it.key);
                     return (
                       <li
                         key={it.key}
@@ -157,12 +175,14 @@ export default function CheeseImportDialog({
                               </span>
                               <span
                                 className={
-                                  c.status === "new"
-                                    ? "shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-green-600"
-                                    : "shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary"
+                                  linked
+                                    ? "shrink-0 rounded-full bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-blue-600"
+                                    : c.status === "new"
+                                      ? "shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-green-600"
+                                      : "shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary"
                                 }
                               >
-                                {c.status}
+                                {linked ? "link" : c.status}
                               </span>
                             </div>
 
@@ -190,6 +210,28 @@ export default function CheeseImportDialog({
                                 <span className="text-foreground">
                                   {r.flavors.join(", ")}
                                 </span>
+                              </div>
+                            )}
+                            {c.linkTo && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
+                                <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
+                                <span className="text-xs text-blue-700">
+                                  Looks like your existing{" "}
+                                  <span className="font-medium">"{c.linkTo.name}"</span>
+                                </span>
+                                <label
+                                  className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-blue-700"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="h-3.5 w-3.5 accent-blue-600"
+                                    checked={linked}
+                                    onChange={() => toggleLink(it.key)}
+                                    data-testid={`cheese-link-${it.key}`}
+                                  />
+                                  Update it instead of adding new
+                                </label>
                               </div>
                             )}
                           </div>

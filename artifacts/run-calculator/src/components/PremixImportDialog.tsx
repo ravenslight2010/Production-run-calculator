@@ -66,8 +66,23 @@ export default function PremixImportDialog({
   if (!open) return null;
 
   const s = prepared?.summary;
-  const nothing = s != null && s.total === 0;
   const selectedCount = items.filter((it) => selected.has(it.key)).length;
+
+  // Pull-note reminders from prep-only blocks (blocks that produced no mix
+  // candidate). They have no mix checkbox to gate on, so they always ride
+  // along when the manager applies the import.
+  const orphanPulls = (() => {
+    const fp = prepared?.freezerPulls ?? {};
+    const candidateKeys = new Set(prepared?.candidates.map((c) => c.mix.id) ?? []);
+    return Object.entries(fp)
+      .filter(([k]) => !candidateKeys.has(k))
+      .flatMap(([, v]) => v);
+  })();
+
+  const hasPrepInfo =
+    (prepared?.prepItems?.length ?? 0) > 0 || orphanPulls.length > 0;
+  const nothing = s != null && s.total === 0 && !hasPrepInfo;
+  const canApply = selectedCount > 0 || orphanPulls.length > 0;
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -102,8 +117,11 @@ export default function PremixImportDialog({
     const mixes = included.map((it) => it.candidate.mix);
     // Freezer-pull settings ride along with their mix's include/exclude pick
     // (keyed by the ORIGINAL parsed id — a re-match doesn't change the note).
-    const pulls = included.flatMap((it) => prepared?.freezerPulls?.[it.key] ?? []);
-    onConfirm(mixes, pulls);
+    const includedPulls = included.flatMap(
+      (it) => prepared?.freezerPulls?.[it.key] ?? [],
+    );
+    // Prep-only blocks contribute their pull notes unconditionally.
+    onConfirm(mixes, [...includedPulls, ...orphanPulls]);
   };
 
   return (
@@ -295,6 +313,30 @@ export default function PremixImportDialog({
                 </ul>
               )}
 
+              {prepared.prepItems.length > 0 && (
+                <div
+                  className="rounded-md border border-border bg-muted/40 p-3"
+                  data-testid="premix-prep-items"
+                >
+                  <p className="text-sm font-medium text-foreground">
+                    Prep / pull-early items ({prepared.prepItems.length})
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    These rows are prepped by the batch (not per pizza), so they were
+                    left out of the mixes above. Manage them in Freezer Pull / prep.
+                  </p>
+                  <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    {prepared.prepItems.map((p, i) => (
+                      <li key={`${p.mixName}-${p.ingredient}-${i}`}>
+                        <span className="text-foreground">{p.ingredient}</span>
+                        {p.perBatch > 0 && <> — {p.perBatch} lbs/batch</>}
+                        {p.mixName && <> · from {p.mixName}</>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {prepared.newAliases.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {prepared.newAliases.length} new name mapping
@@ -334,7 +376,7 @@ export default function PremixImportDialog({
           <button
             type="button"
             onClick={confirm}
-            disabled={loading || applying || !!error || !prepared || nothing || selectedCount === 0}
+            disabled={loading || applying || !!error || !prepared || nothing || !canApply}
             className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {applying ? (
@@ -342,8 +384,9 @@ export default function PremixImportDialog({
             ) : (
               <CheckCircle2 className="h-4 w-4" />
             )}
-            Apply {selectedCount > 0 ? selectedCount : ""} mix
-            {selectedCount === 1 ? "" : "es"}
+            {selectedCount > 0
+              ? `Apply ${selectedCount} mix${selectedCount === 1 ? "" : "es"}`
+              : "Apply pull items"}
           </button>
         </div>
       </div>

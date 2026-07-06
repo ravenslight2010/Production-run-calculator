@@ -9812,13 +9812,13 @@ export default function Home() {
                     {isManager && (
                       <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5">
                         <p className="text-xs font-semibold text-foreground">Best import order</p>
-                        <p className="text-[11px] text-muted-foreground">Import your building-block sheets first, then the pizza spec last — that way the spec links to them instead of creating duplicates:</p>
+                        <p className="text-[11px] text-muted-foreground">Import the pizza spec sheet <span className="font-medium text-foreground">first</span> — it sets the master names for every pizza, ingredient, and weight. Then import the rest, ending with cheese &amp; premix, so their shorthand names get matched back to the spec instead of creating duplicates:</p>
                         <ol className="text-[11px] text-muted-foreground list-decimal pl-4 space-y-0.5">
-                          <li><span className="font-medium text-foreground">Cheese Mix Recipe Specs</span> — Manage Lists ▸ Cheese Recipes</li>
-                          <li><span className="font-medium text-foreground">Pre-Mix Sheets</span> — Manage Lists ▸ Mixes</li>
-                          <li><span className="font-medium text-foreground">Sauce recipe sheets</span> — Import Spec Sheet (below)</li>
+                          <li><span className="font-medium text-foreground">Pizza Spec Sheets</span> — Import Spec Sheet (below), first</li>
                           <li><span className="font-medium text-foreground">Dough recipe sheets</span> — Import Spec Sheet (below)</li>
-                          <li><span className="font-medium text-foreground">Pizza Spec Sheets</span> — Import Spec Sheet (below), last</li>
+                          <li><span className="font-medium text-foreground">Sauce recipe sheets</span> — Import Spec Sheet (below)</li>
+                          <li><span className="font-medium text-foreground">Pre-Mix Sheets</span> — Manage Lists ▸ Mixes</li>
+                          <li><span className="font-medium text-foreground">Cheese Mix Recipe Specs</span> — Manage Lists ▸ Cheese Recipes, last</li>
                         </ol>
                         <p className="text-[11px] text-muted-foreground">If a name still doesn&apos;t match (e.g. an extra word or a typo), confirm the match once in the review step — the app remembers it next time.</p>
                       </div>

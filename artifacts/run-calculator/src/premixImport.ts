@@ -27,12 +27,15 @@ import {
   buildPremixCandidates,
   mergePremixIntoMixes,
   collectPremixFreezerPulls,
+  collectPremixPrepItems,
+  isPrepOnlyPremix,
   type ParsedPremix,
   type GroundedPremix,
   type PremixKnown,
   type PremixImportSummary,
   type PremixCandidate,
   type PremixFreezerPull,
+  type PremixPrepItem,
   type SpecImportAlias,
 } from "@workspace/premix-import";
 import type { Mix } from "@workspace/mixes";
@@ -67,6 +70,13 @@ export type PremixImportPrepared = {
    * they follow the manager's include/exclude picks and are applied on confirm.
    */
   freezerPulls: Record<string, PremixFreezerPull[]>;
+  /**
+   * Per-batch-only "prep for the run" rows split OUT of the mixes (e.g. fresh
+   * spinach) — shown read-only in the review so the split is visible. These are
+   * NOT added as mix ingredients; ones with a pull note still flow to freezer
+   * pulls via `freezerPulls`.
+   */
+  prepItems: PremixPrepItem[];
   /** Uploaded filename(s) for this import — used for per-file snapshot retention. */
   sourceNames?: string[];
   note?: string;
@@ -187,10 +197,14 @@ export async function preparePremixImport(
   }
 
   // Convert to the Mix model; drop any block that can't form a valid mix.
+  // Split the per-batch-only "prep for the run" rows OUT of each mix (operator's
+  // model: those are prep / pull-early, not per-pizza ingredients), and skip a
+  // block entirely when EVERY row is prep — it isn't a mix at all.
   const seen = new Set<string>();
   const mixes: Mix[] = [];
   for (const pm of groundedMixes) {
-    const mix = premixToMix(pm);
+    if (isPrepOnlyPremix(pm)) continue;
+    const mix = premixToMix(pm, { perPizzaOnly: true });
     if (!mix) continue;
     // De-dup within the import by deterministic id (re-importing the same block
     // across sheets/files collapses to one).
@@ -210,6 +224,8 @@ export async function preparePremixImport(
   // Pick out the "Pull N days early" ingredient notes as freezer-pull settings
   // (keyed by the same deterministic ids the candidates carry at this point).
   const freezerPulls = collectPremixFreezerPulls(groundedMixes);
+  // The per-batch-only rows split out of the mixes, for a read-only review note.
+  const prepItems = collectPremixPrepItems(groundedMixes);
 
   const noteParts: string[] = [];
   if (errors.length) {
@@ -229,6 +245,7 @@ export async function preparePremixImport(
     flavorsByBrand: known.flavorsByBrand,
     existingIds: [...existingIds],
     freezerPulls,
+    prepItems,
     ...(note ? { note } : {}),
   };
 }
@@ -252,25 +269,34 @@ export async function commitPremixImport(
   mixesToApply: ReadonlyArray<Mix>,
   freezerPulls: ReadonlyArray<PremixFreezerPull> = [],
 ): Promise<PremixCommitResult> {
-  if (mixesToApply.length === 0) return { freezerPullCount: 0 };
-  // Re-read current mixes right before writing so we merge onto the freshest
-  // list (another manager may have edited mixes since prepare).
-  const existing = await fetchMixes();
-  const merged = mergePremixIntoMixes(existing, mixesToApply);
-  await saveMixes(merged);
+  // Nothing to apply at all — no mixes AND no pull-note reminders (e.g. a
+  // prep-only sheet with no pull notes). Bail before touching the server.
+  if (mixesToApply.length === 0 && freezerPulls.length === 0)
+    return { freezerPullCount: 0 };
 
-  // Snapshot the imported mixes server-side so the Mixes section can later
-  // reconcile the current mixes against this premix sheet (new/drifted mixes).
-  // Best-effort: the import already applied; the snapshot is a monitoring bonus.
-  try {
-    const names = prepared.sourceNames ?? [];
-    await savePremixSheet(
-      buildPremixSheetLabel(mixesToApply, names),
-      [...mixesToApply],
-      deriveSourceKey(names),
-    );
-  } catch {
-    // ignore — monitoring snapshot is non-critical
+  // A premix sheet can be entirely prep/pull-early rows (no per-pizza mixes).
+  // In that case there are no mixes to save, but its pull-note reminders below
+  // must still persist — so only the mix write is gated on having mixes.
+  if (mixesToApply.length > 0) {
+    // Re-read current mixes right before writing so we merge onto the freshest
+    // list (another manager may have edited mixes since prepare).
+    const existing = await fetchMixes();
+    const merged = mergePremixIntoMixes(existing, mixesToApply);
+    await saveMixes(merged);
+
+    // Snapshot the imported mixes server-side so the Mixes section can later
+    // reconcile the current mixes against this premix sheet (new/drifted mixes).
+    // Best-effort: the import already applied; the snapshot is a monitoring bonus.
+    try {
+      const names = prepared.sourceNames ?? [];
+      await savePremixSheet(
+        buildPremixSheetLabel(mixesToApply, names),
+        [...mixesToApply],
+        deriveSourceKey(names),
+      );
+    } catch {
+      // ignore — monitoring snapshot is non-critical
+    }
   }
 
   // Set the freezer-pull settings the pull notes suggested for the included

@@ -378,9 +378,158 @@ export interface CheeseImportSummary {
   updated: number;
 }
 
+/** An existing pool recipe a workbook blend loosely matched (by a different name). */
+export interface CheeseLinkTarget {
+  id: string;
+  name: string;
+}
+
 export interface CheeseImportCandidate {
   recipe: CheeseRecipe;
   status: "new" | "update";
+  /**
+   * Set when this workbook blend does NOT share an id with any saved recipe but
+   * loosely matches an existing pool recipe of the same brand under a DIFFERENT
+   * name (e.g. workbook "Whole Mozz Cheese Mix" vs saved "Whole Mozzarella
+   * Cheese Mix"). The review dialog offers to link (relink id+name onto the
+   * existing recipe so it updates in place) or keep it as a new recipe. Absent
+   * when the blend is a clean exact-id update or a genuinely new recipe.
+   */
+  linkTo?: CheeseLinkTarget;
+}
+
+// ---------------------------------------------------------------------------
+// Link-to-existing detection
+// ---------------------------------------------------------------------------
+//
+// The cheese workbook keys each blend by a brand+name slug, so a blend written
+// in shorthand ("Whole Mozz Cheese Mix") forks a DUPLICATE of the canonical
+// recipe a spec-sheet import already established ("Whole Mozzarella Cheese Mix")
+// instead of updating it — leaving the run applicator's pick-only cheese card
+// pointing at a name that isn't the one the profile references. This pass snaps
+// an imported blend onto an existing pool recipe of the SAME brand when their
+// loose keys match, so the import updates the recipe the user already has.
+
+/**
+ * Generic "default version" filler words that carry no distinguishing meaning in
+ * a blend name, so a name that includes or omits them still refers to the SAME
+ * blend ("Aldo's Cheese Mix" == "Aldo's Standard Cheese Mix"). Deliberately tiny
+ * and curated — a MEANINGFUL qualifier ("Whole Milk", "5 Cheese", "Spicy") is
+ * never listed, so two genuinely different blends stay apart. Mirrors the spec
+ * importer's SPEC_IMPORT_FILLER_TOKENS intent for cheese blend names.
+ */
+const CHEESE_LINK_FILLER_TOKENS = new Set(["standard", "regular", "pizza"]);
+
+/**
+ * Loose match key for snapping an imported blend onto an existing pool recipe:
+ * the abbreviation-expanded matchKey (so "Whole Mozz" == "Whole Mozzarella")
+ * with generic filler tokens dropped (so "Aldo's Cheese Mix" == "Aldo's Standard
+ * Cheese Mix"). Deliberately conservative — no edit-distance fuzz — so genuinely
+ * different blends never collide.
+ */
+export function cheeseLinkKey(name: string): string {
+  const tokens = matchKey(name).split(" ").filter(Boolean);
+  const kept = tokens.filter((t) => !CHEESE_LINK_FILLER_TOKENS.has(t));
+  return (kept.length ? kept : tokens).join(" ");
+}
+
+/** Brand-scoped loose-key for the link map. */
+function cheeseLinkMapKey(brand: string, name: string): string {
+  return `${nameKey(brand)}\u0000${cheeseLinkKey(name)}`;
+}
+
+/**
+ * Build a brand-scoped loose-key → existing recipe map, with an AMBIGUITY GUARD:
+ * if two genuinely DIFFERENT saved recipes of the same brand collapse to the same
+ * loose key, that key is dropped so an import is never silently relabeled to an
+ * arbitrary one of them. Duplicate ids / same-name entries are not a conflict.
+ */
+export function buildCheeseLinkMap(
+  existing: ReadonlyArray<CheeseRecipe>,
+): Map<string, CheeseLinkTarget> {
+  const byKey = new Map<string, CheeseLinkTarget>();
+  const ambiguous = new Set<string>();
+  for (const r of existing) {
+    const lk = cheeseLinkKey(r.name);
+    if (!lk) continue;
+    const key = cheeseLinkMapKey(r.brand, r.name);
+    const prior = byKey.get(key);
+    if (prior === undefined) byKey.set(key, { id: r.id, name: r.name });
+    else if (prior.id !== r.id && nameKey(prior.name) !== nameKey(r.name)) {
+      ambiguous.add(key);
+    }
+  }
+  for (const k of ambiguous) byKey.delete(k);
+  return byKey;
+}
+
+/**
+ * Find the existing pool recipe a workbook blend should link to, or undefined.
+ * Returns nothing when the blend already shares an id with a saved recipe (a
+ * clean exact-id update) or when no unambiguous same-brand loose match exists.
+ */
+export function findCheeseLink(
+  recipe: CheeseRecipe,
+  linkMap: ReadonlyMap<string, CheeseLinkTarget>,
+  existingIds: ReadonlySet<string>,
+): CheeseLinkTarget | undefined {
+  if (existingIds.has(recipe.id)) return undefined;
+  const target = linkMap.get(cheeseLinkMapKey(recipe.brand, recipe.name));
+  if (target && target.id !== recipe.id) return target;
+  return undefined;
+}
+
+/**
+ * Resolve a reviewed candidate to the recipe to actually apply. When the manager
+ * keeps a proposed link, the recipe's id + name are swapped onto the existing
+ * pool recipe so mergeCheeseRecipes UPDATES it in place; otherwise the workbook's
+ * own id + name are kept (a new recipe).
+ */
+export function resolveCheeseCandidate(
+  candidate: CheeseImportCandidate,
+  linkEnabled: boolean,
+): CheeseRecipe {
+  if (linkEnabled && candidate.linkTo) {
+    return { ...candidate.recipe, id: candidate.linkTo.id, name: candidate.linkTo.name };
+  }
+  return candidate.recipe;
+}
+
+/**
+ * Attach link-to-existing suggestions to a candidate list built from the raw
+ * new/update status. Pure; returns a new list, leaving clean exact-id updates and
+ * genuinely new recipes untouched.
+ *
+ * ONE-TO-ONE GUARD: a proposed link is dropped when its target existing recipe
+ * would be claimed by more than one candidate — i.e. another candidate also loose
+ * matches the same target, or a candidate already updates that recipe by exact id.
+ * Without this guard two accepted links (or a link + an exact update) resolving to
+ * the same id would collide in mergeCheeseRecipes' last-write-wins merge and
+ * silently drop one recipe's data. When in doubt the blend stays a NEW recipe.
+ */
+export function withCheeseLinks(
+  candidates: ReadonlyArray<CheeseImportCandidate>,
+  existing: ReadonlyArray<CheeseRecipe>,
+): CheeseImportCandidate[] {
+  const linkMap = buildCheeseLinkMap(existing);
+  const existingIds = new Set(existing.map((r) => r.id));
+  const proposed = candidates.map((c) => findCheeseLink(c.recipe, linkMap, existingIds));
+
+  // Tally how many candidates would write each existing id: an exact-id update
+  // claims its own id; a proposed link claims its target id.
+  const claims = new Map<string, number>();
+  const bump = (id: string) => claims.set(id, (claims.get(id) ?? 0) + 1);
+  candidates.forEach((c, i) => {
+    if (existingIds.has(c.recipe.id)) bump(c.recipe.id);
+    const link = proposed[i];
+    if (link) bump(link.id);
+  });
+
+  return candidates.map((c, i) => {
+    const link = proposed[i];
+    if (link && (claims.get(link.id) ?? 0) === 1) return { ...c, linkTo: link };
+    return c;
+  });
 }
 
 export function summarizeCheeseImport(

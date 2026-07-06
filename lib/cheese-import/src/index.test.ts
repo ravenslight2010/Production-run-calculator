@@ -5,8 +5,26 @@ import {
   cheeseImportId,
   summarizeCheeseImport,
   buildCheeseImportCandidates,
+  cheeseLinkKey,
+  buildCheeseLinkMap,
+  withCheeseLinks,
+  resolveCheeseCandidate,
   type CheeseSheetGrid,
 } from "./index";
+import type { CheeseRecipe } from "@workspace/cheese-recipes";
+
+function cheese(partial: Partial<CheeseRecipe> & { id: string; name: string }): CheeseRecipe {
+  return {
+    brand: "",
+    flavors: [],
+    components: [],
+    cellulose: "",
+    shredderSetting: "",
+    notes: "",
+    enabled: true,
+    ...partial,
+  };
+}
 
 // Representative rows taken verbatim from the real
 // "Cheese_Mix_Recipe_Specs_-_Tabbed_by_Customer" workbook.
@@ -293,5 +311,185 @@ describe("summary + candidates", () => {
   it("labels each candidate", () => {
     const cands = buildCheeseImportCandidates(wb.recipes, existsById);
     expect(cands.map((c) => c.status)).toEqual(["update", "new"]);
+  });
+});
+
+describe("cheeseLinkKey", () => {
+  it("expands abbreviations and drops generic filler tokens", () => {
+    expect(cheeseLinkKey("Whole Mozz Cheese Mix")).toBe(
+      cheeseLinkKey("Whole Mozzarella Cheese Mix"),
+    );
+    expect(cheeseLinkKey("Aldo's Cheese Mix")).toBe(
+      cheeseLinkKey("Aldo's Standard Cheese Mix"),
+    );
+    expect(cheeseLinkKey("Aldo's Cheese Mix")).toBe(
+      cheeseLinkKey("Aldo's Regular Cheese Mix"),
+    );
+  });
+
+  it("keeps meaningful qualifiers distinct", () => {
+    expect(cheeseLinkKey("5 Cheese Mix")).not.toBe(cheeseLinkKey("Cheese Mix"));
+    expect(cheeseLinkKey("Spicy Cheese Mix")).not.toBe(cheeseLinkKey("Cheese Mix"));
+  });
+
+  it("never collapses to empty when a name is all filler", () => {
+    expect(cheeseLinkKey("Standard Pizza")).not.toBe("");
+  });
+});
+
+describe("link-to-existing detection", () => {
+  const existing: CheeseRecipe[] = [
+    cheese({
+      id: "cheese:basha:whole-mozzarella-cheese-mix",
+      brand: "Basha's",
+      name: "Whole Mozzarella Cheese Mix",
+    }),
+    cheese({
+      id: "cheese:aldo:aldo-s-standard-cheese-mix",
+      brand: "Aldo",
+      name: "Aldo's Standard Cheese Mix",
+    }),
+  ];
+
+  it("suggests a link for a shorthand name of the same brand", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const base = buildCheeseImportCandidates(imported, () => false);
+    const linked = withCheeseLinks(base, existing);
+    expect(linked[0].status).toBe("new");
+    expect(linked[0].linkTo).toEqual({
+      id: "cheese:basha:whole-mozzarella-cheese-mix",
+      name: "Whole Mozzarella Cheese Mix",
+    });
+  });
+
+  it("does not suggest a link across brands", () => {
+    const imported = [
+      cheese({
+        id: "cheese:corner:whole-mozz-cheese-mix",
+        brand: "Corner Booth",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+    );
+    expect(linked[0].linkTo).toBeUndefined();
+  });
+
+  it("does not suggest a link when the id already exists (clean update)", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozzarella-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozzarella Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, (id) => id === imported[0].id),
+      existing,
+    );
+    expect(linked[0].status).toBe("update");
+    expect(linked[0].linkTo).toBeUndefined();
+  });
+
+  it("drops both links when two imported blends would target the same existing recipe", () => {
+    // Both shorthand names loose-match the one existing "Whole Mozzarella Cheese
+    // Mix"; linking both and committing would collide (last-write-wins) and lose
+    // one blend's data, so NEITHER link is proposed — they stay new recipes.
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+      cheese({
+        id: "cheese:basha:whole-moz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Moz Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+    );
+    expect(linked.every((c) => c.linkTo === undefined)).toBe(true);
+  });
+
+  it("drops a link when another candidate already updates that recipe by exact id", () => {
+    // One blend IS the existing recipe (exact id → clean update); a second blend
+    // loose-matches the SAME recipe. Proposing the link would double-write the id,
+    // so the link is dropped and only the exact update applies.
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozzarella-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozzarella Cheese Mix",
+      }),
+      cheese({
+        id: "cheese:basha:whole-mozz-cheese-mix",
+        brand: "Basha's",
+        name: "Whole Mozz Cheese Mix",
+      }),
+    ];
+    const existsById = (id: string) => id === imported[0].id;
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, existsById),
+      existing,
+    );
+    expect(linked[0].status).toBe("update");
+    expect(linked[0].linkTo).toBeUndefined();
+    expect(linked[1].linkTo).toBeUndefined();
+  });
+
+  it("drops ambiguous loose keys so nothing is silently relabeled", () => {
+    const ambiguous: CheeseRecipe[] = [
+      cheese({ id: "a", brand: "Zed", name: "Zed Standard Cheese Mix" }),
+      cheese({ id: "b", brand: "Zed", name: "Zed Regular Cheese Mix" }),
+    ];
+    const map = buildCheeseLinkMap(ambiguous);
+    expect(map.size).toBe(0);
+  });
+
+  it("keeps a duplicate-id / same-name pair as an unambiguous target", () => {
+    const dupes: CheeseRecipe[] = [
+      cheese({ id: "x", brand: "Zed", name: "Zed Cheese Mix" }),
+      cheese({ id: "x", brand: "Zed", name: "Zed Cheese Mix" }),
+    ];
+    const map = buildCheeseLinkMap(dupes);
+    expect(map.size).toBe(1);
+  });
+});
+
+describe("resolveCheeseCandidate", () => {
+  const linkTo = { id: "existing-id", name: "Existing Name" };
+  const candidate = {
+    recipe: cheese({ id: "workbook-id", brand: "Basha's", name: "Workbook Name" }),
+    status: "new" as const,
+    linkTo,
+  };
+
+  it("swaps id + name onto the existing recipe when linking is enabled", () => {
+    const resolved = resolveCheeseCandidate(candidate, true);
+    expect(resolved.id).toBe("existing-id");
+    expect(resolved.name).toBe("Existing Name");
+    expect(resolved.brand).toBe("Basha's");
+  });
+
+  it("keeps the workbook id + name when linking is disabled", () => {
+    const resolved = resolveCheeseCandidate(candidate, false);
+    expect(resolved.id).toBe("workbook-id");
+    expect(resolved.name).toBe("Workbook Name");
+  });
+
+  it("is a no-op passthrough when there is no link", () => {
+    const noLink = { recipe: cheese({ id: "z", name: "Z" }), status: "new" as const };
+    expect(resolveCheeseCandidate(noLink, true)).toEqual(noLink.recipe);
   });
 });
