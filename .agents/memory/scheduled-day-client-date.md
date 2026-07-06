@@ -45,12 +45,25 @@ leg is legacy tolerance — server date-scoping is the real defense.
 
 **Easy-to-miss caller: the schedule-import PUTs.** The web Excel import commit paths
 (`commitMultiDayImport` + single-day `commitExcelImport` in `home.tsx`) write each
-day via `PUT /sync/${date}` and were originally missing `?today=`. Symptom: after a
-multi-day import, future/scheduled days appeared but **today's** runs never showed in
-the live view — the today-row write was stored but its same-day SSE broadcast never
-fired (server fell back to UTC, which ≠ operator's local date on a US evening). Fix =
-append `?today=${todayStr()}` to those PUTs too. Lesson: ANY new dated sync write must
-thread the client `?today=`, not just the obvious live today/events paths.
+day via `PUT /sync/${date}`. Two distinct bugs made **today's** imported runs never
+show in the live view while future/scheduled days appeared fine:
+  1. **Missing `?today=`** — the PUTs omitted it, so the server's same-day broadcast
+     gate (`date === clientToday(req)`) fell back to server UTC and didn't fire when
+     the operator's local date ≠ UTC (US evening). Fix: append `?today=${todayStr()}`.
+  2. **The importing device never self-applies today.** Future days re-render from the
+     refetched `/sync/scheduled` list, but TODAY is the LIVE view and the importing
+     client only picks up its own write via the **SSE echo of its own PUT** — a
+     round-trip that can be swallowed (reconnecting stream, reset-epoch skew), so today
+     stays blank even when the server stored it. Fix: after a successful PUT of today,
+     apply the just-built payload straight into live state via
+     `applySyncCallbackRef.current(outPayload)` (reuses the union-merge: preserves
+     in-progress/manual runs, per-run LWW, `acceptRemoteDay` — safe to double-apply
+     when the echo later arrives; `writeDayResetAt` keeps today's resetAt so
+     `acceptRemoteDay` passes in steady state).
+
+**Rule:** a client that WRITES today's row must also APPLY today locally — never rely
+on the SSE self-echo as the only way its own write reaches its live view. And ANY new
+dated sync write must thread the client `?today=`, not just the obvious live paths.
 
 **Known gap (left intentionally):** neither client rotates its SSE stream date at
 local midnight — the EventSource/stream is opened once with a single `todayStr()`.

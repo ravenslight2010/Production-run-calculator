@@ -7306,6 +7306,10 @@ export default function Home() {
       });
       ok = res.ok;
       if (res.ok) {
+        // If this import targets today, apply it onto THIS device right away
+        // (same union-merge the SSE path uses) instead of waiting for the SSE
+        // echo — otherwise today's imported runs may never show live here.
+        if (date === todayStr()) applySyncCallbackRef.current(outPayload);
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
       }
     } catch {}
@@ -7360,6 +7364,13 @@ export default function Home() {
     let failed = 0;
     let skippedToday = 0;
     let lastErrorDetail = "";
+    // TODAY is the LIVE view: unlike future days (which re-render from the
+    // refetched schedule list below), this device only picks up today's write
+    // via the SSE echo of our own PUT — an unreliable round-trip (a reconnecting
+    // stream, or a reset-epoch skew, can swallow it), which is why today's runs
+    // often never appeared even though the server stored them. Capture today's
+    // built payload and apply it straight into live state after the loop.
+    let todayApplyPayload: SyncPayload | null = null;
     // Skipped file rows whose planned cases differ from the matched IN-PROGRESS
     // run's current target: the office re-issued today's schedule with a new
     // count. Collected here and OFFERED to the user after the import (never
@@ -7473,9 +7484,14 @@ export default function Home() {
         if (!lastErrorDetail) lastErrorDetail = err instanceof Error ? (err.message || "network error") : "network error";
       }
       if (!dayOk) failed += 1;
+      if (dayOk && date === todayStr()) todayApplyPayload = outPayload;
       done += 1;
       setImportProgress({ done, total: byDate.length });
     }
+    // Show today's imported runs on THIS device immediately, through the same
+    // union-merge the SSE path uses (preserves in-progress runs, respects LWW),
+    // instead of waiting for — and depending on — the SSE echo to arrive.
+    if (todayApplyPayload) applySyncCallbackRef.current(todayApplyPayload);
     fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
     setImportProgress(null);
     setShowImportDialog(false);
