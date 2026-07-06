@@ -50,11 +50,12 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## User preferences
 
-- **Keep web and mobile at parity.** Any feature added, removed, or changed must be applied to BOTH `artifacts/run-calculator` (web) and `artifacts/run-calculator-mobile` (Expo). Match formulas exactly across both. Mobile is local-only (AsyncStorage `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`); web is its own app — adapt storage/UI per platform but keep behavior identical.
+- **CURRENT FOCUS: WEB ONLY — parity paused.** As of 2026-07-06 the user is focusing on the web app (`artifacts/run-calculator`) only; the mobile app has not been used or tested yet. Do NOT do web+mobile parity work for now — build/change web only unless the user explicitly asks for mobile. The parity rule below is retained for when mobile work resumes.
+- **(Paused) Keep web and mobile at parity.** Any feature added, removed, or changed must be applied to BOTH `artifacts/run-calculator` (web) and `artifacts/run-calculator-mobile` (Expo). Match formulas exactly across both. Mobile is local-only (AsyncStorage `run-calc-mobile-v2`, additive migration via `normalizeState`/`normalizeSettings`); web is its own app — adapt storage/UI per platform but keep behavior identical.
 
 ## Gotchas
 
-- **Web+mobile parity is mandatory** (see User preferences). Every behavior change must land in BOTH apps with formulas matching exactly. Most logic lives in `lib/*` to make this enforceable — change the lib, then update each app's thin wrapper.
+- **Web+mobile parity is currently PAUSED** (see User preferences — web-only focus as of 2026-07-06). When parity resumes: every behavior change must land in BOTH apps with formulas matching exactly. Most logic lives in `lib/*` to make this enforceable — change the lib, then update each app's thin wrapper.
 - **Run `pnpm run typecheck:libs` after any `lib/*` change** before leaf typechecks. "Missing `@workspace/db` export" usually means stale lib declarations, not a bad import.
 - **Verify artifacts with `typecheck`, not `build`.** `build` needs workflow-provided `PORT`/`BASE_PATH` and can fail from a plain shell even when the code is fine. Don't run `pnpm dev` at the workspace root — use workflows.
 - **Run tests via the configured test workflows** (`test`, `test:client`, `test:rules`, `test:inventory-math`); web tests run single-file (`fileParallelism: false`) with big timeouts because validation runs alongside dev workflows. A single test file from bash is fine; the full suite from bash can starve.
