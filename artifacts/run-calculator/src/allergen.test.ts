@@ -63,9 +63,9 @@ describe("allergenOptions", () => {
 });
 
 describe("metadata", () => {
-  it("egg is yellow, soy is red, none is neutral", () => {
+  it("egg is yellow, soy is pink, none is neutral", () => {
     expect(allergenMeta("egg").color).toBe("#eab308");
-    expect(allergenMeta("soy").color).toBe("#dc2626");
+    expect(allergenMeta("soy").color).toBe("#db2777");
     expect(allergenMeta("none").color).toBe("#94a3b8");
   });
   it("isAllergen flags egg/soy but not none", () => {

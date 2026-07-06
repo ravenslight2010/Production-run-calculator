@@ -30,7 +30,7 @@ export interface AllergenMeta {
 export const ALLERGENS: readonly AllergenMeta[] = [
   { value: "none", label: "None", color: "#94a3b8", textColor: "#0f172a", isAllergen: false },
   { value: "egg", label: "Egg", color: "#eab308", textColor: "#1c1917", isAllergen: true },
-  { value: "soy", label: "Soy", color: "#dc2626", textColor: "#ffffff", isAllergen: true },
+  { value: "soy", label: "Soy", color: "#db2777", textColor: "#ffffff", isAllergen: true },
 ];
 
 // "No allergen" spellings that must collapse to the neutral `none`.
