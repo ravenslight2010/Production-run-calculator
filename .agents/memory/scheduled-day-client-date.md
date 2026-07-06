@@ -43,6 +43,15 @@ the fallback only triggers on non-format-matching input. Receivers also keep a
 `remoteDateOk` guard (`!remoteDate || remoteDate===todayStr()`); the `!remoteDate`
 leg is legacy tolerance — server date-scoping is the real defense.
 
+**Easy-to-miss caller: the schedule-import PUTs.** The web Excel import commit paths
+(`commitMultiDayImport` + single-day `commitExcelImport` in `home.tsx`) write each
+day via `PUT /sync/${date}` and were originally missing `?today=`. Symptom: after a
+multi-day import, future/scheduled days appeared but **today's** runs never showed in
+the live view — the today-row write was stored but its same-day SSE broadcast never
+fired (server fell back to UTC, which ≠ operator's local date on a US evening). Fix =
+append `?today=${todayStr()}` to those PUTs too. Lesson: ANY new dated sync write must
+thread the client `?today=`, not just the obvious live today/events paths.
+
 **Known gap (left intentionally):** neither client rotates its SSE stream date at
 local midnight — the EventSource/stream is opened once with a single `todayStr()`.
 A device left open across midnight keeps the prior day's `watchDate` until reload/

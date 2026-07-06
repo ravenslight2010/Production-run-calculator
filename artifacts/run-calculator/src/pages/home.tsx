@@ -7296,7 +7296,10 @@ export default function Home() {
     };
     let ok = false;
     try {
-      const res = await fetch(`/api/sync/${date}`, {
+      // Key the day boundary + live-view broadcast on the operator's local
+      // `today`, not the server's UTC date (see commitMultiDayImport) — else an
+      // import onto today never shows up live when the two dates disagree.
+      const res = await fetch(`/api/sync/${date}?today=${todayStr()}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: outPayload }),
@@ -7419,7 +7422,13 @@ export default function Home() {
       };
       let dayOk = false;
       try {
-        const res = await fetch(`/api/sync/${date}`, {
+        // Pass the client's local `today` so the server keys the day boundary
+        // (and its live-view SSE broadcast) on the OPERATOR's date, not its own
+        // UTC date. Without this, an import whose "today" differs from the
+        // server's UTC day (e.g. a US evening) writes today's runs to the row
+        // but never broadcasts them, so the open app never shows today's
+        // schedule even though future days appear in the scheduled list.
+        const res = await fetch(`/api/sync/${date}?today=${todayStr()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ payload: outPayload }),

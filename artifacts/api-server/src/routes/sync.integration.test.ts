@@ -431,6 +431,47 @@ describe("/sync/events — date-scoped broadcasts", () => {
     expect(aEvents).toContain("sender-A");
     expect(bEvents).not.toContain("sender-A");
   });
+
+  // Regression: a schedule import writes each day via PUT /sync/:date. TODAY's
+  // write must broadcast to the live view, but the server only broadcasts when
+  // `date === clientToday(req)`. If the import omits `?today=`, clientToday
+  // falls back to the SERVER's UTC date; when the operator's local date differs
+  // (e.g. a US evening), today's runs are stored but NEVER broadcast, so the
+  // open app never shows today's schedule. Passing the operator's `?today=`
+  // makes the dated write broadcast regardless of the server's timezone.
+  it("broadcasts a PUT /sync/:date to a same-date watcher when ?today matches the date", async () => {
+    const ctrl = new AbortController();
+    const events: string[] = [];
+    const p = collectSenderIds("2030-04-01", ctrl, events);
+    await new Promise((r) => setTimeout(r, 400));
+    await fetch(`${baseUrl}/api/sync/2030-04-01?today=2030-04-01`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "importer", payload: { dayState: { runs: [], date: "2030-04-01" }, runValues: {} } }),
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    ctrl.abort();
+    await Promise.allSettled([p]);
+    expect(events).toContain("importer");
+  });
+
+  it("does NOT broadcast a PUT /sync/:date for a future date to today's watcher", async () => {
+    // A future-day write (any date !== the watcher's today) must never reach a
+    // live today watcher, or a scheduled-day import would clobber the live view.
+    const ctrl = new AbortController();
+    const events: string[] = [];
+    const p = collectSenderIds("2030-04-02", ctrl, events);
+    await new Promise((r) => setTimeout(r, 400));
+    await fetch(`${baseUrl}/api/sync/2030-04-09?today=2030-04-02`, {
+      method: "PUT",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify({ senderId: "future-importer", payload: { dayState: { runs: [], date: "2030-04-09" }, runValues: {} } }),
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    ctrl.abort();
+    await Promise.allSettled([p]);
+    expect(events).not.toContain("future-importer");
+  });
 });
 
 describe("DELETE /sync/:date — client-local-date guard", () => {
