@@ -16,6 +16,7 @@ import {
   mergePremixIntoMixes,
   collectPremixFreezerPulls,
   collectPremixPrepItems,
+  PREMIX_PREP_RE,
   isPrepOnlyPremix,
   type PremixKnown,
   type SheetGrid,
@@ -442,8 +443,44 @@ describe("conversion + summary", () => {
     expect(gp).toBeTruthy();
     expect(gp!.perBatch).toBe(10);
     expect(gp!.mixName).toBe("Bobo's Deluxe Veggie Mix");
-    // Per-pizza ingredients are never reported as prep.
+    // Ordinary per-pizza ingredients are never reported as prep.
     expect(prep.some((p) => p.ingredient === "Bacon")).toBe(false);
+  });
+
+  it("surfaces a per-pizza ingredient that needs prep by name (e.g. drained pineapple)", () => {
+    const [parsed] = parsePremixWorkbook([BOBOS]);
+    // A real per-pizza ingredient whose NAME says it needs run-day prep.
+    const withPineapple = {
+      ...parsed,
+      components: [
+        ...parsed.components,
+        { ingredient: "Pineapple - Drained", perPizza: 2, perBatch: 82.8 },
+      ],
+    };
+    const prep = collectPremixPrepItems([withPineapple]);
+    const pineapple = prep.find((p) => p.ingredient === "Pineapple - Drained");
+    expect(pineapple).toBeTruthy();
+    // Flagged as staying in the mix (a prep reminder, not a split-out row).
+    expect(pineapple!.alsoInMix).toBe(true);
+    expect(pineapple!.perBatch).toBe(82.8);
+    // Per-batch-only rows carry no alsoInMix flag.
+    const gp = prep.find((p) => p.ingredient === "1/8 Green Pepper");
+    expect(gp!.alsoInMix).toBeUndefined();
+    // The pineapple row is a real per-pizza ingredient, so it STILL belongs in
+    // the mix even with perPizzaOnly on.
+    const mix = premixToMix(
+      { ...withPineapple, brand: "", flavor: "", components: withPineapple.components },
+      { perPizzaOnly: true },
+    )!;
+    expect(mix.components.some((c) => c.ingredient === "Pineapple - Drained")).toBe(true);
+  });
+
+  it("PREMIX_PREP_RE matches pineapple / drained but not ordinary names", () => {
+    expect(PREMIX_PREP_RE.test("Pineapple - Drained")).toBe(true);
+    expect(PREMIX_PREP_RE.test("Pineapple")).toBe(true);
+    expect(PREMIX_PREP_RE.test("Diced Tomatoes - Drained")).toBe(true);
+    expect(PREMIX_PREP_RE.test("Bacon")).toBe(false);
+    expect(PREMIX_PREP_RE.test("Whole Milk Mozzarella")).toBe(false);
   });
 
   it("isPrepOnlyPremix flags blocks that have no per-pizza ingredient", () => {

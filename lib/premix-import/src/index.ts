@@ -737,13 +737,28 @@ export function specMixDraftToMix(draft: SpecMixDraft): Mix | null {
 
 // ── Prep / per-batch-only split ──────────────────────────────────────────────
 
-/** A per-batch-only "prep for the run" row split OUT of a mix (not a per-pizza ingredient). */
+/**
+ * Ingredients that need run-day prep even when they ARE a real per-pizza mix
+ * ingredient (e.g. "Pineapple - Drained" → drain the juices before use). The
+ * sheet carries no structural marker for these — the only signal is the name —
+ * so they're matched by name and surfaced as a reminder WITHOUT being removed
+ * from the mix. Kept deliberately narrow to avoid false positives.
+ */
+export const PREMIX_PREP_RE = /\bpineapple\b|\bdrain(?:ed|ing)?\b/i;
+
+/** A "prep for the run" row surfaced out of a mix. */
 export type PremixPrepItem = {
   /** The block/product the prep row was listed under (for display context). */
   mixName: string;
   ingredient: string;
   /** Per-batch amount (lbs) straight from the sheet. */
   perBatch: number;
+  /**
+   * True when this row is ALSO a per-pizza mix ingredient — a prep reminder
+   * (e.g. drain the juices) that STAYS in the mix, not a row split out of it.
+   * Absent → a per-batch-only row that was left out of the mix.
+   */
+  alsoInMix?: boolean;
 };
 
 /**
@@ -765,12 +780,28 @@ export function collectPremixPrepItems(
   parsed: ReadonlyArray<ParsedPremix>,
 ): PremixPrepItem[] {
   const out: PremixPrepItem[] = [];
+  const seen = new Set<string>();
   for (const p of parsed) {
+    const mixName = p.name.trim();
     for (const c of p.components) {
-      if (c.perPizza > 0) continue; // a real per-pizza mix ingredient
       const ingredient = c.ingredient.trim();
       if (!ingredient) continue;
-      out.push({ mixName: p.name.trim(), ingredient, perBatch: c.perBatch });
+      const perBatchOnly = !(c.perPizza > 0);
+      // Two kinds of prep: (1) per-batch-only rows split OUT of the mix, and
+      // (2) real per-pizza ingredients whose NAME says they need run-day prep
+      // (e.g. "Pineapple - Drained") — those STAY in the mix but are surfaced
+      // as a reminder too.
+      const nameFlag = !perBatchOnly && PREMIX_PREP_RE.test(ingredient);
+      if (!perBatchOnly && !nameFlag) continue;
+      const key = `${mixName.toLowerCase()}::${ingredient.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        mixName,
+        ingredient,
+        perBatch: c.perBatch,
+        ...(nameFlag ? { alsoInMix: true } : {}),
+      });
     }
   }
   return out;

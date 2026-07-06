@@ -29,6 +29,11 @@ The user's mental model of how their upload files link together, and the improve
 - **Prep items** = fresh/perishable ingredient rows inside blends (only signal is the NAME — no structural marker). `collectCheesePrepItems` matches `/\b(fresh|spinach|mushroom)\b/i`, surfaced read-only. Real file: all 11 hits were spinach variants.
 - Real 25-tab workbook sanity: 112 recipes → 5 sub-mixes + 11 prep items, zero false positives. Extend `CHEESE_PREP_RE` as new sheets reveal more perishables.
 
+## Premix prep items are TWO kinds (not just cheese has prep)
+- Prep-to-pull items live in the PREMIX sheet too, not only the cheese workbook. `collectPremixPrepItems` surfaces:
+  1. **per-batch-only rows** split OUT of a mix (perPizza==0, e.g. fresh spinach) — legacy behavior.
+  2. **per-pizza ingredients whose NAME says they need run-day prep** (`PREMIX_PREP_RE`, a curated name list; e.g. pineapple / "drained") — these STAY in the mix (real ingredient, never removed) but are ALSO surfaced with `alsoInMix:true` as a reminder (e.g. "Pineapple - Drained" → drain the juices). No structural marker exists; name is the only signal, so keep the regex narrow and expand only from observed real imports (drain-juice items like sauerkraut also qualify).
+
 ## Why it matters / the ask
 - Step 3 (cheese workbook + premix) is where names get abbreviated most, so it's where **brand/flavor cheese & mix name-matching helpers are needed most** — to tie shorthand names to the right blend for each brand+flavor. Relates to follow-up "Connect cheese spec to blend".
 - Reminder of existing invariants: cheese = per-BATCH lbs; premix/mixes = per-PIZZA oz; sauce == frontline pool (see spec-import-batch-vs-perpizza.md, premix-import.md, cheese-server-master-data.md).

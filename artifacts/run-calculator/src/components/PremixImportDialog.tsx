@@ -322,8 +322,10 @@ export default function PremixImportDialog({
                     Prep / pull-early items ({prepared.prepItems.length})
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    These rows are prepped by the batch (not per pizza), so they were
-                    left out of the mixes above. Manage them in Freezer Pull / prep.
+                    Items that need run-day prep. Batch-only rows are left out of the
+                    mixes above; items tagged “stays in mix” are still per-pizza
+                    ingredients that also need prepping (e.g. drain the juices). Manage
+                    them in Freezer Pull / prep.
                   </p>
                   <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                     {prepared.prepItems.map((p, i) => (
@@ -331,6 +333,11 @@ export default function PremixImportDialog({
                         <span className="text-foreground">{p.ingredient}</span>
                         {p.perBatch > 0 && <> — {p.perBatch} lbs/batch</>}
                         {p.mixName && <> · from {p.mixName}</>}
+                        {p.alsoInMix && (
+                          <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-medium text-amber-700">
+                            stays in mix — prep before use
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
