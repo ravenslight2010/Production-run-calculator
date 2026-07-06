@@ -21,6 +21,9 @@ The user's mental model of how their upload files link together, and the improve
   - Contains **mixes inside blends** — e.g. **Aldo's**: a cheese SPICE mix that goes into a cheese mix (a sub-mix nested in a blend).
   - Some prep items (fresh spinach) also live here — see **Cornerbooth Spin & Mushroom** — the same spinach that appears in the premix sheet's non-mix rows.
 
+## Keep the in-app guidance spec-first
+- The Manage Lists ▸ Import "Best import order" block MUST stay **spec-first, cheese/premix last**. It once read the reverse (blocks first, spec last), which silently defeats matching: the cheese & premix importers link their shorthand names onto the recipes the spec import already created, so the spec has to exist first.
+
 ## Why it matters / the ask
 - Step 3 (cheese workbook + premix) is where names get abbreviated most, so it's where **brand/flavor cheese & mix name-matching helpers are needed most** — to tie shorthand names to the right blend for each brand+flavor. Relates to follow-up "Connect cheese spec to blend".
 - Reminder of existing invariants: cheese = per-BATCH lbs; premix/mixes = per-PIZZA oz; sauce == frontline pool (see spec-import-batch-vs-perpizza.md, premix-import.md, cheese-server-master-data.md).
