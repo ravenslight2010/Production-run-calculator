@@ -45,7 +45,7 @@ function makePrepared(recipe: ParsedRecipe, profiles: ParsedProfile[] = []): Spe
 }
 
 function renderDialog(prepared: SpecImportPrepared, onConfirm: (p: ParsedSpecImport) => void) {
-  return render(
+  const result = render(
     <SpecImportDialog
       open={true}
       onClose={() => {}}
@@ -62,6 +62,10 @@ function renderDialog(prepared: SpecImportPrepared, onConfirm: (p: ParsedSpecImp
       onConfirm={onConfirm}
     />,
   );
+  // The recipe rows and Apply live in step 2 of the two-step review; every reuse
+  // test operates on recipes, so advance past the step-1 product confirmation.
+  fireEvent.click(screen.getByText("Next"));
+  return result;
 }
 
 describe("SpecImportDialog reuse-existing-recipe picker", () => {

@@ -3107,6 +3107,127 @@ export function crossFillSpecImport(parsed: ParsedSpecImport): CrossFillResult {
   return { parsed: { ...parsed, profiles }, filledCount };
 }
 
+// ── Deterministic re-target on brand/flavor rename (import review step 2) ─────
+
+/**
+ * One product's brand/flavor rename captured in the import review's first step:
+ * `from` is the brand/flavor the parser originally produced, `to` is what the
+ * user confirmed. Used to re-point recipes (and re-run cross-fill) so the second
+ * review step reflects the corrected product names WITHOUT another AI call.
+ */
+export type SpecProfileRename = { from: ParsedRecipeTarget; to: ParsedRecipeTarget };
+
+const specRenameKey = (brand: string, flavor: string): string =>
+  `${brand.trim().toLowerCase()}\u0000${flavor.trim().toLowerCase()}`;
+
+export type SpecRenameMaps = {
+  /** old (brand+flavor) key -> new {brand, flavor} pair. */
+  pairs: Map<string, ParsedRecipeTarget>;
+  /**
+   * old brand (lower) -> new brand, kept ONLY when every rename of that brand
+   * agrees on a single new brand. Ambiguous brands (renamed different ways across
+   * their flavors) are dropped so brand-only anchors are never mis-repointed.
+   */
+  brands: Map<string, string>;
+};
+
+/**
+ * Build the lookup maps for a set of product renames. Identity renames are kept
+ * (they map a name to itself, which is harmless) but empty from/to entries are
+ * skipped. A per-(brand+flavor) map handles recipes tied to a specific flavor; a
+ * brand-only map handles brand anchors / flavorless targets, and only survives
+ * when a brand's renames are unambiguous. Pure.
+ */
+export function buildSpecRenameMaps(
+  renames: ReadonlyArray<SpecProfileRename>,
+): SpecRenameMaps {
+  const pairs = new Map<string, ParsedRecipeTarget>();
+  const brandTo = new Map<string, string | null>();
+  for (const { from, to } of renames) {
+    const fb = from.brand.trim();
+    const ff = from.flavor.trim();
+    const tb = to.brand.trim();
+    const tf = to.flavor.trim();
+    if (!fb || !ff || !tb || !tf) continue;
+    pairs.set(specRenameKey(fb, ff), { brand: tb, flavor: tf });
+    const bkey = fb.toLowerCase();
+    if (!brandTo.has(bkey)) brandTo.set(bkey, tb);
+    else if ((brandTo.get(bkey) ?? "").toLowerCase() !== tb.toLowerCase()) {
+      brandTo.set(bkey, null);
+    }
+  }
+  const brands = new Map<string, string>();
+  for (const [k, v] of brandTo) if (v != null) brands.set(k, v);
+  return { pairs, brands };
+}
+
+const mapTargetPair = (
+  maps: SpecRenameMaps,
+  brand: string,
+  flavor: string,
+): ParsedRecipeTarget => {
+  const b = brand.trim();
+  const f = flavor.trim();
+  if (b && f) {
+    const hit = maps.pairs.get(specRenameKey(b, f));
+    if (hit) return { brand: hit.brand, flavor: hit.flavor };
+    const nb = maps.brands.get(b.toLowerCase());
+    return { brand: nb ?? brand, flavor };
+  }
+  if (b) {
+    const nb = maps.brands.get(b.toLowerCase());
+    return { brand: nb ?? brand, flavor };
+  }
+  return { brand, flavor };
+};
+
+/**
+ * Re-point ONE recipe's brand/flavor, `targets[]`, and `brandAnchors[]` through
+ * the rename maps. A specific brand+flavor is remapped by the pair map (falling
+ * back to the unambiguous brand map when only the brand changed); a flavorless
+ * brand / brand anchor is remapped by the brand map. Values with no matching
+ * rename pass through unchanged. Pure + non-mutating.
+ */
+export function remapRecipeForRenames(
+  r: ParsedRecipe,
+  maps: SpecRenameMaps,
+): ParsedRecipe {
+  const out: ParsedRecipe = { ...r };
+  const b = (r.brand ?? "").trim();
+  const f = (r.flavor ?? "").trim();
+  if (b) {
+    const mapped = mapTargetPair(maps, b, f);
+    out.brand = mapped.brand;
+    if (f) out.flavor = mapped.flavor;
+  }
+  if (r.targets?.length) {
+    out.targets = r.targets.map((t) => mapTargetPair(maps, t.brand, t.flavor));
+  }
+  if (r.brandAnchors?.length) {
+    out.brandAnchors = r.brandAnchors.map(
+      (a) => maps.brands.get(a.trim().toLowerCase()) ?? a,
+    );
+  }
+  return out;
+}
+
+/**
+ * Apply a set of product renames to a whole parsed import: re-point every
+ * recipe's targets to the confirmed brand/flavor names, then re-run the
+ * conservative same-brand cross-fill so die/sauce siblings reflect the corrected
+ * grouping. The caller passes `parsed.profiles` ALREADY renamed (the confirmed
+ * products); recipes are remapped from their original targets. Preserves note /
+ * warnings. Pure + non-mutating.
+ */
+export function retargetSpecImport(
+  parsed: ParsedSpecImport,
+  renames: ReadonlyArray<SpecProfileRename>,
+): ParsedSpecImport {
+  const maps = buildSpecRenameMaps(renames);
+  const recipes = parsed.recipes.map((r) => remapRecipeForRenames(r, maps));
+  return crossFillSpecImport({ ...parsed, recipes }).parsed;
+}
+
 // ── AI parse-pass retry rule ────────────────────────────────────────────────
 
 /**

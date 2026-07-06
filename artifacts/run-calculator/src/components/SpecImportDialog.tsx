@@ -4,10 +4,14 @@ import {
   recipeApplyIssue,
   profileApplyIssue,
   recipeApplyTargets,
+  buildSpecRenameMaps,
+  remapRecipeForRenames,
+  crossFillSpecImport,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedRecipeTarget,
   type ParsedSpecImport,
+  type SpecProfileRename,
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import { buildDiscrepancies } from "@/specImport";
@@ -47,11 +51,23 @@ type Props = {
 // excluded by default and shown as re-includable.
 type ProfileItem = {
   key: string;
+  /**
+   * The profile with cross-fill-derived values (die/sauce) applied under the
+   * CURRENT confirmed grouping. Recomputed from `baseOrig` on every step-2 entry.
+   */
   orig: ParsedProfile;
+  /**
+   * The pristine parsed profile. Cross-fill (die/sauce inheritance) is always
+   * recomputed from this so a Back → rename/uncheck → Next re-derives cleanly
+   * instead of keeping values inherited under a stale grouping.
+   */
+  baseOrig: ParsedProfile;
   brand: string;
   flavor: string;
   /** Die type to save; starts from the parsed value, editable to an existing one. */
   dieType: string;
+  /** User explicitly set the die — keep it across re-target instead of recomputing. */
+  dieTouched: boolean;
   include: boolean;
   tombstoned: boolean;
 };
@@ -62,7 +78,20 @@ type ProfileItem = {
 // product (fixes the silent "recipe imported but shows up on nothing" miss).
 type RecipeItem = {
   key: string;
+  /**
+   * The recipe with its brand/flavor/targets re-pointed to the CURRENT confirmed
+   * product names (updated when advancing to step 2). Drives the review + apply.
+   */
   orig: ParsedRecipe;
+  /**
+   * The pristine parsed recipe, kept so the step-1 → step-2 re-target always maps
+   * from the original names (re-deriving on every "Next" stays correct even after
+   * a Back-and-edit round trip).
+   */
+  baseOrig: ParsedRecipe;
+  /** User manually set the attach brand/flavor — don't overwrite it on re-target. */
+  brandTouched: boolean;
+  flavorTouched: boolean;
   name: string;
   /**
    * Category shown/edited in the review. "mix" is a display-level split of the
@@ -91,18 +120,22 @@ function buildProfileItems(prepared: SpecImportPrepared): ProfileItem[] {
   const kept = prepared.parsed.profiles.map((p, i) => ({
     key: `pk${i}`,
     orig: p,
+    baseOrig: p,
     brand: p.brand ?? "",
     flavor: p.flavor ?? "",
     dieType: p.dieType ?? "",
+    dieTouched: false,
     include: true,
     tombstoned: false,
   }));
   const skipped = prepared.skipped.profiles.map((p, i) => ({
     key: `ps${i}`,
     orig: p,
+    baseOrig: p,
     brand: p.brand ?? "",
     flavor: p.flavor ?? "",
     dieType: p.dieType ?? "",
+    dieTouched: false,
     include: false,
     tombstoned: true,
   }));
@@ -113,6 +146,9 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
   const kept = prepared.parsed.recipes.map((r, i) => ({
     key: `rk${i}`,
     orig: r,
+    baseOrig: r,
+    brandTouched: false,
+    flavorTouched: false,
     name: r.name ?? "",
     kind: specImportRecipeDisplayKind(r),
     brand: r.brand ?? "",
@@ -123,6 +159,9 @@ function buildRecipeItems(prepared: SpecImportPrepared): RecipeItem[] {
   const skipped = prepared.skipped.recipes.map((r, i) => ({
     key: `rs${i}`,
     orig: r,
+    baseOrig: r,
+    brandTouched: false,
+    flavorTouched: false,
     name: r.name ?? "",
     kind: specImportRecipeDisplayKind(r),
     brand: r.brand ?? "",
@@ -186,14 +225,19 @@ export default function SpecImportDialog({
 }: Props) {
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [recipes, setRecipes] = useState<RecipeItem[]>([]);
+  // Two-step review: step 1 confirms product brand/flavor names only; step 2
+  // reviews everything else (recipes, die types, the diff, notes, mappings).
+  const [step, setStep] = useState<1 | 2>(1);
 
   useEffect(() => {
     if (prepared) {
       setProfiles(buildProfileItems(prepared));
       setRecipes(buildRecipeItems(prepared));
+      setStep(1);
     } else {
       setProfiles([]);
       setRecipes([]);
+      setStep(1);
     }
   }, [prepared]);
 
@@ -204,6 +248,77 @@ export default function SpecImportDialog({
     setProfiles((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)));
   const setRecipe = (key: string, patch: Partial<RecipeItem>) =>
     setRecipes((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+
+  // A checked product can't advance until it has both a brand and a flavor —
+  // step 2 (and the diff) are computed from the CONFIRMED product names.
+  const includedProfileMissing = profiles.some(
+    (p) => p.include && (!p.brand.trim() || !p.flavor.trim()),
+  );
+
+  // Advance to step 2: freeze the step-1 renames, re-point every recipe from its
+  // pristine parse to the confirmed product names, and re-run the same-brand
+  // cross-fill so die/sauce blanks inherit under the corrected grouping. No AI.
+  const goToStep2 = () => {
+    const renames: SpecProfileRename[] = profiles.map((p) => ({
+      from: { brand: p.baseOrig.brand ?? "", flavor: p.baseOrig.flavor ?? "" },
+      to: { brand: p.brand.trim(), flavor: p.flavor.trim() },
+    }));
+    const maps = buildSpecRenameMaps(renames);
+
+    // Cross-fill die/sauce blanks from same-(confirmed-)brand siblings. Always
+    // built from the PRISTINE parse (+ the confirmed names + any die the user set)
+    // so a Back → rename/uncheck → Next re-derives cleanly instead of keeping a
+    // value inherited under a stale grouping. The effective die also feeds the
+    // fill so a sibling can inherit from a user-set die.
+    const effectiveDie = (p: ProfileItem) =>
+      (p.dieTouched ? p.dieType : p.baseOrig.dieType ?? "").trim();
+    const includedEdited = profiles
+      .filter((p) => p.include)
+      .map((p): ParsedProfile => {
+        const out: ParsedProfile = {
+          ...p.baseOrig,
+          brand: p.brand.trim(),
+          flavor: p.flavor.trim(),
+        };
+        const die = effectiveDie(p);
+        if (die) out.dieType = die;
+        else delete out.dieType;
+        return out;
+      });
+    const filled = crossFillSpecImport({ profiles: includedEdited, recipes: [] }).parsed.profiles;
+    let fi = 0;
+    const nextProfiles = profiles.map((p): ProfileItem => {
+      const baseSauce = p.baseOrig.sauceOzPerPizza;
+      if (!p.include) {
+        // Excluded rows aren't cross-filled and aren't applied; reset derived
+        // state to the pristine parse so re-including then re-advancing is clean.
+        return {
+          ...p,
+          orig: { ...p.baseOrig },
+          dieType: p.dieTouched ? p.dieType : p.baseOrig.dieType ?? "",
+        };
+      }
+      const f = filled[fi++];
+      const die = p.dieTouched ? p.dieType : effectiveDie(p) || (f.dieType ?? "");
+      const sauce = baseSauce == null ? f.sauceOzPerPizza : baseSauce;
+      const orig: ParsedProfile = { ...p.baseOrig };
+      if (sauce != null) orig.sauceOzPerPizza = sauce;
+      else delete orig.sauceOzPerPizza;
+      return { ...p, dieType: die, orig };
+    });
+
+    const nextRecipes = recipes.map((r): RecipeItem => {
+      const remapped = remapRecipeForRenames(r.baseOrig, maps);
+      const next: RecipeItem = { ...r, orig: remapped };
+      if (!r.brandTouched) next.brand = remapped.brand ?? "";
+      if (!r.flavorTouched) next.flavor = remapped.flavor ?? "";
+      return next;
+    });
+
+    setProfiles(nextProfiles);
+    setRecipes(nextRecipes);
+    setStep(2);
+  };
 
   // The edited, include-only import that would be applied. Recomputed live so the
   // change list and counts always reflect the user's edits.
@@ -329,13 +444,20 @@ export default function SpecImportDialog({
 
           {!loading && !error && prepared && (
             <>
-              <p className="text-sm text-muted-foreground">
-                Review each item. Uncheck anything you don't want, fix a recipe's{" "}
-                <span className="font-medium text-foreground">name</span> or{" "}
-                <span className="font-medium text-foreground">type</span>, or correct a
-                product's brand/flavor. Only checked items are applied — existing ones are
-                overwritten, new ones are added.
-              </p>
+              {step === 1 ? (
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">Step 1 of 2 — products.</span>{" "}
+                  First, confirm each product's{" "}
+                  <span className="font-medium text-foreground">brand and flavor</span>, and
+                  uncheck any you don't want. You'll review the recipes and details next.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">Step 2 of 2 — details.</span>{" "}
+                  Now review the recipes, die types, and what will change. Only checked items
+                  are applied — existing ones are overwritten, new ones are added.
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border border-border p-3">
@@ -352,7 +474,14 @@ export default function SpecImportDialog({
                 </div>
               </div>
 
-              {attentionCount > 0 && (
+              {step === 1 && includedProfileMissing && (
+                <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700">
+                  A checked product is missing its brand or flavor. Fill both in (or uncheck
+                  it) to continue.
+                </div>
+              )}
+
+              {step === 2 && attentionCount > 0 && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-2 text-xs text-amber-700">
                   {attentionCount} checked item{attentionCount === 1 ? "" : "s"} still{" "}
                   need attention — a recipe needs a name, or a profile is missing its
@@ -360,7 +489,7 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {specWarnings.length > 0 && (
+              {step === 1 && specWarnings.length > 0 && (
                 <div
                   className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3"
                   data-testid="spec-import-warnings"
@@ -396,7 +525,7 @@ export default function SpecImportDialog({
                 ))}
               </datalist>
 
-              {profiles.length > 0 && (
+              {step === 1 && profiles.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Spec profiles
@@ -406,20 +535,47 @@ export default function SpecImportDialog({
                       <ProfileRow
                         key={p.key}
                         item={p}
+                        mode="names"
                         brands={brands}
                         flavorsByBrand={flavorsByBrand}
                         warnings={warningsByProfile.get(warnKey(p.orig.brand, p.orig.flavor)) ?? []}
                         onToggle={() => setProfile(p.key, { include: !p.include })}
                         onBrand={(brand) => setProfile(p.key, { brand })}
                         onFlavor={(flavor) => setProfile(p.key, { flavor })}
-                        onDieType={(dieType) => setProfile(p.key, { dieType })}
+                        onDieType={(dieType) => setProfile(p.key, { dieType, dieTouched: true })}
                       />
                     ))}
                   </ul>
                 </div>
               )}
 
-              {recipes.length > 0 && (
+              {step === 2 && includedProfiles > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Die types
+                  </p>
+                  <ul className="space-y-2">
+                    {profiles
+                      .filter((p) => p.include)
+                      .map((p) => (
+                        <ProfileRow
+                          key={p.key}
+                          item={p}
+                          mode="die"
+                          brands={brands}
+                          flavorsByBrand={flavorsByBrand}
+                          warnings={[]}
+                          onToggle={() => setProfile(p.key, { include: !p.include })}
+                          onBrand={(brand) => setProfile(p.key, { brand })}
+                          onFlavor={(flavor) => setProfile(p.key, { flavor })}
+                          onDieType={(dieType) => setProfile(p.key, { dieType, dieTouched: true })}
+                        />
+                      ))}
+                  </ul>
+                </div>
+              )}
+
+              {step === 2 && recipes.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Recipes
@@ -436,8 +592,8 @@ export default function SpecImportDialog({
                         onToggle={() => setRecipe(r.key, { include: !r.include })}
                         onName={(name) => setRecipe(r.key, { name })}
                         onKind={(kind) => setRecipe(r.key, { kind, linkExisting: undefined })}
-                        onBrand={(brand) => setRecipe(r.key, { brand })}
-                        onFlavor={(flavor) => setRecipe(r.key, { flavor })}
+                        onBrand={(brand) => setRecipe(r.key, { brand, brandTouched: true })}
+                        onFlavor={(flavor) => setRecipe(r.key, { flavor, flavorTouched: true })}
                         onLinkExisting={(linkExisting) =>
                           setRecipe(r.key, { linkExisting: linkExisting || undefined })
                         }
@@ -447,7 +603,7 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {prepared.newAliases.length > 0 && (
+              {step === 2 && prepared.newAliases.length > 0 && (
                 <p className="text-xs text-muted-foreground">
                   {prepared.newAliases.length} new name mapping
                   {prepared.newAliases.length === 1 ? "" : "s"} will be remembered for
@@ -455,7 +611,7 @@ export default function SpecImportDialog({
                 </p>
               )}
 
-              {prepared.flagged.length > 0 && (
+              {step === 2 && prepared.flagged.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-muted-foreground">
                     A second AI check flagged {prepared.flagged.length} item
@@ -470,7 +626,7 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {discrepancies.length > 0 && (
+              {step === 2 && discrepancies.length > 0 && (
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-muted-foreground">
                     Applying these will change {discrepancies.length} thing
@@ -491,7 +647,7 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {prepared.note && (
+              {step === 2 && prepared.note && (
                 <div className="rounded-md border border-amber-400/60 bg-amber-500/10 p-3">
                   <div className="flex items-center gap-2 text-amber-600">
                     <AlertTriangle className="h-4 w-4" />
@@ -519,28 +675,56 @@ export default function SpecImportDialog({
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={() => onConfirm(edited)}
-            disabled={
-              loading ||
-              applying ||
-              !!error ||
-              !prepared ||
-              nothingParsed ||
-              includedCount === 0 ||
-              attentionCount > 0
-            }
-            className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {applying ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
-            )}
-            Apply {includedCount > 0 ? includedCount : ""} item
-            {includedCount === 1 ? "" : "s"}
-          </button>
+          {step === 2 && (
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              disabled={applying}
+              className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              Back
+            </button>
+          )}
+          {step === 1 ? (
+            <button
+              type="button"
+              onClick={goToStep2}
+              disabled={
+                loading ||
+                applying ||
+                !!error ||
+                !prepared ||
+                nothingParsed ||
+                includedProfileMissing
+              }
+              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              Next
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onConfirm(edited)}
+              disabled={
+                loading ||
+                applying ||
+                !!error ||
+                !prepared ||
+                nothingParsed ||
+                includedCount === 0 ||
+                attentionCount > 0
+              }
+              className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {applying ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              Apply {includedCount > 0 ? includedCount : ""} item
+              {includedCount === 1 ? "" : "s"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -575,7 +759,7 @@ function warnKey(brand: string, flavor: string): string {
 
 function ProfileRow({
   item,
-  brands,
+  mode,
   flavorsByBrand,
   warnings,
   onToggle,
@@ -584,6 +768,8 @@ function ProfileRow({
   onDieType,
 }: {
   item: ProfileItem;
+  /** "names" = step 1 (include + brand/flavor + grounding); "die" = step 2 die-only. */
+  mode: "names" | "die";
   brands: string[];
   flavorsByBrand: Record<string, string[]>;
   warnings: string[];
@@ -601,7 +787,10 @@ function ProfileRow({
   );
   const flavorOpts = flavorMatch ? flavorsByBrand[flavorMatch] ?? [] : [];
   const flavorListId = `spec-flavors-${item.key}`;
-  const summary = profileSummary(item.orig);
+  const summary = profileSummary({
+    ...item.orig,
+    dieType: item.dieType.trim() || item.orig.dieType,
+  });
   // Die-type reuse: offer the user's existing dies so a profile can point at one
   // instead of creating a new die option. The parsed value stays selectable even
   // if it isn't a saved die yet.
@@ -614,6 +803,45 @@ function ProfileRow({
     ...(dieIsNew ? [dieValue] : []),
   ];
 
+  // Step 2 "die" mode: names are already locked in from step 1, shown read-only;
+  // only the die selector (and the read summary) stay editable/visible.
+  if (mode === "die") {
+    return (
+      <li className="rounded-lg border border-border p-3" data-testid={`spec-profile-${item.key}`}>
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-sm font-medium text-foreground">
+            {brand || "(no brand)"} — {flavor || "(no flavor)"}
+          </span>
+          <StatusBadge tombstoned={item.tombstoned} isNew={isNew} />
+        </div>
+        {dieSelectOptions.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">Die:</span>
+            <select
+              value={item.dieType}
+              onChange={(e) => onDieType(e.target.value)}
+              aria-label={`Die type for ${brand} ${flavor}`}
+              data-testid={`spec-profile-die-${item.key}`}
+              className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+            >
+              <option value="">No die</option>
+              {dieSelectOptions.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                  {dieIsNew && d === dieValue ? " (new)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {summary && (
+          <div className="mt-1.5 text-xs text-muted-foreground">Read: {summary}</div>
+        )}
+      </li>
+    );
+  }
+
+  // Step 1 "names" mode: include + brand/flavor + grounding warnings only.
   return (
     <li
       className={`rounded-lg border p-3 ${item.include ? "border-border" : "border-border/60 opacity-70"}`}
@@ -662,27 +890,6 @@ function ProfileRow({
               className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
             />
           </div>
-
-          {dieSelectOptions.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">Die:</span>
-              <select
-                value={item.dieType}
-                onChange={(e) => onDieType(e.target.value)}
-                aria-label={`Die type for ${item.orig.brand} ${item.orig.flavor}`}
-                data-testid={`spec-profile-die-${item.key}`}
-                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
-              >
-                <option value="">No die</option>
-                {dieSelectOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                    {dieIsNew && d === dieValue ? " (new)" : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {summary && (
             <div className="mt-1.5 text-xs text-muted-foreground">

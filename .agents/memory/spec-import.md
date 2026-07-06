@@ -788,3 +788,28 @@ number+ingredient pairs → one cheese-kind recipe.
   in BOTH clients' `commitSpecImport` — fetch the pool BEFORE `applySpecImport`,
   snap, apply, then reuse the same fetch in the add-to-pool block. Both fetches
   best-effort (apply with imported names if the pool is unavailable).
+
+## Two-step review wizard (WEB ONLY) — recompute-from-baseOrig invariant
+- The web `SpecImportDialog` review is split into two steps: **Step 1 = confirm
+  brand/flavor product NAMES + include/exclude ONLY** (names-mode ProfileRow +
+  warnings); **Step 2 = everything else** (die types, recipes name/kind/targets,
+  cross-fill results, diff, notes, remembered mappings, Apply). Footer: Step 1 =
+  Cancel/Next, Step 2 = Cancel/Back/Apply. Any edit that re-mounts (new `prepared`)
+  resets to step 1.
+- **Step 2 reflects Step-1 renames DETERMINISTICALLY — NO extra AI call.** Renames
+  feed `buildSpecRenameMaps` + `remapRecipeForRenames` (pure, `@workspace/spec-import`)
+  to re-point each recipe's attach brand/flavor; die/sauce blanks re-inherit via
+  `crossFillSpecImport` under the corrected grouping.
+- **STRICT INVARIANT: `goToStep2` recomputes EVERYTHING from `p.baseOrig` (the
+  pristine parse) on every transition — never incrementally patches prior derived
+  state.** ProfileItem/RecipeItem carry `baseOrig` + `*Touched` flags. Why: the
+  first attempt patched cross-fill die/sauce into persistent profile state, so a
+  Back → rename/uncheck → Next kept a value inherited under the OLD grouping
+  (sticky `!dieType.trim()` / `sauce==null` guards never cleared it). Recompute
+  from baseOrig is idempotent. User-set values survive via `dieTouched`
+  (onDieType handlers set it) and `brandTouched`/`flavorTouched` (recipe attach);
+  excluded rows reset their derived `orig`/`dieType` back to pristine.
+- Tests: `SpecImportDialog.steps.test.tsx` (step split, Next gating, die+sauce
+  cross-fill idempotency across Back→rename→Next, recipe re-point, manual-attach
+  survival, recipe-only advance) + lib `retargetSpecImport.test.ts`.
+- **Parity:** WEB ONLY (parity paused) — mobile spec import stays a read-only summary.
