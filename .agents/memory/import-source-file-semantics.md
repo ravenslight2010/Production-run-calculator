@@ -24,6 +24,11 @@ The user's mental model of how their upload files link together, and the improve
 ## Keep the in-app guidance spec-first
 - The Manage Lists ▸ Import "Best import order" block MUST stay **spec-first, cheese/premix last**. It once read the reverse (blocks first, spec last), which silently defeats matching: the cheese & premix importers link their shorthand names onto the recipes the spec import already created, so the spec has to exist first.
 
+## Cheese workbook "depth" (sub-mixes + prep items) — IMPLEMENTED (web)
+- **Sub-mix** = a cheese blend block whose (brand-stripped, punct-normalized) name matches an ingredient ROW inside another blend on the SAME customer tab. Real layout: two side-by-side blocks where the parent lists the sub-mix as a small-lbs component (e.g. Aldo "Parm / Oregano Mix" 0.3 → its own "Aldo's Parmesan / Oregano Mix" block). Detected per-tab by `detectCheeseSubMixes` in `@workspace/cheese-import`; exact-on-normalized-key (no fuzz) so a raw-cheese component ("Whole Mozzarella") never links to the standalone "Whole Mozzarella Cheese Mix" block. Sub-mixes still import as recipes but are LABELED (not pizza-facing).
+- **Prep items** = fresh/perishable ingredient rows inside blends (only signal is the NAME — no structural marker). `collectCheesePrepItems` matches `/\b(fresh|spinach|mushroom)\b/i`, surfaced read-only. Real file: all 11 hits were spinach variants.
+- Real 25-tab workbook sanity: 112 recipes → 5 sub-mixes + 11 prep items, zero false positives. Extend `CHEESE_PREP_RE` as new sheets reveal more perishables.
+
 ## Why it matters / the ask
 - Step 3 (cheese workbook + premix) is where names get abbreviated most, so it's where **brand/flavor cheese & mix name-matching helpers are needed most** — to tie shorthand names to the right blend for each brand+flavor. Relates to follow-up "Connect cheese spec to blend".
 - Reminder of existing invariants: cheese = per-BATCH lbs; premix/mixes = per-PIZZA oz; sauce == frontline pool (see spec-import-batch-vs-perpizza.md, premix-import.md, cheese-server-master-data.md).

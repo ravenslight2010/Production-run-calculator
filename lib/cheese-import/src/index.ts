@@ -396,6 +396,16 @@ export interface CheeseImportCandidate {
    * when the blend is a clean exact-id update or a genuinely new recipe.
    */
   linkTo?: CheeseLinkTarget;
+  /**
+   * Set when this blend is a SUB-MIX: its (brand-stripped) name matches an
+   * ingredient row inside another blend on the same customer tab (e.g. "Aldo's
+   * Parmesan / Oregano Mix" is a block AND appears as the "Parm / Oregano Mix"
+   * component inside "Aldo's Standard Cheese Mix"). It is a real recipe the
+   * factory makes, but it is NOT a pizza-facing blend an applicator picks — it's
+   * a component of the parent named here. Surfaced/labeled in review so it isn't
+   * mistaken for a top-level blend. Absent for ordinary pizza-facing blends.
+   */
+  subMixOf?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +563,124 @@ export function buildCheeseImportCandidates(
     recipe,
     status: existsById(recipe.id) ? "update" : "new",
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Sub-mix + prep-item detection (workbook "depth")
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip a leading brand / customer prefix (possessive-aware) from a blend name
+ * so a sub-mix block title ("Aldo's Parmesan / Oregano Mix") lines up with the
+ * un-prefixed component reference inside its parent ("Parm / Oregano Mix").
+ */
+function stripBrandPrefix(name: string, brand: string): string {
+  const b = collapseWs(brand).toLowerCase();
+  if (!b) return collapseWs(name);
+  const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return collapseWs(name).replace(new RegExp(`^${esc}(?:'s|s)?\\s+`, "i"), "");
+}
+
+/**
+ * Normalized key for matching a sub-mix block name against a parent's component
+ * row: abbreviation-expanded matchKey, brand prefix removed, punctuation-only
+ * tokens dropped. "Aldo's Parmesan / Oregano Mix" and "Parm / Oregano Mix" both
+ * collapse to "parmesan oregano mix".
+ */
+function subMixKey(name: string, brand: string): string {
+  return matchKey(stripBrandPrefix(name, brand))
+    .split(" ")
+    .filter((t) => t && t !== "/" && t !== "&")
+    .join(" ");
+}
+
+/**
+ * Detect SUB-MIXES within each customer tab: a blend block whose name matches an
+ * ingredient row inside ANOTHER block on the same tab. Returns a map of
+ * recipe id → parent blend name. Detection is per-sheet (a sub-mix relationship
+ * only holds within one customer tab) and deliberately exact-on-normalized-key
+ * (no fuzz) so an ordinary raw-cheese component like "Whole Mozzarella" never
+ * gets mistaken for the standalone "Whole Mozzarella Cheese Mix" block.
+ */
+export function detectCheeseSubMixes(
+  sheets: ReadonlyArray<ParsedCheeseSheet>,
+): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const sheet of sheets) {
+    // Map every component reference on this tab → the blend that contains it.
+    const componentParent = new Map<string, string>();
+    for (const parent of sheet.recipes) {
+      for (const c of parent.components) {
+        const ck = subMixKey(c.ingredient, sheet.brand);
+        if (ck) componentParent.set(ck, parent.name);
+      }
+    }
+    for (const r of sheet.recipes) {
+      const parent = componentParent.get(subMixKey(r.name, sheet.brand));
+      if (parent && nameKey(parent) !== nameKey(r.name)) {
+        result.set(r.id, parent);
+      }
+    }
+  }
+  return result;
+}
+
+/** A fresh / perishable prep ingredient found inside a cheese blend. */
+export interface CheesePrepItem {
+  /** The blend this prep ingredient appears in. */
+  blend: string;
+  /** The prep ingredient name, verbatim from the sheet. */
+  ingredient: string;
+  /** Pounds per batch, as parsed. */
+  lbs: number;
+}
+
+/**
+ * Component names that denote a fresh / perishable PREP ingredient (not a shelf-
+ * stable cheese) — these need to be pulled/prepped ahead, parallel to the premix
+ * importer's prep split. Deliberately conservative; extend as real sheets show
+ * more. Matched as whole words, case-insensitive.
+ */
+const CHEESE_PREP_RE = /\b(fresh|spinach|mushroom)\b/i;
+
+/**
+ * Collect fresh / perishable PREP items that appear as ingredient rows inside
+ * cheese blends (e.g. Corner Booth's "Fresh Spinach"). Surfaced read-only in
+ * review so a manager can tag them for early pull; the cheese recipes themselves
+ * are unchanged. Deduped by blend + ingredient across the whole workbook.
+ */
+export function collectCheesePrepItems(
+  sheets: ReadonlyArray<ParsedCheeseSheet>,
+): CheesePrepItem[] {
+  const out: CheesePrepItem[] = [];
+  const seen = new Set<string>();
+  for (const sheet of sheets) {
+    for (const r of sheet.recipes) {
+      for (const c of r.components) {
+        if (!CHEESE_PREP_RE.test(c.ingredient)) continue;
+        const key = `${nameKey(r.name)}\u0000${nameKey(c.ingredient)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ blend: r.name, ingredient: c.ingredient, lbs: c.lbs });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Attach `subMixOf` to candidates from a recipe-id → parent-name map (from
+ * {@link detectCheeseSubMixes}). Pure; returns a new list, leaving non-sub-mix
+ * candidates untouched.
+ */
+export function withCheeseSubMixes(
+  candidates: ReadonlyArray<CheeseImportCandidate>,
+  subMixOfById: ReadonlyMap<string, string>,
+): CheeseImportCandidate[] {
+  return candidates.map((c) => {
+    const parent = subMixOfById.get(c.recipe.id);
+    return parent ? { ...c, subMixOf: parent } : c;
+  });
 }
 
 export { mergeCheeseRecipes };

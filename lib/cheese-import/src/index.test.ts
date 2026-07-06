@@ -9,6 +9,9 @@ import {
   buildCheeseLinkMap,
   withCheeseLinks,
   resolveCheeseCandidate,
+  detectCheeseSubMixes,
+  collectCheesePrepItems,
+  withCheeseSubMixes,
   type CheeseSheetGrid,
 } from "./index";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
@@ -491,5 +494,159 @@ describe("resolveCheeseCandidate", () => {
   it("is a no-op passthrough when there is no link", () => {
     const noLink = { recipe: cheese({ id: "z", name: "Z" }), status: "new" as const };
     expect(resolveCheeseCandidate(noLink, true)).toEqual(noLink.recipe);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sub-mix detection (workbook "depth")
+// ---------------------------------------------------------------------------
+
+describe("detectCheeseSubMixes", () => {
+  it("flags a blend that is itself an ingredient inside another blend on the tab", () => {
+    const { sheets } = parseCheeseWorkbook([ALDO]);
+    const map = detectCheeseSubMixes(sheets);
+    // "Aldo's Parmesan / Oregano Mix" appears as the "Parm / Oregano Mix" row
+    // inside "Aldo's Standard Cheese Mix".
+    const subMix = sheets[0].recipes.find(
+      (r) => r.name === "Aldo's Parmesan / Oregano Mix",
+    );
+    expect(subMix).toBeDefined();
+    expect(map.get(subMix!.id)).toBe("Aldo's Standard Cheese Mix");
+  });
+
+  it("does NOT flag the parent blend itself", () => {
+    const { sheets } = parseCheeseWorkbook([ALDO]);
+    const map = detectCheeseSubMixes(sheets);
+    const parent = sheets[0].recipes.find(
+      (r) => r.name === "Aldo's Standard Cheese Mix",
+    );
+    expect(parent).toBeDefined();
+    expect(map.has(parent!.id)).toBe(false);
+  });
+
+  it("does NOT mistake a raw-cheese component for a same-named 'X Cheese Mix' block", () => {
+    // "Whole Mozzarella Cheese Mix" is a standalone blend; "Whole Mozzarella"
+    // (a raw cheese) is a component of other blends. They must NOT link.
+    const grid: CheeseSheetGrid = {
+      name: "Acme",
+      rows: [
+        ["Five Cheese Mix", "", "", "Whole Mozzarella Cheese Mix", ""],
+        ["", "LBS", "", "", "LBS"],
+        ["Whole Mozzarella", "20", "", "Whole Mozzarella", "40"],
+        ["Provolone", "5", "", "Total", "40"],
+        ["Total", "25", "", "", ""],
+      ],
+    };
+    const { sheets } = parseCheeseWorkbook([grid]);
+    const map = detectCheeseSubMixes(sheets);
+    expect(map.size).toBe(0);
+  });
+
+  it("scopes detection per tab (no cross-tab sub-mix links)", () => {
+    const a: CheeseSheetGrid = {
+      name: "A",
+      rows: [
+        ["Base Mix", ""],
+        ["", "LBS"],
+        ["Spice Mix", "0.3"],
+        ["Total", "0.3"],
+      ],
+    };
+    const b: CheeseSheetGrid = {
+      name: "B",
+      rows: [
+        ["Spice Mix", ""],
+        ["", "LBS"],
+        ["Salt", "1"],
+        ["Total", "1"],
+      ],
+    };
+    const { sheets } = parseCheeseWorkbook([a, b]);
+    const map = detectCheeseSubMixes(sheets);
+    // "Spice Mix" block lives on tab B; its component reference lives on tab A —
+    // different tabs, so no link.
+    expect(map.size).toBe(0);
+  });
+});
+
+describe("withCheeseSubMixes", () => {
+  it("attaches subMixOf only to candidates in the map", () => {
+    const candidates = [
+      { recipe: cheese({ id: "sub", name: "Spice Mix" }), status: "new" as const },
+      { recipe: cheese({ id: "top", name: "Base Mix" }), status: "new" as const },
+    ];
+    const out = withCheeseSubMixes(candidates, new Map([["sub", "Base Mix"]]));
+    expect(out.find((c) => c.recipe.id === "sub")?.subMixOf).toBe("Base Mix");
+    expect(out.find((c) => c.recipe.id === "top")?.subMixOf).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prep-item detection
+// ---------------------------------------------------------------------------
+
+describe("collectCheesePrepItems", () => {
+  const CORNER: CheeseSheetGrid = {
+    name: "Corner Booth",
+    rows: [
+      ["Corner Booth White Spinach & Mushroom Cheese Mix", ""],
+      ["", "LBS"],
+      ["Whole Mozzarella", "20"],
+      ["Fresh Spinach", "17.5"],
+      ["Parmesan, Grated", "2.5"],
+      ["Total", "40"],
+    ],
+  };
+
+  it("surfaces fresh/perishable ingredient rows inside blends", () => {
+    const { sheets } = parseCheeseWorkbook([CORNER]);
+    const prep = collectCheesePrepItems(sheets);
+    const spinach = prep.find((p) => /spinach/i.test(p.ingredient));
+    expect(spinach).toBeDefined();
+    expect(spinach!.blend).toBe(
+      "Corner Booth White Spinach & Mushroom Cheese Mix",
+    );
+    expect(spinach!.lbs).toBe(17.5);
+  });
+
+  it("leaves shelf-stable cheeses out of the prep list", () => {
+    const { sheets } = parseCheeseWorkbook([CORNER]);
+    const prep = collectCheesePrepItems(sheets);
+    expect(prep.some((p) => /mozzarella|parmesan/i.test(p.ingredient))).toBe(
+      false,
+    );
+  });
+
+  it("dedupes the same prep item across tabs", () => {
+    const { sheets } = parseCheeseWorkbook([CORNER, CORNER]);
+    const prep = collectCheesePrepItems(sheets);
+    expect(prep.filter((p) => /spinach/i.test(p.ingredient)).length).toBe(1);
+  });
+});
+
+describe("detectCheeseSubMixes — shared sub-mix", () => {
+  it("still flags a sub-mix referenced by two parent blends on one tab", () => {
+    // "Spice Blend" is a component of BOTH "Blend A" and "Blend B" and has its
+    // own block. It must be flagged as a sub-mix; the parent label is one of the
+    // two (last-seen wins by design — label fidelity only, not correctness).
+    const grid: CheeseSheetGrid = {
+      name: "Shared",
+      rows: [
+        ["Blend A", "", "", "Blend B", ""],
+        ["", "LBS", "", "", "LBS"],
+        ["Whole Mozzarella", "20", "", "Provolone", "20"],
+        ["Spice Blend", "0.3", "", "Spice Blend", "0.3"],
+        ["Total", "20.3", "", "Total", "20.3"],
+        ["Spice Blend", "", "", "", ""],
+        ["", "LBS", "", "", ""],
+        ["Oregano", "1", "", "", ""],
+        ["Total", "1", "", "", ""],
+      ],
+    };
+    const { sheets } = parseCheeseWorkbook([grid]);
+    const map = detectCheeseSubMixes(sheets);
+    const sub = sheets[0].recipes.find((r) => r.name === "Spice Blend");
+    expect(sub).toBeDefined();
+    expect(["Blend A", "Blend B"]).toContain(map.get(sub!.id));
   });
 });

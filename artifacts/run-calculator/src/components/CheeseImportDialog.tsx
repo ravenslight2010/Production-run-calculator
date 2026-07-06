@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { X, FileSpreadsheet, Loader2, CheckCircle2, AlertTriangle, Link2 } from "lucide-react";
+import {
+  X,
+  FileSpreadsheet,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
+  Link2,
+  Layers,
+  Clock,
+} from "lucide-react";
 import { resolveCheeseCandidate, type CheeseImportCandidate } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import type { CheeseImportPrepared } from "@/cheeseImport";
@@ -212,6 +221,19 @@ export default function CheeseImportDialog({
                                 </span>
                               </div>
                             )}
+                            {c.subMixOf && (
+                              <div
+                                className="mt-2 flex flex-wrap items-center gap-1.5 rounded-md border border-purple-400/50 bg-purple-500/10 p-2"
+                                data-testid={`cheese-submix-${it.key}`}
+                              >
+                                <Layers className="h-3.5 w-3.5 shrink-0 text-purple-600" />
+                                <span className="text-xs text-purple-700">
+                                  Sub-mix used inside{" "}
+                                  <span className="font-medium">"{c.subMixOf}"</span>{" "}
+                                  — not applied to pizzas on its own.
+                                </span>
+                              </div>
+                            )}
                             {c.linkTo && (
                               <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-blue-400/50 bg-blue-500/10 p-2">
                                 <Link2 className="h-3.5 w-3.5 shrink-0 text-blue-600" />
@@ -240,6 +262,37 @@ export default function CheeseImportDialog({
                     );
                   })}
                 </ul>
+              )}
+
+              {prepared.prepItems.length > 0 && (
+                <div
+                  className="rounded-md border border-purple-400/50 bg-purple-500/10 p-3"
+                  data-testid="cheese-prep-items"
+                >
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Clock className="h-4 w-4" />
+                    <span className="text-sm font-medium">
+                      Fresh / prep items to pull early
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-purple-700/90">
+                    These fresh ingredients appear inside cheese blends. They're
+                    imported as part of the recipe — this list is just a reminder
+                    to prep or pull them ahead.
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {prepared.prepItems.map((p) => (
+                      <li
+                        key={`${p.blend}\u0000${p.ingredient}`}
+                        className="text-xs text-purple-800"
+                      >
+                        <span className="font-medium">{p.ingredient}</span>
+                        {p.lbs > 0 ? ` — ${p.lbs} lbs` : ""}{" "}
+                        <span className="text-purple-700/80">in {p.blend}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
 
               {prepared.note && (

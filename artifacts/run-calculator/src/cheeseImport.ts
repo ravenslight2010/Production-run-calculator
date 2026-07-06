@@ -18,9 +18,14 @@ import {
   summarizeCheeseImport,
   buildCheeseImportCandidates,
   withCheeseLinks,
+  withCheeseSubMixes,
+  detectCheeseSubMixes,
+  collectCheesePrepItems,
   mergeCheeseRecipes,
   type CheeseImportSummary,
   type CheeseImportCandidate,
+  type CheesePrepItem,
+  type ParsedCheeseSheet,
 } from "@workspace/cheese-import";
 import type { CheeseRecipe } from "@workspace/cheese-recipes";
 import { gridSanityIssue } from "@workspace/spec-import";
@@ -35,6 +40,12 @@ export type CheeseImportPrepared = {
   summary: CheeseImportSummary;
   /** Ids of recipes already saved, so the dialog can show new-vs-update. */
   existingIds: string[];
+  /**
+   * Fresh / perishable prep items found inside blends (e.g. "Fresh Spinach").
+   * Surfaced read-only in review so a manager can pull them early; the imported
+   * cheese recipes are unchanged.
+   */
+  prepItems: CheesePrepItem[];
   /** Uploaded filename(s) for this import. */
   sourceNames?: string[];
   note?: string;
@@ -57,6 +68,7 @@ export async function prepareCheeseImport(
   const existing = await fetchCheeseRecipes();
 
   const byId = new Map<string, CheeseRecipe>();
+  const sheets: ParsedCheeseSheet[] = [];
   const errors: string[] = [];
   const failedNames: string[] = [];
   for (let i = 0; i < buffers.length; i++) {
@@ -66,13 +78,15 @@ export async function prepareCheeseImport(
       // Cheap junk-file guard (a renamed PDF/image "reads" as one junk sheet).
       const sanity = gridSanityIssue(grids);
       if (sanity) throw new Error(sanity);
-      const { recipes } = parseCheeseWorkbook(grids);
+      const { recipes, sheets: parsedSheets } = parseCheeseWorkbook(grids);
       if (recipes.length === 0) {
         failedNames.push(label);
         errors.push(`${label}: no recognizable cheese recipes.`);
       } else {
         // De-dup across files by deterministic id (last-seen wins).
         for (const r of recipes) byId.set(r.id, r);
+        // Keep the per-tab parse so sub-mix / prep detection stays tab-scoped.
+        sheets.push(...parsedSheets);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "could not be read";
@@ -96,10 +110,17 @@ export async function prepareCheeseImport(
   // onto the canonical recipe a spec-sheet import already created (same brand,
   // different name), instead of forking a duplicate. The dialog lets the manager
   // accept or reject each proposed link.
-  const candidates = withCheeseLinks(
-    buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
-    existing,
+  // Flag sub-mixes (a blend that is itself an ingredient inside another blend on
+  // the same tab) so review labels them instead of treating them as pizza-facing
+  // blends, and collect fresh/perishable prep items to surface read-only.
+  const candidates = withCheeseSubMixes(
+    withCheeseLinks(
+      buildCheeseImportCandidates(recipes, (id) => existingIds.has(id)),
+      existing,
+    ),
+    detectCheeseSubMixes(sheets),
   );
+  const prepItems = collectCheesePrepItems(sheets);
 
   const noteParts: string[] = [];
   if (errors.length) {
@@ -115,6 +136,7 @@ export async function prepareCheeseImport(
     candidates,
     summary,
     existingIds: [...existingIds],
+    prepItems,
     ...(note ? { note } : {}),
   };
 }
