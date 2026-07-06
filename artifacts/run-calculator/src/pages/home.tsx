@@ -7447,9 +7447,16 @@ export default function Home() {
           if (!lastErrorDetail) {
             let serverMsg = "";
             try {
-              const body = (await res.json()) as { error?: unknown };
+              const body = (await res.clone().json()) as { error?: unknown };
               if (body && typeof body.error === "string") serverMsg = body.error;
-            } catch {}
+            } catch {
+              // Non-JSON error body (e.g. a proxy/HTML error page): fall back to a
+              // short snippet of the text so the toast still carries a real reason.
+              try {
+                const text = (await res.text()).trim();
+                if (text && !text.startsWith("<")) serverMsg = text.slice(0, 120);
+              } catch {}
+            }
             lastErrorDetail = serverMsg ? `${res.status}: ${serverMsg}` : `error ${res.status}`;
           }
         }
