@@ -35,6 +35,12 @@ describe("normalizeAllergen", () => {
     expect(normalizeAllergen(" Milk ")).toBe("milk");
     expect(normalizeAllergen("Tree  Nuts")).toBe("tree nuts");
   });
+  it("collapses verbose built-in spellings onto the canonical token", () => {
+    expect(normalizeAllergen("Egg Allergen")).toBe("egg");
+    expect(normalizeAllergen("soy allergen")).toBe("soy");
+    // A combined/other allergen is NOT a built-in and stays custom.
+    expect(normalizeAllergen("Soy & Egg Allergen")).toBe("soy & egg allergen");
+  });
   it("DEFAULT_ALLERGEN is none", () => {
     expect(DEFAULT_ALLERGEN).toBe("none");
   });
@@ -75,8 +81,8 @@ describe("metadata", () => {
   });
   it("labels are human readable", () => {
     expect(allergenLabel("none")).toBe("None");
-    expect(allergenLabel("egg")).toBe("Egg");
-    expect(allergenLabel("soy")).toBe("Soy");
+    expect(allergenLabel("egg")).toBe("Egg Allergen");
+    expect(allergenLabel("soy")).toBe("Soy Allergen");
   });
   it("ALLERGENS lists none first then egg, soy", () => {
     expect(ALLERGENS.map((a) => a.value)).toEqual(["none", "egg", "soy"]);

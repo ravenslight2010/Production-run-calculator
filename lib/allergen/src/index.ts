@@ -29,21 +29,32 @@ export interface AllergenMeta {
 // Order matters: this is the order options are shown in the picker.
 export const ALLERGENS: readonly AllergenMeta[] = [
   { value: "none", label: "None", color: "#94a3b8", textColor: "#0f172a", isAllergen: false },
-  { value: "egg", label: "Egg", color: "#eab308", textColor: "#1c1917", isAllergen: true },
-  { value: "soy", label: "Soy", color: "#db2777", textColor: "#ffffff", isAllergen: true },
+  { value: "egg", label: "Egg Allergen", color: "#eab308", textColor: "#1c1917", isAllergen: true },
+  { value: "soy", label: "Soy Allergen", color: "#db2777", textColor: "#ffffff", isAllergen: true },
 ];
 
 // "No allergen" spellings that must collapse to the neutral `none`.
 const NONE_ALIASES = new Set(["", "none", "no", "na", "n/a", "no allergen"]);
 
+// Verbose spellings of a built-in allergen (e.g. "Egg Allergen" typed into a
+// profile or written by an import) collapse onto the canonical egg/soy tokens,
+// so they render as the single built-in chip instead of a duplicate custom one.
+const BUILTIN_ALIASES: Record<string, Allergen> = {
+  "egg allergen": "egg",
+  "egg allergens": "egg",
+  "soy allergen": "soy",
+  "soy allergens": "soy",
+};
+
 // Coerce any persisted/synced/parsed value onto a clean allergen token. Blank,
-// non-string, or an explicit "no allergen" spelling become `none`; anything
-// else is preserved (lower-cased, whitespace-collapsed) so a NEW allergen named
-// on a spec sheet (e.g. "milk") survives instead of being discarded.
+// non-string, or an explicit "no allergen" spelling become `none`; a verbose
+// built-in spelling collapses onto its canonical token; anything else is
+// preserved (lower-cased, whitespace-collapsed) so a NEW allergen named on a
+// spec sheet (e.g. "milk") survives instead of being discarded.
 export function normalizeAllergen(v: unknown): Allergen {
   const s = typeof v === "string" ? v.trim().toLowerCase().replace(/\s+/g, " ") : "";
   if (NONE_ALIASES.has(s)) return "none";
-  return s;
+  return BUILTIN_ALIASES[s] ?? s;
 }
 
 // A small palette of distinct, dark swatch colors for custom allergens (beyond

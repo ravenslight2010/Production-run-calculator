@@ -13,6 +13,15 @@ Built-ins (none/egg/soy) keep fixed colors/labels; any other token is a real
 custom allergen (e.g. "milk", "tree nuts") imported from a spec sheet.
 `normalizeAllergen` lowercases + collapses whitespace and maps none-spellings to
 "none" but PRESERVES unknown tokens (never coerce a custom allergen to "none").
+It ALSO collapses verbose built-in spellings ("egg allergen"/"soy allergen") onto
+canonical "egg"/"soy" via BUILTIN_ALIASES so profiles/imports that stored the
+verbose name don't render as a DUPLICATE custom chip alongside the built-in.
+Built-in labels intentionally read "Egg Allergen"/"Soy Allergen" (egg yellow
+#eab308, soy pink #db2777), so the surviving chip both says "allergen" and is
+correctly colored. **Why:** user saw two Egg + two Soy chips (built-in short-label
+correct color, plus verbose custom wrong hash color) and wanted one correctly
+colored allergen chip. Combined forms like "soy & egg allergen" are NOT aliased
+(no built-in) and remain custom by design.
 `allergenMeta` derives a stable hash-palette color + contrast text + titleCase
 label for customs. `allergenOptions(extra)` = built-ins ∪ deduped/sorted customs;
 every picker (web import/run picker/SetupProfileEditor, mobile configure/
