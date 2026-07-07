@@ -89,3 +89,5 @@ advance; 0 = no fence; treats stored 0 as real). Wired into all 4 home.tsx write
 sites. **Rule for any new day-row write:** never pass `Date.now()` as resetAt for a
 today-target — preserve the existing boundary. Mobile has the same latent bug
 (parity paused; MOBILE TODO logged).
+
+**"Reset didn't sign me out" in DEV — usually a restart collision, not a fence bug (seen 2026-07-07).** The boundary is client-pushed, and `forceSignedOut` deliberately keeps the cookie so the push can land. If the dev workflows restart in that window (agent checkpoint/validation), Vite's HMR reload re-boots the page while the cookie is still valid and the boundary PUT hasn't landed (API server was mid-restart), so /me returns 200 and the user is silently signed back in — data reset visible, no login prompt. The fence catches them on their next request once the delayed PUT lands + the 15s boundary cache expires. Diagnose by comparing `resetBoundaryAt` (client Date.now at rollover) vs the row's `updated_at` (when the push actually landed) vs API-server boot time in the logs.
