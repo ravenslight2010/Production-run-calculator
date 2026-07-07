@@ -487,6 +487,12 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     ["House Marinara", "House Regular Marinara", "sauce"],
     // Filler token "pizza" dropped from a sauce name.
     ["House Marinara", "House Pizza Marinara", "sauce"],
+    // Reordered words (near-dup matcher, word-order layer).
+    ["House Dough", "Dough House", "dough"],
+    ["House Marinara", "Marinara House", "sauce"],
+    // Single-letter misspelling (near-dup matcher, typo layer — one dropped
+    // letter; a two-letter swap like "Duogh" is edit distance 2 and still forks).
+    ["House Dugh", "House Dough", "dough"],
   ];
 
   it.each(collapseCases)(
@@ -503,21 +509,16 @@ describe("spec-import dough/sauce loose-key dedup boundary — collapse vs keep"
     },
   );
 
-  // ---- KEEP: the loose key is deliberately conservative (no fuzzy / edit
-  // distance), so a distinguishing extra word, a word reorder, or a misspelling
-  // is a DIFFERENT recipe and forks a parallel pool entry. This documents the
-  // real-world split risk from import-order-dedup-keys.md.
+  // ---- KEEP: the near-dup matcher (@workspace/name-match) now folds word
+  // reorders and single typos, but its extra-word layer stays OFF in this
+  // silent auto-link path: an extra word is often a MEANINGFUL qualifier
+  // ("Spicy House Sauce" is not "House Sauce"), so it still forks a parallel
+  // pool entry the manager can merge by hand.
   const keepCases: Array<[string, string, "dough" | "sauce"]> = [
     // Extra distinguishing word ("Craft") — not filler.
     ["House Dough", "House Craft Dough", "dough"],
-    // Reordered words.
-    ["House Dough", "Dough House", "dough"],
-    // Misspelling.
-    ["House Dough", "House Duogh", "dough"],
     // Sauce: extra word.
     ["House Marinara", "House Craft Marinara", "sauce"],
-    // Sauce: reordered words.
-    ["House Marinara", "Marinara House", "sauce"],
   ];
 
   it.each(keepCases)(
