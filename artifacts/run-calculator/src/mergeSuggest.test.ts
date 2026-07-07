@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { suggestMerges } from "./mergeSuggest";
 import {
   collectDeniedPairs,
   collectMergeAliases,
@@ -219,5 +220,62 @@ describe("filterDeniedSuggestions", () => {
 
   it("returns the input unchanged when there are no denials", () => {
     expect(filterDeniedSuggestions(suggestions, [])).toBe(suggestions);
+  });
+});
+
+describe("suggestMerges — conflicting descriptor guard (cured vs natural)", () => {
+  function stubFetch(handlers: {
+    aliases?: MergeAlias[];
+    ai?: { suggestions: MergeSuggestion[] } | "fail";
+  }) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const json = (body: unknown, ok = true, status = 200) =>
+          ({ ok, status, json: async () => body }) as Response;
+        if (url.includes("/api/merge-aliases")) return json({ aliases: handlers.aliases ?? [] });
+        if (url.includes("/api/denied-merges")) return json({ denied: [] });
+        if (url.includes("/api/ai/suggest-merges")) {
+          if (handlers.ai === "fail" || !handlers.ai) return json({ error: "nope" }, false, 403);
+          return json(handlers.ai);
+        }
+        return json({}, false, 404);
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("strips a cured↔natural pairing from AI output (AI-success path)", async () => {
+    stubFetch({
+      ai: {
+        suggestions: [
+          { target: "Pepperoni Cured", sources: ["Pepperoni Natural"] },
+          { target: "Mozzarella", sources: ["Mozarella"] },
+        ],
+      },
+    });
+    const res = await suggestMerges([
+      "Pepperoni Cured",
+      "Pepperoni Natural",
+      "Mozzarella",
+      "Mozarella",
+    ]);
+    expect(res.usedAi).toBe(true);
+    expect(res.suggestions).toHaveLength(1);
+    expect(res.suggestions[0].target).toBe("Mozzarella");
+  });
+
+  it("strips a remembered cured↔natural pairing (AI-fallback path)", async () => {
+    stubFetch({
+      aliases: [{ externalName: "Pepperoni Cured", canonicalName: "Pepperoni Natural" }],
+      ai: "fail",
+    });
+    const res = await suggestMerges(["Pepperoni Cured", "Pepperoni Natural"]);
+    expect(res.usedAi).toBe(false);
+    expect(res.suggestions).toEqual([]);
   });
 });

@@ -199,6 +199,66 @@ export function nearDupSuggestions(names: string[]): MergeSuggestion[] {
   return out.sort((a, b) => a.target.localeCompare(b.target));
 }
 
+// ── Conflicting descriptor guard ─────────────────────────────────────────────
+// Some word pairs mark genuinely DIFFERENT products even when the rest of the
+// name matches (e.g. "Pepperoni Cured" vs "Pepperoni Natural" are distinct
+// items, not spellings of one item). Suggestions pairing such names are wrong
+// by construction, so they are stripped before anything is shown — from the
+// deterministic near-dup scan, remembered groups, and AI output alike.
+
+const CONFLICTING_TERM_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["cured", "natural"],
+];
+
+function nameTokens(name: string): Set<string> {
+  return new Set(
+    norm(name)
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean),
+  );
+}
+
+/**
+ * True when two names carry opposing product descriptors (one says "cured",
+ * the other says "natural") and therefore must never be merged. Token-based,
+ * so "Uncured" is NOT treated as "cured". A name containing BOTH terms is
+ * ambiguous and conflicts with neither.
+ */
+export function namesHaveConflictingTerms(a: string, b: string): boolean {
+  const ta = nameTokens(a ?? "");
+  const tb = nameTokens(b ?? "");
+  for (const [x, y] of CONFLICTING_TERM_PAIRS) {
+    const aOnlyX = ta.has(x) && !ta.has(y);
+    const aOnlyY = ta.has(y) && !ta.has(x);
+    const bOnlyX = tb.has(x) && !tb.has(y);
+    const bOnlyY = tb.has(y) && !tb.has(x);
+    if ((aOnlyX && bOnlyY) || (aOnlyY && bOnlyX)) return true;
+  }
+  return false;
+}
+
+/**
+ * Strip conflicting-descriptor pairings out of suggestions. A source is dropped
+ * when it conflicts with the group's target OR with any source kept before it
+ * (so a neutral target can't quietly collapse a "cured" and a "natural" item
+ * into one). Groups left with no sources are dropped. Pure; never throws.
+ */
+export function filterConflictingSuggestions<T extends MergeSuggestion>(
+  suggestions: T[],
+): T[] {
+  const out: T[] = [];
+  for (const s of suggestions) {
+    const kept: string[] = [];
+    for (const src of s.sources ?? []) {
+      if (namesHaveConflictingTerms(s.target, src)) continue;
+      if (kept.some((k) => namesHaveConflictingTerms(k, src))) continue;
+      kept.push(src);
+    }
+    if (kept.length > 0) out.push({ ...s, sources: kept });
+  }
+  return out;
+}
+
 // ── Denied (ignored) merge pairs ─────────────────────────────────────────────
 // When the user explicitly denies/ignores a merge suggestion, we remember the
 // unordered name pairs so the AI/learned suggester never re-proposes merging

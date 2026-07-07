@@ -18,6 +18,7 @@ import {
   nearDupSuggestions,
   collectDeniedPairs,
   filterDeniedSuggestions,
+  filterConflictingSuggestions,
   type MergeAlias,
   type MergeSuggestion,
   type DeniedMerge,
@@ -257,10 +258,15 @@ export async function suggestMerges(
       const review = reviewByTarget.get(s.target.trim().toLowerCase());
       return review ? { ...s, review } : s;
     });
-    return { suggestions: filterDeniedSuggestions(merged, denied), usedAi: true };
+    // Conflicting-descriptor guard (e.g. "cured" vs "natural" are different
+    // products): stripped from every shown suggestion, AI or baseline.
+    return {
+      suggestions: filterConflictingSuggestions(filterDeniedSuggestions(merged, denied)),
+      usedAi: true,
+    };
   } catch (e) {
     return {
-      suggestions: filterDeniedSuggestions(baseline, denied),
+      suggestions: filterConflictingSuggestions(filterDeniedSuggestions(baseline, denied)),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };
