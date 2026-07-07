@@ -8,6 +8,7 @@ import {
   remapRecipeForRenames,
   crossFillSpecImport,
   collectSpecRenameAliases,
+  mergeSpecAliases,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedRecipeTarget,
@@ -344,6 +345,14 @@ export default function SpecImportDialog({
     [profiles, prepared],
   );
 
+  // What the step-2 "mappings will be remembered" note reports: the prepare-time
+  // learned mappings PLUS the user's step-1 renames (rename wins on collisions),
+  // exactly what will be saved on Apply.
+  const rememberedMappingCount = useMemo(
+    () => mergeSpecAliases(prepared?.newAliases ?? [], learnedRenames).length,
+    [prepared, learnedRenames],
+  );
+
   // The edited, include-only import that would be applied. Recomputed live so the
   // change list and counts always reflect the user's edits.
   const edited: ParsedSpecImport = useMemo(() => {
@@ -627,10 +636,10 @@ export default function SpecImportDialog({
                 </div>
               )}
 
-              {step === 2 && prepared.newAliases.length > 0 && (
+              {step === 2 && rememberedMappingCount > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  {prepared.newAliases.length} new name mapping
-                  {prepared.newAliases.length === 1 ? "" : "s"} will be remembered for
+                  {rememberedMappingCount} new name mapping
+                  {rememberedMappingCount === 1 ? "" : "s"} will be remembered for
                   future imports.
                 </p>
               )}
