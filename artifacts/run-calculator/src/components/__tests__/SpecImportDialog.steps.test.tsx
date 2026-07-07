@@ -4,6 +4,7 @@ import type {
   ParsedProfile,
   ParsedRecipe,
   ParsedSpecImport,
+  SpecImportAlias,
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import SpecImportDialog from "../SpecImportDialog";
@@ -50,7 +51,7 @@ function makePrepared(
 
 function renderDialog(
   prepared: SpecImportPrepared,
-  onConfirm: (p: ParsedSpecImport) => void = () => {},
+  onConfirm: (p: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void = () => {},
 ) {
   return render(
     <SpecImportDialog
@@ -247,6 +248,54 @@ describe("SpecImportDialog two-step wizard", () => {
 
     const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
     expect(out.recipes[0]).toMatchObject({ brand: "Keep", flavor: "Me" });
+  });
+
+  it("passes step-1 brand/flavor renames to onConfirm as learnable aliases", () => {
+    const onConfirm = vi.fn();
+    const prepared = makePrepared([{ brand: '11" Four Hands', flavor: "Chz" }]);
+    // A prior learned alias points AT the shown brand: the rename must re-point
+    // the raw sheet label to the edited name (no alias chain).
+    prepared.newAliases = [
+      { kind: "brand", externalName: "11 IN FOUR HANDS", canonicalName: '11" Four Hands', context: null },
+    ];
+    renderDialog(prepared, onConfirm);
+
+    fireEvent.change(screen.getByTestId("spec-profile-brand-pk0"), {
+      target: { value: "Four Hands" },
+    });
+    fireEvent.change(screen.getByTestId("spec-profile-flavor-pk0"), {
+      target: { value: "Cheese" },
+    });
+    fireEvent.click(screen.getByText("Next"));
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const learned = onConfirm.mock.calls[0][1] as SpecImportAlias[];
+    expect(learned).toContainEqual({
+      kind: "brand",
+      externalName: '11" Four Hands',
+      canonicalName: "Four Hands",
+      context: null,
+    });
+    expect(learned).toContainEqual({
+      kind: "brand",
+      externalName: "11 IN FOUR HANDS",
+      canonicalName: "Four Hands",
+      context: null,
+    });
+    expect(learned).toContainEqual({
+      kind: "flavor",
+      externalName: "Chz",
+      canonicalName: "Cheese",
+      context: "Four Hands",
+    });
+  });
+
+  it("passes no learned aliases when names were confirmed unchanged", () => {
+    const onConfirm = vi.fn();
+    renderDialog(makePrepared([{ brand: "A", flavor: "X" }]), onConfirm);
+    fireEvent.click(screen.getByText("Next"));
+    fireEvent.click(screen.getByText(/^Apply/));
+    expect(onConfirm.mock.calls[0][1]).toEqual([]);
   });
 
   it("lets a recipe-only workbook (no profiles) advance straight to step 2", () => {

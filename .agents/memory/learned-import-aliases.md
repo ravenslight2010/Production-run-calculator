@@ -36,3 +36,27 @@ and makes results deterministic.
   `(type, externalName, brandContext)`. No DB unique index yet, so it is not
   hardened against truly concurrent POSTs of the same new key — acceptable given
   imports are infrequent, manual actions.
+
+## Manual review renames must also be learned (spec import)
+
+The spec importer's review dialog lets the user hand-edit brand/flavor names
+(Step 1). Those manual edits must ALSO be captured as learned aliases — the
+automatic `collectSpecAliases` only learns matches the canonicalizer/AI found,
+so hand-typed corrections were forgotten on re-upload of the same sheet.
+
+**Why:** the user re-uploaded a sheet and every rename came back wrong.
+
+**How to apply:**
+- Learn a rename with the RAW sheet label as `externalName`, not the shown
+  name: the shown name may itself be a prior alias target, and a chained alias
+  (raw→shown plus shown→edited) gets discarded wholesale by
+  `dropConflictingSpecAliases` on the next import — including the previously
+  good raw→shown one. Re-point every prior alias whose canonical == shown to
+  the edited name; the server upserts by (kind, externalName, context) so the
+  old row is replaced.
+- Only learn a rename when it is consistent across the whole review (same
+  shown brand renamed the same way everywhere); aliases are global per kind.
+- A flavor alias's context is the CONFIRMED brand (brand alias applies before
+  flavor canonicalization on re-import).
+- Pure logic: `collectSpecRenameAliases` / `mergeSpecAliases` in
+  `@workspace/spec-import`.

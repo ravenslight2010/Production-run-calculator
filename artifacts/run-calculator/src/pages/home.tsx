@@ -383,7 +383,7 @@ import SpecImportDialog from "@/components/SpecImportDialog";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
 import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_IMPORT_FILES, type SpecImportPrepared } from "@/specImport";
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
-import type { ParsedSpecImport } from "@workspace/spec-import";
+import { mergeSpecAliases, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
 import type { PremixFreezerPull } from "@workspace/premix-import";
@@ -7031,13 +7031,22 @@ export default function Home() {
     }
   }
 
-  async function handleSpecImportConfirm(editedParsed: ParsedSpecImport) {
+  async function handleSpecImportConfirm(
+    editedParsed: ParsedSpecImport,
+    learnedRenames: SpecImportAlias[],
+  ) {
     if (!specImportPrepared) return;
     setSpecImportApplying(true);
     // Apply exactly what the user kept/corrected in the review — not the raw
-    // parse. Everything else on `prepared` (aliases, source names for the
-    // snapshot) is preserved.
-    const toCommit: SpecImportPrepared = { ...specImportPrepared, parsed: editedParsed };
+    // parse. Everything else on `prepared` (source names for the snapshot) is
+    // preserved. The user's step-1 brand/flavor renames are folded into the
+    // learned aliases (rename wins on key collisions) so a re-upload of the
+    // same sheet remembers the corrections.
+    const toCommit: SpecImportPrepared = {
+      ...specImportPrepared,
+      parsed: editedParsed,
+      newAliases: mergeSpecAliases(specImportPrepared.newAliases, learnedRenames),
+    };
     // Imported recipes can introduce ingredients that duplicate standalone ones,
     // so kick off a merge check afterwards (only when recipes were actually
     // imported). Capture before clearing the prepared payload.

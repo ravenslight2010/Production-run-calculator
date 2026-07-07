@@ -1265,6 +1265,119 @@ export function collectSpecAliases(
   return [...byKey.values()];
 }
 
+/**
+ * Turn the review dialog's step-1 brand/flavor renames into learnable aliases so
+ * a re-upload of the same sheet remembers them (the missing half of the learned
+ * memory: `collectSpecAliases` only learns matches the canonicalizer/AI found,
+ * never the user's manual text edits).
+ *
+ * Chain safety: the shown name being renamed may itself be the target of a
+ * previously learned alias (raw sheet label → shown). Saving shown→edited would
+ * create a chain (raw→shown→edited) that `dropConflictingSpecAliases` throws
+ * away wholesale on the next import. So for every prior alias that points AT the
+ * shown name, this emits raw→edited instead (the server upserts by
+ * kind+externalName+context, so the old raw→shown row is REPLACED), plus
+ * shown→edited itself for sheets that literally contain the shown label.
+ *
+ * Ambiguity safety: a rename is only learned when it is CONSISTENT across the
+ * whole review — if two rows started as brand X but were renamed to different
+ * brands, no brand alias is learned (aliases are global per kind, and guessing
+ * would mis-rename future sheets). Same per (brand, flavor) pair for flavors.
+ * A flavor alias's context is the CONFIRMED brand, because on the next import
+ * the brand alias applies first and the flavor is canonicalized under it.
+ *
+ * Pure; output deduped by identity key.
+ */
+export function collectSpecRenameAliases(
+  renames: ReadonlyArray<SpecProfileRename>,
+  priorAliases: ReadonlyArray<SpecImportAlias>,
+): SpecImportAlias[] {
+  const dl = (s: string) => s.trim().toLowerCase();
+
+  // Consistent brand renames: old brand (lower) -> confirmed brand, dropped when
+  // ambiguous. Reuses the same rule as the step-2 re-target maps.
+  const brandTo = new Map<string, string | null>();
+  // Consistent flavor renames: (old brand, old flavor) -> confirmed pair.
+  const pairTo = new Map<string, { brand: string; flavor: string } | null>();
+  for (const { from, to } of renames) {
+    const fb = from.brand.trim();
+    const ff = from.flavor.trim();
+    const tb = to.brand.trim();
+    const tf = to.flavor.trim();
+    if (fb && tb) {
+      const k = dl(fb);
+      if (!brandTo.has(k)) brandTo.set(k, tb);
+      else if (dl(brandTo.get(k) ?? "") !== dl(tb)) brandTo.set(k, null);
+    }
+    if (fb && ff && tb && tf) {
+      const k = `${dl(fb)}${NUL}${dl(ff)}`;
+      const prev = pairTo.get(k);
+      if (prev === undefined) pairTo.set(k, { brand: tb, flavor: tf });
+      else if (prev !== null && (dl(prev.brand) !== dl(tb) || dl(prev.flavor) !== dl(tf))) {
+        pairTo.set(k, null);
+      }
+    }
+  }
+
+  const out = new Map<string, SpecImportAlias>();
+  const emit = (a: SpecImportAlias) => {
+    if (!a.externalName.trim() || !a.canonicalName.trim()) return;
+    if (dl(a.externalName) === dl(a.canonicalName)) return;
+    out.set(specAliasKey(a.kind, a.externalName, a.context ?? null), a);
+  };
+
+  for (const { from } of renames) {
+    const shownBrand = from.brand.trim();
+    const shownFlavor = from.flavor.trim();
+
+    // Brand rename (only when unambiguous across the whole review).
+    const confirmedBrand = shownBrand ? brandTo.get(dl(shownBrand)) ?? null : null;
+    if (shownBrand && confirmedBrand && dl(shownBrand) !== dl(confirmedBrand)) {
+      emit({ kind: "brand", externalName: shownBrand, canonicalName: confirmedBrand, context: null });
+      for (const a of priorAliases) {
+        if (a.kind !== "brand") continue;
+        if (dl(a.canonicalName) !== dl(shownBrand)) continue;
+        emit({ kind: "brand", externalName: a.externalName, canonicalName: confirmedBrand, context: null });
+      }
+    }
+
+    // Flavor rename (scoped to the confirmed brand; only when unambiguous).
+    const pair =
+      shownBrand && shownFlavor ? pairTo.get(`${dl(shownBrand)}${NUL}${dl(shownFlavor)}`) ?? null : null;
+    if (pair && dl(shownFlavor) !== dl(pair.flavor)) {
+      emit({ kind: "flavor", externalName: shownFlavor, canonicalName: pair.flavor, context: pair.brand });
+      for (const a of priorAliases) {
+        if (a.kind !== "flavor") continue;
+        if (dl(a.canonicalName) !== dl(shownFlavor)) continue;
+        if (dl(a.context ?? "") !== dl(shownBrand)) continue;
+        emit({ kind: "flavor", externalName: a.externalName, canonicalName: pair.flavor, context: pair.brand });
+      }
+    }
+  }
+
+  return [...out.values()];
+}
+
+/**
+ * Merge learned aliases, `overrides` winning on identity-key collisions. Used to
+ * fold the review's rename aliases into the prepare-time list before saving, so
+ * a stale raw→shown mapping is REPLACED by raw→edited instead of both being sent
+ * (the server upserts in order, so sending both would be order-dependent).
+ * Pure and order-preserving for survivors.
+ */
+export function mergeSpecAliases(
+  base: ReadonlyArray<SpecImportAlias>,
+  overrides: ReadonlyArray<SpecImportAlias>,
+): SpecImportAlias[] {
+  const overrideKeys = new Set(
+    overrides.map((a) => specAliasKey(a.kind, a.externalName, a.context ?? null)),
+  );
+  return [
+    ...base.filter((a) => !overrideKeys.has(specAliasKey(a.kind, a.externalName, a.context ?? null))),
+    ...overrides,
+  ];
+}
+
 // ── Workbook → compact prompt text ───────────────────────────────────────────
 
 export type SheetGrid = { name: string; rows: string[][] };

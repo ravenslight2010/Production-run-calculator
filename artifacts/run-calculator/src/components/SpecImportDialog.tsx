@@ -7,11 +7,13 @@ import {
   buildSpecRenameMaps,
   remapRecipeForRenames,
   crossFillSpecImport,
+  collectSpecRenameAliases,
   type ParsedProfile,
   type ParsedRecipe,
   type ParsedRecipeTarget,
   type ParsedSpecImport,
   type SpecProfileRename,
+  type SpecImportAlias,
 } from "@workspace/spec-import";
 import type { SpecImportPrepared } from "@/specImport";
 import { buildDiscrepancies } from "@/specImport";
@@ -41,8 +43,13 @@ type Props = {
    * (e.g. a single "Aldo's Standard Cheese Mix").
    */
   existingRecipeNamesByKind: Record<SpecImportDisplayKind, string[]>;
-  /** Confirm with the edited, kept-only import the user chose to apply. */
-  onConfirm: (parsed: ParsedSpecImport) => void;
+  /**
+   * Confirm with the edited, kept-only import the user chose to apply.
+   * `learnedRenames` are the step-1 brand/flavor renames turned into learnable
+   * aliases — the parent folds them into the saved alias list so a re-upload of
+   * the same sheet remembers the corrections.
+   */
+  onConfirm: (parsed: ParsedSpecImport, learnedRenames: SpecImportAlias[]) => void;
 };
 
 // One editable profile row in the review. `orig` keeps every field the parser
@@ -319,6 +326,23 @@ export default function SpecImportDialog({
     setRecipes(nextRecipes);
     setStep(2);
   };
+
+  // Step-1 brand/flavor renames on INCLUDED products, turned into learnable
+  // aliases (raw sheet label → confirmed name) so a re-upload of the same sheet
+  // remembers the corrections. Passed to the parent on Apply.
+  const learnedRenames: SpecImportAlias[] = useMemo(
+    () =>
+      collectSpecRenameAliases(
+        profiles
+          .filter((p) => p.include)
+          .map((p): SpecProfileRename => ({
+            from: { brand: p.baseOrig.brand ?? "", flavor: p.baseOrig.flavor ?? "" },
+            to: { brand: p.brand.trim(), flavor: p.flavor.trim() },
+          })),
+        prepared?.newAliases ?? [],
+      ),
+    [profiles, prepared],
+  );
 
   // The edited, include-only import that would be applied. Recomputed live so the
   // change list and counts always reflect the user's edits.
@@ -704,7 +728,7 @@ export default function SpecImportDialog({
           ) : (
             <button
               type="button"
-              onClick={() => onConfirm(edited)}
+              onClick={() => onConfirm(edited, learnedRenames)}
               disabled={
                 loading ||
                 applying ||
