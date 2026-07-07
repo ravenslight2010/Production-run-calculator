@@ -10,8 +10,11 @@ type Props = {
   error: string | null;
   prepared: ShippingImportPrepared | null;
   applying: boolean;
-  /** Confirm with the reviewed rows (brand picked, include/exclude applied). */
-  onConfirm: (rows: { brand: string; patch: ShippingPatch }[]) => void;
+  /**
+   * Confirm with the reviewed rows (brand picked, include/exclude applied).
+   * `flavors` empty = apply to the whole brand; otherwise only those flavors.
+   */
+  onConfirm: (rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) => void;
 };
 
 // Review screen for the Shipping & Palletizing Guide importer. Each guide row
@@ -31,19 +34,23 @@ export default function ShippingImportDialog({
 }: Props) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [brandPicks, setBrandPicks] = useState<Record<string, string>>({});
+  // Per-row flavor targets. Missing/empty set = "All flavors" (whole brand).
+  const [flavorPicks, setFlavorPicks] = useState<Record<string, Set<string>>>({});
 
   // Reset review state whenever a fresh prepared result arrives: rows with a
   // matched brand start included; unmatched rows start excluded until the
-  // manager picks a brand for them.
+  // manager picks a brand for them. Flavor targeting defaults to "All flavors".
   useEffect(() => {
     if (prepared) {
       setSelected(new Set(prepared.candidates.filter((c) => c.brand).map((c) => c.id)));
       setBrandPicks(
         Object.fromEntries(prepared.candidates.map((c) => [c.id, c.brand ?? ""])),
       );
+      setFlavorPicks({});
     } else {
       setSelected(new Set());
       setBrandPicks({});
+      setFlavorPicks({});
     }
   }, [prepared]);
 
@@ -62,6 +69,13 @@ export default function ShippingImportDialog({
 
   const pickBrand = (c: ShippingCandidate, brand: string) => {
     setBrandPicks((prev) => ({ ...prev, [c.id]: brand }));
+    // Changing the brand resets the row's flavor targeting to "All flavors"
+    // (the old picks belong to the previous brand's flavor list).
+    setFlavorPicks((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
     // Picking a brand for a previously unmatched row is an implicit include;
     // clearing the pick excludes it (can't apply without a target brand).
     setSelected((prev) => {
@@ -72,9 +86,30 @@ export default function ShippingImportDialog({
     });
   };
 
+  const toggleFlavor = (id: string, flavor: string) =>
+    setFlavorPicks((prev) => {
+      const cur = new Set(prev[id] ?? []);
+      if (cur.has(flavor)) cur.delete(flavor);
+      else cur.add(flavor);
+      return { ...prev, [id]: cur };
+    });
+
+  const clearFlavors = (id: string) =>
+    setFlavorPicks((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+
+  const flavorsByBrand = prepared?.flavorsByBrand ?? {};
+
   const applyRows = candidates
     .filter((c) => selected.has(c.id) && (brandPicks[c.id] ?? "").trim() && Object.keys(c.patch).length > 0)
-    .map((c) => ({ brand: brandPicks[c.id], patch: c.patch }));
+    .map((c) => ({
+      brand: brandPicks[c.id],
+      flavors: Array.from(flavorPicks[c.id] ?? []),
+      patch: c.patch,
+    }));
 
   const confirm = () => {
     if (applyRows.length > 0) onConfirm(applyRows);
@@ -107,7 +142,7 @@ export default function ShippingImportDialog({
           {!loading && !error && prepared && (
             <>
               <p className="text-xs text-muted-foreground">
-                Each row below fills that brand&apos;s packaging settings (every flavor under the brand).
+                Each row below fills that brand&apos;s packaging settings — all flavors by default, or tap specific flavors to target just those.
                 Values the guide has but the app can&apos;t match for sure are <span className="font-medium text-foreground">kept as-is</span> — nothing is guessed.
                 Uncheck a row to skip it; unmatched rows need a brand picked first.
               </p>
@@ -115,6 +150,8 @@ export default function ShippingImportDialog({
                 {candidates.map((c) => {
                   const brand = brandPicks[c.id] ?? "";
                   const included = selected.has(c.id) && !!brand.trim();
+                  const brandFlavors = brand ? (flavorsByBrand[brand] ?? []) : [];
+                  const picked = flavorPicks[c.id] ?? new Set<string>();
                   return (
                     <div key={c.id} className={`rounded-md border p-3 space-y-1.5 ${included ? "border-border" : "border-border/50 opacity-70"}`} data-testid={`row-shipping-${c.id}`}>
                       <div className="flex items-center gap-2">
@@ -147,6 +184,30 @@ export default function ShippingImportDialog({
                           <span className="text-[11px] text-muted-foreground">Nothing recognizable to apply.</span>
                         )}
                       </div>
+                      {brand && brandFlavors.length > 0 && (
+                        <div className="pl-6 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] text-muted-foreground">Apply to:</span>
+                          <button
+                            type="button"
+                            onClick={() => clearFlavors(c.id)}
+                            className={`rounded-full border px-2 py-0.5 text-[11px] ${picked.size === 0 ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border text-muted-foreground hover:bg-muted"}`}
+                            data-testid={`chip-shipping-all-flavors-${c.id}`}
+                          >
+                            All flavors
+                          </button>
+                          {brandFlavors.map((f) => (
+                            <button
+                              key={f}
+                              type="button"
+                              onClick={() => toggleFlavor(c.id, f)}
+                              className={`rounded-full border px-2 py-0.5 text-[11px] ${picked.has(f) ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border text-muted-foreground hover:bg-muted"}`}
+                              data-testid={`chip-shipping-flavor-${c.id}-${f}`}
+                            >
+                              {f}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {c.unmapped.length > 0 && (
                         <p className="pl-6 text-[11px] text-muted-foreground">
                           Kept as-is: {c.unmapped.join(" · ")}
@@ -179,7 +240,7 @@ export default function ShippingImportDialog({
               data-testid="button-shipping-import-confirm"
             >
               {applying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              {applying ? "Applying…" : "Apply to Brands"}
+              {applying ? "Applying…" : "Apply Settings"}
             </button>
           </div>
         </div>

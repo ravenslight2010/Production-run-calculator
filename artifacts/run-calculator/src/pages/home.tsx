@@ -7279,7 +7279,7 @@ export default function Home() {
     }
   }
 
-  function handleShippingImportConfirm(rows: { brand: string; patch: ShippingPatch }[]) {
+  function handleShippingImportConfirm(rows: { brand: string; flavors: string[]; patch: ShippingPatch }[]) {
     setShippingImportApplying(true);
     try {
       const result = commitShippingImport(rows);

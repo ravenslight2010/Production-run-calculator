@@ -26,6 +26,8 @@ export type ShippingImportPrepared = {
   candidates: ShippingCandidate[];
   /** Known brands for the review dialog's manual re-match picker. */
   brands: string[];
+  /** Flavors under each brand for the dialog's per-row flavor targeting. */
+  flavorsByBrand: Record<string, string[]>;
 };
 
 /**
@@ -43,7 +45,11 @@ export async function prepareShippingImport(buffer: ArrayBuffer): Promise<Shippi
     );
   }
   const brands = loadSpecImportKnown().brands;
-  return { candidates: buildShippingCandidates(rows, brands), brands };
+  return {
+    candidates: buildShippingCandidates(rows, brands),
+    brands,
+    flavorsByBrand: loadBrandFlavors(),
+  };
 }
 
 export type ShippingCommitResult = {
@@ -54,12 +60,15 @@ export type ShippingCommitResult = {
 };
 
 /**
- * Apply the reviewed rows: merge each row's packaging patch into the
- * brand-level profile and every flavor profile under that brand. Purely
- * local storage writes — the next sync push carries them factory-wide.
+ * Apply the reviewed rows. Flavor targeting per row:
+ * - `flavors` empty/absent → apply to the WHOLE brand (brand-level ""
+ *   profile plus every flavor under it).
+ * - `flavors` set → apply ONLY to those flavor profiles (the brand-level
+ *   profile and other flavors are left untouched).
+ * Purely local storage writes — the next sync push carries them factory-wide.
  */
 export function commitShippingImport(
-  rows: ReadonlyArray<{ brand: string; patch: ShippingPatch }>,
+  rows: ReadonlyArray<{ brand: string; flavors?: readonly string[]; patch: ShippingPatch }>,
 ): ShippingCommitResult {
   const flavorsByBrand = loadBrandFlavors();
   let rowsApplied = 0;
@@ -67,8 +76,8 @@ export function commitShippingImport(
   for (const row of rows) {
     const brand = row.brand.trim();
     if (!brand || Object.keys(row.patch).length === 0) continue;
-    const flavors = flavorsByBrand[brand] ?? [];
-    const targets = ["", ...flavors];
+    const picked = (row.flavors ?? []).map((f) => f.trim()).filter(Boolean);
+    const targets = picked.length > 0 ? picked : ["", ...(flavorsByBrand[brand] ?? [])];
     for (const flavor of targets) {
       applyPackagingPatchToProfile(brand, flavor, row.patch as Partial<FormValues>);
       profilesUpdated++;

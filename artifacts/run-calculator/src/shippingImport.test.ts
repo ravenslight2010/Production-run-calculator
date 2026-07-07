@@ -53,6 +53,26 @@ describe("commitShippingImport", () => {
     expect(readProfile("Hannaford", "Pepperoni")).toMatchObject({ shipper: "11in" });
   });
 
+  it("targets only the picked flavors when flavors are provided", () => {
+    const result = commitShippingImport([
+      { brand: "Hannaford", flavors: ["Pepperoni"], patch: { shipper: "11in" } },
+    ]);
+    expect(result.rowsApplied).toBe(1);
+    expect(result.profilesUpdated).toBe(1);
+    // Only the picked flavor is written; brand-level and other flavors untouched.
+    expect(readProfile("Hannaford", "Pepperoni")).toMatchObject({ shipper: "11in" });
+    expect(readProfile("Hannaford", "")).toBeNull();
+    expect(readProfile("Hannaford", "Cheese")).toBeNull();
+  });
+
+  it("treats an empty flavors list as the whole brand", () => {
+    const result = commitShippingImport([
+      { brand: "Hannaford", flavors: [], patch: { circles: "11in" } },
+    ]);
+    expect(result.profilesUpdated).toBe(3); // "" + Cheese + Pepperoni
+    expect(readProfile("Hannaford", "")).toMatchObject({ circles: "11in" });
+  });
+
   it("skips empty patches and blank brands", () => {
     const result = commitShippingImport([
       { brand: "Hannaford", patch: {} },
