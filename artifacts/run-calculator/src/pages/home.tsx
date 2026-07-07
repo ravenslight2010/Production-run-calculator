@@ -386,7 +386,10 @@ import { prepareSpecImport, prepareSpecImportMulti, commitSpecImport, MAX_SPEC_I
 import { exportSpecRecipes, type ExportSelection } from "@/specExport";
 import { mergeSpecAliases, type ParsedSpecImport, type SpecImportAlias } from "@workspace/spec-import";
 import PremixImportDialog from "@/components/PremixImportDialog";
+import ShippingImportDialog from "@/components/ShippingImportDialog";
 import { preparePremixImport, commitPremixImport, MAX_PREMIX_IMPORT_FILES, type PremixImportPrepared } from "@/premixImport";
+import { prepareShippingImport, commitShippingImport, type ShippingImportPrepared } from "@/shippingImport";
+import type { ShippingPatch } from "@workspace/shipping-import";
 import type { PremixFreezerPull } from "@workspace/premix-import";
 import CheeseRecipesManager from "@/components/CheeseRecipesManager";
 import CheeseImportDialog from "@/components/CheeseImportDialog";
@@ -4372,6 +4375,12 @@ export default function Home() {
   const [premixImportPrepared, setPremixImportPrepared] = useState<PremixImportPrepared | null>(null);
   const [premixImportProgress, setPremixImportProgress] = useState<{ done: number; total: number } | null>(null);
   const premixImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [showShippingImport, setShowShippingImport] = useState(false);
+  const [shippingImportLoading, setShippingImportLoading] = useState(false);
+  const [shippingImportApplying, setShippingImportApplying] = useState(false);
+  const [shippingImportError, setShippingImportError] = useState<string | null>(null);
+  const [shippingImportPrepared, setShippingImportPrepared] = useState<ShippingImportPrepared | null>(null);
+  const shippingImportInputRef = useRef<HTMLInputElement | null>(null);
   const [showCheeseImport, setShowCheeseImport] = useState(false);
   const [cheeseImportLoading, setCheeseImportLoading] = useState(false);
   const [cheeseImportApplying, setCheeseImportApplying] = useState(false);
@@ -7245,6 +7254,53 @@ export default function Home() {
     }
   }
 
+  // Shipping & Palletizing Guide importer: read the .xlsx, deterministically
+  // parse the per-brand table, map each row onto the packaging fields the app
+  // already has, and show a review screen. Nothing is written until the user
+  // confirms; unmappable values are kept as-is (never guessed).
+  async function handleShippingImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    noteBreadcrumb(file ? "shipping import: file selected" : "shipping import: picker canceled");
+    if (!file) return;
+    setShippingImportPrepared(null);
+    setShippingImportError(null);
+    setShippingImportLoading(true);
+    setShowShippingImport(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      setShippingImportPrepared(await prepareShippingImport(buffer));
+    } catch (err) {
+      setShippingImportError(
+        err instanceof Error ? err.message : "Could not read or interpret that workbook.",
+      );
+    } finally {
+      setShippingImportLoading(false);
+    }
+  }
+
+  function handleShippingImportConfirm(rows: { brand: string; patch: ShippingPatch }[]) {
+    setShippingImportApplying(true);
+    try {
+      const result = commitShippingImport(rows);
+      // Profiles changed in storage — refresh derived dropdowns/profiles so
+      // the packaging pickers and the current form pick the values up.
+      reloadMasterData();
+      setShowShippingImport(false);
+      setShippingImportPrepared(null);
+      toast({
+        title: "Shipping guide imported",
+        description: `Packaging settings updated for ${result.rowsApplied} brand${result.rowsApplied === 1 ? "" : "s"}.`,
+      });
+    } catch (err) {
+      setShippingImportError(
+        err instanceof Error ? err.message : "Import failed while saving. Please try again.",
+      );
+    } finally {
+      setShippingImportApplying(false);
+    }
+  }
+
   // "Cheese Mix Recipe Specs" importer: read the .xlsx, DETERMINISTICALLY parse
   // each customer tab into cheese recipes (shredder setting, per-flavor
   // assignment lines, per-batch pounds), and show a single review screen.
@@ -9966,6 +10022,13 @@ export default function Home() {
                       <button type="button" onClick={() => { noteBreadcrumb("Import Spec Sheet clicked (picker opening)"); specImportInputRef.current?.click(); }}
                         className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90">
                         <Upload className="w-4 h-4" /> Import Spec Sheet
+                      </button>
+                    )}
+                    {isManager && (
+                      <button type="button" onClick={() => { noteBreadcrumb("Import Shipping Guide clicked (picker opening)"); shippingImportInputRef.current?.click(); }}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90"
+                        data-testid="button-import-shipping-guide">
+                        <Upload className="w-4 h-4" /> Import Shipping &amp; Palletizing Guide
                       </button>
                     )}
                     <button type="button" onClick={() => { noteBreadcrumb("Import Excel clicked (picker opening)"); importInputRef.current?.click(); }}
@@ -15182,6 +15245,15 @@ export default function Home() {
             onChange={handleCheeseImportFile}
           />
         )}
+        {isManager && (
+          <input
+            ref={shippingImportInputRef}
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            onChange={handleShippingImportFile}
+          />
+        )}
 
         {/* ── Change Password Dialog ───────────────────────────────────────── */}
         {showPasswordDialog && (
@@ -15243,6 +15315,17 @@ export default function Home() {
           prepared={premixImportPrepared}
           applying={premixImportApplying}
           onConfirm={handlePremixImportConfirm}
+        />
+
+        {/* ── Shipping & Palletizing Guide Import Dialog ───────────────────── */}
+        <ShippingImportDialog
+          open={showShippingImport}
+          onClose={() => { setShowShippingImport(false); setShippingImportPrepared(null); setShippingImportError(null); }}
+          loading={shippingImportLoading}
+          error={shippingImportError}
+          prepared={shippingImportPrepared}
+          applying={shippingImportApplying}
+          onConfirm={handleShippingImportConfirm}
         />
 
         {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}

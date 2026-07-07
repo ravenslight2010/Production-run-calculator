@@ -437,6 +437,33 @@ export function saveProfile(brand: string, flavor: string, values: FormValues): 
   try { localStorage.setItem(CRUST_PROFILE_KEY(brand, flavor), JSON.stringify(crustVals)); } catch {}
 }
 
+/**
+ * Merge a few packaging fields into the stored profile for brand+flavor,
+ * creating the profile blob when absent. Used by the Shipping & Palletizing
+ * Guide importer: it deliberately bypasses saveProfile's "has real data"
+ * guard because this is a targeted field merge onto whatever is stored —
+ * it can never zero out recipe data (only the provided keys are written).
+ * The fields live in the dough profile blob (none are crust fields).
+ */
+export function applyPackagingPatchToProfile(
+  brand: string,
+  flavor: string,
+  patch: Partial<FormValues>,
+): void {
+  if (!brand) return;
+  const keys = Object.keys(patch) as (keyof FormValues)[];
+  if (keys.length === 0) return;
+  try {
+    let existing: Record<string, unknown> = {};
+    try {
+      const raw = localStorage.getItem(PROFILE_KEY(brand, flavor));
+      if (raw) existing = JSON.parse(raw) as Record<string, unknown>;
+    } catch {}
+    for (const k of keys) existing[k] = patch[k];
+    localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(existing));
+  } catch {}
+}
+
 export function freshDayState(): DayState {
   // The placeholder run is `seeded`: auto-created, not a user action. While it
   // stays pristine it is excluded from sync pushes and dropped on receive once

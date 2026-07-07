@@ -64,6 +64,9 @@
       "path": "./lib/premix-import"
     },
     {
+      "path": "./lib/shipping-import"
+    },
+    {
       "path": "./lib/mix-reconcile"
     },
     {

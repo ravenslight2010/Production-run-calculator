@@ -101,6 +101,7 @@
     "@workspace/merge-suggest": "workspace:*",
     "@workspace/onboarding": "workspace:*",
     "@workspace/premix-import": "workspace:*",
+    "@workspace/shipping-import": "workspace:*",
     "@workspace/production-rules": "workspace:*",
     "@workspace/profile-cleanup": "workspace:*",
     "@workspace/recipe-apply": "workspace:*",
