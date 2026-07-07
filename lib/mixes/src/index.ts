@@ -23,6 +23,11 @@
 // insensitive), the same join key the schedule uses, so web and mobile line up
 // exactly. Advisory only — this never moves stock.
 
+import {
+  buildNearDupNameMatcher,
+  looseNameKey,
+} from "@workspace/name-match";
+
 // Mixes are made same-day by default; a manager can opt a mix into being made
 // ahead by giving it a positive "make N days early" value.
 export const DEFAULT_DAYS_EARLY = 0;
@@ -264,39 +269,31 @@ export function repointMixIngredients(
  * never produces a duplicate of it. Pure. Returns the merged list plus how many
  * mixes were actually added.
  */
-// Loose match key mirroring @workspace/spec-import's specImportNameMatchKey:
-// lowercase, drop apostrophes/quotes, fold other punctuation to a single space,
-// collapse whitespace, and drop generic "default version" filler tokens
-// ("standard"/"regular"/"pizza" — this is a pizza factory, so "pizza" is always a
-// generic descriptor, never a distinguishing qualifier). So an imported mix that
+// Loose match key: the shared @workspace/name-match normalization (lowercase,
+// drop apostrophes/quotes, fold other punctuation to a single space, drop
+// generic "standard"/"regular"/"pizza" filler tokens). An imported mix that
 // differs from an existing one only in case / punctuation / spacing / a filler
-// word ("Aldo's Cheese Mix" vs "Aldo's Standard Cheese Mix") links to the mix the
-// manager already keeps instead of creating a duplicate. (Kept in lockstep with
-// the spec-import helper of the same behavior; duplicated here to avoid a
-// cross-lib dependency.)
-const MIX_FILLER_TOKENS = new Set(["standard", "regular", "pizza"]);
+// word ("Aldo's Cheese Mix" vs "Aldo's Standard Cheese Mix") links to the mix
+// the manager already keeps instead of creating a duplicate.
 function mixNameMatchKey(name: string): string {
-  const base = (name ?? "")
-    .toLowerCase()
-    .replace(/['’`]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  if (!base) return "";
-  const tokens = base.split(" ");
-  const kept = tokens.filter((t) => !MIX_FILLER_TOKENS.has(t));
-  return (kept.length ? kept : tokens).join(" ");
+  return looseNameKey(name);
 }
 
 export function addSpecMixesIfAbsent(
   existing: ReadonlyArray<Mix>,
   candidates: ReadonlyArray<Mix>,
 ): { merged: Mix[]; added: number } {
+  // Near-dup layers (word order / single typo, each with ambiguity + digit
+  // guards) catch workbook label drift the loose key alone misses, so a
+  // re-import doesn't fork a parallel mix. The extra-word layer stays OFF:
+  // "Spicy Cheese Mix" is a distinct mix, not "Cheese Mix".
+  const matchExisting = buildNearDupNameMatcher(existing.map((m) => m.name));
   const haveNames = new Set(existing.map((m) => mixNameMatchKey(m.name)));
   const merged: Mix[] = [...existing];
   let added = 0;
   for (const c of candidates) {
     const key = mixNameMatchKey(c.name);
-    if (!key || haveNames.has(key)) continue;
+    if (!key || haveNames.has(key) || matchExisting(c.name) !== null) continue;
     haveNames.add(key);
     merged.push(c);
     added++;

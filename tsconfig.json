@@ -37,6 +37,9 @@
       "path": "./lib/voice-commands"
     },
     {
+      "path": "./lib/name-match"
+    },
+    {
       "path": "./lib/spec-import"
     },
     {

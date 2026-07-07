@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@workspace/cheese-recipes": "workspace:*"
+    "@workspace/cheese-recipes": "workspace:*",
+    "@workspace/name-match": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^4.1.9"

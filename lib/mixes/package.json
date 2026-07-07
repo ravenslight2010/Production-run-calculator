@@ -11,5 +11,8 @@
   },
   "devDependencies": {
     "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@workspace/name-match": "workspace:*"
   }
 }

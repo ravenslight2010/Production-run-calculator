@@ -44,6 +44,25 @@ describe("addSpecMixesIfAbsent", () => {
     expect(merged[0].batchSize).toBe(40);
   });
 
+  it("links a candidate whose words are just reordered (no duplicate)", () => {
+    const existing = [mix("Aldo's Fajita Mix", { batchSize: 40, id: "kept" })];
+    const candidates = [mix("Fajita Aldo's Mix", { batchSize: 0, id: "incoming" })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("kept");
+    expect(merged[0].batchSize).toBe(40);
+  });
+
+  it("links a candidate that differs by a single typo (no duplicate)", () => {
+    const existing = [mix("Aldo's Fajita Mix", { batchSize: 40, id: "kept" })];
+    const candidates = [mix("Aldo's Fajta Mix", { batchSize: 0, id: "incoming" })];
+    const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
+    expect(added).toBe(0);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe("kept");
+  });
+
   it("links a candidate that differs only by a filler word (Standard) to an existing mix", () => {
     const existing = [mix("Aldo's Standard Cheese Mix", { batchSize: 40, id: "kept" })];
     const candidates = [mix("Aldo's Cheese Mix", { batchSize: 0, id: "incoming" })];

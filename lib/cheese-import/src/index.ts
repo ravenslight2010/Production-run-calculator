@@ -31,6 +31,7 @@ import {
   type CheeseRecipe,
   type CheeseComponent,
 } from "@workspace/cheese-recipes";
+import { buildNearDupNameMatcher } from "@workspace/name-match";
 
 /** A worksheet flattened to string cells (matches readWorkbookGrids output). */
 export interface CheeseSheetGrid {
@@ -490,6 +491,58 @@ export function findCheeseLink(
 }
 
 /**
+ * Near-duplicate fallback for the link pass: when the exact loose-key map finds
+ * nothing, try the shared layered near-dup matcher (word order / one extra
+ * non-digit word / single typo — each with ambiguity + digit guards) over the
+ * SAME brand's saved recipe names, using the abbreviation-expanded cheese link
+ * key. This catches workbook label drift ("Pepperoni Craft Blend" vs "Craft
+ * Pepperoni Blend", "Peperoni" vs "Pepperoni") that used to fork a parallel
+ * recipe. Still only a PROPOSED link — the manager reviews and can keep the
+ * blend as a new recipe, and withCheeseLinks' one-to-one guard still applies.
+ */
+function buildCheeseNearDupResolver(
+  existing: ReadonlyArray<CheeseRecipe>,
+): (recipe: CheeseRecipe, existingIds: ReadonlySet<string>) => CheeseLinkTarget | undefined {
+  const byBrand = new Map<
+    string,
+    {
+      matcher: (name: string) => string | null;
+      names: string[];
+      targets: Map<string, CheeseLinkTarget>;
+    }
+  >();
+  for (const r of existing) {
+    const bk = nameKey(r.brand);
+    let entry = byBrand.get(bk);
+    if (!entry) {
+      entry = { matcher: () => null, names: [], targets: new Map() };
+      byBrand.set(bk, entry);
+    }
+    entry.names.push(r.name);
+    const nk = nameKey(r.name);
+    if (!entry.targets.has(nk)) entry.targets.set(nk, { id: r.id, name: r.name });
+  }
+  for (const entry of byBrand.values()) {
+    entry.matcher = buildNearDupNameMatcher(entry.names, {
+      // Extra-word layer is safe HERE (and only here) because a cheese link is
+      // a reviewable proposal the manager can decline, never a silent rename.
+      keyOf: cheeseLinkKey,
+      allowExtraToken: true,
+    });
+  }
+  return (recipe, existingIds) => {
+    if (existingIds.has(recipe.id)) return undefined;
+    const entry = byBrand.get(nameKey(recipe.brand));
+    if (!entry) return undefined;
+    const matched = entry.matcher(recipe.name);
+    if (!matched) return undefined;
+    const target = entry.targets.get(nameKey(matched));
+    if (!target || target.id === recipe.id) return undefined;
+    return target;
+  };
+}
+
+/**
  * Resolve a reviewed candidate to the recipe to actually apply. When the manager
  * keeps a proposed link, the recipe's id + name are swapped onto the existing
  * pool recipe so mergeCheeseRecipes UPDATES it in place; otherwise the workbook's
@@ -523,7 +576,12 @@ export function withCheeseLinks(
 ): CheeseImportCandidate[] {
   const linkMap = buildCheeseLinkMap(existing);
   const existingIds = new Set(existing.map((r) => r.id));
-  const proposed = candidates.map((c) => findCheeseLink(c.recipe, linkMap, existingIds));
+  const nearDup = buildCheeseNearDupResolver(existing);
+  const proposed = candidates.map(
+    (c) =>
+      findCheeseLink(c.recipe, linkMap, existingIds) ??
+      nearDup(c.recipe, existingIds),
+  );
 
   // Tally how many candidates would write each existing id: an exact-id update
   // claims its own id; a proposed link claims its target id.

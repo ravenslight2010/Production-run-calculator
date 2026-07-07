@@ -6,9 +6,19 @@
     "emitDeclarationOnly": true,
     "outDir": "dist",
     "rootDir": "src",
-    "lib": ["es2022"]
+    "lib": [
+      "es2022"
+    ]
   },
-  "references": [],
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "references": [
+    {
+      "path": "../name-match"
+    }
+  ],
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
 }

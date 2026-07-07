@@ -192,4 +192,27 @@ describe("addNamedRecipesIfAbsentByName", () => {
     expect(added).toBe(1);
     expect(merged.map((r) => r.name)).toEqual(["Marinara", "BBQ"]);
   });
+
+  it("skips a candidate that near-duplicates an existing name (typo / word order)", () => {
+    const pool: NamedRecipe[] = [
+      normalizeNamedRecipe({ id: "sauce:marinara", name: "Marinara" })!,
+      normalizeNamedRecipe({ id: "dough:mystic-thin-dough", name: "Mystic Thin Dough" })!,
+    ];
+    const { merged, added } = addNamedRecipesIfAbsentByName(pool, [
+      normalizeNamedRecipe({ id: "sauce:marinera", name: "Marinera" })!, // single typo
+      normalizeNamedRecipe({ id: "dough:thin-mystic-dough", name: "Thin Mystic Dough" })!, // reorder
+    ]);
+    expect(added).toBe(0);
+    expect(merged.map((r) => r.name)).toEqual(["Marinara", "Mystic Thin Dough"]);
+  });
+
+  it("still adds a candidate with a meaningful extra word (Spicy)", () => {
+    const pool: NamedRecipe[] = [
+      normalizeNamedRecipe({ id: "sauce:house-sauce", name: "House Sauce" })!,
+    ];
+    const { added } = addNamedRecipesIfAbsentByName(pool, [
+      normalizeNamedRecipe({ id: "sauce:spicy-house-sauce", name: "Spicy House Sauce" })!,
+    ]);
+    expect(added).toBe(1);
+  });
 });

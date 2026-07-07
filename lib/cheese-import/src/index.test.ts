@@ -371,6 +371,42 @@ describe("link-to-existing detection", () => {
     });
   });
 
+  it("suggests a link for a name with one extra word (Craft) — reviewable proposal", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:craft-whole-mozzarella-cheese-mix",
+        brand: "Basha's",
+        name: "Craft Whole Mozzarella Cheese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+    );
+    expect(linked[0].linkTo).toEqual({
+      id: "cheese:basha:whole-mozzarella-cheese-mix",
+      name: "Whole Mozzarella Cheese Mix",
+    });
+  });
+
+  it("suggests a link for a single-typo name of the same brand", () => {
+    const imported = [
+      cheese({
+        id: "cheese:basha:whole-mozzarella-chese-mix",
+        brand: "Basha's",
+        name: "Whole Mozzarella Chese Mix",
+      }),
+    ];
+    const linked = withCheeseLinks(
+      buildCheeseImportCandidates(imported, () => false),
+      existing,
+    );
+    expect(linked[0].linkTo).toEqual({
+      id: "cheese:basha:whole-mozzarella-cheese-mix",
+      name: "Whole Mozzarella Cheese Mix",
+    });
+  });
+
   it("does not suggest a link across brands", () => {
     const imported = [
       cheese({

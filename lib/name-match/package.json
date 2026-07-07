@@ -1,5 +1,5 @@
 {
-  "name": "@workspace/named-recipes",
+  "name": "@workspace/name-match",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,5 @@
   },
   "devDependencies": {
     "vitest": "^4.1.9"
-  },
-  "dependencies": {
-    "@workspace/name-match": "workspace:*"
   }
 }

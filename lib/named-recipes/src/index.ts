@@ -19,6 +19,8 @@
 // the per-day sync payload) and edited by managers only; the apps keep only thin
 // platform glue (fetch/save/delete) plus the run-side hydration.
 
+import { buildNearDupNameMatcher } from "@workspace/name-match";
+
 // One component of a named recipe: an ingredient and how many POUNDS of it the
 // recipe uses. Matches the per-run RecipeRow shape ({ ingredient, lbs }).
 export interface NamedRecipeComponent {
@@ -227,13 +229,25 @@ export function addNamedRecipesIfAbsentByName(
   existing: ReadonlyArray<NamedRecipe>,
   candidates: ReadonlyArray<NamedRecipe>,
 ): { merged: NamedRecipe[]; added: number } {
+  // Near-dup layers (loose key, word order, single typo — each with ambiguity
+  // + digit guards) so an import whose name only drifts in labeling links to
+  // the recipe the factory already keeps instead of forking a parallel entry.
+  // The extra-word layer stays OFF: "Spicy Sauce" is not "Sauce".
+  const matchExisting = buildNearDupNameMatcher(existing.map((r) => r.name));
   const haveNames = new Set(existing.map((r) => r.name.trim().toLowerCase()));
   const haveIds = new Set(existing.map((r) => r.id));
   const merged: NamedRecipe[] = [...existing];
   let added = 0;
   for (const c of candidates) {
     const nameKey = c.name.trim().toLowerCase();
-    if (!nameKey || haveNames.has(nameKey) || haveIds.has(c.id)) continue;
+    if (
+      !nameKey ||
+      haveNames.has(nameKey) ||
+      haveIds.has(c.id) ||
+      matchExisting(c.name) !== null
+    ) {
+      continue;
+    }
     haveNames.add(nameKey);
     haveIds.add(c.id);
     merged.push(c);

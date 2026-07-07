@@ -8,6 +8,8 @@
 // vs an update, and collect the alias mappings worth remembering. Keeping the
 // logic here means both apps stay thin and behave identically (replit.md parity).
 
+import { buildNearDupNameMatcher } from "@workspace/name-match";
+
 // ── Core data shapes ────────────────────────────────────────────────────────
 
 export type RecipeRow = { ingredient: string; lbs: number };
@@ -510,10 +512,6 @@ export function specImportNameMatchKey(name: string): string {
   return (kept.length ? kept : tokens).join(" ");
 }
 
-function cheeseNameMatchKey(name: string): string {
-  return specImportNameMatchKey(name);
-}
-
 /**
  * Build a loose-key → EXACT existing-name map for a "link to existing" pass, with
  * an AMBIGUITY GUARD: if two genuinely DIFFERENT saved names collapse to the same
@@ -561,8 +559,9 @@ export function linkSpecImportCheeseToExisting(
   parsed: ParsedSpecImport,
   existingCheeseNames: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = buildLinkKeyMap(existingCheeseNames);
-  if (byKey.size === 0) return parsed;
+  const match = buildNearDupNameMatcher(existingCheeseNames, {
+    keyOf: specImportNameMatchKey,
+  });
   const noUserMixes = new Set<string>();
   let changed = false;
   const recipes = (parsed.recipes ?? []).map((r) => {
@@ -570,7 +569,7 @@ export function linkSpecImportCheeseToExisting(
     if (r.kind !== "cheese" || !name || specImportRecipeIsMix(r, noUserMixes)) {
       return r;
     }
-    const existing = byKey.get(cheeseNameMatchKey(name));
+    const existing = match(name);
     if (!existing || existing === name) return r;
     changed = true;
     return { ...r, name: existing };
@@ -601,13 +600,14 @@ export function linkSpecImportNamedRecipesToExisting(
   kind: "dough" | "sauce",
   existingNames: ReadonlyArray<string>,
 ): ParsedSpecImport {
-  const byKey = buildLinkKeyMap(existingNames);
-  if (byKey.size === 0) return parsed;
+  const match = buildNearDupNameMatcher(existingNames, {
+    keyOf: specImportNameMatchKey,
+  });
   let changed = false;
   const recipes = (parsed.recipes ?? []).map((r) => {
     const name = (r.name ?? "").trim();
     if (r.kind !== kind || !name) return r;
-    const existing = byKey.get(specImportNameMatchKey(name));
+    const existing = match(name);
     if (!existing || existing === name) return r;
     changed = true;
     return { ...r, name: existing };
@@ -618,7 +618,7 @@ export function linkSpecImportNamedRecipesToExisting(
     const next = (parsed.profiles ?? []).map((p) => {
       const sn = (p.sauceName ?? "").trim();
       if (!sn) return p;
-      const existing = byKey.get(specImportNameMatchKey(sn));
+      const existing = match(sn);
       if (!existing || existing === sn) return p;
       profilesChanged = true;
       return { ...p, sauceName: existing };

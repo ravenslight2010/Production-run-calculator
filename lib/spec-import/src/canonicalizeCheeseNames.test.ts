@@ -420,6 +420,15 @@ describe("linkSpecImportNamedRecipesToExisting", () => {
     expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Dough"]);
   });
 
+  it("snaps a single-typo sauce name onto the saved recipe", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [{ kind: "sauce", name: "Mystic Pizza Sause", rows: [{ ingredient: "Tomato", lbs: 10 }] }],
+    };
+    const linked = linkSpecImportNamedRecipesToExisting(parsed, "sauce", ["Mystic Pizza Sauce"]);
+    expect(linked.recipes.map((r) => r.name)).toEqual(["Mystic Pizza Sauce"]);
+  });
+
   it("does NOT collapse a MEANINGFUL qualifier (Spicy) onto a different saved sauce", () => {
     const parsed: ParsedSpecImport = {
       profiles: [],
