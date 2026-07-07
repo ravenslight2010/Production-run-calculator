@@ -8,5 +8,11 @@
     "rootDir": "src",
     "lib": ["es2022"]
   },
-  "include": ["src"]
+  "references": [
+    {
+      "path": "../name-match"
+    }
+  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

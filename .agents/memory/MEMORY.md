@@ -1,4 +1,4 @@
-- [Recipe print/share](recipe-print-share.md) — per-recipe card print/share button requested by user, deferred.
+- [Recipe print/share](recipe-print-share.md) — built on web 2026-07-07; AbortError=shared (never clipboard-clobber), escaped print popup; mobile pending.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes that fail-safe to empty on malformed model JSON must use the shared 2-attempt retry helper; retry parse failures only, never provider throws.
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [Die-type master heal](die-type-master-heal.md) — imports write profile dieType VALUE but not the picker's master list; both apps self-heal DIE_TYPES from profiles, honoring deletions.

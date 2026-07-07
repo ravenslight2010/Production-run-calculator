@@ -168,6 +168,7 @@ import CycleCountManager from "../components/CycleCountManager";
 import ReorderCard from "../components/ReorderCard";
 import UseFirstCard from "../components/UseFirstCard";
 import ScheduledRecipeWarningCard from "../components/ScheduledRecipeWarningCard";
+import { RecipeShareButtons } from "../components/RecipeShareButtons";
 import { useFreezerPullItems } from "../hooks/useFreezerPullItems";
 import { useRunTemplates } from "../hooks/useRunTemplates";
 import { useSupervisorPin } from "../hooks/useSupervisorPin";
@@ -882,6 +883,7 @@ function CheeseRecipeCard({
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
         {body}
       </>
@@ -896,6 +898,7 @@ function CheeseRecipeCard({
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">{body}</CardContent>
@@ -1041,6 +1044,7 @@ export function CheesePickCard({
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend</span>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
         {body}
       </>
@@ -1055,6 +1059,7 @@ export function CheesePickCard({
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">{label} — Cheese Blend Recipe</CardTitle>
           {recipeSelector}
           <span className="text-xs text-muted-foreground shrink-0"><span className="font-mono text-foreground">{batches > 0 ? fmtNum(batches, 2) : "—"}</span> batches</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Cheese Blend`, name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">{body}</CardContent>
@@ -1164,6 +1169,7 @@ export function MixRecipeCard({
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</span>
           <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
         {body}
       </>
@@ -1177,6 +1183,7 @@ export function MixRecipeCard({
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{label} — Mix Recipe</CardTitle>
           <span className="text-xs text-muted-foreground"><span className="font-mono text-foreground">{fmtNum(totalRunLbs, 1)}</span> lbs needed</span>
+          <RecipeShareButtons recipe={{ title: `${label} — Mix Recipe`, name: recipeName, unit: "oz/pizza", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">{body}</CardContent>
@@ -1253,6 +1260,7 @@ export function DoughRecipeCard({
           <span className="text-xs text-muted-foreground shrink-0">
             <span className="font-mono text-foreground">{batchesNeeded > 0 ? fmtNum(batchesNeeded, 2) : "—"}</span> batches needed
           </span>
+          <RecipeShareButtons recipe={{ title: "Dough Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
@@ -1459,6 +1467,7 @@ export function FrontlineRecipeCard({
         <div className="flex items-center gap-2 justify-between mb-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</span>
           {recipeSelector}
+          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
         {body}
       </>
@@ -1472,6 +1481,7 @@ export function FrontlineRecipeCard({
         <div className="flex items-center gap-3 justify-between">
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground shrink-0">Sauce Recipe</CardTitle>
           {recipeSelector}
+          <RecipeShareButtons recipe={{ title: "Sauce Recipe", name: recipeName, unit: "lbs/batch", rows: recipe.map(r => ({ ingredient: r.ingredient ?? "", amount: Number(r.lbs ?? 0) })) }} />
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">{body}</CardContent>
@@ -3660,7 +3670,7 @@ export default function Home() {
       setMergeSuggestions(suggestions);
       if (!usedAi && error) {
         setMergeSuggestError(
-          `AI unavailable (${error}). Showing previously-merged suggestions only.`,
+          `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
         );
       }
       if (usedAi && suggestions.length === 0) {
@@ -9612,7 +9622,7 @@ export default function Home() {
                           <div>
                             <p className="text-xs font-semibold text-foreground">Suggested merges</p>
                             <p className="text-[11px] text-muted-foreground">
-                              Scan for likely duplicates and previously-merged names.
+                              Scans for look-alike names (spelling, word order) and previously-merged names; AI adds smarter matches when available.
                             </p>
                           </div>
                           <button
@@ -9620,7 +9630,7 @@ export default function Home() {
                             disabled={mergeSuggestBusy || mergeBusy}
                             onClick={() => handleSuggestMerges()}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
-                          >{mergeSuggestBusy ? "Scanning…" : "Suggest with AI"}</button>
+                          >{mergeSuggestBusy ? "Scanning…" : "Scan for duplicates"}</button>
                         </div>
 
                         {mergeSuggestError && (

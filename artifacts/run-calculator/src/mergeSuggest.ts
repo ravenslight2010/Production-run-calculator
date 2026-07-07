@@ -15,6 +15,7 @@
 import {
   mergeSuggestionLists,
   suggestionsFromAliases,
+  nearDupSuggestions,
   collectDeniedPairs,
   filterDeniedSuggestions,
   type MergeAlias,
@@ -237,7 +238,13 @@ export async function suggestMerges(
   } catch {
     denied = [];
   }
-  const remembered = suggestionsFromAliases(names, aliases);
+  // Deterministic look-alike scan (word-order + single-typo near-dups) runs
+  // locally with no AI call, so obvious duplicates surface even offline or for
+  // users without the AI capability. Folded under remembered groups by target.
+  const baseline = mergeSuggestionLists(
+    suggestionsFromAliases(names, aliases),
+    nearDupSuggestions(names),
+  );
   try {
     const ai = await requestAiSuggestMerges(names, aliases, category, brand);
     // mergeSuggestionLists rebuilds group objects (dropping the reviewer verdict),
@@ -246,14 +253,14 @@ export async function suggestMerges(
     for (const s of ai) {
       if (s.review) reviewByTarget.set(s.target.trim().toLowerCase(), s.review);
     }
-    const merged = mergeSuggestionLists(remembered, ai).map((s) => {
+    const merged = mergeSuggestionLists(baseline, ai).map((s) => {
       const review = reviewByTarget.get(s.target.trim().toLowerCase());
       return review ? { ...s, review } : s;
     });
     return { suggestions: filterDeniedSuggestions(merged, denied), usedAi: true };
   } catch (e) {
     return {
-      suggestions: filterDeniedSuggestions(remembered, denied),
+      suggestions: filterDeniedSuggestions(baseline, denied),
       usedAi: false,
       error: e instanceof Error ? e.message : "AI suggestions unavailable",
     };

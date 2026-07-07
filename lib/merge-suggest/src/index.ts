@@ -14,6 +14,14 @@
 // This module owns ONLY pure data shaping. Network/storage/UI live in the web
 // (`run-calculator/src/mergeSuggest.ts`) and mobile
 // (`run-calculator-mobile/context/mergeSuggest.ts`) glue, kept at parity.
+//
+// A third, deterministic idea (no AI, no memory): `nearDupSuggestions` scans a
+// name pool with @workspace/name-match's near-duplicate matcher (word-order +
+// single-typo layers, extra-word layer intentionally OFF) so obvious look-alike
+// duplicates surface even when the AI is unavailable or the caller lacks the
+// AI capability. Human review still gates every merge.
+
+import { buildNearDupNameMatcher } from "@workspace/name-match";
 
 /**
  * Which merge tab a suggestion/alias/denial belongs to. Scoping by category
@@ -122,6 +130,73 @@ export function suggestionsFromAliases(
     }
   }
   return out;
+}
+
+/**
+ * Deterministic look-alike scan over an existing name pool. Finds groups of
+ * names that near-duplicate each other (exact loose key, reordered words, or a
+ * single typo — the safe default layers of @workspace/name-match; the opt-in
+ * extra-word layer stays OFF because "Spicy Cheese Mix" is not "Cheese Mix").
+ *
+ * Pairs are clustered transitively (union-find) and each group keeps the
+ * longest name as the suggested target (most specific spelling; ties broken
+ * alphabetically) — the user reviews and can re-pick before applying. Pure and
+ * offline: no AI call, no learned memory. The matcher's ambiguity guard means
+ * a name that could match two different others contributes no pair itself,
+ * but the group still forms if the others pair up directly.
+ */
+export function nearDupSuggestions(names: string[]): MergeSuggestion[] {
+  const cleaned: string[] = [];
+  const seenCi = new Set<string>();
+  for (const raw of names) {
+    const n = (raw ?? "").trim();
+    if (!n) continue;
+    const ci = norm(n);
+    if (seenCi.has(ci)) continue;
+    seenCi.add(ci);
+    cleaned.push(n);
+  }
+  if (cleaned.length < 2) return [];
+
+  const parent = cleaned.map((_, i) => i);
+  const find = (i: number): number =>
+    parent[i] === i ? i : (parent[i] = find(parent[i]));
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  for (let i = 0; i < cleaned.length; i++) {
+    // Build the matcher over every OTHER name so a name never matches itself.
+    const others = cleaned.filter((_, j) => j !== i);
+    const match = buildNearDupNameMatcher(others)(cleaned[i]);
+    if (!match) continue;
+    const j = cleaned.indexOf(match);
+    if (j >= 0 && j !== i) union(i, j);
+  }
+
+  const groups = new Map<number, string[]>();
+  cleaned.forEach((n, i) => {
+    const root = find(i);
+    const g = groups.get(root);
+    if (g) g.push(n);
+    else groups.set(root, [n]);
+  });
+
+  const out: MergeSuggestion[] = [];
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    const target = [...members].sort(
+      (a, b) => b.length - a.length || a.localeCompare(b),
+    )[0];
+    out.push({
+      target,
+      sources: members.filter((m) => m !== target),
+      reason: "Looks like the same item (spelling or word order)",
+    });
+  }
+  return out.sort((a, b) => a.target.localeCompare(b.target));
 }
 
 // ── Denied (ignored) merge pairs ─────────────────────────────────────────────
