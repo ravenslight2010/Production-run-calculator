@@ -3350,6 +3350,11 @@ export default function Home() {
   const [mergeSuggestError, setMergeSuggestError] = useState("");
   const [mergeSuggestNote, setMergeSuggestNote] = useState("");
   const [mergeSuggestRan, setMergeSuggestRan] = useState(false);
+  // Checked suggestion groups for batch apply, keyed by target+sources (stable
+  // across list re-renders; stale keys from removed suggestions are harmless
+  // because counts intersect against the live list).
+  const [mergeSuggestSelected, setMergeSuggestSelected] = useState<Set<string>>(new Set());
+  const [mergeBatchBusy, setMergeBatchBusy] = useState(false);
   // Bumped after a recipe/spec import so an effect can auto-run the merge check
   // (imported recipe ingredients can duplicate standalone individual ones).
   const [mergeCheckRequest, setMergeCheckRequest] = useState(0);
@@ -3668,6 +3673,7 @@ export default function Home() {
         scope.brand,
       );
       setMergeSuggestions(suggestions);
+      setMergeSuggestSelected(new Set());
       if (!usedAi && error) {
         setMergeSuggestError(
           `AI unavailable (${error}). Showing look-alike and previously-merged matches only.`,
@@ -3678,6 +3684,7 @@ export default function Home() {
       }
     } catch (e) {
       setMergeSuggestions([]);
+      setMergeSuggestSelected(new Set());
       setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
     } finally {
       setMergeSuggestBusy(false);
@@ -3732,12 +3739,33 @@ export default function Home() {
     );
   }
 
+  // Stable identity for a suggestion group, used for batch-apply checkboxes.
+  // Sources are sorted and every part URI-encoded so names containing the
+  // delimiter can't collide across groups.
+  function mergeSuggestKey(s: MergeSuggestion): string {
+    const parts = s.sources
+      .filter((n) => n !== s.target)
+      .map((n) => encodeURIComponent(n))
+      .sort();
+    return `${encodeURIComponent(s.target)}::${parts.join("|")}`;
+  }
+
+  function toggleMergeSuggestSelected(s: ReviewedMergeSuggestion) {
+    const key = mergeSuggestKey(s);
+    setMergeSuggestSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   // Apply a suggested group directly through the destructive merge path. On
   // success drop just this suggestion so the user can keep working through the
   // rest of the list (the panel stays open — no reload).
-  async function applyMergeSuggestion(s: ReviewedMergeSuggestion) {
+  async function applyMergeSuggestion(s: ReviewedMergeSuggestion): Promise<boolean> {
     const sources = s.sources.filter((n) => n !== s.target);
-    if (sources.length === 0) return;
+    if (sources.length === 0) return false;
     setMergeFromImport(false);
     const ok = mergeCategory === "brandflavor"
       ? await handleApplyBrandFlavorMerge(sources, s.target)
@@ -3745,6 +3773,30 @@ export default function Home() {
       ? await handleApplyRecipeNameMerge(mergeCategory as RecipeNameMergeCategory, sources, s.target)
       : await handleApplyMerge(sources, s.target);
     if (ok) setMergeSuggestions((prev) => prev.filter((x) => x !== s));
+    return ok;
+  }
+
+  // Batch apply: run each checked group through the SAME per-group merge path,
+  // strictly one at a time (each merge rewrites lists + pushes sync; running
+  // them concurrently would race). Stops on the first failure so the error for
+  // that group stays visible and the remaining checked groups are untouched.
+  async function applySelectedSuggestions() {
+    const chosen = mergeSuggestions.filter((s) => mergeSuggestSelected.has(mergeSuggestKey(s)));
+    if (chosen.length === 0 || mergeBatchBusy) return;
+    setMergeBatchBusy(true);
+    try {
+      for (const s of chosen) {
+        const ok = await applyMergeSuggestion(s);
+        if (!ok) break;
+        setMergeSuggestSelected((prev) => {
+          const next = new Set(prev);
+          next.delete(mergeSuggestKey(s));
+          return next;
+        });
+      }
+    } finally {
+      setMergeBatchBusy(false);
+    }
   }
 
   // Ignore a suggested group: persist the {target, source} pairs as denied so
@@ -4245,6 +4297,7 @@ export default function Home() {
     setMergeCategory(cat);
     resetMergeForm();
     setMergeSuggestions([]);
+    setMergeSuggestSelected(new Set());
     setMergeSuggestRan(false);
     setMergeSuggestError("");
     setMergeSuggestNote("");
@@ -9544,7 +9597,7 @@ export default function Home() {
                         <button
                           key={key}
                           type="button"
-                          disabled={mergeBusy}
+                          disabled={mergeBusy || mergeBatchBusy}
                           onClick={() => switchMergeCategory(key)}
                           className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 ${mergeCategory === key ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}
                         >{label}</button>
@@ -9627,7 +9680,7 @@ export default function Home() {
                           </div>
                           <button
                             type="button"
-                            disabled={mergeSuggestBusy || mergeBusy}
+                            disabled={mergeSuggestBusy || mergeBusy || mergeBatchBusy}
                             onClick={() => handleSuggestMerges()}
                             className="px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors disabled:opacity-50 whitespace-nowrap"
                           >{mergeSuggestBusy ? "Scanning…" : "Scan for duplicates"}</button>
@@ -9642,18 +9695,52 @@ export default function Home() {
                           </p>
                         )}
 
-                        {mergeSuggestions.length > 0 && (
+                        {mergeSuggestions.length > 0 && (() => {
+                          const anyBusy = mergeBusy || mergeSuggestBusy || mergeBatchBusy;
+                          const liveKeys = mergeSuggestions
+                            .filter(s => s.sources.some(n => n !== s.target))
+                            .map(s => mergeSuggestKey(s));
+                          const selectedCount = liveKeys.filter(k => mergeSuggestSelected.has(k)).length;
+                          const allSelected = selectedCount > 0 && selectedCount === liveKeys.length;
+                          return (
                           <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={allSelected}
+                                  disabled={anyBusy}
+                                  onChange={() => setMergeSuggestSelected(allSelected ? new Set() : new Set(liveKeys))}
+                                />
+                                Select all
+                              </label>
+                              <button
+                                type="button"
+                                disabled={selectedCount === 0 || anyBusy}
+                                onClick={() => void applySelectedSuggestions()}
+                                className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
+                              >{mergeBatchBusy ? "Merging…" : `Apply selected (${selectedCount})`}</button>
+                            </div>
                             {mergeSuggestions.map((s, i) => {
                               const sources = s.sources.filter(n => n !== s.target);
                               if (sources.length === 0) return null;
+                              const checked = mergeSuggestSelected.has(mergeSuggestKey(s));
                               return (
                                 <div key={`${s.target}-${i}`} className="rounded-md border border-border bg-background/60 px-2.5 py-2 space-y-1">
-                                  <p className="text-xs">
-                                    <span className="text-muted-foreground">{sources.join(", ")}</span>
-                                    {" → "}
-                                    <span className="font-semibold text-primary">{s.target}</span>
-                                  </p>
+                                  <label className="flex items-start gap-2 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5"
+                                      checked={checked}
+                                      disabled={anyBusy}
+                                      onChange={() => toggleMergeSuggestSelected(s)}
+                                    />
+                                    <p className="text-xs">
+                                      <span className="text-muted-foreground">{sources.join(", ")}</span>
+                                      {" → "}
+                                      <span className="font-semibold text-primary">{s.target}</span>
+                                    </p>
+                                  </label>
                                   {s.reason && (
                                     <p className="text-[11px] text-muted-foreground">{s.reason}</p>
                                   )}
@@ -9661,20 +9748,20 @@ export default function Home() {
                                   <div className="flex items-center gap-2 pt-0.5">
                                     <button
                                       type="button"
-                                      disabled={mergeBusy || mergeSuggestBusy}
+                                      disabled={mergeBusy || mergeSuggestBusy || mergeBatchBusy}
                                       onClick={() => loadMergeSuggestion(s)}
                                       className="px-2.5 py-1 rounded border border-border text-[11px] font-medium hover:bg-muted transition-colors disabled:opacity-50"
                                     >Load</button>
                                     <button
                                       type="button"
-                                      disabled={mergeBusy || mergeSuggestBusy}
-                                      onClick={() => applyMergeSuggestion(s)}
+                                      disabled={mergeBusy || mergeSuggestBusy || mergeBatchBusy}
+                                      onClick={() => void applyMergeSuggestion(s)}
                                       className="px-2.5 py-1 rounded bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50"
                                     >Apply</button>
                                     <button
                                       type="button"
-                                      disabled={mergeBusy || mergeSuggestBusy}
-                                      onClick={() => ignoreMergeSuggestion(s)}
+                                      disabled={mergeBusy || mergeSuggestBusy || mergeBatchBusy}
+                                      onClick={() => void ignoreMergeSuggestion(s)}
                                       title="Never suggest merging these again"
                                       className="px-2.5 py-1 rounded border border-border text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-50 ml-auto"
                                     >Ignore</button>
@@ -9683,7 +9770,8 @@ export default function Home() {
                               );
                             })}
                           </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     )}
 

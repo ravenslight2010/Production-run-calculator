@@ -83,3 +83,5 @@ POST/DELETE bodies already get this for free from the zod enum; GET query
 params bypass that and previously silently fell back to "ingredient" on a
 typo/bad value, which would look like "my data disappeared" instead of a
 clear error.
+
+**Batch apply (2026-07-07):** suggestion groups can be checkbox-selected and applied in one click. Batch MUST apply strictly one group at a time through the same single-group merge path (each merge rewrites local lists, records undo, pushes sync — concurrent applies would race), stops on first failure, and locks the category tabs while running so in-flight merges cannot continue under a switched category.
