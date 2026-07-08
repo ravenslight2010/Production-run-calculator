@@ -10,6 +10,7 @@ export const modules: ModuleMap = {
   "./components/mockups/tab-frontline/Frontline.tsx": () => import("../components/mockups/tab-frontline/Frontline.tsx"),
   "./components/mockups/tab-packaging/Current.tsx": () => import("../components/mockups/tab-packaging/Current.tsx"),
   "./components/mockups/tab-packaging/VariantA.tsx": () => import("../components/mockups/tab-packaging/VariantA.tsx"),
+  "./components/mockups/tab-packaging/VariantAB.tsx": () => import("../components/mockups/tab-packaging/VariantAB.tsx"),
   "./components/mockups/tab-packaging/VariantB.tsx": () => import("../components/mockups/tab-packaging/VariantB.tsx"),
   "./components/mockups/tab-packaging/VariantC.tsx": () => import("../components/mockups/tab-packaging/VariantC.tsx"),
   "./components/mockups/tab-summary/Summary.tsx": () => import("../components/mockups/tab-summary/Summary.tsx"),
