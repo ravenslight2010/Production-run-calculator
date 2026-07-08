@@ -209,6 +209,44 @@ describe("SpecImportDialog two-step wizard", () => {
     expect(out.recipes[0]).toMatchObject({ brand: "Acme", flavor: "Plain" });
   });
 
+  it("re-points a brand-only recipe after a rename even when a same-brand row is excluded", () => {
+    // Brand A has flavors X and Y. The user includes X and renames A → NewA,
+    // but excludes Y (still under the original "A"). The excluded row must NOT
+    // register an identity rename that makes the brand map ambiguous — the
+    // brand-anchored recipe has to follow the confirmed name of the rows that
+    // are actually being imported.
+    const recipe: ParsedRecipe = {
+      kind: "dough",
+      name: "Sheet Dough",
+      brand: "A",
+      rows: [{ ingredient: "Flour", lbs: 40 }],
+    };
+    const onConfirm = vi.fn();
+    renderDialog(
+      makePrepared(
+        [
+          { brand: "A", flavor: "X" },
+          { brand: "A", flavor: "Y" },
+        ],
+        [recipe],
+      ),
+      onConfirm,
+    );
+
+    fireEvent.change(screen.getByTestId("spec-profile-brand-pk0"), {
+      target: { value: "NewA" },
+    });
+    fireEvent.click(screen.getByTestId("spec-profile-include-pk1"));
+    fireEvent.click(screen.getByText("Next"));
+    fireEvent.click(screen.getByText(/^Apply/));
+
+    const out = onConfirm.mock.calls[0][0] as ParsedSpecImport;
+    expect(out.profiles).toHaveLength(1);
+    expect(out.profiles[0]).toMatchObject({ brand: "NewA", flavor: "X" });
+    // The brand-only recipe followed the included row's confirmed brand.
+    expect(out.recipes[0]).toMatchObject({ brand: "NewA" });
+  });
+
   it("keeps a user-typed recipe attach name across the step-1 rename", () => {
     // A recipe the AI left attached to nothing shows the manual attach editor.
     const recipe: ParsedRecipe = {

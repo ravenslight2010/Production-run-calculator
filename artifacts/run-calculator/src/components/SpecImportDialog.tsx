@@ -267,10 +267,17 @@ export default function SpecImportDialog({
   // pristine parse to the confirmed product names, and re-run the same-brand
   // cross-fill so die/sauce blanks inherit under the corrected grouping. No AI.
   const goToStep2 = () => {
-    const renames: SpecProfileRename[] = profiles.map((p) => ({
-      from: { brand: p.baseOrig.brand ?? "", flavor: p.baseOrig.flavor ?? "" },
-      to: { brand: p.brand.trim(), flavor: p.flavor.trim() },
-    }));
+    // Renames come from INCLUDED rows only: an excluded row's (unedited) name
+    // would register an identity rename for the same original brand, making the
+    // brand-level map ambiguous and silently dropping a real rename — a
+    // brand-only recipe anchor would then keep the old brand and attach to
+    // nothing in step 2.
+    const renames: SpecProfileRename[] = profiles
+      .filter((p) => p.include)
+      .map((p) => ({
+        from: { brand: p.baseOrig.brand ?? "", flavor: p.baseOrig.flavor ?? "" },
+        to: { brand: p.brand.trim(), flavor: p.flavor.trim() },
+      }));
     const maps = buildSpecRenameMaps(renames);
 
     // Cross-fill die/sauce blanks from same-(confirmed-)brand siblings. Always
