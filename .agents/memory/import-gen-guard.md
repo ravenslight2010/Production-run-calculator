@@ -11,6 +11,14 @@ Rule: every slow async "prepare" flow behind an import dialog (spec/premix/chees
 
 **How to apply:** any NEW import kind (or any other dialog-scoped slow async prepare) must follow the same pattern — see the existing `*ImportGenRef` handlers in the web home page.
 
+# No backdrop-click close on import dialogs
+
+Rule: the import dialogs (spec/premix/cheese/excel) must NOT close on a click of the dim backdrop — close is explicit only (X / Cancel buttons). If the user explicitly closes while a parse is still in flight, show an "Import canceled" toast.
+
+**Why:** the AI parse runs 30–60s. A stray tap on the backdrop mid-parse closed the dialog, bumped the generation, and silently discarded the finished parse — to the user "I picked the file and nothing happened" (production logs showed the parse + match both returning 200 with no result ever displayed). The review step also holds unsaved edits a stray tap would wipe.
+
+**How to apply:** any new import-style dialog gets no `onClick={onClose}` on the overlay, and its `onClose` handler in the page toasts when the loading flag was still true.
+
 # No post-import navigation hijack
 
 Rule: the post-import duplicate-ingredient merge scan runs in the BACKGROUND; if it finds groups, a toast with a "Review" action offers navigation to Setup→Merge — it never force-navigates.

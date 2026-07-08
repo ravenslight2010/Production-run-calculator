@@ -16207,6 +16207,14 @@ export default function Home() {
             // (its late result can't reopen stale data over the next import),
             // and clear the loading/progress flags it would have cleared.
             specImportGenRef.current++;
+            // Closing while the file is still being read cancels the import —
+            // say so, otherwise it looks like the import just never happened.
+            if (specImportLoading) {
+              toast({
+                title: "Import canceled",
+                description: "That spec sheet was still being read. Pick the file again to retry.",
+              });
+            }
             setShowSpecImport(false);
             setSpecImportPrepared(null);
             setSpecImportError(null);
@@ -16227,6 +16235,12 @@ export default function Home() {
           open={showPremixImport}
           onClose={() => {
             premixImportGenRef.current++;
+            if (premixImportLoading) {
+              toast({
+                title: "Import canceled",
+                description: "That premix sheet was still being read. Pick the file again to retry.",
+              });
+            }
             setShowPremixImport(false);
             setPremixImportPrepared(null);
             setPremixImportError(null);
@@ -16246,6 +16260,12 @@ export default function Home() {
           open={showShippingImport}
           onClose={() => {
             shippingImportGenRef.current++;
+            if (shippingImportLoading) {
+              toast({
+                title: "Import canceled",
+                description: "That shipping guide was still being read. Pick the file again to retry.",
+              });
+            }
             setShowShippingImport(false);
             setShippingImportPrepared(null);
             setShippingImportError(null);
@@ -16263,6 +16283,12 @@ export default function Home() {
           open={showCheeseImport}
           onClose={() => {
             cheeseImportGenRef.current++;
+            if (cheeseImportLoading) {
+              toast({
+                title: "Import canceled",
+                description: "That cheese recipe sheet was still being read. Pick the file again to retry.",
+              });
+            }
             setShowCheeseImport(false);
             setCheeseImportPrepared(null);
             setCheeseImportError(null);

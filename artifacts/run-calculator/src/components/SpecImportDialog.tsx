@@ -446,8 +446,12 @@ export default function SpecImportDialog({
 
   return (
     <div
+      // No close-on-backdrop-click: the AI parse runs for ~30-60s and the review
+      // step holds unsaved edits — a stray tap on the dim background would
+      // silently cancel the import (the late parse result is discarded by the
+      // generation guard, so to the user "nothing happens"). Close is explicit
+      // only: the X button or Cancel.
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
     >
       <div
         className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"

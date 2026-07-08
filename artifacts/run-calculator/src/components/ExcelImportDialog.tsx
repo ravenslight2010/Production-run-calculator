@@ -504,8 +504,9 @@ export default function ExcelImportDialog({
 
   return (
     <div
+      // No close-on-backdrop-click: the review step holds unsaved date/run
+      // edits — a stray tap would silently discard them. Close is explicit only.
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
     >
       <div
         className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-border bg-background shadow-xl"
