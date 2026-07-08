@@ -51,6 +51,34 @@ them pollutes both dedupe keys and the prompt blocks.
   avoid a bigint round-trip through codegen. Server stamps createdAt.
 - Facility rows are capped server-side (MAX_FACILITY_ROWS=500); conversation is
   window-trimmed on write. Don't rely on clients to bound size.
+- **A domain gated on the bulk-read endpoint must be gated everywhere that
+  domain can reach a prompt, not just on the reader that inspired the gate.**
+  Some facility domains are meant to be visible only to `use-ai-tools`
+  holders, but several generative routes are intentionally open to every
+  signed-in user and, by default, ground themselves in the WHOLE pool —
+  re-exposing a "gated" domain to anyone who asks the model to repeat what it
+  knows. Grounding takes a privileged-domain opt-out, defaulted permissive so
+  existing gated callers are unaffected; every route reachable by a
+  lower-privilege user must opt out explicitly, including ones that don't look
+  like "AI chat" on the surface (e.g. issue-reporting, which grounds its
+  diagnosis in facility memory too). When adding a new privileged domain or a
+  new ungated route that grounds a prompt, audit ALL such routes together —
+  don't assume the first hardened route is the only reachable one. An explicit
+  narrow domain allowlist on a call site is a separate, already-safe pattern.
+- **A shared, trusted persistence store fed by client-submitted history needs
+  its own reconciliation against authoritative data — capability gating on the
+  endpoint is not enough**, since anyone with that capability (not just the
+  most-trusted role) can still submit fabricated history to poison what every
+  other AI feature later treats as fact. Reconciliation must aggregate
+  claimed values by their natural key (e.g. per product per day) BEFORE
+  comparing to the authoritative total — comparing itemized submissions
+  one-by-one lets an attacker split an inflated claim into several
+  under-threshold pieces. It should also fail on the reverse case (submitted
+  data quietly omitting or under-reporting real records for a period it does
+  claim to cover), not just on overstatement, since selective omission can
+  bias shared patterns just as much as fabrication. When reconciliation
+  fails, prefer failing closed only on the persistence step — still serving
+  the advisory result to the caller keeps legitimate use unaffected.
 - Auth: conversation routes are per-user (`req.userId`). Facility GET requires
   `use-ai-tools` (bulk pool disclosure is gated — no client reads it directly,
   prompts are grounded server-side). Facility POST stays open to any

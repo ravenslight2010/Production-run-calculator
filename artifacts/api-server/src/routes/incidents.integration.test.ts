@@ -520,6 +520,26 @@ describe("history-aware diagnosis — grounding + write-back", () => {
     expect(incidentIdx).toBeGreaterThan(historyIdx);
   });
 
+  it("excludes privileged facility domains from the report route (any signed-in user is reachable here)", async () => {
+    // /incidents is open to every signed-in user, unlike GET /ai-memory/facility
+    // (use-ai-tools only). A privileged fact (e.g. a persisted forecast plan)
+    // must never leak into this route's grounding, or reporting an issue
+    // becomes a side-channel for reading manager-gated facility knowledge.
+    await db.insert(facilityKnowledgeTable).values({
+      domain: "forecast",
+      key: "plan:2026-07-09",
+      fact: "ZZZ-PRIVILEGED-FORECAST-MARKER",
+      source: "test",
+    });
+
+    const reporter = await freshReporter();
+    const res = await req(reporter, "POST", "/api/incidents", userReport());
+    expect(res.status).toBe(200);
+    await res.json();
+
+    expect(mock.lastUserPrompt).not.toContain("ZZZ-PRIVILEGED-FORECAST-MARKER");
+  });
+
   it("still records the incident when the report has no precedent (fail-safe baseline)", async () => {
     const reporter = await freshReporter();
     // A deliberately unique signal so no other test's (async, best-effort)

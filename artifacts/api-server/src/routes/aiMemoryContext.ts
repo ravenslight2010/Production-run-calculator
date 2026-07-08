@@ -62,26 +62,53 @@ export async function loadFacilityKnowledge(log: ContextLogger): Promise<Facilit
 // lost by excluding it here.
 const UNTRUSTED_FREEFORM_DOMAINS = new Set([INCIDENT_MEMORY_DOMAIN]);
 
+// Domains that hold data the raw REST surface (GET /ai-memory/facility)
+// deliberately gates behind the `use-ai-tools` capability — forecast plans
+// (aggregated demand/production predictions) and proactive-alert trigger
+// history. Several AI-prompt routes are intentionally open to EVERY signed-in
+// user (ask-the-day chat, end-of-day summary, anomaly narration — informational
+// features every floor worker should get), but they all load the WHOLE
+// facility-knowledge pool to ground their prompt. Without this exclusion, an
+// ordinary staff account with no `use-ai-tools` capability could recover the
+// privileged pool's contents indirectly by asking the model to repeat what it
+// was told, defeating the REST endpoint's gate. Routes that already require
+// `use-ai-tools` (optimize, proactive-alert, forecast, schedule-optimize, etc.)
+// pass `allowPrivileged: true` to keep seeing this data — that's unchanged
+// behavior for the audience the raw endpoint already trusts.
+const PRIVILEGED_FACILITY_DOMAINS = new Set(["forecast", "proactive-alerts"]);
+
 function excludeUntrustedFreeformDomains(
   knowledge: FacilityKnowledge[],
 ): FacilityKnowledge[] {
   return knowledge.filter((k) => !UNTRUSTED_FREEFORM_DOMAINS.has(k.domain.trim().toLowerCase()));
 }
 
+function excludePrivilegedDomains(knowledge: FacilityKnowledge[]): FacilityKnowledge[] {
+  return knowledge.filter((k) => !PRIVILEGED_FACILITY_DOMAINS.has(k.domain.trim().toLowerCase()));
+}
+
 // Append the facility-memory block to a built user prompt. When `domains` is
 // given, only those topics are included (this is an explicit opt-in, so it MAY
 // include an otherwise-untrusted domain, e.g. incidents.ts building its own
 // scoped block); otherwise the whole pool minus UNTRUSTED_FREEFORM_DOMAINS is
-// used. When nothing applies the prompt is returned unchanged.
+// used. `allowPrivileged` (default true, to preserve existing behavior for
+// every current call site) gates PRIVILEGED_FACILITY_DOMAINS in that
+// whole-pool fallback path — pass `false` for a route reachable by users who
+// lack `use-ai-tools`, so it can't be used to exfiltrate the privileged pool.
+// When nothing applies the prompt is returned unchanged.
 export function appendFacilityMemoryBlock(
   userPrompt: string,
   knowledge: FacilityKnowledge[],
   domains?: string[],
+  allowPrivileged: boolean = true,
 ): string {
-  const scoped =
+  let scoped =
     domains && domains.length > 0
       ? filterKnowledgeByDomain(knowledge, domains)
       : excludeUntrustedFreeformDomains(knowledge);
+  if (!domains?.length && !allowPrivileged) {
+    scoped = excludePrivilegedDomains(scoped);
+  }
   const block = buildKnowledgeBlock(scoped);
   return block ? `${userPrompt}\n\n${block}` : userPrompt;
 }
@@ -130,10 +157,20 @@ export function appendConversationBlock(
 export async function groundPromptWithMemory(
   log: ContextLogger,
   userPrompt: string,
-  opts: { facilityDomains?: string[]; userId?: string; conversationLimit?: number } = {},
+  opts: {
+    facilityDomains?: string[];
+    userId?: string;
+    conversationLimit?: number;
+    allowPrivilegedFacilityDomains?: boolean;
+  } = {},
 ): Promise<string> {
   const knowledge = await loadFacilityKnowledge(log);
-  let grounded = appendFacilityMemoryBlock(userPrompt, knowledge, opts.facilityDomains);
+  let grounded = appendFacilityMemoryBlock(
+    userPrompt,
+    knowledge,
+    opts.facilityDomains,
+    opts.allowPrivilegedFacilityDomains ?? true,
+  );
   if (opts.userId) {
     const turns = await loadConversationTurns(log, opts.userId, opts.conversationLimit);
     grounded = appendConversationBlock(grounded, turns);

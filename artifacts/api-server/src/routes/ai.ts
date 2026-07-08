@@ -120,6 +120,7 @@ import {
   validateForecastBody,
   FORECAST_MIN_RUNS,
 } from "./aiForecast";
+import { verifyForecastHistory } from "./aiForecastVerify";
 import {
   validateSummaryBody,
   toSummaryAggInput,
@@ -421,7 +422,15 @@ router.post(
     const { system, user } = buildAskPrompt(validation.data);
     // Ground in facility memory + this user's prior turns BEFORE recording the
     // new exchange, so the model sees the conversation as it stood at ask time.
-    const userPrompt = await groundPromptWithMemory(req.log, user, { userId });
+    // Not manager-gated — every signed-in worker can ask — so the privileged
+    // slice of facility memory (forecast plans, proactive-alert history; see
+    // PRIVILEGED_FACILITY_DOMAINS) must be excluded, or a low-privilege account
+    // could recover it by asking the model to repeat what it was told,
+    // bypassing GET /ai-memory/facility's use-ai-tools gate.
+    const userPrompt = await groundPromptWithMemory(req.log, user, {
+      userId,
+      allowPrivilegedFacilityDomains: false,
+    });
 
     // Finalize the exchange identically for the stream and non-stream paths: run
     // the same deterministic sanitize, then best-effort record the turns so the
@@ -1339,7 +1348,20 @@ router.post(
     // write path (best-effort) so future forecasts — and any later accuracy
     // review — can reference what was predicted for this kind of day. A write
     // failure must never break the response, so swallow errors.
-    if (forecasts.length) {
+    //
+    // Security: `validation.data.history` is entirely client-controlled, and the
+    // model is told to echo its brand/flavor names verbatim, so a fabricated
+    // history flows straight into what gets persisted here — poisoning the
+    // shared pool every other AI feature trusts. Reconcile the submitted
+    // history against the server's own authoritative daily_sync records before
+    // writing back; an unverifiable/fabricated history still gets its forecast
+    // returned to the caller, it just isn't trusted into shared memory.
+    const historyVerified = await verifyForecastHistory(
+      validation.data.history,
+      currentScope(),
+      req.log,
+    );
+    if (forecasts.length && historyVerified) {
       void recordFacilityKnowledge(
         forecasts.map((plan) => ({
           domain: "forecast",
@@ -1403,7 +1425,10 @@ router.post(
 
     const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildSummaryPrompt(stats);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    // Open to all signed-in staff (see comment above), so exclude the
+    // privileged facility-memory domains (forecast/proactive-alerts) — same
+    // reasoning as /ai/ask.
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge, undefined, false);
 
     let content = "";
     try {
@@ -1506,7 +1531,10 @@ router.post(
 
     const knowledge = await loadFacilityKnowledge(req.log);
     const { system, user } = buildAnomalyPrompt(result);
-    const userPrompt = appendFacilityMemoryBlock(user, knowledge);
+    // Open to all signed-in staff (see comment above), so exclude the
+    // privileged facility-memory domains (forecast/proactive-alerts) — same
+    // reasoning as /ai/ask.
+    const userPrompt = appendFacilityMemoryBlock(user, knowledge, undefined, false);
 
     let content = "";
     try {
