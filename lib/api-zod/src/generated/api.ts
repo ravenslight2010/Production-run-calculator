@@ -592,15 +592,25 @@ export const UpdateInventorySettingsResponse = zod.object({
 /**
  * @summary Identify incoming stock items from a photo (AI vision); read-only
  */
+export const identifyInventoryPhotoBodyCandidatesItemKeyMax = 200;
+
+export const identifyInventoryPhotoBodyCandidatesItemCategoryMax = 100;
+
+export const identifyInventoryPhotoBodyCandidatesItemNameMax = 200;
+
+export const identifyInventoryPhotoBodyCandidatesItemUnitMax = 50;
+
+
+
 export const IdentifyInventoryPhotoBody = zod.object({
   "imageBase64": zod.string().describe('Base64-encoded image data (no data URI prefix)'),
   "mimeType": zod.string().optional().describe('Image MIME type, e.g. image\/jpeg'),
   "candidates": zod.array(zod.object({
-  "key": zod.string(),
-  "category": zod.string(),
-  "name": zod.string(),
-  "unit": zod.string()
-})).optional().describe('Known inventory + production items to match against')
+  "key": zod.string().max(identifyInventoryPhotoBodyCandidatesItemKeyMax),
+  "category": zod.string().max(identifyInventoryPhotoBodyCandidatesItemCategoryMax),
+  "name": zod.string().max(identifyInventoryPhotoBodyCandidatesItemNameMax),
+  "unit": zod.string().max(identifyInventoryPhotoBodyCandidatesItemUnitMax)
+}).describe('Known inventory\/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost\/DoS purposes.')).optional().describe('Known inventory + production items to match against')
 })
 
 export const IdentifyInventoryPhotoResponse = zod.object({
@@ -767,13 +777,23 @@ export const ListQualityChecksResponse = zod.array(ListQualityChecksResponseItem
  * Reads current inventory and the configured expiry lead time, flags lots that are expired or expiring soon, and (when anything is flagged) asks the AI for a plain-language run-order suggestion to consume the at-risk stock first. Grounded in the real inventory data and the shared facility memory. Read-only — never applies any change.
  * @summary Flag items trending toward expiry and suggest run-order to use them first
  */
+export const wasteInsightBodyPlannedItemsItemKeyMax = 200;
+
+export const wasteInsightBodyPlannedItemsItemCategoryMax = 100;
+
+export const wasteInsightBodyPlannedItemsItemNameMax = 200;
+
+export const wasteInsightBodyPlannedItemsItemUnitMax = 50;
+
+
+
 export const WasteInsightBody = zod.object({
   "plannedItems": zod.array(zod.object({
-  "key": zod.string(),
-  "category": zod.string(),
-  "name": zod.string(),
-  "unit": zod.string()
-})).optional().describe('Items the current\/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional.')
+  "key": zod.string().max(wasteInsightBodyPlannedItemsItemKeyMax),
+  "category": zod.string().max(wasteInsightBodyPlannedItemsItemCategoryMax),
+  "name": zod.string().max(wasteInsightBodyPlannedItemsItemNameMax),
+  "unit": zod.string().max(wasteInsightBodyPlannedItemsItemUnitMax)
+}).describe('Known inventory\/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can\'t inflate the model prompt for cost\/DoS purposes.')).optional().describe('Items the current\/upcoming production plan would consume, so the AI can recommend which planned products to run first to use at-risk stock. Optional.')
 }).describe('Request for an expiry\/waste insight. Inventory and expiry data are read server-side; the optional plannedItems give the AI the production context it needs to suggest which planned products to run first.')
 
 export const WasteInsightResponse = zod.object({

@@ -127,6 +127,17 @@ describe("validateWasteInsightBody", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(400);
   });
+
+  it("rejects a plannedItem with an oversized name/key/unit/category with 400", () => {
+    const base = { key: "mozz", category: "ingredient", name: "Mozzarella", unit: "cases" };
+    for (const field of ["key", "category", "name", "unit"] as const) {
+      const result = validateWasteInsightBody({
+        plannedItems: [{ ...base, [field]: "x".repeat(5000) }],
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.status).toBe(400);
+    }
+  });
 });
 
 describe("buildWastePrompt", () => {

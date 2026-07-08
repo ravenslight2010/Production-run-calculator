@@ -6,9 +6,16 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Known inventory/production item passed to an AI prompt (vision match candidates, planned production items). Fields are length-bounded so a crafted request can't inflate the model prompt for cost/DoS purposes.
+ */
 export interface PhotoCandidate {
+  /** @maxLength 200 */
   key: string;
+  /** @maxLength 100 */
   category: string;
+  /** @maxLength 200 */
   name: string;
+  /** @maxLength 50 */
   unit: string;
 }

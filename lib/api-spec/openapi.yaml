@@ -3639,6 +3639,10 @@ components:
 
     PhotoCandidate:
       type: object
+      description: >-
+        Known inventory/production item passed to an AI prompt (vision match
+        candidates, planned production items). Fields are length-bounded so a
+        crafted request can't inflate the model prompt for cost/DoS purposes.
       required:
         - key
         - category
@@ -3647,12 +3651,16 @@ components:
       properties:
         key:
           type: string
+          maxLength: 200
         category:
           type: string
+          maxLength: 100
         name:
           type: string
+          maxLength: 200
         unit:
           type: string
+          maxLength: 50
 
     IdentifyPhotoInput:
       type: object

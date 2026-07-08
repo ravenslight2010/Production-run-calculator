@@ -182,4 +182,16 @@ describe("validateIdentifyPhotoBody", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.candidateKeys.size).toBe(0);
   });
+
+  it("rejects a candidate with an oversized name/key/unit/category with 400", () => {
+    const base = { key: "mozz", category: "ingredient", name: "Mozzarella", unit: "cases" };
+    for (const field of ["key", "category", "name", "unit"] as const) {
+      const result = validateIdentifyPhotoBody({
+        imageBase64: validImage,
+        candidates: [{ ...base, [field]: "x".repeat(5000) }],
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.status).toBe(400);
+    }
+  });
 });
