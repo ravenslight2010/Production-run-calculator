@@ -2,17 +2,26 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, Pause, Sparkles, Timer, Zap } from "lucide-react";
 import "./_group.css";
 
-/* ── Variant A (rev 2): Inline Detail + measured mixer/hopper times ────────
-   The dough steppers with live countdown strips, now driven by MEASURED
-   times instead of guesses:
-     • Mixer Time Low / High (seconds) — how long a batch actually spins
-     • Hopper Time (seconds) — how long the hopper takes to turn one batch
+/* ── Variant A (rev 3): two-stage mixer + packaging quick-check ────────────
+   The dough steppers with live countdown strips, driven by MEASURED times:
+     • Mixer low / high speed (seconds) — SEQUENTIAL stages; total spin =
+       low + high
+     • Hopper time (seconds) — how long the hopper takes to turn one batch
        into doughballs
    Pipeline is 3 batches max: 1 prepped to spin · 1 spinning · 1 in the
-   hopper being turned into doughballs. Tray cadence stays line-speed based
-   (perTray / ppm). */
+   hopper. Batches-ready drain = slower of hopper speed and line demand.
+   Tray cadence stays line-speed based (perTray / ppm). Packaging card gives
+   the dough crew a skids/cases pace check without switching tabs. */
 
-const calc = { ppm: 24, perTray: 42, perBatch: 260, traysNeeded: 18, batchesNeeded: 2.4 };
+const calc = {
+  ppm: 24,
+  perTray: 42,
+  perBatch: 260,
+  traysNeeded: 18,
+  batchesNeeded: 2.4,
+  pizzasPerCase: 12,
+  casesPerSkid: 60,
+};
 
 const TRAY_PERIOD_S = (calc.perTray / calc.ppm) * 60; // 105 s
 
@@ -210,6 +219,21 @@ export function TimersInline() {
   const keepUpMargin = lineBatchSec - supplySec;
   const keepsUp = keepUpMargin >= 0;
 
+  /* ── Packaging quick-check (same math as the real Packaging tab) ──
+     A case completes every pizzasPerCase ÷ line speed; skids roll from the
+     case total. Expected pace comes from line speed; actual packed count is
+     what packaging has recorded. Dough crew glances here instead of
+     switching tabs. */
+  const casePeriodSec = (calc.pizzasPerCase / calc.ppm) * 60; // 30 s
+  const caseLeft = casePeriodSec - (elapsed % casePeriodSec);
+  const expectedCasesTotal = 222 + Math.floor(elapsed / casePeriodSec);
+  const [packedCasesTotal, setPackedCasesTotal] = useState(214); // simulated: a bit behind
+  const packedSkids = Math.floor(packedCasesTotal / calc.casesPerSkid);
+  const packedCasesOnSkid = packedCasesTotal % calc.casesPerSkid;
+  const packGapCases = expectedCasesTotal - packedCasesTotal;
+  const packOnPace = packGapCases <= 2;
+  const packBehindSec = packGapCases * casePeriodSec;
+
   /* Simulated ticks so the mockup visibly moves (real app: useAutoTrack) */
   const hasDeficit = calc.traysNeeded > 0 && calc.batchesNeeded > 0;
   useEffect(() => {
@@ -244,6 +268,12 @@ export function TimersInline() {
     );
     return () => clearInterval(id);
   }, [running, hasDeficit, spinTotalSec]);
+  useEffect(() => {
+    // Packaging keeps recording cases at case cadence (simulated, stays a
+    // constant few cases behind so the "behind" state is visible).
+    const id = setInterval(() => setPackedCasesTotal(c => c + 1), casePeriodSec * 1000);
+    return () => clearInterval(id);
+  }, [casePeriodSec]);
 
   return (
     <div className="dough-tab-scope dark min-h-screen">
@@ -378,6 +408,52 @@ export function TimersInline() {
               </p>
             )}
           </div>
+        </div>
+
+        {/* ── NEW: packaging quick-check for the dough crew ── */}
+        <div className={`mt-3 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/50" : "border-amber-600/30 bg-amber-950/10"}`}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Packaging — quick check (no tab switch)
+            </p>
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+              packOnPace
+                ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
+                : "text-amber-400 border-amber-500/30 bg-amber-950/20"
+            }`}>
+              {packOnPace ? "On pace" : `Behind ${packGapCases} cases`}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
+              <p className="text-xl font-mono font-bold text-foreground mt-0.5 tabular-nums">{packedSkids}</p>
+            </div>
+            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
+              <p className="text-xl font-mono font-bold text-foreground mt-0.5 tabular-nums">
+                {packedCasesOnSkid}
+                <span className="text-xs text-muted-foreground font-normal">/{calc.casesPerSkid}</span>
+              </p>
+            </div>
+            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
+              <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">{fmtMS(caseLeft)}</p>
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-2">
+            {packOnPace ? (
+              <>Packed {packedCasesTotal} cases vs {expectedCasesTotal} expected at line speed — packaging is keeping up.</>
+            ) : (
+              <>
+                Packed <span className="text-foreground font-semibold">{packedCasesTotal}</span> cases vs{" "}
+                <span className="text-foreground font-semibold">{expectedCasesTotal}</span> expected at line speed —
+                that's <span className="text-amber-400 font-semibold">{fmtMS(packBehindSec)}</span> of production not
+                boxed yet. Dough keeps feeding the line either way; this is your heads-up before trays pile up at the
+                wrapper.
+              </>
+            )}
+          </p>
         </div>
 
         <div className="mt-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
