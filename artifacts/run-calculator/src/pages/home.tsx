@@ -423,6 +423,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import SetupProfileEditor from "@/components/SetupProfileEditor";
 import { noteBreadcrumb, getLastActionBeforeLoad } from "@/reloadBreadcrumbs";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -3841,7 +3842,7 @@ export default function Home() {
   // "previously merged" aliases. Results are reviewed (never auto-applied);
   // each group's "Load" pre-fills the manual merge form for inspection, while
   // "Apply" merges it directly through the same destructive merge path.
-  async function handleSuggestMerges(fromImport = false) {
+  async function handleSuggestMerges(fromImport = false): Promise<number> {
     if (!fromImport) setMergeFromImport(false);
     // The import-triggered auto-scan always lands on (and scans) the
     // Ingredients tab — read from the closured `mergeFullUniverse` directly
@@ -3871,28 +3872,51 @@ export default function Home() {
       if (usedAi && suggestions.length === 0) {
         setMergeSuggestNote("No duplicate groups found.");
       }
+      return suggestions.length;
     } catch (e) {
       setMergeSuggestions([]);
       setMergeSuggestSelected(new Set());
       setMergeSuggestError(e instanceof Error ? e.message : "Couldn't get suggestions.");
+      return 0;
     } finally {
       setMergeSuggestBusy(false);
     }
   }
 
-  // After a spec/recipe import that added recipes, auto-run the merge check:
-  // imported cheese/mix recipe ingredients can duplicate standalone individual
-  // ingredients. We navigate to the Merge review and scan once (fire-and-forget,
-  // never blocks the already-committed import). The effect re-runs only when the
-  // request counter is bumped, so by then `mergeUniverse` reflects the new lists.
+  // After a spec/recipe import that added recipes, auto-run the merge check in
+  // the BACKGROUND: imported cheese/mix recipe ingredients can duplicate
+  // standalone individual ingredients. This used to yank the user straight to
+  // the Merge screen after EVERY import — importing several sheets back-to-back
+  // felt broken ("where did the import buttons go?"). Now the scan runs without
+  // navigating; if duplicates are found, a toast offers a "Review" button that
+  // jumps to the Merge screen with the results already loaded. The effect
+  // re-runs only when the request counter is bumped, so by then the merge
+  // universe reflects the new lists.
   useEffect(() => {
     if (mergeCheckRequest === 0) return;
-    setActiveTab("setup");
-    setManageCategory("merge");
-    // Land on the Ingredients tab, where the cross-category AI suggestions show.
+    // Pre-select the Ingredients tab (where the cross-category suggestions
+    // show) so the results match the screen when the user does come look.
     setMergeCategory("ingredients");
     setMergeFromImport(true);
-    void handleSuggestMerges(true);
+    void handleSuggestMerges(true).then((count) => {
+      if (count <= 0) return;
+      toast({
+        title: "Possible duplicate ingredients",
+        description: `The import may have added ${count} duplicate group${count === 1 ? "" : "s"}. You can keep importing — review them whenever you're ready.`,
+        action: (
+          <ToastAction
+            altText="Review duplicates"
+            onClick={() => {
+              setActiveTab("setup");
+              setManageCategory("merge");
+              setMergeCategory("ingredients");
+            }}
+          >
+            Review
+          </ToastAction>
+        ),
+      });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergeCheckRequest]);
 
@@ -7244,6 +7268,15 @@ export default function Home() {
     }
   }
 
+  // Each import kind gets a "generation" counter so a slow in-flight parse
+  // can't clobber a newer one: picking new files or closing the dialog bumps
+  // the generation, and any still-running older prepare becomes a no-op (its
+  // results, errors, progress, and loading-flag resets are all ignored).
+  const specImportGenRef = useRef(0);
+  const premixImportGenRef = useRef(0);
+  const cheeseImportGenRef = useRef(0);
+  const shippingImportGenRef = useRef(0);
+
   // Spec-sheet importer: read the .xlsx, ask the AI to interpret it into
   // structured spec profiles + recipes, canonicalize the names, and show a
   // single review/summary screen. Nothing is written until the user confirms.
@@ -7252,6 +7285,13 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `spec import: ${files.length} file(s) selected` : "spec import: picker canceled");
     if (files.length === 0) return;
+    // Generation guard: parsing is slow (AI call), and a user importing files
+    // back-to-back can close the dialog and pick the next file while the old
+    // parse is still in flight. Without this guard the OLD promise resolves
+    // later and clobbers the NEW import's state (stale file info, spinner
+    // flags flipping off early). Any state write below is a no-op once a
+    // newer pick (or dialog close) bumped the generation.
+    const gen = ++specImportGenRef.current;
     setSpecImportPrepared(null);
     setSpecImportError(null);
     setSpecImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -7272,20 +7312,26 @@ export default function Home() {
           ? await prepareSpecImport(buffers[0])
           : await prepareSpecImportMulti(
               buffers,
-              (done, total) => setSpecImportProgress({ done, total }),
+              (done, total) => {
+                if (gen === specImportGenRef.current) setSpecImportProgress({ done, total });
+              },
               files.map((f) => f.name),
             );
+      if (gen !== specImportGenRef.current) return;
       // Remember which file(s) this came from so each distinct spec sheet keeps
       // its own two most recent versions (per-file retention, newest = default).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setSpecImportPrepared(prepared);
     } catch (err) {
+      if (gen !== specImportGenRef.current) return;
       setSpecImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
     } finally {
-      setSpecImportLoading(false);
-      setSpecImportProgress(null);
+      if (gen === specImportGenRef.current) {
+        setSpecImportLoading(false);
+        setSpecImportProgress(null);
+      }
     }
   }
 
@@ -7365,6 +7411,9 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `premix import: ${files.length} file(s) selected` : "premix import: picker canceled");
     if (files.length === 0) return;
+    // Generation guard — see handleSpecImportFile: a still-running older
+    // prepare must never clobber a newer pick's state.
+    const gen = ++premixImportGenRef.current;
     setPremixImportPrepared(null);
     setPremixImportError(null);
     setPremixImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -7379,20 +7428,27 @@ export default function Home() {
       }
       const prepared = await preparePremixImport(
         buffers,
-        (done, total) => setPremixImportProgress(total > 1 ? { done, total } : null),
+        (done, total) => {
+          if (gen === premixImportGenRef.current)
+            setPremixImportProgress(total > 1 ? { done, total } : null);
+        },
         files.map((f) => f.name),
       );
+      if (gen !== premixImportGenRef.current) return;
       // Remember which file(s) this came from so each distinct premix workbook
       // keeps its own two most recent versions (per-file retention).
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setPremixImportPrepared(prepared);
     } catch (err) {
+      if (gen !== premixImportGenRef.current) return;
       setPremixImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
     } finally {
-      setPremixImportLoading(false);
-      setPremixImportProgress(null);
+      if (gen === premixImportGenRef.current) {
+        setPremixImportLoading(false);
+        setPremixImportProgress(null);
+      }
     }
   }
 
@@ -7449,19 +7505,25 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(file ? "shipping import: file selected" : "shipping import: picker canceled");
     if (!file) return;
+    // Generation guard — see handleSpecImportFile: a still-running older
+    // prepare must never clobber a newer pick's state.
+    const gen = ++shippingImportGenRef.current;
     setShippingImportPrepared(null);
     setShippingImportError(null);
     setShippingImportLoading(true);
     setShowShippingImport(true);
     try {
       const buffer = await file.arrayBuffer();
-      setShippingImportPrepared(await prepareShippingImport(buffer));
+      const prepared = await prepareShippingImport(buffer);
+      if (gen !== shippingImportGenRef.current) return;
+      setShippingImportPrepared(prepared);
     } catch (err) {
+      if (gen !== shippingImportGenRef.current) return;
       setShippingImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
     } finally {
-      setShippingImportLoading(false);
+      if (gen === shippingImportGenRef.current) setShippingImportLoading(false);
     }
   }
 
@@ -7497,6 +7559,9 @@ export default function Home() {
     e.target.value = "";
     noteBreadcrumb(files.length > 0 ? `cheese import: ${files.length} file(s) selected` : "cheese import: picker canceled");
     if (files.length === 0) return;
+    // Generation guard — see handleSpecImportFile: a still-running older
+    // prepare must never clobber a newer pick's state.
+    const gen = ++cheeseImportGenRef.current;
     setCheeseImportPrepared(null);
     setCheeseImportError(null);
     setCheeseImportProgress(files.length > 1 ? { done: 0, total: files.length } : null);
@@ -7509,18 +7574,25 @@ export default function Home() {
       }
       const prepared = await prepareCheeseImport(
         buffers,
-        (done, total) => setCheeseImportProgress(total > 1 ? { done, total } : null),
+        (done, total) => {
+          if (gen === cheeseImportGenRef.current)
+            setCheeseImportProgress(total > 1 ? { done, total } : null);
+        },
         files.map((f) => f.name),
       );
+      if (gen !== cheeseImportGenRef.current) return;
       prepared.sourceNames = files.map((f) => f.name).filter(Boolean);
       setCheeseImportPrepared(prepared);
     } catch (err) {
+      if (gen !== cheeseImportGenRef.current) return;
       setCheeseImportError(
         err instanceof Error ? err.message : "Could not read or interpret that workbook.",
       );
     } finally {
-      setCheeseImportLoading(false);
-      setCheeseImportProgress(null);
+      if (gen === cheeseImportGenRef.current) {
+        setCheeseImportLoading(false);
+        setCheeseImportProgress(null);
+      }
     }
   }
 
@@ -16130,7 +16202,17 @@ export default function Home() {
         {/* ── Spec Sheet Import Dialog ─────────────────────────────────────── */}
         <SpecImportDialog
           open={showSpecImport}
-          onClose={() => { setShowSpecImport(false); setSpecImportPrepared(null); setSpecImportError(null); }}
+          onClose={() => {
+            // Bump the generation so a parse still in flight becomes a no-op
+            // (its late result can't reopen stale data over the next import),
+            // and clear the loading/progress flags it would have cleared.
+            specImportGenRef.current++;
+            setShowSpecImport(false);
+            setSpecImportPrepared(null);
+            setSpecImportError(null);
+            setSpecImportLoading(false);
+            setSpecImportProgress(null);
+          }}
           loading={specImportLoading}
           progress={specImportProgress}
           error={specImportError}
@@ -16143,7 +16225,14 @@ export default function Home() {
         {/* ── Premix Sheet Import Dialog ───────────────────────────────────── */}
         <PremixImportDialog
           open={showPremixImport}
-          onClose={() => { setShowPremixImport(false); setPremixImportPrepared(null); setPremixImportError(null); }}
+          onClose={() => {
+            premixImportGenRef.current++;
+            setShowPremixImport(false);
+            setPremixImportPrepared(null);
+            setPremixImportError(null);
+            setPremixImportLoading(false);
+            setPremixImportProgress(null);
+          }}
           loading={premixImportLoading}
           progress={premixImportProgress}
           error={premixImportError}
@@ -16155,7 +16244,13 @@ export default function Home() {
         {/* ── Shipping & Palletizing Guide Import Dialog ───────────────────── */}
         <ShippingImportDialog
           open={showShippingImport}
-          onClose={() => { setShowShippingImport(false); setShippingImportPrepared(null); setShippingImportError(null); }}
+          onClose={() => {
+            shippingImportGenRef.current++;
+            setShowShippingImport(false);
+            setShippingImportPrepared(null);
+            setShippingImportError(null);
+            setShippingImportLoading(false);
+          }}
           loading={shippingImportLoading}
           error={shippingImportError}
           prepared={shippingImportPrepared}
@@ -16166,7 +16261,14 @@ export default function Home() {
         {/* ── Cheese Mix Recipe Specs Import Dialog ────────────────────────── */}
         <CheeseImportDialog
           open={showCheeseImport}
-          onClose={() => { setShowCheeseImport(false); setCheeseImportPrepared(null); setCheeseImportError(null); }}
+          onClose={() => {
+            cheeseImportGenRef.current++;
+            setShowCheeseImport(false);
+            setCheeseImportPrepared(null);
+            setCheeseImportError(null);
+            setCheeseImportLoading(false);
+            setCheeseImportProgress(null);
+          }}
           loading={cheeseImportLoading}
           progress={cheeseImportProgress}
           error={cheeseImportError}

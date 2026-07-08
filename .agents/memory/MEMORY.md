@@ -152,5 +152,6 @@
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time spec-sheet profile reconciliation in shared @workspace/profile-cleanup; mobile MUST apply via functional setAppState; any "has real data" gate must exclude dough or dough-only profiles become ghosts.
 - [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
+- [Import gen guards](import-gen-guard.md) — slow import prepares need per-kind generation refs (stale parse clobbers next import); post-import merge scan is background + toast, never force-navigates.
 - [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — epoch guard must fail-closed once a scope was ever reset; resetAt→resetBoundaryAt clamp needs a small future-skew allowance, not exact now, or session-fence tests break.
 - [Freezer WIP completion](freezer-wip-completion.md) — casesInFreezer is additive display-only (never in spreadsheet math); resumeRun shifts startedAt so only an end-while-paused open pause is subtracted in the drain.
