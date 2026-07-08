@@ -166,28 +166,7 @@ export function VariantAB() {
           </div>
         </div>
 
-        {/* Stage 2: Freezer Filling */}
-        <div className="flex mb-4">
-          <TimelineNode icon={Snowflake} active />
-          <div className="flex-1 mt-2">
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
-              <div className="flex justify-between items-end mb-2">
-                <span className="text-sm font-semibold uppercase tracking-wider text-primary">Freezer Loading</span>
-                <span className="text-xs font-mono font-bold text-primary/80">
-                  {String(Math.floor(fillRemain / 60)).padStart(2, "0")}:{String(fillRemain % 60).padStart(2, "0")} rem
-                </span>
-              </div>
-              <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-1000 bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"
-                  style={{ width: `${fillPct * 100}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Stage 3: Freezer Draining */}
+        {/* Stage 2: Freezer Draining */}
         <div className="flex mb-4">
           <TimelineNode icon={Zap} active />
           <div className="flex-1 mt-2">
@@ -225,6 +204,27 @@ export function VariantAB() {
                 >
                   <CheckCircle2 className="w-5 h-5" />
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Stage 3: Freezer Filling */}
+        <div className="flex mb-4">
+          <TimelineNode icon={Snowflake} active />
+          <div className="flex-1 mt-2">
+            <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+              <div className="flex justify-between items-end mb-2">
+                <span className="text-sm font-semibold uppercase tracking-wider text-primary">Freezer Loading</span>
+                <span className="text-xs font-mono font-bold text-primary/80">
+                  {String(Math.floor(fillRemain / 60)).padStart(2, "0")}:{String(fillRemain % 60).padStart(2, "0")} rem
+                </span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-1000 bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"
+                  style={{ width: `${fillPct * 100}%` }}
+                />
               </div>
             </div>
           </div>
