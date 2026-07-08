@@ -10419,599 +10419,153 @@ export default function Home() {
       )}
 
       <div className="max-w-5xl mx-auto space-y-5">
-        {/* ─── RUN SELECTOR ─── */}
-        <div className="print:hidden flex justify-center">
-          {/* Current run — brand + flavor pickers */}
-          <div className="flex flex-col items-center gap-2 px-4 py-2 rounded-lg bg-primary/15 border border-primary/30 w-full max-w-lg">
-            <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current Run</div>
-            <div className="flex items-center gap-2">
-
-              {/* Brand picker */}
-              <div className="relative">
-                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Brand</div>
-                <div className="relative">
-                  <input
-                    value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
-                    placeholder="Brand…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
-                    readOnly={!showBrandDrop}
-                    onClick={() => {
-                      setBrandInput(currentRun?.brand ?? "");
-                      setShowBrandDrop(true);
-                      setShowFlavorDrop(false);
-                    }}
-                    onChange={(e) => setBrandInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const b = addBrand(brandInput);
-                        setRunBrandFlavor(b, currentRun?.flavor ?? "");
-                        setShowBrandDrop(false);
-                      }
-                      if (e.key === "Escape") setShowBrandDrop(false);
-                    }}
-                    onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
-                  />
-                  {showBrandDrop && (
-                    <div ref={brandScrollKeep.listRef} onScroll={brandScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
-                      {brands
-                        .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
-                        .map((b) =>
-                          confirmDeleteBrand === b ? (
-                            <div key={b} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{b}"?</span>
-                              <span className="flex gap-1 shrink-0">
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeBrand(b); confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); setShowBrandDrop(false); }}>Yes</button>
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); }}>No</button>
-                              </span>
-                            </div>
-                          ) : (
-                            <div key={b} className="flex items-center">
-                              <button
-                                type="button"
-                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
-                                onMouseDown={() => { setRunBrandFlavor(b, currentRun?.flavor ?? ""); setShowBrandDrop(false); }}
-                              >
-                                {b}
-                              </button>
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                                onMouseDown={e => { e.stopPropagation(); confirmDeleteBrandRef.current = b; setConfirmDeleteBrand(b); }}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )
-                        )}
-                      {brandInput.trim() && !brands.includes(brandInput.trim()) && (
-                        <button
-                          type="button"
-                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                          onMouseDown={() => {
-                            const b = addBrand(brandInput);
-                            setRunBrandFlavor(b, currentRun?.flavor ?? "");
-                            setShowBrandDrop(false);
-                          }}
-                        >
-                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{brandInput.trim()}"</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="text-muted-foreground/40 text-lg font-light">–</div>
-
-              {/* Flavor picker */}
-              <div className="relative">
-                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Flavor</div>
-                <div className="relative">
-                  <input
-                    value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
-                    placeholder="Flavor…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
-                    readOnly={!showFlavorDrop}
-                    onClick={() => {
-                      setFlavorInput(currentRun?.flavor ?? "");
-                      setShowFlavorDrop(true);
-                      setShowBrandDrop(false);
-                    }}
-                    onChange={(e) => setFlavorInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const f = addFlavor(flavorInput);
-                        setRunBrandFlavor(currentRun?.brand ?? "", f);
-                        setShowFlavorDrop(false);
-                      }
-                      if (e.key === "Escape") setShowFlavorDrop(false);
-                    }}
-                    onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
-                  />
-                  {showFlavorDrop && (
-                    <div ref={flavorScrollKeep.listRef} onScroll={flavorScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
-                      {!(currentRun?.brand) && (
-                        <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
-                      )}
-                      {(brandFlavors[currentRun?.brand ?? ""] ?? [])
-                        .filter((f) => f.toLowerCase().includes(flavorInput.toLowerCase()))
-                        .map((f) =>
-                          confirmDeleteFlavor === f ? (
-                            <div key={f} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
-                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{f}"?</span>
-                              <span className="flex gap-1 shrink-0">
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeFlavor(f); confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); setShowFlavorDrop(false); }}>Yes</button>
-                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); }}>No</button>
-                              </span>
-                            </div>
-                          ) : (
-                            <div key={f} className="flex items-center">
-                              <button
-                                type="button"
-                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
-                                onMouseDown={() => { setRunBrandFlavor(currentRun?.brand ?? "", f); setShowFlavorDrop(false); }}
-                              >
-                                {f}
-                              </button>
-                              <button
-                                type="button"
-                                tabIndex={-1}
-                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
-                                onMouseDown={e => { e.stopPropagation(); confirmDeleteFlavorRef.current = f; setConfirmDeleteFlavor(f); }}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )
-                        )}
-                      {currentRun?.brand && flavorInput.trim() && !(brandFlavors[currentRun.brand] ?? []).includes(flavorInput.trim()) && (
-                        <button
-                          type="button"
-                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
-                          onMouseDown={() => {
-                            const f = addFlavor(flavorInput);
-                            setRunBrandFlavor(currentRun?.brand ?? "", f);
-                            setShowFlavorDrop(false);
-                          }}
-                        >
-                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{flavorInput.trim()}"</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-            </div>
-
-            {/* Cases Needed — editable by all, plain input outside Form context */}
-            <div className="px-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Cases Needed</label>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={v.casesNeeded === 0 ? "" : v.casesNeeded}
-                onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
-                placeholder="0"
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-              {Number(v.casesNeeded) === 0 && (
-                <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
-                  <span>⚠</span> Enter cases needed to enable calculations
-                </p>
-              )}
-            </div>
-
-            {/* Last-run recall hint */}
-            {lastRunRecall && (
-              <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70 -mt-1">
-                <History className="w-3 h-3 shrink-0" />
-                <span>
-                  Last ran {lastRunRecall.date}
-                  {lastRunRecall.actualCases != null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.actualCases)} cases</span></span>}
-                  {lastRunRecall.casesNeeded != null && lastRunRecall.actualCases == null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.casesNeeded)} planned</span></span>}
-                  {lastRunRecall.wasteLbs != null && lastRunRecall.wasteLbs > 0 && <span> · <span className="text-amber-400/80">{fmtNum(lastRunRecall.wasteLbs, 1)} lbs waste</span></span>}
-                </span>
-              </div>
-            )}
-
-            {/* Run status + Start/End buttons */}
-            <div className="flex items-center gap-2">
-              {runStatus === "pending" && (
-                <button
-                  type="button"
-                  onClick={startRun}
-                  disabled={blockingViolations.length > 0}
-                  title={
-                    blockingViolations.length > 0
-                      ? `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}: ${blockingViolations.map(x => x.name).join(", ")}`
-                      : undefined
-                  }
-                  className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
-                >
-                  <Play className="w-3 h-3 fill-current" /> Start Run
-                </button>
-              )}
-              {runStatus === "running" && (
-                <>
-                  <span className="flex items-center gap-1.5 text-xs text-green-400 font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-green-400 animate-pulse shrink-0" />
-                    <span className="hidden sm:inline">Running</span>
-                    {currentRun?.startedAt ? (
-                      <span className="text-green-400/70 font-normal hidden sm:inline">
-                        · {fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}
-                      </span>
-                    ) : null}
-                  </span>
-                  {activeStopId ? (
-                    <button
-                      type="button"
-                      onClick={endStop}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold transition-colors animate-pulse"
-                    >
-                      <CircleDot className="w-3 h-3" /> End Stop
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 text-xs font-semibold transition-colors"
-                    >
-                      <OctagonX className="w-3 h-3" /> <span className="hidden sm:inline">Log Stop</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={pauseRun}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition-colors"
-                  >
-                    <Pause className="w-3 h-3 fill-current" /> <span className="hidden sm:inline">Pause</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={endRun}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-red-700 hover:bg-red-600 text-white text-xs font-semibold transition-colors"
-                  >
-                    <Square className="w-3 h-3 fill-current" /> <span className="hidden sm:inline">Stop Run</span>
-                  </button>
-                </>
-              )}
-              {runStatus === "paused" && (
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
-                    Paused
-                  </span>
-                  {resumeDialog ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-muted-foreground font-medium">Freezer empty?</span>
-                      <button
-                        type="button"
-                        className="px-2 py-0.5 rounded bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
-                        onClick={() => { resumeRun(true); setResumeDialog(false); }}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-2 py-0.5 rounded bg-muted hover:bg-muted/70 text-muted-foreground text-xs font-semibold transition-colors"
-                        onClick={() => { resumeRun(false); setResumeDialog(false); }}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setResumeDialog(true)}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-semibold transition-colors"
-                    >
-                      <Play className="w-3 h-3 fill-current" /> Resume
-                    </button>
-                  )}
-                </div>
-              )}
-              {runStatus === "ended" && (() => {
-                const emptyMs = Number(ve.freezerTime) * 60000;
-                const remainMs = lastEndedRun?.endedAt && emptyMs > 0
-                  ? Math.max(0, lastEndedRun.endedAt + emptyMs - nowTime.getTime())
-                  : 0;
-                const draining = emptyMs > 0 && remainMs > 0;
-                const mm = Math.floor(remainMs / 60000);
-                const ss = Math.floor((remainMs % 60000) / 1000);
-                return draining ? (
-                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    Freezer draining · {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                    Ended{emptyMs > 0 ? " · Freezer empty" : ""}
-                  </span>
-                );
-              })()}
-              {/* Die type badge in run header */}
-              {v.dieType && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/40 border border-border/50 text-muted-foreground tabular-nums">
-                  {v.dieType}
-                </span>
-              )}
-              {/* Allergen badge in run header */}
-              {isAllergen(normalizeAllergen(v.allergen)) && (() => {
-                const m = allergenMeta(normalizeAllergen(v.allergen));
-                return (
-                  <span
-                    className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
-                    style={{ backgroundColor: m.color, color: m.textColor }}
-                  >
-                    {m.label}
-                  </span>
-                );
-              })()}
-            </div>
-
-            {/* Glanceable case progress — persistent across tabs, mirrors mobile control-bar KPI */}
-            {v.casesNeeded > 0 && (
-              <div className="flex items-center gap-2 px-1">
-                <span className="text-sm font-bold font-mono tabular-nums text-foreground shrink-0">
-                  {fmtComma(calc.casesCompleted)}
-                  <span className="text-muted-foreground">/{fmtComma(v.casesNeeded)}</span>
-                </span>
-                <div className="flex-1 h-2 rounded-full bg-muted/40 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-500"
-                    style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
-                  />
-                </div>
-                <span className="text-xs font-semibold text-primary shrink-0 tabular-nums">
-                  {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
-                </span>
-              </div>
-            )}
-
-            {/* Estimated time to finish — shown while running or paused */}
-            {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
-              const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
-              const driftMs = initialFinishTimestampRef.current > 0
-                ? projectedFinish - initialFinishTimestampRef.current
-                : 0;
-              const driftSec = driftMs / 1000;
-              const showDrift = Math.abs(driftSec) >= 30;
-              const ahead = driftSec < 0;
-              return (
-                <div className="flex flex-col items-center gap-1 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <Timer className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span className="text-xs text-muted-foreground">Est. finish in</span>
-                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtTime(calc.adjustedTimeSec)}</span>
-                    <span className="text-xs text-muted-foreground">·</span>
-                    <span className="text-sm font-bold tabular-nums text-foreground">{fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</span>
+        {/* ─── Compact run strip — shown on every tab except Run (graduated mockup) ─── */}
+        {activeTab !== "run" && (
+          <div className="print:hidden sticky top-2 z-40">
+            <div
+              className="relative rounded-lg border border-border/60 bg-card/95 backdrop-blur shadow-lg overflow-hidden cursor-pointer"
+              onClick={() => setActiveTab("run")}
+              data-testid="compact-run-strip"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
+              <div className="px-3 py-2.5 pt-3 flex items-center justify-between gap-3">
+                <div className="flex flex-col flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    {runStatus === "running" ? (
+                      <>
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        </span>
+                        <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider truncate">
+                          Running{currentRun?.startedAt ? ` · ${fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}` : ""}
+                        </span>
+                      </>
+                    ) : runStatus === "paused" ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Paused</span>
+                      </>
+                    ) : runStatus === "ended" ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Ended</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0" />
+                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Not started</span>
+                      </>
+                    )}
                   </div>
-                  {showDrift && (
-                    <div className={`flex items-center gap-1.5 text-xs font-semibold ${ahead ? "text-emerald-400" : "text-amber-400"}`}>
-                      <span>{ahead ? "▲" : "▼"}</span>
-                      <span>{ahead ? `${fmtTime(Math.abs(driftSec))} ahead of original estimate` : `${fmtTime(Math.abs(driftSec))} behind original estimate`}</span>
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-sm font-bold text-foreground truncate">
+                      {(currentRun?.brand || currentRun?.flavor)
+                        ? <>{currentRun?.brand}{currentRun?.brand && currentRun?.flavor ? <span className="text-primary mx-1">—</span> : null}{currentRun?.flavor}</>
+                        : "Unnamed Run"}
+                    </span>
+                    <span className="text-[10px] font-bold text-muted-foreground uppercase shrink-0 inline-flex items-center">
+                      Run {dayState.currentIndex + 1}/{dayState.runs.length}
+                      <ChevronRight className="w-3 h-3 ml-0.5" />
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end text-right shrink-0">
+                  {v.casesNeeded > 0 && (
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-sm font-bold font-mono tabular-nums text-foreground">{fmtComma(calc.casesCompleted)}</span>
+                      <span className="text-[10px] text-muted-foreground">/ {fmtComma(v.casesNeeded)}</span>
+                      <span className="text-[10px] font-semibold text-primary tabular-nums">
+                        {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
+                      </span>
                     </div>
                   )}
+                  <div className="flex items-center gap-2">
+                    {calc.paceStatus !== null && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border tabular-nums ${
+                        calc.paceStatus === "behind"
+                          ? "text-red-400 bg-red-400/10 border-red-400/20"
+                          : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
+                      }`}>
+                        {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} ahead` : `▼ ${Math.abs(calc.paceDelta)} behind`}
+                        {calc.ppm > 0 ? ` · ${calc.ppm} PPM` : ""}
+                      </span>
+                    )}
+                    {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (
+                      <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
+                        Est {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <div className="shrink-0 border-l border-border/50 pl-3">
+                    {runStatus === "running" ? (
+                      <button
+                        type="button"
+                        title="Pause run"
+                        data-testid="strip-pause"
+                        onClick={(e) => { e.stopPropagation(); pauseRun(); }}
+                        className="bg-amber-600/20 text-amber-500 hover:bg-amber-500 hover:text-black p-2.5 rounded-lg transition-colors border border-amber-500/30"
+                      >
+                        <Pause className="w-4 h-4 fill-current" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        title="Resume on Run tab"
+                        data-testid="strip-resume"
+                        onClick={(e) => { e.stopPropagation(); setActiveTab("run"); }}
+                        className="bg-emerald-600/20 text-emerald-500 hover:bg-emerald-500 hover:text-black p-2.5 rounded-lg transition-colors border border-emerald-500/30"
+                      >
+                        <Play className="w-4 h-4 fill-current" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {v.casesNeeded > 0 && (
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-muted/40">
+                  <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }} />
+                </div>
+              )}
+            </div>
+            {/* Compact freezer phase line — same math as the Run tab banner */}
+            {!currentRun?.endedAt && runStatus === "running" && (() => {
+              const freezerMin = Number(ve.freezerTime) || 0;
+              if (freezerMin <= 0) return null;
+              const elapsedMin = elapsedBatchSec / 60;
+              const ppm = calc.ppm;
+              if (ppm <= 0) return null;
+              const feedDoneMin =
+                v.pizzasPerCase > 0 && v.casesNeeded > 0
+                  ? (v.casesNeeded * v.pizzasPerCase) / ppm
+                  : Infinity;
+              const feedComplete = elapsedMin >= feedDoneMin;
+              const filling = elapsedMin > 0 && elapsedMin < freezerMin && !feedComplete;
+              const emptyRemainMin = Math.max(0, feedDoneMin + freezerMin - elapsedMin);
+              const emptying = feedComplete && emptyRemainMin > 0;
+              if (!filling && !emptying) return null;
+              const remainMin = filling ? freezerMin - elapsedMin : emptyRemainMin;
+              const remainMs = Math.max(0, remainMin * 60000);
+              const mm = Math.floor(remainMs / 60000);
+              const ss = Math.floor((remainMs % 60000) / 1000);
+              const tone = filling
+                ? { wrap: "bg-sky-950/30 border-sky-700/30", text: "text-sky-400" }
+                : { wrap: "bg-amber-950/30 border-amber-700/30", text: "text-amber-400" };
+              return (
+                <div className={`mt-1 rounded-md border px-3 py-1.5 flex items-center justify-center gap-2 ${tone.wrap}`}>
+                  <Timer className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} />
+                  <span className={`text-[11px] font-semibold ${tone.text}`}>
+                    {filling
+                      ? `Freezer filling — first cases exit in ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+                      : `Freezer emptying — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} until last cases exit`}
+                  </span>
                 </div>
               );
             })()}
-
-            {/* Auto-detected stall nudge (advisory — never writes on its own) */}
-            {stallPrompt && (
-              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
-                <span>⚠ Line looks stalled — about {stallCheck.behindMinutes} min behind with no stoppage logged</span>
-                <button
-                  type="button"
-                  data-testid="button-stall-log"
-                  className="px-2.5 py-1 rounded-md bg-amber-500 text-black font-bold hover-elevate active-elevate-2"
-                  onClick={() => { logStop("Auto-detected stall", ""); setStallPrompt(false); }}
-                >
-                  Log stoppage
-                </button>
-                <button
-                  type="button"
-                  data-testid="button-stall-dismiss"
-                  className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
-                  onClick={() => setStallPrompt(false)}
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-
-            {/* Pace gauge + PPM */}
-            {calc.paceStatus !== null && (
-              <div className={`flex flex-wrap items-center justify-center gap-2 py-1.5 px-4 rounded-lg text-xs font-semibold ${
-                calc.paceStatus === "on-pace" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
-                : calc.paceStatus === "ahead" ? "bg-emerald-950/40 border border-emerald-700/30 text-emerald-400"
-                : "bg-red-950/40 border border-red-700/30 text-red-400"
-              }`}>
-                <span>{calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}</span>
-                {calc.ppm > 0 && (
-                  <span className="opacity-60 border-l border-current/30 pl-2 ml-0.5">
-                    {calc.ppm} PPM
-                  </span>
-                )}
-                {calc.catchUpPpm !== null && (
-                  <span className="border-l border-current/30 pl-2 ml-0.5 text-red-300 font-bold">
-                    Need {calc.catchUpPpm} PPM to finish on time
-                  </span>
-                )}
-                {(() => {
-                  const dtSec = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
-                  return dtSec > 0 ? (
-                    <span className="border-l border-current/30 pl-2 ml-0.5 text-red-300">
-                      ↓ {fmtTime(dtSec)} downtime
-                    </span>
-                  ) : null;
-                })()}
-              </div>
-            )}
-
-            {/* Run position dots */}
-            {dayState.runs.length > 1 && (
-              <div className="flex items-center justify-center gap-1.5 py-1">
-                {dayState.runs.map((_, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => switchToRun(i)}
-                    className={`rounded-full transition-all ${i === dayState.currentIndex ? "w-4 h-2 bg-primary" : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Navigation row: Previous · count · New Run · Upcoming */}
-            <div className="flex items-center justify-between w-full gap-1 pt-1 border-t border-primary/20">
-              {/* Previous */}
-              {dayState.currentIndex > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => switchToRun(dayState.currentIndex - 1)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
-                  <div className="text-left min-w-0">
-                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Prev</div>
-                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
-                  </div>
-                </button>
-              ) : (
-                <div className="w-16" />
-              )}
-
-              {/* Upcoming */}
-              {dayState.currentIndex < dayState.runs.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={() => switchToRun(dayState.currentIndex + 1)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
-                >
-                  <div className="text-right min-w-0">
-                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Next</div>
-                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
-                </button>
-              ) : (
-                <div className="w-16" />
-              )}
-
-              {/* Count + Run actions */}
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
-                {/* Remove run — only for upcoming (pending) runs when more than one exists, supervisors only */}
-                {isSupervisor && !currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
-                  confirmRemoveRun ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-destructive font-semibold">Remove?</span>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
-                        onClick={removeRun}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
-                        onClick={() => setConfirmRemoveRun(false)}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveRun(true)}
-                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      title="Remove this run"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )
-                )}
-                {/* Remove blank runs — sweep untouched "Unnamed Run" entries pinned in the shared day, supervisors only */}
-                {isSupervisor && blankRunIds.length > 0 && (
-                  confirmRemoveBlanks ? (
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-destructive font-semibold">Remove {blankRunIds.length} blank run{blankRunIds.length === 1 ? "" : "s"}?</span>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
-                        onClick={removeBlankRuns}
-                      >Yes</button>
-                      <button
-                        type="button"
-                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
-                        onClick={() => setConfirmRemoveBlanks(false)}
-                      >No</button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRemoveBlanks(true)}
-                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
-                      title={`Remove ${blankRunIds.length} blank run${blankRunIds.length === 1 ? "" : "s"}`}
-                    >
-                      <Eraser className="w-3.5 h-3.5" />
-                    </button>
-                  )
-                )}
-                {dayState.runs.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowReorderDialog(true)}
-                    title="Reorder runs"
-                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <GripVertical className="w-3.5 h-3.5" />
-                  </button>
-                )}
-                {(runStatus === "running" || runStatus === "paused") && (
-                  <button
-                    type="button"
-                    onClick={() => setShowGlance(true)}
-                    title="Glance view — large numbers for distance viewing"
-                    className="h-6 w-6 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-                  >
-                    <Maximize2 className="w-3 h-3" />
-                  </button>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => { setTemplateSaveMode(false); setTemplateNameInput(""); setShowTemplatesDialog(true); }}
-                  title="Run templates — save or load run settings"
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  <Bookmark className="w-3 h-3" />
-                  <span className="hidden sm:inline">Templates</span>
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={copyRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  title="Duplicate this run's settings into a new run"
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  Copy
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addRun}
-                  disabled={dayState.runs.length >= MAX_RUNS}
-                  className="h-6 px-2 gap-1 text-xs"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span className="hidden sm:inline">New Run</span>
-                </Button>
-              </div>
-            </div>
           </div>
-        </div>
+        )}
 
         {/* Sandbox scope banner — persistent while signed in as the test user */}
         {me?.sandbox && (
@@ -11281,6 +10835,595 @@ export default function Home() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               {/* ─── RUN ─── */}
               <TabsContent value="run">
+                {/* ─── Run cockpit — identity, status & KPIs (graduated ManagerHub mockup) ─── */}
+                <div className="space-y-4 mb-4">
+                  {/* Top bar: run position + last-run recall + run actions */}
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <span className="text-xs text-muted-foreground font-bold uppercase tracking-wider bg-muted/40 px-2 py-1 rounded border border-border/50 w-fit">
+                        Run {dayState.currentIndex + 1} of {dayState.runs.length}
+                      </span>
+            {lastRunRecall && (
+              <div className="flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground/70 -mt-1">
+                <History className="w-3 h-3 shrink-0" />
+                <span>
+                  Last ran {lastRunRecall.date}
+                  {lastRunRecall.actualCases != null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.actualCases)} cases</span></span>}
+                  {lastRunRecall.casesNeeded != null && lastRunRecall.actualCases == null && <span> · <span className="font-semibold text-muted-foreground">{fmtComma(lastRunRecall.casesNeeded)} planned</span></span>}
+                  {lastRunRecall.wasteLbs != null && lastRunRecall.wasteLbs > 0 && <span> · <span className="text-amber-400/80">{fmtNum(lastRunRecall.wasteLbs, 1)} lbs waste</span></span>}
+                </span>
+              </div>
+            )}
+                    </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-xs text-muted-foreground tabular-nums">{dayState.runs.length}/{MAX_RUNS}</span>
+                {/* Remove run — only for upcoming (pending) runs when more than one exists, supervisors only */}
+                {isSupervisor && !currentRun?.startedAt && !currentRun?.endedAt && dayState.runs.length > 1 && (
+                  confirmRemoveRun ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-destructive font-semibold">Remove?</span>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
+                        onClick={removeRun}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
+                        onClick={() => setConfirmRemoveRun(false)}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemoveRun(true)}
+                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      title="Remove this run"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )
+                )}
+                {/* Remove blank runs — sweep untouched "Unnamed Run" entries pinned in the shared day, supervisors only */}
+                {isSupervisor && blankRunIds.length > 0 && (
+                  confirmRemoveBlanks ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-destructive font-semibold">Remove {blankRunIds.length} blank run{blankRunIds.length === 1 ? "" : "s"}?</span>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors"
+                        onClick={removeBlankRuns}
+                      >Yes</button>
+                      <button
+                        type="button"
+                        className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors"
+                        onClick={() => setConfirmRemoveBlanks(false)}
+                      >No</button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemoveBlanks(true)}
+                      className="h-6 w-6 flex items-center justify-center rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors"
+                      title={`Remove ${blankRunIds.length} blank run${blankRunIds.length === 1 ? "" : "s"}`}
+                    >
+                      <Eraser className="w-3.5 h-3.5" />
+                    </button>
+                  )
+                )}
+                {dayState.runs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowReorderDialog(true)}
+                    title="Reorder runs"
+                    className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <GripVertical className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {(runStatus === "running" || runStatus === "paused") && (
+                  <button
+                    type="button"
+                    onClick={() => setShowGlance(true)}
+                    title="Glance view — large numbers for distance viewing"
+                    className="h-6 w-6 flex items-center justify-center rounded border border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { setTemplateSaveMode(false); setTemplateNameInput(""); setShowTemplatesDialog(true); }}
+                  title="Run templates — save or load run settings"
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Bookmark className="w-3 h-3" />
+                  <span className="hidden sm:inline">Templates</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copyRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  title="Duplicate this run's settings into a new run"
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  Copy
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addRun}
+                  disabled={dayState.runs.length >= MAX_RUNS}
+                  className="h-6 px-2 gap-1 text-xs"
+                >
+                  <Plus className="w-3 h-3" />
+                  <span className="hidden sm:inline">New Run</span>
+                </Button>
+              </div>
+                  </div>
+
+                  {/* Run setup — brand / flavor / target cases */}
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current Run</div>
+                      <div className="flex items-center gap-1.5">
+              {v.dieType && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/40 border border-border/50 text-muted-foreground tabular-nums">
+                  {v.dieType}
+                </span>
+              )}
+              {isAllergen(normalizeAllergen(v.allergen)) && (() => {
+                const m = allergenMeta(normalizeAllergen(v.allergen));
+                return (
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide"
+                    style={{ backgroundColor: m.color, color: m.textColor }}
+                  >
+                    {m.label}
+                  </span>
+                );
+              })()}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-start justify-center sm:justify-start gap-x-4 gap-y-3">
+                      <div className="flex items-center gap-2">
+              <div className="relative">
+                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Brand</div>
+                <div className="relative">
+                  <input
+                    value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
+                    placeholder="Brand…"
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showBrandDrop}
+                    onClick={() => {
+                      setBrandInput(currentRun?.brand ?? "");
+                      setShowBrandDrop(true);
+                      setShowFlavorDrop(false);
+                    }}
+                    onChange={(e) => setBrandInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const b = addBrand(brandInput);
+                        setRunBrandFlavor(b, currentRun?.flavor ?? "");
+                        setShowBrandDrop(false);
+                      }
+                      if (e.key === "Escape") setShowBrandDrop(false);
+                    }}
+                    onBlur={() => setTimeout(() => { if (!confirmDeleteBrandRef.current) setShowBrandDrop(false); }, 150)}
+                  />
+                  {showBrandDrop && (
+                    <div ref={brandScrollKeep.listRef} onScroll={brandScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
+                      {brands
+                        .filter((b) => b.toLowerCase().includes(brandInput.toLowerCase()))
+                        .map((b) =>
+                          confirmDeleteBrand === b ? (
+                            <div key={b} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{b}"?</span>
+                              <span className="flex gap-1 shrink-0">
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeBrand(b); confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); setShowBrandDrop(false); }}>Yes</button>
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteBrandRef.current = null; setConfirmDeleteBrand(null); }}>No</button>
+                              </span>
+                            </div>
+                          ) : (
+                            <div key={b} className="flex items-center">
+                              <button
+                                type="button"
+                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.brand === b ? "text-primary font-semibold" : ""}`}
+                                onMouseDown={() => { setRunBrandFlavor(b, currentRun?.flavor ?? ""); setShowBrandDrop(false); }}
+                              >
+                                {b}
+                              </button>
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
+                                onMouseDown={e => { e.stopPropagation(); confirmDeleteBrandRef.current = b; setConfirmDeleteBrand(b); }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )
+                        )}
+                      {brandInput.trim() && !brands.includes(brandInput.trim()) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                          onMouseDown={() => {
+                            const b = addBrand(brandInput);
+                            setRunBrandFlavor(b, currentRun?.flavor ?? "");
+                            setShowBrandDrop(false);
+                          }}
+                        >
+                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{brandInput.trim()}"</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+                        <div className="text-muted-foreground/40 text-lg font-light mt-4">–</div>
+              <div className="relative">
+                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Flavor</div>
+                <div className="relative">
+                  <input
+                    value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
+                    placeholder="Flavor…"
+                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    readOnly={!showFlavorDrop}
+                    onClick={() => {
+                      setFlavorInput(currentRun?.flavor ?? "");
+                      setShowFlavorDrop(true);
+                      setShowBrandDrop(false);
+                    }}
+                    onChange={(e) => setFlavorInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        const f = addFlavor(flavorInput);
+                        setRunBrandFlavor(currentRun?.brand ?? "", f);
+                        setShowFlavorDrop(false);
+                      }
+                      if (e.key === "Escape") setShowFlavorDrop(false);
+                    }}
+                    onBlur={() => setTimeout(() => { if (!confirmDeleteFlavorRef.current) setShowFlavorDrop(false); }, 150)}
+                  />
+                  {showFlavorDrop && (
+                    <div ref={flavorScrollKeep.listRef} onScroll={flavorScrollKeep.onScroll} className="absolute z-50 top-full mt-1 left-0 w-44 bg-popover border border-border rounded-md shadow-lg py-1 max-h-52 overflow-y-auto overscroll-contain">
+                      {!(currentRun?.brand) && (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">Pick a brand first</p>
+                      )}
+                      {(brandFlavors[currentRun?.brand ?? ""] ?? [])
+                        .filter((f) => f.toLowerCase().includes(flavorInput.toLowerCase()))
+                        .map((f) =>
+                          confirmDeleteFlavor === f ? (
+                            <div key={f} className="px-3 py-1.5 flex items-center justify-between gap-1 bg-destructive/10">
+                              <span className="text-[10px] text-destructive font-semibold truncate">Remove "{f}"?</span>
+                              <span className="flex gap-1 shrink-0">
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold hover:bg-destructive/80 transition-colors" onMouseDown={() => { removeFlavor(f); confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); setShowFlavorDrop(false); }}>Yes</button>
+                                <button type="button" className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold hover:bg-muted/80 transition-colors" onMouseDown={() => { confirmDeleteFlavorRef.current = null; setConfirmDeleteFlavor(null); }}>No</button>
+                              </span>
+                            </div>
+                          ) : (
+                            <div key={f} className="flex items-center">
+                              <button
+                                type="button"
+                                className={`flex-1 min-w-0 truncate text-left px-3 py-1.5 text-sm hover:bg-muted transition-colors ${currentRun?.flavor === f ? "text-primary font-semibold" : ""}`}
+                                onMouseDown={() => { setRunBrandFlavor(currentRun?.brand ?? "", f); setShowFlavorDrop(false); }}
+                              >
+                                {f}
+                              </button>
+                              <button
+                                type="button"
+                                tabIndex={-1}
+                                className="px-2 py-1.5 text-muted-foreground/40 hover:text-destructive transition-colors"
+                                onMouseDown={e => { e.stopPropagation(); confirmDeleteFlavorRef.current = f; setConfirmDeleteFlavor(f); }}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )
+                        )}
+                      {currentRun?.brand && flavorInput.trim() && !(brandFlavors[currentRun.brand] ?? []).includes(flavorInput.trim()) && (
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-sm text-primary hover:bg-muted transition-colors flex items-center gap-1"
+                          onMouseDown={() => {
+                            const f = addFlavor(flavorInput);
+                            setRunBrandFlavor(currentRun?.brand ?? "", f);
+                            setShowFlavorDrop(false);
+                          }}
+                        >
+                          <Plus className="w-3 h-3 shrink-0" /> <span className="min-w-0 truncate">Add "{flavorInput.trim()}"</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+                      </div>
+                      <div className="w-40">
+            <div className="px-1">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Cases Needed</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={v.casesNeeded === 0 ? "" : v.casesNeeded}
+                onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
+                placeholder="0"
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              {Number(v.casesNeeded) === 0 && (
+                <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
+                  <span>⚠</span> Enter cases needed to enable calculations
+                </p>
+              )}
+            </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Status controls — big touch targets */}
+                  {runStatus === "pending" && (
+                    <button
+                      type="button"
+                      onClick={startRun}
+                      disabled={blockingViolations.length > 0}
+                      title={
+                        blockingViolations.length > 0
+                          ? `Blocked by production rule${blockingViolations.length > 1 ? "s" : ""}: ${blockingViolations.map(x => x.name).join(", ")}`
+                          : undefined
+                      }
+                      data-testid="button-start-run"
+                      className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600"
+                    >
+                      <Play className="w-6 h-6 fill-current" /> START RUN
+                    </button>
+                  )}
+                  {runStatus === "running" && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={pauseRun}
+                        className="bg-amber-600 hover:bg-amber-500 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
+                      >
+                        <Pause className="w-5 h-5 fill-current" /> PAUSE RUN
+                      </button>
+                      <button
+                        type="button"
+                        onClick={endRun}
+                        className="bg-red-700 hover:bg-red-600 text-white font-black text-base sm:text-lg py-5 rounded-xl flex items-center justify-center gap-2.5 shadow-lg transition-colors active:translate-y-0.5"
+                      >
+                        <Square className="w-5 h-5 fill-current" /> STOP RUN
+                      </button>
+                      {activeStopId ? (
+                        <button
+                          type="button"
+                          onClick={endStop}
+                          className="col-span-2 bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors animate-pulse"
+                        >
+                          <CircleDot className="w-4 h-4" /> END STOP
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setStopReason(""); setStopNotes(""); setShowStopDialog(true); }}
+                          className="col-span-2 border border-orange-700/60 text-orange-400 hover:bg-orange-950/40 font-bold text-sm py-3.5 rounded-xl flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <OctagonX className="w-4 h-4" /> LOG STOPPAGE
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {runStatus === "running" && currentRun?.startedAt ? (
+                    <div className="flex items-center justify-center">
+                      <div className="bg-card px-3 py-1.5 rounded-full border border-border/50 text-xs text-muted-foreground font-medium">
+                        Elapsed Time:{" "}
+                        <span className="text-foreground font-bold tabular-nums">
+                          {fmtElapsed(nowTime.getTime() - currentRun.startedAt + (currentRun.pausedAt ? nowTime.getTime() - currentRun.pausedAt : 0))}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+                  {runStatus === "paused" && (
+                    resumeDialog ? (
+                      <div className="flex items-center justify-center gap-2.5 rounded-xl border border-amber-600/40 bg-amber-950/20 py-4 px-4 flex-wrap">
+                        <span className="text-sm text-muted-foreground font-medium">Freezer empty?</span>
+                        <button
+                          type="button"
+                          className="px-4 py-1.5 rounded-md bg-green-600 hover:bg-green-500 text-white text-sm font-semibold transition-colors"
+                          onClick={() => { resumeRun(true); setResumeDialog(false); }}
+                        >Yes</button>
+                        <button
+                          type="button"
+                          className="px-4 py-1.5 rounded-md bg-muted hover:bg-muted/70 text-muted-foreground text-sm font-semibold transition-colors"
+                          onClick={() => { resumeRun(false); setResumeDialog(false); }}
+                        >No</button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setResumeDialog(true)}
+                        className="w-full bg-green-600 hover:bg-green-500 text-white font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 shadow-lg transition-colors"
+                      >
+                        <Play className="w-6 h-6 fill-current" /> RESUME RUN
+                      </button>
+                    )
+                  )}
+                  {runStatus === "ended" && (
+                    <div className="flex items-center justify-center py-1">
+              {runStatus === "ended" && (() => {
+                const emptyMs = Number(ve.freezerTime) * 60000;
+                const remainMs = lastEndedRun?.endedAt && emptyMs > 0
+                  ? Math.max(0, lastEndedRun.endedAt + emptyMs - nowTime.getTime())
+                  : 0;
+                const draining = emptyMs > 0 && remainMs > 0;
+                const mm = Math.floor(remainMs / 60000);
+                const ss = Math.floor((remainMs % 60000) / 1000);
+                return draining ? (
+                  <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                    Freezer draining · {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
+                    <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
+                    Ended{emptyMs > 0 ? " · Freezer empty" : ""}
+                  </span>
+                );
+              })()}
+                    </div>
+                  )}
+            {/* Auto-detected stall nudge (advisory — never writes on its own) */}
+            {stallPrompt && (
+              <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
+                <span>⚠ Line looks stalled — about {stallCheck.behindMinutes} min behind with no stoppage logged</span>
+                <button
+                  type="button"
+                  data-testid="button-stall-log"
+                  className="px-2.5 py-1 rounded-md bg-amber-500 text-black font-bold hover-elevate active-elevate-2"
+                  onClick={() => { logStop("Auto-detected stall", ""); setStallPrompt(false); }}
+                >
+                  Log stoppage
+                </button>
+                <button
+                  type="button"
+                  data-testid="button-stall-dismiss"
+                  className="px-2.5 py-1 rounded-md border border-amber-700/40 hover-elevate"
+                  onClick={() => setStallPrompt(false)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+                  {/* KPI tiles — completion, pace, estimated finish */}
+                  {(v.casesNeeded > 0 || calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {v.casesNeeded > 0 && (
+                        <div className="rounded-xl border border-border/60 bg-card/60 p-5 flex flex-col items-center justify-center relative overflow-hidden shadow-lg">
+                          <div className="absolute top-3 left-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Completion</div>
+                          <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                            {runStatus === "running" ? (
+                              <>
+                                <span className="relative flex h-2.5 w-2.5">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                                </span>
+                                <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wide">Running</span>
+                              </>
+                            ) : runStatus === "paused" ? (
+                              <>
+                                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Paused</span>
+                              </>
+                            ) : runStatus === "ended" ? (
+                              <>
+                                <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" />
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Ended</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" />
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Not started</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="mt-7 mb-2 text-5xl sm:text-6xl font-black text-foreground tabular-nums tracking-tighter font-mono" data-testid="tile-cases-completed">
+                            {fmtComma(calc.casesCompleted)}
+                          </div>
+                          {calc.casesCompleted >= v.casesNeeded ? (
+                            <div className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-4 h-4" /> Target reached!
+                            </div>
+                          ) : (
+                            <div className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 tabular-nums">
+                              {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}% Done
+                            </div>
+                          )}
+                          <div className="w-full h-3.5 rounded-full mt-5 bg-muted/30 border border-border/40 overflow-hidden shadow-inner">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
+                              style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
+                            />
+                          </div>
+                          <div className="w-full flex justify-between mt-2 text-xs text-muted-foreground font-medium tabular-nums">
+                            <span>0</span>
+                            <span>{fmtComma(Math.max(0, v.casesNeeded - calc.casesCompleted))} left</span>
+                            <span>{fmtComma(v.casesNeeded)}</span>
+                          </div>
+                        </div>
+                      )}
+                      {(calc.paceStatus !== null || ((runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0)) && (
+                        <div className="flex flex-col gap-4">
+                          {calc.paceStatus !== null && (
+                            <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pace</span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border tabular-nums ${
+                                  calc.paceStatus === "behind"
+                                    ? "text-red-400 bg-red-400/10 border-red-400/20"
+                                    : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
+                                }`}>
+                                  {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}
+                                </span>
+                              </div>
+                              <div className="flex items-baseline gap-2">
+                                <span className="text-3xl sm:text-4xl font-black text-foreground tabular-nums tracking-tight font-mono">{calc.ppm}</span>
+                                <span className="text-sm text-muted-foreground font-bold uppercase">PPM</span>
+                              </div>
+                              {calc.catchUpPpm !== null && (
+                                <div className="text-xs font-semibold text-red-300 mt-2">
+                                  Need {calc.catchUpPpm} PPM to finish on time
+                                </div>
+                              )}
+                              {(() => {
+                                const dtSec = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
+                                return dtSec > 0 ? (
+                                  <div className="text-xs font-medium text-red-300/80 mt-1">
+                                    ↓ {fmtTime(dtSec)} downtime
+                                  </div>
+                                ) : null;
+                              })()}
+                            </div>
+                          )}
+                          {(runStatus === "running" || runStatus === "paused") && calc.totalTimeSec > 0 && (() => {
+                            const projectedFinish = Date.now() + calc.totalTimeSec * 1000;
+                            const driftMs = initialFinishTimestampRef.current > 0
+                              ? projectedFinish - initialFinishTimestampRef.current
+                              : 0;
+                            const driftSec = driftMs / 1000;
+                            const showDrift = Math.abs(driftSec) >= 30;
+                            const ahead = driftSec < 0;
+                            return (
+                              <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
+                                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
+                                <div className="flex items-baseline gap-2">
+                                  <span className="text-2xl sm:text-3xl font-black text-foreground tabular-nums tracking-tight font-mono">{fmtTime(calc.adjustedTimeSec)}</span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
+                                  <div className="text-sm font-medium text-foreground tabular-nums">at {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</div>
+                                  {showDrift && (
+                                    <div className={`text-[10px] font-bold border px-1.5 py-0.5 rounded tabular-nums ${
+                                      ahead
+                                        ? "text-emerald-400 border-emerald-400/20 bg-emerald-400/10"
+                                        : "text-red-400 border-red-400/20 bg-red-400/10"
+                                    }`}>
+                                      {ahead ? "▲" : "▼"} {fmtTime(Math.abs(driftSec))} {ahead ? "ahead" : "behind"}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {/* Ended-run banner */}
                 {currentRun?.endedAt && (() => {
                   const emptyMs = Number(ve.freezerTime) * 60000;
@@ -11390,25 +11533,6 @@ export default function Home() {
                   );
                 })()}
 
-                {/* Batch due alert — dough only */}
-                {showBatchDue && runStatus === "running" && doughSubTab !== "crusts" && (
-                  <div className="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-orange-950/40 border border-orange-500/50 animate-pulse">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-lg">🍕</span>
-                      <div>
-                        <p className="text-sm font-bold text-orange-400">Start next dough batch now</p>
-                        <p className="text-xs text-orange-300/70 mt-0.5">Time per batch: {fmtTime(calc.timePerBatchSec)}</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowBatchDue(false)}
-                      className="text-orange-400/60 hover:text-orange-400 transition-colors shrink-0"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
 
                 {/* Die change warning — before run ends */}
                 {(runStatus === "running" || runStatus === "paused") && v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
@@ -11426,36 +11550,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Case completion progress bar */}
-                {v.casesNeeded > 0 && calc.casesCompleted > 0 && (
-                  <div className="mb-4 space-y-1.5">
-                    {calc.casesCompleted >= v.casesNeeded ? (
-                      <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-400">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span className="text-sm font-bold">Target reached! {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)} cases</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Cases completed</span>
-                          <span className="font-semibold tabular-nums text-foreground">
-                            {fmtComma(calc.casesCompleted)} / {fmtComma(v.casesNeeded)}
-                            {" "}
-                            <span className="text-muted-foreground">({Math.round(calc.casesCompleted / v.casesNeeded * 100)}%)</span>
-                          </span>
-                        </div>
-                        <div className="h-2.5 rounded-full bg-muted/40 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              calc.casesCompleted / v.casesNeeded >= 0.75 ? "bg-primary" : "bg-primary/70"
-                            }`}
-                            style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
 
                 {/* Carry-over surplus to next run (moved from Current Progress) */}
                 {(() => {
@@ -11534,7 +11628,7 @@ export default function Home() {
                   <Card className="bg-card/50 border-border/50 shadow-md mt-4">
                     <CardHeader className="pb-1 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Run Details
+                        Line Details
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-4 pb-3">
@@ -11572,7 +11666,7 @@ export default function Home() {
                   <Card className="bg-card/50 border-border/50 shadow-md mt-4">
                     <CardHeader className="pb-1 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Run Details
+                        Line Details
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="px-4 pb-3">
@@ -11609,22 +11703,6 @@ export default function Home() {
                         label="Cases on Last Skid"
                         value={fmtNum(calc.casesOnLastSkid, 0)}
                         testId="output-last-skid-cases"
-                      />
-                      <Separator className="my-3 opacity-30" />
-                      <StatRow
-                        label="Trays Per Skid"
-                        value={fmtNum(calc.traysPerSkid, 2)}
-                        testId="output-trays-per-skid"
-                      />
-                      <StatRow
-                        label="Trays Per Batch"
-                        value={fmtNum(calc.traysPerBatch, 2)}
-                        testId="output-trays-per-batch"
-                      />
-                      <StatRow
-                        label="Batches Per Skid"
-                        value={fmtNum(calc.batchesPerSkid, 2)}
-                        testId="output-batches-per-skid"
                       />
                     </CardContent>
                   </Card>
@@ -11665,6 +11743,56 @@ export default function Home() {
                   </CardContent>
                 </Card>
 
+                {/* Run navigation — prev / dots / next (graduated mockup) */}
+                {dayState.runs.length > 1 && (
+                  <div className="mt-4 rounded-xl border border-border/50 bg-card/50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+              {dayState.currentIndex > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => switchToRun(dayState.currentIndex - 1)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 shrink-0" />
+                  <div className="text-left min-w-0">
+                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Prev</div>
+                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex - 1])}</div>
+                  </div>
+                </button>
+              ) : (
+                <div className="w-16" />
+              )}
+            {dayState.runs.length > 1 && (
+              <div className="flex items-center justify-center gap-1.5 py-1">
+                {dayState.runs.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => switchToRun(i)}
+                    className={`rounded-full transition-all ${i === dayState.currentIndex ? "w-4 h-2 bg-primary" : "w-2 h-2 bg-muted-foreground/30 hover:bg-muted-foreground/60"}`}
+                  />
+                ))}
+              </div>
+            )}
+              {dayState.currentIndex < dayState.runs.length - 1 ? (
+                <button
+                  type="button"
+                  onClick={() => switchToRun(dayState.currentIndex + 1)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors min-w-0"
+                >
+                  <div className="text-right min-w-0">
+                    <div className="text-[8px] uppercase tracking-widest opacity-50 font-semibold leading-none mb-0.5">Next</div>
+                    <div className="font-medium text-xs truncate max-w-[90px]">{runLabel(dayState.runs[dayState.currentIndex + 1])}</div>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                </button>
+              ) : (
+                <div className="w-16" />
+              )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Upcoming runs */}
                 {(() => {
                   const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
@@ -11691,30 +11819,12 @@ export default function Home() {
                     </div>
                   );
                 })()}
-              </TabsContent>
 
-              {/* ─── SETUP ─── */}
-              <TabsContent value="setup">
-                <div className="mb-4">
-                  <FillMissingPanel
-                    getRecord={() => ({
-                      ...form.getValues(),
-                      brand: currentRun?.brand ?? "",
-                      flavor: currentRun?.flavor ?? "",
-                      subTab: doughSubTab,
-                    })}
-                    brand={currentRun?.brand ?? ""}
-                    flavor={currentRun?.flavor ?? ""}
-                    dieType={form.getValues("dieType") ?? ""}
-                    canEdit={isSupervisor}
-                    onCommit={commitMissingField}
-                  />
-                </div>
                 <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
                     <summary className="flex items-center justify-between px-5 py-3.5 cursor-pointer list-none select-none">
                       <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                         <Settings className="w-3.5 h-3.5" />
-                        Line Settings
+                        Line Setup
                         {!isSupervisor && <Lock className="w-3.5 h-3.5 text-muted-foreground/50" />}
                       </span>
                       <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
@@ -11981,6 +12091,25 @@ export default function Home() {
                     </fieldset>
                     </div>
                 </details>
+              </TabsContent>
+
+              {/* ─── SETUP ─── */}
+              <TabsContent value="setup">
+                <div className="mb-4">
+                  <FillMissingPanel
+                    getRecord={() => ({
+                      ...form.getValues(),
+                      brand: currentRun?.brand ?? "",
+                      flavor: currentRun?.flavor ?? "",
+                      subTab: doughSubTab,
+                    })}
+                    brand={currentRun?.brand ?? ""}
+                    flavor={currentRun?.flavor ?? ""}
+                    dieType={form.getValues("dieType") ?? ""}
+                    canEdit={isSupervisor}
+                    onCommit={commitMissingField}
+                  />
+                </div>
 
                 {/* Packaging Settings */}
                 <details className="group rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden mb-4">
@@ -13730,6 +13859,48 @@ export default function Home() {
                   })()}
                 </div>
 
+
+                {/* Next batch due — merged countdown + start-next-batch card (graduated mockup) */}
+                {doughSubTab === "dough" && runStatus === "running" && (() => {
+                  const spinSecCard =
+                    (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)) ||
+                    calc.timePerBatchSec;
+                  const dueMs = tickDueRefs.batchProd.current;
+                  const secLeft = spinSecCard > 0 && dueMs > 0
+                    ? Math.min(spinSecCard, Math.max(0, (dueMs - nowTime.getTime()) / 1000))
+                    : null;
+                  return (
+                    <div className={`mb-4 rounded-xl border overflow-hidden ${showBatchDue ? "border-orange-500/50 bg-orange-950/40 animate-pulse" : "border-amber-500/30 bg-card/50"}`}>
+                      <div className="px-4 py-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Timer className={`w-5 h-5 shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} />
+                          <div className="min-w-0">
+                            <p className={`text-sm font-bold ${showBatchDue ? "text-orange-400" : "text-foreground"}`}>
+                              {showBatchDue ? "Start next dough batch now" : "Next batch due"}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {showBatchDue ? `Time per batch: ${fmtTime(calc.timePerBatchSec)}` : "Countdown to the next mixer batch at current pace"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`text-xl font-black font-mono tabular-nums shrink-0 ${showBatchDue ? "text-orange-400" : "text-amber-500"}`} data-testid="text-next-batch-countdown">
+                          {secLeft !== null ? fmtMS(secLeft) : "—:—"}
+                        </span>
+                      </div>
+                      {showBatchDue && (
+                        <button
+                          type="button"
+                          data-testid="button-start-next-batch"
+                          onClick={() => setShowBatchDue(false)}
+                          className="w-full bg-amber-600 hover:bg-amber-500 text-black font-black text-sm py-3 flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <Play className="w-4 h-4 fill-current" />
+                          START NEXT BATCH
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
                 {/* Run to Time card — available to all roles */}
                 {doughSubTab === "dough" && (() => {
                   const target = new Date(nowTime);
@@ -13916,6 +14087,29 @@ export default function Home() {
                     </Card>
                   );
                 })()}
+
+                {/* Extra Info — trays/skid, trays/batch, batches/skid (graduated mockup) */}
+                {doughSubTab === "dough" && (
+                  <div className="mt-4 rounded-xl border border-border/50 bg-card/50 shadow-md overflow-hidden">
+                    <div className="bg-muted/30 px-4 py-2.5 border-b border-border/40">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Extra Info</p>
+                    </div>
+                    <div className="grid grid-cols-3 divide-x divide-border/40">
+                      <div className="p-3 text-center">
+                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-trays-per-skid">{fmtNum(calc.traysPerSkid, 2)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Trays / Skid</p>
+                      </div>
+                      <div className="p-3 text-center">
+                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-trays-per-batch">{fmtNum(calc.traysPerBatch, 2)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Trays / Batch</p>
+                      </div>
+                      <div className="p-3 text-center">
+                        <p className="text-lg font-mono font-bold text-foreground tabular-nums" data-testid="output-batches-per-skid">{fmtNum(calc.batchesPerSkid, 2)}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">Batches / Skid</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <RecipeSubstitutionBadge
                   substitutions={dayState.substitutions ?? []}
