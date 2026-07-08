@@ -32,6 +32,12 @@ export const formSchema = z.object({
   casesOnCurrentSkid: z.coerce.number().min(0).default(6),
   traysOnLine: z.coerce.number().min(0).default(43),
   batchesReady: z.coerce.number().min(0).default(0),
+  // Measured machine times (seconds). 0 = not measured — timing features fall
+  // back to line-speed-derived estimates. Mixer runs low then high speed
+  // back-to-back; total spin = low + high. Hopper = one batch → doughballs.
+  mixerLowSec: z.coerce.number().min(0).default(0),
+  mixerHighSec: z.coerce.number().min(0).default(0),
+  hopperSec: z.coerce.number().min(0).default(0),
   carryOverDone: z.boolean().default(false),
   sauceOzPerPizza: z.coerce.number().min(0).default(4),
   sauceBarrelLbs: z.coerce.number().min(0.1).default(450),
@@ -140,6 +146,9 @@ export const DEFAULT_VALUES: FormValues = {
   casesOnCurrentSkid: 0,
   traysOnLine: 0,
   batchesReady: 0,
+  mixerLowSec: 0,
+  mixerHighSec: 0,
+  hopperSec: 0,
   carryOverDone: false,
   sauceOzPerPizza: 0,
   sauceBarrelLbs: 0,

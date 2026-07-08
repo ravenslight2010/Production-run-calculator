@@ -1831,6 +1831,84 @@ const VALID_TABS = new Set([
   "summary",
 ]);
 
+/** m:ss for the dough-timer countdowns (e.g. 105 → "1:45"). */
+function fmtMS(totalSec: number): string {
+  if (!Number.isFinite(totalSec)) return "—:—";
+  const s = Math.max(0, Math.round(totalSec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** Slim countdown row + progress bar under a dough stepper. */
+function TickBar({
+  label,
+  secLeft,
+  periodSec,
+  color,
+}: {
+  label: string;
+  secLeft: number;
+  periodSec: number;
+  color: string;
+}) {
+  const pct = periodSec > 0 ? Math.min(100, Math.max(0, (1 - secLeft / periodSec) * 100)) : 0;
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-muted-foreground">{label}</span>
+        <span className={`text-[10px] font-mono font-semibold tabular-nums ${color}`}>{fmtMS(secLeft)}</span>
+      </div>
+      <div className="h-1 rounded-full bg-muted/40 overflow-hidden mt-0.5">
+        <div
+          className={`h-full rounded-full ${color.replace("text-", "bg-")}`}
+          style={{ width: `${pct}%`, transition: "width 1s linear" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Compact seconds input (with m:ss preview) for the measured machine times. */
+function SecondsField({
+  control,
+  name,
+  label,
+}: {
+  control: any;
+  name: keyof FormValues;
+  label: string;
+}) {
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field }) => (
+        <FormItem className="min-w-0 space-y-0">
+          <FormLabel className="text-[9px] text-muted-foreground block truncate font-normal">{label}</FormLabel>
+          <FormControl>
+            <div className="flex items-center gap-1 mt-0.5">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                {...field}
+                value={field.value ?? 0}
+                onChange={(e) => {
+                  const val = e.target.value === "" ? "" : Number(e.target.value);
+                  if (val === "" || (Number.isFinite(val) && val >= 0)) field.onChange(val);
+                }}
+                onFocus={(e) => e.target.select()}
+                className="h-7 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                data-testid={`input-${name}`}
+              />
+              <span className="text-[9px] text-muted-foreground shrink-0 font-mono">= {fmtMS(Number(field.value) || 0)}</span>
+            </div>
+          </FormControl>
+        </FormItem>
+      )}
+    />
+  );
+}
+
 function StepperField({
   control,
   name,
@@ -8228,7 +8306,7 @@ export default function Home() {
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
     : 0;
   // ── Auto-track progress ───────────────────────────────────────────────────
-  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow } = useAutoTrack({
+  const { autoTrackProgress, setAutoTrackProgress, autoTrackSuggestion, autoSuppressUntilRef, fireAutoTrackNow, tickDueRefs } = useAutoTrack({
     runId: currentRunId,
     runStatus,
     nowTime,
@@ -8237,6 +8315,13 @@ export default function Home() {
     // Effective values so temp overrides (freezer time) drive tunnel timing.
     v: ve,
     form,
+    // Measured machine times: mixer spin (low + high) paces the mixer's +1
+    // batch tick; hopper time slows the batches-ready drain when it's the
+    // bottleneck. 0 = not measured → line-speed fallback (old behavior).
+    machine: {
+      spinSec: (Number(v.mixerLowSec) || 0) + (Number(v.mixerHighSec) || 0),
+      hopperSec: Number(v.hopperSec) || 0,
+    },
     // Cast/wall display screens are read-only viewers: they must never run
     // auto-track writes, or their decrements sync back and clobber the
     // operator's manual tray/batch edits on every other device.
@@ -13094,6 +13179,103 @@ export default function Home() {
 
               {/* ─── DOUGH ─── */}
               <TabsContent value="dough">
+                {/* Batch pipeline + measured machine times (dough runs only) */}
+                {doughSubTab === "dough" && (() => {
+                  const safeLow = Math.max(0, Number(v.mixerLowSec) || 0);
+                  const safeHigh = Math.max(0, Number(v.mixerHighSec) || 0);
+                  const safeHopper = Math.max(0, Number(v.hopperSec) || 0);
+                  const spinTotalSec = safeLow + safeHigh;
+                  const lineBatchSec = calc.ppm > 0 && calc.perBatch > 0 ? (calc.perBatch / calc.ppm) * 60 : 0;
+                  const measured = spinTotalSec > 0 && lineBatchSec > 0;
+                  const supplySec = Math.max(spinTotalSec, safeHopper);
+                  const keepUpMargin = lineBatchSec - supplySec;
+                  const keepsUp = keepUpMargin >= 0;
+                  const running = runStatus === "running" && autoTrackProgress;
+                  const nowMs = nowTime.getTime();
+                  // The mixer spin countdown anchors to auto-track's "+1 batch"
+                  // tick — when times are measured, that tick fires every
+                  // spin-total, so display and counter always agree.
+                  const batchProdDue = tickDueRefs.batchProd.current;
+                  const spinLeft = running && batchProdDue > 0
+                    ? Math.min(spinTotalSec, Math.max(0, (batchProdDue - nowMs) / 1000))
+                    : null;
+                  const spinElapsed = spinLeft !== null ? Math.max(0, spinTotalSec - spinLeft) : null;
+                  const onLowStage = spinElapsed !== null && spinElapsed < safeLow;
+                  const stageLeft = spinLeft === null || spinElapsed === null
+                    ? null
+                    : onLowStage ? safeLow - spinElapsed : spinLeft;
+                  const hopperLeft = running && safeHopper > 0
+                    ? safeHopper - (elapsedBatchSec % safeHopper)
+                    : null;
+                  return (
+                    <>
+                      {measured && (
+                        <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                            Batch Pipeline · 3 max
+                          </p>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
+                              <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
+                              <p className="text-[9px] text-muted-foreground mt-0.5">spins when mixer frees</p>
+                            </div>
+                            <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
+                              <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
+                              <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
+                                {spinLeft !== null ? fmtMS(spinLeft) : "—:—"}
+                              </p>
+                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                                {spinLeft === null
+                                  ? "counts while running"
+                                  : onLowStage
+                                    ? `low speed · ${fmtMS(stageLeft ?? 0)} to high`
+                                    : `high speed · ${fmtMS(stageLeft ?? 0)} left`}
+                              </p>
+                            </div>
+                            <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
+                              <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
+                              <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">
+                                {hopperLeft !== null ? fmtMS(hopperLeft) : "—:—"}
+                              </p>
+                              <p className="text-[9px] text-muted-foreground mt-0.5">
+                                {safeHopper > 0 ? "until batch is all balls" : "enter hopper time below"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${keepsUp ? "text-emerald-400" : "text-amber-400"}`}>
+                            <CheckCircle2 className="w-3 h-3 shrink-0" />
+                            {keepsUp
+                              ? `Keeping up: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(keepUpMargin)} spare)`
+                              : `Falling behind: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(-keepUpMargin)} short)`}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Start prepping the next batch every{" "}
+                            <span className="font-mono text-foreground">{fmtMS(supplySec)}</span> — set by the{" "}
+                            {spinTotalSec >= safeHopper ? "mixer (low + high)" : "hopper"}.
+                          </p>
+                        </div>
+                      )}
+                      <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 mb-3">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
+                            <Timer className="w-2.5 h-2.5" /> Machine Times
+                          </p>
+                          <p className="text-[9px] text-muted-foreground font-mono truncate">
+                            {spinTotalSec > 0 || safeHopper > 0
+                              ? `spin ${fmtMS(spinTotalSec)} + hopper ${fmtMS(safeHopper)}`
+                              : "time your mixer & hopper for live timers"}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <SecondsField control={form.control} name="mixerLowSec" label="Mixer low (sec)" />
+                          <SecondsField control={form.control} name="mixerHighSec" label="Mixer high (sec)" />
+                          <SecondsField control={form.control} name="hopperSec" label="Hopper (sec)" />
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
                 {/* Supply progress steppers (moved from Current Progress) */}
                 <div className="mb-4">
                   {(() => {
@@ -13105,6 +13287,15 @@ export default function Home() {
                       suggestedDoughStaging(calc.traysNeeded, calc.batchesNeeded);
                     const trayAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
                     const batchAutoActive = autoTrackProgress && runStatus === "running" && !suppressed;
+                    // ── Live countdowns to each auto counter's next tick ──
+                    const nowMs = nowTime.getTime();
+                    const secLeftOf = (dueMs: number, periodSec: number) =>
+                      dueMs > 0 ? Math.min(periodSec, Math.max(0, (dueMs - nowMs) / 1000)) : periodSec;
+                    const trayPeriodSec = calc.ppm > 0 && calc.perTray > 0 ? (calc.perTray / calc.ppm) * 60 : 0;
+                    const lineBatchSec = calc.ppm > 0 && calc.perBatch > 0 ? (calc.perBatch / calc.ppm) * 60 : 0;
+                    const hopperSecSafe = Math.max(0, Number(v.hopperSec) || 0);
+                    const drainQuarterSec = Math.max(hopperSecSafe, lineBatchSec) / 4;
+                    const spinSec = (Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0)) || lineBatchSec;
                     return (
                       <>
                         {autoTrackProgress && s && suppressed && (
@@ -13131,6 +13322,24 @@ export default function Home() {
                                 <AlertTriangle className="w-3 h-3 shrink-0" /> Line full — max 74 trays
                               </p>
                             )}
+                            {doughSubTab !== "crusts" && trayAutoActive && trayPeriodSec > 0 && (
+                              <>
+                                <TickBar
+                                  label="Line eats 1 tray in"
+                                  secLeft={secLeftOf(tickDueRefs.tray.current, trayPeriodSec)}
+                                  periodSec={trayPeriodSec}
+                                  color="text-orange-400"
+                                />
+                                {calc.traysNeeded > 0 && (
+                                  <TickBar
+                                    label="Press adds 1 tray in"
+                                    secLeft={secLeftOf(tickDueRefs.trayProd.current, trayPeriodSec)}
+                                    periodSec={trayPeriodSec}
+                                    color="text-emerald-400"
+                                  />
+                                )}
+                              </>
+                            )}
                           </div>
                           {doughSubTab !== "crusts" && (
                             <div>
@@ -13148,11 +13357,116 @@ export default function Home() {
                                   <AlertTriangle className="w-3 h-3 shrink-0" /> Max 3 batches — avoid over-mixing
                                 </p>
                               )}
+                              {batchAutoActive && drainQuarterSec > 0 && (
+                                <>
+                                  <TickBar
+                                    label="Line uses ¼ batch in"
+                                    secLeft={secLeftOf(tickDueRefs.batch.current, drainQuarterSec)}
+                                    periodSec={drainQuarterSec}
+                                    color="text-orange-400"
+                                  />
+                                  {calc.batchesNeeded > 0 && spinSec > 0 && (
+                                    <TickBar
+                                      label="Mixer finishes +1 in"
+                                      secLeft={secLeftOf(tickDueRefs.batchProd.current, spinSec)}
+                                      periodSec={spinSec}
+                                      color="text-emerald-400"
+                                    />
+                                  )}
+                                </>
+                              )}
                             </div>
                           )}
                         </div>
-                        {/* Skids / cases completed — mirrored from Packaging so the
-                            packout can be updated without switching tabs */}
+                        {/* Packaging quick check — skids/cases pace without a tab
+                            switch. Crust mode (and missing cases-per-skid) keeps
+                            the plain steppers. */}
+                        {doughSubTab !== "crusts" && v.casesPerSkid > 0 ? (() => {
+                          const cps = v.casesPerSkid;
+                          const packedSkids = Number(v.skidsCompleted) || 0;
+                          const packedCasesOnSkid = Number(v.casesOnCurrentSkid) || 0;
+                          const packedTotal = packedSkids * cps + packedCasesOnSkid;
+                          const skidsTotal = v.casesNeeded > 0 ? Math.ceil(v.casesNeeded / cps) : null;
+                          const casePeriodSec = calc.ppm > 0 && v.pizzasPerCase > 0 ? (v.pizzasPerCase / calc.ppm) * 60 : 0;
+                          const caseAutoActive = autoTrackProgress && !!s && !suppressed && runStatus === "running";
+                          const expectedTotal = s ? s.expectedCases : null;
+                          const packGapCases = expectedTotal !== null ? expectedTotal - packedTotal : 0;
+                          const packOnPace = packGapCases <= 2;
+                          const packBehindSec = packGapCases * casePeriodSec;
+                          const setPackedTotal = (t: number) => {
+                            // Same upper bound as the old steppers: never past
+                            // the run's total case need (when one is set).
+                            const maxTotal = v.casesNeeded > 0 ? v.casesNeeded : Infinity;
+                            const total = Math.min(maxTotal, Math.max(0, t));
+                            form.setValue("skidsCompleted", Math.floor(total / cps), { shouldDirty: true });
+                            form.setValue("casesOnCurrentSkid", total % cps, { shouldDirty: true });
+                            onManual();
+                          };
+                          const miniBtn = "h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none";
+                          return (
+                            <div className={`mt-2 rounded-lg border px-4 py-3 ${packOnPace ? "border-border/50 bg-card/50" : "border-amber-600/30 bg-amber-950/10"}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Packaging — quick check{caseAutoActive ? " · Auto" : ""}
+                                </p>
+                                {expectedTotal !== null && (
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                    packOnPace
+                                      ? "text-emerald-400 border-emerald-500/30 bg-emerald-950/20"
+                                      : "text-amber-400 border-amber-500/30 bg-amber-950/20"
+                                  }`}>
+                                    {packOnPace ? "On pace" : `Behind ${packGapCases} case${packGapCases !== 1 ? "s" : ""}`}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
+                                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                                    <button type="button" onClick={() => setPackedTotal(packedTotal - cps)} className={miniBtn} data-testid="btn-dec-packSkids">−</button>
+                                    <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-skids">
+                                      {packedSkids}
+                                      {skidsTotal !== null && <span className="text-xs text-muted-foreground font-normal">/{skidsTotal}</span>}
+                                    </p>
+                                    <button type="button" onClick={() => setPackedTotal(packedTotal + cps)} className={miniBtn} data-testid="btn-inc-packSkids">+</button>
+                                  </div>
+                                </div>
+                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
+                                  <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                                    <button type="button" onClick={() => setPackedTotal(packedTotal - 1)} className={miniBtn} data-testid="btn-dec-packCases">−</button>
+                                    <p className="text-xl font-mono font-bold text-foreground tabular-nums" data-testid="text-pack-cases">
+                                      {packedCasesOnSkid}
+                                      <span className="text-xs text-muted-foreground font-normal">/{cps}</span>
+                                    </p>
+                                    <button type="button" onClick={() => setPackedTotal(packedTotal + 1)} className={miniBtn} data-testid="btn-inc-packCases">+</button>
+                                  </div>
+                                </div>
+                                <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+                                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
+                                  <p className="text-xl font-mono font-bold text-orange-400 mt-0.5 tabular-nums">
+                                    {caseAutoActive && casePeriodSec > 0 ? fmtMS(secLeftOf(tickDueRefs.case.current, casePeriodSec)) : "—:—"}
+                                  </p>
+                                </div>
+                              </div>
+                              {expectedTotal !== null && (
+                                <p className="text-[10px] text-muted-foreground mt-2">
+                                  {packOnPace ? (
+                                    <>Packed {packedTotal} cases vs {expectedTotal} expected at line speed — packaging is keeping up.</>
+                                  ) : (
+                                    <>
+                                      Packed <span className="text-foreground font-semibold">{packedTotal}</span> cases vs{" "}
+                                      <span className="text-foreground font-semibold">{expectedTotal}</span> expected at line speed —
+                                      that's <span className="text-amber-400 font-semibold">{fmtMS(packBehindSec)}</span> of production not
+                                      boxed yet. Dough keeps feeding the line either way; this is your heads-up before trays pile up at the
+                                      wrapper.
+                                    </>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })() : (
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           <StepperField
                             control={form.control}
@@ -13173,6 +13487,7 @@ export default function Home() {
                             onManualChange={onManual}
                           />
                         </div>
+                        )}
                       </>
                     );
                   })()}
@@ -13240,7 +13555,10 @@ export default function Home() {
                   target.setHours(hrs, mins, 0, 0);
                   if (target <= nowTime) target.setDate(target.getDate() + 1);
                   const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
-                  const timePerBatchMin = calc.timePerBatchSec / 60;
+                  // Measured mixer time (low + high) beats the line-speed guess
+                  // for min/batch when the operator has timed the machines.
+                  const measuredSpinSec = Math.max(0, Number(v.mixerLowSec) || 0) + Math.max(0, Number(v.mixerHighSec) || 0);
+                  const timePerBatchMin = measuredSpinSec > 0 ? measuredSpinSec / 60 : calc.timePerBatchSec / 60;
                   const onHandBatches = v.batchesReady ?? 0;
                   const onHandTrays = v.traysOnLine ?? 0;
                   const hasOnHand = onHandBatches > 0 || onHandTrays > 0;

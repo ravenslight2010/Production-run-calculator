@@ -51,6 +51,16 @@ interface AutoTrackParams {
   v: AutoTrackValues;
   form: UseFormReturn<FormValues>;
   /**
+   * Measured machine times in seconds (0 = not measured → fall back to
+   * line-speed-derived estimates, i.e. the pre-existing behavior).
+   *  • spinSec: total mixer time (low + high stage) — overrides how often the
+   *    mixer finishes a new batch (+1 production tick).
+   *  • hopperSec: how long the hopper takes to turn one batch into balls —
+   *    "batches ready" can never drain faster than the hopper converts, so the
+   *    effective drain period is the SLOWER of hopper time and line demand.
+   */
+  machine?: { spinSec: number; hopperSec: number };
+  /**
    * Hard-disable all auto-track WRITES (cast/wall display screens). A passive
    * display must never decrement trays/batches or seed staging — its writes
    * get pushed through live sync with fresh stamps and clobber the operator's
@@ -73,6 +83,18 @@ interface AutoTrackResult {
   autoSuppressUntilRef: React.MutableRefObject<number>;
   /** Force every counter's next tick to fire immediately (e.g. "Resume now"). */
   fireAutoTrackNow: () => void;
+  /**
+   * Wall-clock ms timestamps of each counter's next tick — read-only refs for
+   * countdown displays (0 = not yet armed). The UI derives "next tick in m:ss"
+   * from these; they are bookkeeping owned by the hook.
+   */
+  tickDueRefs: {
+    case: React.MutableRefObject<number>;
+    tray: React.MutableRefObject<number>;
+    trayProd: React.MutableRefObject<number>;
+    batch: React.MutableRefObject<number>;
+    batchProd: React.MutableRefObject<number>;
+  };
 }
 
 // Each counter ticks at its own natural production pace, clamped to a sane
@@ -114,6 +136,7 @@ export function useAutoTrack({
   calc,
   v,
   form,
+  machine,
   disabled = false,
 }: AutoTrackParams): AutoTrackResult {
   const [autoTrackProgress, setAutoTrackProgress] = useState(true);
@@ -213,6 +236,8 @@ export function useAutoTrack({
     caseNextDueMsRef.current = 0;
     trayNextDueMsRef.current = 0;
     batchNextDueMsRef.current = 0;
+    trayProdNextDueMsRef.current = 0;
+    batchProdNextDueMsRef.current = 0;
   }, []);
 
   // Baseline resets are declared BEFORE the tick-write effect below on purpose:
@@ -391,8 +416,17 @@ export function useAutoTrack({
     // while the run still has a batch deficit), down once per full batch
     // consumed (quarter-batch ticks with fractional remainder carry). ──
     if (calc.perBatch > 0 && calc.ppm > 0) {
-      const batchPeriodMs = clampPeriodMs((calc.perBatch / calc.ppm / 4) * 60000);
-      const fullBatchMs = clampPeriodMs((calc.perBatch / calc.ppm) * 60000);
+      // Line demand: how often the LINE eats a whole batch's worth of balls.
+      const lineBatchMs = (calc.perBatch / calc.ppm) * 60000;
+      // Drain can never be faster than the hopper converts a batch into balls
+      // (when measured) — effective drain period = slower of hopper and line.
+      const hopperMs = machine && machine.hopperSec > 0 ? machine.hopperSec * 1000 : 0;
+      const effDrainMs = Math.max(hopperMs, lineBatchMs);
+      const batchPeriodMs = clampPeriodMs(effDrainMs / 4);
+      // Mixer finishes a new batch every measured spin time (low + high stage)
+      // when it's been measured; otherwise fall back to line-demand pacing.
+      const spinMs = machine && machine.spinSec > 0 ? machine.spinSec * 1000 : 0;
+      const fullBatchMs = clampPeriodMs(spinMs > 0 ? spinMs : lineBatchMs);
       let delta = 0;
       let batchSeededThisTick = false;
 
@@ -429,7 +463,9 @@ export function useAutoTrack({
             // Fractional consumption, written directly (2 decimals) so the
             // operator SEES the counter fluctuate every quarter-batch tick
             // instead of thinking it's frozen until a whole batch drops.
-            delta -= (durationMin * calc.ppm) / calc.perBatch;
+            // Rate = 1 batch per effective-drain period (line demand, slowed
+            // by the hopper when a hopper time has been measured).
+            delta -= (durationMin * 60000) / effDrainMs;
           }
         }
       }
@@ -455,5 +491,12 @@ export function useAutoTrack({
     autoTrackSuggestion,
     autoSuppressUntilRef,
     fireAutoTrackNow,
+    tickDueRefs: {
+      case: caseNextDueMsRef,
+      tray: trayNextDueMsRef,
+      trayProd: trayProdNextDueMsRef,
+      batch: batchNextDueMsRef,
+      batchProd: batchProdNextDueMsRef,
+    },
   };
 }
