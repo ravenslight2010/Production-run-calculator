@@ -102,15 +102,21 @@ export function CompactStrip() {
           </div>
         </div>
 
-        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 text-neutral-300">
-            <Timer className="w-5 h-5 text-neutral-500" />
-            <div className="flex flex-col">
-              <span className="text-sm font-bold">Next batch due</span>
-              <span className="text-xs text-neutral-500">Based on current pace</span>
+        <div className="bg-neutral-900 border border-amber-500/40 rounded-xl overflow-hidden">
+          <div className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3 text-neutral-300">
+              <Timer className="w-5 h-5 text-amber-500" />
+              <div className="flex flex-col">
+                <span className="text-sm font-bold">Next batch due</span>
+                <span className="text-xs text-neutral-500">Based on current pace</span>
+              </div>
             </div>
+            <span className="text-xl font-bold tabular-nums text-amber-500">08:45</span>
           </div>
-          <span className="text-xl font-bold tabular-nums text-amber-500">08:45</span>
+          <button className="w-full bg-amber-600 hover:bg-amber-500 text-neutral-950 font-black text-sm py-3.5 flex items-center justify-center gap-2 transition-colors active:translate-y-0.5">
+            <Play className="w-4 h-4 fill-current" />
+            START NEXT BATCH
+          </button>
         </div>
 
         {/* Run to Time */}
