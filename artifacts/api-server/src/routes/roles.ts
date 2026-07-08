@@ -195,7 +195,11 @@ router.put(
       res.status(400).json({ error: parsed.error.message });
       return;
     }
-    const result = await resetUserPassword(targetUserId, parsed.data.newPassword);
+    const result = await resetUserPassword(
+      targetUserId,
+      parsed.data.newPassword,
+      (req.capabilities ?? []) as Capability[],
+    );
     if (!result.ok) {
       res.status(result.status).json({ error: result.error });
       return;

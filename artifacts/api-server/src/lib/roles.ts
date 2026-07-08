@@ -469,6 +469,7 @@ export async function setUserRole(
 export async function resetUserPassword(
   targetUserId: string,
   newPassword: string,
+  actorCapabilities: readonly Capability[],
 ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
   const [user] = await db
     .select({ id: usersTable.id })
@@ -476,6 +477,18 @@ export async function resetUserPassword(
     .where(eq(usersTable.id, targetUserId));
   if (!user) {
     return { ok: false, status: 404, error: "User not found" };
+  }
+  // A reset is equivalent to taking over the target's account, so it must
+  // never let an actor reach past their own privilege — mirrors the
+  // "can't grant a capability you don't have" rule for role assignment and
+  // the approved-reset-request boundary (canManagePasswordResetFor).
+  const allowed = await canManagePasswordResetFor(targetUserId, actorCapabilities);
+  if (!allowed) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Cannot reset a password for a higher-privileged account",
+    };
   }
   await updateUserPassword(targetUserId, newPassword);
   // A password reset is exactly the moment we must assume the old password

@@ -785,6 +785,34 @@ describe("privilege-escalation guard", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("forbids the junior-admin resetting a higher-privileged manager's password (403)", async () => {
+    // manage-staff alone must not be a manager-takeover primitive: the
+    // manager holds capabilities (e.g. approve-password-resets) the
+    // junior-admin does not, so this reset must be rejected.
+    const res = await req(OPERATOR, "PUT", `/api/users/${MANAGER}/password`, {
+      newPassword: "attacker-chosen-secret",
+    });
+    expect(res.status).toBe(403);
+
+    // The manager's password is unchanged.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${MANAGER}`);
+    expect(verifyPassword("attacker-chosen-secret", row.passwordHash)).toBe(false);
+  });
+
+  it("allows the junior-admin resetting a peer/lower-privileged account's password (204)", async () => {
+    // manage-staff is the only capability the operator role carries, so a
+    // junior-admin (also manage-staff-only) resetting a plain operator's
+    // password should still work — the boundary is about privilege, not
+    // about staff administration itself.
+    const res = await req(OPERATOR, "PUT", `/api/users/${WAREHOUSE}/password`, {
+      newPassword: "fresh-and-valid",
+    });
+    expect(res.status).toBe(204);
+  });
 });
 
 describe("last-manager guard", () => {

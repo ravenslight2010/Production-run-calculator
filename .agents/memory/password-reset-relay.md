@@ -29,3 +29,13 @@ manager pending list also auto-drops requests older than `PENDING_REQUEST_TTL_MS
 **Parity:** web + mobile must match — client helpers in each `inventoryShared`,
 a 3-step forgot-password screen, and the manager approve/decline + show-code UI
 in `StaffRolesCard`. React Query key `["passwordResetRequests"]`, polled.
+
+**Direct manager reset also needs the privilege-boundary check.** The direct
+`PUT /users/:id/password` reset (distinct from the relay flow above) only
+gated on `manage-staff`; without also calling `canManagePasswordResetFor`,
+a narrowly-delegated manage-staff-only role could reset ANY account's
+password including a manager's, and sign in as them. Fixed by having
+`resetUserPassword()` itself call `canManagePasswordResetFor` right after
+the target-exists check (not before — checking capabilities for a
+nonexistent user hits `getOrCreateUserRole`'s FK insert and 500s instead
+of 404ing). Same ordering pattern as `setUserRole`.
