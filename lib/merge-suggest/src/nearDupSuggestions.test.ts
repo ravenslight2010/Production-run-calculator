@@ -82,3 +82,18 @@ describe("nearDupSuggestions", () => {
     expect(out.map((s) => s.target)).toEqual(["Diced Tomato", "Pepperoni"]);
   });
 });
+
+describe("nearDupSuggestions performance", () => {
+  it("stays fast on large pools (single shared matcher, not O(n^2) rebuilds)", () => {
+    const words = ["Mozzarella", "Cheddar", "Provolone", "Romano", "Asiago", "Parmesan", "Pepperoni", "Sausage", "Basil", "Oregano", "Garlic", "Onion", "Pepper", "Tomato", "Spinach", "Ricotta", "Fontina", "Gouda", "Salt", "Yeast", "Flour", "Oil", "Sugar", "Water", "Whey", "Starch", "Cellulose", "Paprika", "Fennel", "Anise"];
+    const names: string[] = [];
+    for (let i = 0; i < 3000; i++) {
+      names.push(`${words[i % words.length]} ${words[(i * 7 + 3) % words.length]} ${i % 97}`);
+    }
+    const t0 = Date.now();
+    nearDupSuggestions(names);
+    // Pre-fix this took ~13s at 3000 names; the shared-matcher version runs in
+    // well under a second. Generous bound so slow CI never flakes.
+    expect(Date.now() - t0).toBeLessThan(5000);
+  });
+});

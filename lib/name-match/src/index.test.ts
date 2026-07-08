@@ -122,3 +122,29 @@ describe("buildNearDupNameMatcher", () => {
     expect(match("Mystic Cheese Mix")).toBeNull();
   });
 });
+
+describe("buildNearDupNameMatcher excludeSelf", () => {
+  it("skips the query's own entry but still matches near-dups in the pool", () => {
+    const match = buildNearDupNameMatcher(
+      ["Pepperoni Blend", "Peperoni Blend", "Sausage"],
+      { excludeSelf: true },
+    );
+    // Own entry is skipped (would otherwise be an exact layer-1 self hit)…
+    expect(match("Peperoni Blend")).toBe("Pepperoni Blend");
+    expect(match("Pepperoni Blend")).toBe("Peperoni Blend");
+    // …and a name with no near-dup gets nothing (not itself).
+    expect(match("Sausage")).toBeNull();
+  });
+
+  it("self-exclusion is case-insensitive on the trimmed name", () => {
+    const match = buildNearDupNameMatcher(["Pepperoni Blend"], {
+      excludeSelf: true,
+    });
+    expect(match("  pepperoni blend  ")).toBeNull();
+  });
+
+  it("without excludeSelf an in-pool name still matches its own entry", () => {
+    const match = buildNearDupNameMatcher(["Pepperoni Blend"]);
+    expect(match("Pepperoni Blend")).toBe("Pepperoni Blend");
+  });
+});

@@ -1,3 +1,4 @@
+- [Near-dup scan perf](near-dup-scan-perf.md) — in-pool duplicate scans build ONE matcher (excludeSelf), never rebuild per name; O(n²) rebuilds froze the page as import pools grew.
 - [Recipe print/share](recipe-print-share.md) — built on web 2026-07-07; AbortError=shared (never clipboard-clobber), escaped print popup; mobile pending.
 - [AI JSON bounded retry](ai-json-retry.md) — AI routes that fail-safe to empty on malformed model JSON must use the shared 2-attempt retry helper; retry parse failures only, never provider throws.
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.

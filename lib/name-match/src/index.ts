@@ -138,6 +138,14 @@ export interface NearDupMatcherOptions {
    * before it is applied (e.g. the cheese import review dialog).
    */
   allowExtraToken?: boolean;
+  /**
+   * When true, a queried name never matches its own saved entry (compared
+   * case-insensitively on the trimmed name). This lets an in-pool duplicate
+   * scan build ONE matcher over the whole pool and query each member against
+   * it, instead of rebuilding an (expensive) matcher per member with that
+   * member excluded — same semantics, O(n) index builds instead of O(n²).
+   */
+  excludeSelf?: boolean;
 }
 
 export type NearDupNameMatcher = (name: string) => string | null;
@@ -186,6 +194,11 @@ export function buildNearDupNameMatcher(
     if (!name) return null;
     const key = keyOf(name);
     if (!key) return null;
+    const selfCi = options?.excludeSelf ? name.toLowerCase() : null;
+    const pool =
+      selfCi === null
+        ? entries
+        : entries.filter((e) => e.name.toLowerCase() !== selfCi);
     const sorted = sortedKey(key);
     const tokens = key.split(" ").filter(Boolean);
     const digits = digitsOf(key);
@@ -205,7 +218,7 @@ export function buildNearDupNameMatcher(
       );
     }
     for (const qualifies of layers) {
-      const hits = entries.filter(qualifies);
+      const hits = pool.filter(qualifies);
       if (hits.length === 1) return hits[0].name;
       // Two DIFFERENT saved names both qualify: never guess, and never fall
       // through to a weaker layer that would hide the ambiguity.

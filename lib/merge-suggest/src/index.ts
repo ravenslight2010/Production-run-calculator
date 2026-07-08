@@ -167,12 +167,15 @@ export function nearDupSuggestions(names: string[]): MergeSuggestion[] {
     if (ra !== rb) parent[rb] = ra;
   };
 
+  // ONE matcher over the whole pool (excludeSelf keeps a name from matching
+  // its own entry). Rebuilding the matcher per name — with that name filtered
+  // out — was O(n²) index construction and froze the page on large pools.
+  const match = buildNearDupNameMatcher(cleaned, { excludeSelf: true });
+  const indexByName = new Map(cleaned.map((n, i) => [n, i] as const));
   for (let i = 0; i < cleaned.length; i++) {
-    // Build the matcher over every OTHER name so a name never matches itself.
-    const others = cleaned.filter((_, j) => j !== i);
-    const match = buildNearDupNameMatcher(others)(cleaned[i]);
-    if (!match) continue;
-    const j = cleaned.indexOf(match);
+    const hit = match(cleaned[i]);
+    if (!hit) continue;
+    const j = indexByName.get(hit) ?? -1;
     if (j >= 0 && j !== i) union(i, j);
   }
 
