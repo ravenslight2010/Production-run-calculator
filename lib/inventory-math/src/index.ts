@@ -875,3 +875,67 @@ export function computeUseFirstList(input: {
   });
   return out;
 }
+
+// ── Freezer-tunnel work-in-progress (cases in freezer / on the line) ────────
+//
+// Live count of cases pressed but not yet cased: product travelling through
+// the spiral-freezer tunnel (and on the line feeding it). Used by the run
+// completion displays so "% complete" reflects work already in flight.
+//
+// Model (matches the app's live `casesOnLine` freezer model):
+// - Not started → 0.
+// - Running: the tunnel fills over `freezerTimeMin`, then holds steady:
+//   floor(ppm * min(elapsedMin, freezerTimeMin) / pizzasPerCase).
+// - Paused: frozen at the moment of pause (`pausedAt`). Closed pauses shift
+//   `startedAt` forward on resume (resumeRun), so plain elapsed time already
+//   excludes them.
+// - Ended: the line stops feeding, the tunnel keeps moving — content drains
+//   to zero over `freezerTimeMin`, starting from however full the tunnel was
+//   at end. A pause still OPEN at end (run ended while paused) is subtracted
+//   because endRun never shifted `startedAt` for it. Non-pause stoppage
+//   downtime is deliberately NOT subtracted — the live model ignores it too,
+//   and subtracting it only after end would make the number jump at "End Run".
+export interface FreezerWipStoppage {
+  type?: string;
+  startedAt: number;
+  endedAt?: number | null;
+}
+
+export interface FreezerWipInput {
+  startedAt?: number | null;
+  endedAt?: number | null;
+  pausedAt?: number | null;
+  stoppages?: FreezerWipStoppage[];
+  /** Current wall-clock time (ms). */
+  now: number;
+  /** Pizzas per minute (already includes any speed adjustment). */
+  ppm: number;
+  pizzasPerCase: number;
+  /** Freezer tunnel transit time in minutes. */
+  freezerTimeMin: number;
+}
+
+export function computeCasesInFreezer(input: FreezerWipInput): number {
+  const { startedAt, endedAt, pausedAt, now, ppm, pizzasPerCase, freezerTimeMin } = input;
+  if (!startedAt || ppm <= 0 || pizzasPerCase <= 0 || freezerTimeMin <= 0) return 0;
+
+  if (!endedAt) {
+    const refTime = pausedAt ?? now;
+    const elapsedMin = Math.max(0, (refTime - startedAt) / 60000);
+    return Math.floor((ppm * Math.min(elapsedMin, freezerTimeMin)) / pizzasPerCase);
+  }
+
+  // Pause that was still open when the run ended (endRun clears pausedAt
+  // without shifting startedAt, so it is NOT already excluded from elapsed).
+  const openPauseMs = (input.stoppages ?? [])
+    .filter(s => s.type === "pause" && s.startedAt < endedAt && (s.endedAt == null || s.endedAt >= endedAt))
+    .reduce((acc, s) => acc + (endedAt - s.startedAt), 0);
+
+  const atEndMin = Math.min(
+    Math.max(0, endedAt - startedAt - openPauseMs) / 60000,
+    freezerTimeMin
+  );
+  const sinceEndMin = Math.max(0, (now - endedAt) / 60000);
+  const remainMin = Math.max(0, Math.min(atEndMin, freezerTimeMin - sinceEndMin));
+  return Math.floor((ppm * remainMin) / pizzasPerCase);
+}

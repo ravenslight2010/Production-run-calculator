@@ -239,6 +239,7 @@ import { buildAnomalyInput } from "../aiAnomaly";
 import { buildScheduleInput } from "../aiSchedule";
 import { useProactiveAlert } from "../aiProactive";
 import ProactiveAlertBanner from "../components/ProactiveAlertBanner";
+import { computeCasesInFreezer } from "@workspace/inventory-math";
 import {
   computeRunConsumptionLines,
   deriveCandidateItems,
@@ -8099,6 +8100,22 @@ export default function Home() {
         ? Math.floor((ppm * freezerTime) / v.pizzasPerCase)
         : 0;
 
+    // Live product still inside the freezer tunnel / on the line (pressed but
+    // not yet cased). While filling/running this matches casesOnLine; after
+    // the line stops the tunnel keeps draining, so it counts down to zero
+    // over freezerTime — capped by how full the tunnel was at run end. Pure
+    // math (incl. the end-while-paused correction) lives in the shared lib.
+    const casesInFreezer = computeCasesInFreezer({
+      startedAt: currentRun?.startedAt,
+      endedAt: currentRun?.endedAt,
+      pausedAt: currentRun?.pausedAt,
+      stoppages: currentRun?.stoppages,
+      now: nowTime.getTime(),
+      ppm,
+      pizzasPerCase: v.pizzasPerCase,
+      freezerTimeMin: Number(ve.freezerTime),
+    });
+
     // Spreadsheet Dough!B4: casesNeeded - skidsCompleted*casesPerSkid - casesOnCurrentSkid - casesOnLine + casesPerLayer
     const casesLeftToRun =
       v.casesNeeded -
@@ -8278,6 +8295,7 @@ export default function Home() {
       traysPerBatch,
       batchesPerSkid,
       casesOnLine,
+      casesInFreezer,
       casesLeftToRun,
       casesLeftToOpen,
       stacksNeededTotal,
@@ -8408,6 +8426,12 @@ export default function Home() {
 
   // ── Screen casting views (early returns) ──────────────────────────────────
   const casesPct = v.casesNeeded > 0 ? Math.min(1, calc.casesCompleted / v.casesNeeded) : 0;
+  // Extra bar segment: product still in the freezer / on the line, shown on
+  // top of the cased progress (never pushes the combined bar past 100%).
+  const casesFreezerPct = v.casesNeeded > 0
+    ? Math.max(0, Math.min(1, (calc.casesCompleted + calc.casesInFreezer) / v.casesNeeded) - casesPct)
+    : 0;
+  const casesPctWithFreezer = Math.min(1, casesPct + casesFreezerPct);
   const currentRunDowntimeMs = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((acc, s) => acc + (s.endedAt! - s.startedAt), 0);
   const elapsedBatchSec = currentRun?.startedAt
     ? Math.max(0, ((currentRun.pausedAt ?? nowTime.getTime()) - currentRun.startedAt - currentRunDowntimeMs)) / 1000
@@ -8486,11 +8510,19 @@ export default function Home() {
               {fmtComma(calc.casesCompleted)}
               <span className="text-3xl text-muted-foreground"> / {fmtComma(v.casesNeeded)}</span>
             </p>
-            <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
-              <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+            <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
+              <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+              {casesFreezerPct > 0 && (
+                <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
+              )}
             </div>
-            <div className="flex items-center gap-6">
-              <p className="text-lg font-semibold text-muted-foreground">{Math.round(casesPct * 100)}% complete</p>
+            <div className="flex items-center gap-6 flex-wrap">
+              <p className="text-lg font-semibold text-muted-foreground">
+                {Math.round(casesPct * 100)}% complete
+                {calc.casesInFreezer > 0 && (
+                  <span className="text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer ({Math.round(casesPctWithFreezer * 100)}%)</span>
+                )}
+              </p>
               {v.casesPerSkid > 0 && v.casesNeeded > 0 && (
                 <p className="text-lg font-semibold text-muted-foreground">
                   {v.skidsCompleted} / {Math.floor(v.casesNeeded / v.casesPerSkid)} skids
@@ -8627,6 +8659,9 @@ export default function Home() {
               <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Cases Done</p>
               <p className="text-3xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
               <p className="text-sm text-muted-foreground">/ {fmtComma(v.casesNeeded)}</p>
+              {calc.casesInFreezer > 0 && (
+                <p className="text-sm font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+              )}
             </div>
           )}
         </div>
@@ -8707,14 +8742,20 @@ export default function Home() {
           {v.casesNeeded > 0 && (
             <span className="ml-auto text-2xl font-black tabular-nums text-muted-foreground">
               {fmtComma(calc.casesCompleted)} <span className="text-lg">/ {fmtComma(v.casesNeeded)} cases</span>
+              {calc.casesInFreezer > 0 && (
+                <span className="text-lg text-sky-400"> · +{fmtComma(calc.casesInFreezer)} in freezer</span>
+              )}
             </span>
           )}
         </div>
 
         {/* Progress bar */}
         {v.casesNeeded > 0 && (
-          <div className="h-3 rounded-full bg-muted/30 overflow-hidden -mt-2">
-            <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+          <div className="h-3 rounded-full bg-muted/30 overflow-hidden -mt-2 flex">
+            <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+            {casesFreezerPct > 0 && (
+              <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
+            )}
           </div>
         )}
 
@@ -8805,9 +8846,15 @@ export default function Home() {
               <div className="flex items-end gap-4">
                 <p className="text-6xl font-black tabular-nums">{fmtComma(calc.casesCompleted)}</p>
                 <p className="text-3xl text-muted-foreground font-bold mb-1">/ {fmtComma(v.casesNeeded)} cases</p>
+                {calc.casesInFreezer > 0 && (
+                  <p className="text-2xl font-bold text-sky-400 tabular-nums mb-1">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                )}
               </div>
-              <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
-                <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+              <div className="h-4 rounded-full bg-muted/30 overflow-hidden flex">
+                <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${casesPct * 100}%` }} />
+                {casesFreezerPct > 0 && (
+                  <div className="h-full bg-sky-400/40 transition-all duration-1000" style={{ width: `${casesFreezerPct * 100}%` }} />
+                )}
               </div>
               <div className="flex gap-6 flex-wrap">
                 {v.casesPerSkid > 0 && (
@@ -9144,6 +9191,9 @@ export default function Home() {
               <div className="flex flex-col items-center">
                 <div className="text-[96px] leading-none font-black tracking-tight tabular-nums">{fmtComma(calc.casesCompleted)}</div>
                 <div className="text-sm font-bold tracking-[0.2em] mt-1.5" style={{ color: accentColor, opacity: 0.75 }}>CASES DONE</div>
+                {calc.casesInFreezer > 0 && (
+                  <div className="text-lg font-bold tabular-nums mt-1" style={{ color: "#7dd3fc" }}>+{fmtComma(calc.casesInFreezer)} IN FREEZER</div>
+                )}
               </div>
               <div className="flex flex-col items-center">
                 <div className="text-[76px] leading-none font-black tracking-tight tabular-nums" style={{ color: "rgba(255,255,255,0.85)" }}>
@@ -9342,9 +9392,15 @@ export default function Home() {
                   <p className="text-xs uppercase tracking-widest text-muted-foreground font-semibold mb-1">Cases</p>
                   <p className="text-7xl font-black tabular-nums leading-none">{fmtComma(calc.casesCompleted)}</p>
                   <p className="text-xl text-muted-foreground mt-1">of {fmtComma(v.casesNeeded)}</p>
+                  {calc.casesInFreezer > 0 && (
+                    <p className="text-lg font-semibold text-sky-400 tabular-nums mt-1">+{fmtComma(calc.casesInFreezer)} in freezer</p>
+                  )}
                   {v.casesNeeded > 0 && (
-                    <div className="mt-3 h-3 rounded-full bg-muted/30 overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-500 ${pct >= 1 ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${pct * 100}%` }} />
+                    <div className="mt-3 h-3 rounded-full bg-muted/30 overflow-hidden flex">
+                      <div className={`h-full transition-all duration-500 ${pct >= 1 ? "bg-emerald-500" : "bg-primary"}`} style={{ width: `${pct * 100}%` }} />
+                      {casesFreezerPct > 0 && (
+                        <div className="h-full bg-sky-400/40 transition-all duration-500" style={{ width: `${casesFreezerPct * 100}%` }} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -10502,6 +10558,9 @@ export default function Home() {
                       <span className="text-[10px] font-semibold text-primary tabular-nums">
                         {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}%
                       </span>
+                      {calc.casesInFreezer > 0 && (
+                        <span className="text-[10px] font-semibold text-sky-400 tabular-nums">+{fmtComma(calc.casesInFreezer)} in freezer</span>
+                      )}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
@@ -10549,8 +10608,11 @@ export default function Home() {
                 )}
               </div>
               {v.casesNeeded > 0 && (
-                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-muted/40">
-                  <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }} />
+                <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-muted/40 flex">
+                  <div className="h-full bg-primary transition-all duration-500" style={{ width: `${casesPct * 100}%` }} />
+                  {casesFreezerPct > 0 && (
+                    <div className="h-full bg-sky-400/60 transition-all duration-500" style={{ width: `${casesFreezerPct * 100}%` }} />
+                  )}
                 </div>
               )}
             </div>
@@ -11360,20 +11422,33 @@ export default function Home() {
                           <div className="mt-7 mb-2 text-6xl font-black text-foreground tabular-nums tracking-tighter" data-testid="tile-cases-completed">
                             {fmtComma(calc.casesCompleted)}
                           </div>
-                          {calc.casesCompleted >= v.casesNeeded ? (
-                            <div className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4" /> Target reached!
-                            </div>
-                          ) : (
-                            <div className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 tabular-nums">
-                              {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}% Done
-                            </div>
-                          )}
-                          <div className="w-full h-3.5 rounded-full mt-5 bg-muted/30 border border-border/40 overflow-hidden shadow-inner">
+                          <div className="flex items-center gap-2 flex-wrap justify-center">
+                            {calc.casesCompleted >= v.casesNeeded ? (
+                              <div className="text-sm font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4" /> Target reached!
+                              </div>
+                            ) : (
+                              <div className="text-sm font-bold text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20 tabular-nums">
+                                {Math.round(Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100))}% Done
+                              </div>
+                            )}
+                            {calc.casesInFreezer > 0 && (
+                              <div className="text-sm font-bold text-sky-400 bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/30 tabular-nums" data-testid="tile-cases-in-freezer">
+                                +{fmtComma(calc.casesInFreezer)} in freezer
+                              </div>
+                            )}
+                          </div>
+                          <div className="w-full h-3.5 rounded-full mt-5 bg-muted/30 border border-border/40 overflow-hidden shadow-inner flex">
                             <div
-                              className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
-                              style={{ width: `${Math.min(100, (calc.casesCompleted / v.casesNeeded) * 100)}%` }}
+                              className="h-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500"
+                              style={{ width: `${casesPct * 100}%` }}
                             />
+                            {casesFreezerPct > 0 && (
+                              <div
+                                className="h-full bg-sky-400/40 transition-all duration-500"
+                                style={{ width: `${casesFreezerPct * 100}%` }}
+                              />
+                            )}
                           </div>
                           <div className="w-full flex justify-between mt-2 text-xs text-muted-foreground font-medium tabular-nums">
                             <span>0</span>
@@ -12625,6 +12700,12 @@ export default function Home() {
                                   <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Cases Done</span>
                                   <span className="text-2xl font-mono font-black tabular-nums text-emerald-400">{fmtNum(calc.casesCompleted, 0)}</span>
                                 </div>
+                                {calc.casesInFreezer > 0 && (
+                                  <div className="bg-sky-950/30 border border-sky-700/40 rounded-xl p-3 flex items-center justify-between">
+                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">In Freezer / On Line</span>
+                                    <span className="text-2xl font-mono font-black tabular-nums text-sky-400">{fmtNum(calc.casesInFreezer, 0)}</span>
+                                  </div>
+                                )}
                                 {calc.extraCases > 0 && (
                                   <div className="bg-emerald-950/30 border border-emerald-700/40 rounded-xl p-3 flex items-center justify-between">
                                     <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Extra Cases Beyond Target</span>

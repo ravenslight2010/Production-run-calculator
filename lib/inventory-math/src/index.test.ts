@@ -11,6 +11,7 @@ import {
   computeTransferNeeds,
   computeReorderList,
   computeUseFirstList,
+  computeCasesInFreezer,
   type IngredientSubstitution,
   type LocationStock,
   type RecipeRow,
@@ -728,5 +729,90 @@ describe("computeCheesePerPizzaOz", () => {
       4,
     );
     expect(res.rows.length).toBe(2);
+  });
+});
+
+describe("computeCasesInFreezer", () => {
+  const MIN = 60000;
+  const base = {
+    startedAt: 1_000_000,
+    now: 1_000_000,
+    ppm: 26,
+    pizzasPerCase: 12,
+    freezerTimeMin: 30,
+  };
+
+  it("returns 0 when not started, or when ppm/pizzasPerCase/freezerTime are non-positive", () => {
+    expect(computeCasesInFreezer({ ...base, startedAt: null })).toBe(0);
+    expect(computeCasesInFreezer({ ...base, startedAt: undefined })).toBe(0);
+    expect(computeCasesInFreezer({ ...base, ppm: 0, now: base.startedAt + 10 * MIN })).toBe(0);
+    expect(computeCasesInFreezer({ ...base, pizzasPerCase: 0, now: base.startedAt + 10 * MIN })).toBe(0);
+    expect(computeCasesInFreezer({ ...base, freezerTimeMin: 0, now: base.startedAt + 10 * MIN })).toBe(0);
+  });
+
+  it("fills over freezerTime while running, then holds steady", () => {
+    // 10 min in: 26 ppm * 10 min = 260 pizzas → 21 cases
+    expect(computeCasesInFreezer({ ...base, now: base.startedAt + 10 * MIN })).toBe(21);
+    // 30 min in (tunnel full): 26 * 30 / 12 = 65
+    expect(computeCasesInFreezer({ ...base, now: base.startedAt + 30 * MIN })).toBe(65);
+    // 90 min in: still full, holds at 65
+    expect(computeCasesInFreezer({ ...base, now: base.startedAt + 90 * MIN })).toBe(65);
+  });
+
+  it("freezes at the pause moment while paused", () => {
+    const pausedAt = base.startedAt + 10 * MIN;
+    // Long after the pause, still shows the 10-min fill level
+    expect(
+      computeCasesInFreezer({ ...base, pausedAt, now: base.startedAt + 60 * MIN })
+    ).toBe(21);
+  });
+
+  it("drains to zero over freezerTime after end (full tunnel)", () => {
+    const endedAt = base.startedAt + 60 * MIN; // tunnel was full
+    const args = { ...base, endedAt };
+    expect(computeCasesInFreezer({ ...args, now: endedAt })).toBe(65);
+    // 15 of 30 min drained → half remains
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 15 * MIN })).toBe(32);
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 30 * MIN })).toBe(0);
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 300 * MIN })).toBe(0);
+  });
+
+  it("caps the drain start at the actual fill level for a short run", () => {
+    const endedAt = base.startedAt + 10 * MIN; // ended before the tunnel filled
+    const args = { ...base, endedAt };
+    expect(computeCasesInFreezer({ ...args, now: endedAt })).toBe(21);
+    // fill was 10 min; after 20 of 30 drain-min, only min(10, 30-20)=10 min remain
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 20 * MIN })).toBe(21);
+    // past 20 min of drain the remaining window shrinks below the fill level
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 25 * MIN })).toBe(10);
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 30 * MIN })).toBe(0);
+  });
+
+  it("subtracts a pause still open at end (run ended while paused)", () => {
+    // Ran 10 min, paused, sat paused 50 min, then ended without resuming.
+    const pauseStart = base.startedAt + 10 * MIN;
+    const endedAt = base.startedAt + 60 * MIN;
+    const args = {
+      ...base,
+      endedAt,
+      stoppages: [{ type: "pause", startedAt: pauseStart }],
+    };
+    // At end the tunnel holds only the 10-min fill, not a full 30 min.
+    expect(computeCasesInFreezer({ ...args, now: endedAt })).toBe(21);
+    expect(computeCasesInFreezer({ ...args, now: endedAt + 25 * MIN })).toBe(10);
+  });
+
+  it("ignores closed pauses (resume already shifted startedAt)", () => {
+    // A pause closed BEFORE end must not be double-subtracted.
+    const endedAt = base.startedAt + 60 * MIN;
+    const args = {
+      ...base,
+      endedAt,
+      stoppages: [
+        { type: "pause", startedAt: base.startedAt + 5 * MIN, endedAt: base.startedAt + 15 * MIN },
+        { type: "jam", startedAt: base.startedAt + 20 * MIN }, // non-pause: ignored
+      ],
+    };
+    expect(computeCasesInFreezer({ ...args, now: endedAt })).toBe(65);
   });
 });
