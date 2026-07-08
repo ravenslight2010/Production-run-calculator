@@ -199,21 +199,9 @@ export function ManagerHub() {
             <span className="text-xs text-neutral-400 font-medium">Dough Status</span>
             <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+3.5 cases ahead</span>
           </div>
-          <div className="p-3 flex justify-between items-center">
+          <div className="p-3 flex justify-between items-center col-span-2">
             <span className="text-xs text-neutral-400 font-medium">Cases on Last</span>
             <span className="text-sm font-bold text-white tabular-nums">14</span>
-          </div>
-          <div className="p-3 flex justify-between items-center">
-            <span className="text-xs text-neutral-400 font-medium">Trays/Skid</span>
-            <span className="text-sm font-bold text-white tabular-nums">6.25</span>
-          </div>
-          <div className="p-3 flex justify-between items-center">
-            <span className="text-xs text-neutral-400 font-medium">Trays/Batch</span>
-            <span className="text-sm font-bold text-white tabular-nums">4.10</span>
-          </div>
-          <div className="p-3 flex justify-between items-center">
-            <span className="text-xs text-neutral-400 font-medium">Batches/Skid</span>
-            <span className="text-sm font-bold text-white tabular-nums">1.52</span>
           </div>
         </div>
       </div>

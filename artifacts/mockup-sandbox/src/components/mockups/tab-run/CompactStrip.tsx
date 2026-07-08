@@ -113,6 +113,58 @@ export function CompactStrip() {
           <span className="text-xl font-bold tabular-nums text-amber-500">08:45</span>
         </div>
 
+        {/* Run to Time */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-neutral-300">Run to Time</span>
+            <span className="text-xs text-neutral-500">Target end of run</span>
+          </div>
+          <span className="text-xl font-bold tabular-nums text-white">4:30 PM</span>
+        </div>
+
+        {/* Extra Info (moved from Run tab Line Details) */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+          <div className="bg-neutral-800/50 px-4 py-2.5 border-b border-neutral-800">
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Extra Info</h3>
+          </div>
+          <div className="grid grid-cols-3 divide-x divide-neutral-800">
+            <div className="p-3 flex flex-col gap-1">
+              <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Trays/Skid</span>
+              <span className="text-lg font-black text-white tabular-nums">6.25</span>
+            </div>
+            <div className="p-3 flex flex-col gap-1">
+              <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Trays/Batch</span>
+              <span className="text-lg font-black text-white tabular-nums">4.10</span>
+            </div>
+            <div className="p-3 flex flex-col gap-1">
+              <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Batches/Skid</span>
+              <span className="text-lg font-black text-white tabular-nums">1.52</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Recipe Card */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+          <div className="bg-neutral-800/50 px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Dough Recipe</h3>
+            <span className="text-[10px] font-bold text-neutral-500 uppercase">Cornerbooth</span>
+          </div>
+          <div className="divide-y divide-neutral-800">
+            <div className="px-4 py-2.5 flex justify-between items-center">
+              <span className="text-xs text-neutral-400 font-medium">Flour</span>
+              <span className="text-sm font-bold text-white tabular-nums">520 lbs</span>
+            </div>
+            <div className="px-4 py-2.5 flex justify-between items-center">
+              <span className="text-xs text-neutral-400 font-medium">Water</span>
+              <span className="text-sm font-bold text-white tabular-nums">312 lbs</span>
+            </div>
+            <div className="px-4 py-2.5 flex justify-between items-center">
+              <span className="text-xs text-neutral-400 font-medium">Yeast</span>
+              <span className="text-sm font-bold text-white tabular-nums">6.5 lbs</span>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-4 border-t border-neutral-800 pt-6">
           <h3 className="text-xs text-neutral-500 uppercase font-bold tracking-wider mb-4">Manual Adjustment</h3>
           <div className="flex gap-3">
