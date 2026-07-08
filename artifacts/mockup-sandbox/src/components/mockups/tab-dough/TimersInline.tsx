@@ -386,10 +386,12 @@ export function TimersInline() {
   }, [running, hasDeficit, spinTotalSec]);
   useEffect(() => {
     // Packaging keeps recording cases at case cadence (simulated, stays a
-    // constant few cases behind so the "behind" state is visible).
+    // constant few cases behind so the "behind" state is visible). Pauses
+    // with the same manual-override hold as the other counters.
+    if (!running) return;
     const id = setInterval(() => setPackedCasesTotal(c => c + 1), casePeriodSec * 1000);
     return () => clearInterval(id);
-  }, [casePeriodSec]);
+  }, [running, casePeriodSec]);
 
   return (
     <div className="dough-tab-scope dark min-h-screen">
@@ -566,14 +568,46 @@ export function TimersInline() {
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
               <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Skids done</p>
-              <p className="text-xl font-mono font-bold text-foreground mt-0.5 tabular-nums">{packedSkids}</p>
+              <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setPackedCasesTotal(c => Math.max(0, c - calc.casesPerSkid)); onManual(); }}
+                  className="h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none"
+                >
+                  −
+                </button>
+                <p className="text-xl font-mono font-bold text-foreground tabular-nums min-w-[2ch]">{packedSkids}</p>
+                <button
+                  type="button"
+                  onClick={() => { setPackedCasesTotal(c => c + calc.casesPerSkid); onManual(); }}
+                  className="h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none"
+                >
+                  +
+                </button>
+              </div>
             </div>
             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
               <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Cases on skid</p>
-              <p className="text-xl font-mono font-bold text-foreground mt-0.5 tabular-nums">
-                {packedCasesOnSkid}
-                <span className="text-xs text-muted-foreground font-normal">/{calc.casesPerSkid}</span>
-              </p>
+              <div className="flex items-center justify-center gap-1.5 mt-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setPackedCasesTotal(c => Math.max(0, c - 1)); onManual(); }}
+                  className="h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none"
+                >
+                  −
+                </button>
+                <p className="text-xl font-mono font-bold text-foreground tabular-nums">
+                  {packedCasesOnSkid}
+                  <span className="text-xs text-muted-foreground font-normal">/{calc.casesPerSkid}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setPackedCasesTotal(c => c + 1); onManual(); }}
+                  className="h-7 w-7 rounded-md border border-input bg-muted/40 hover:bg-muted text-sm font-bold text-foreground shrink-0 select-none"
+                >
+                  +
+                </button>
+              </div>
             </div>
             <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
               <p className="text-[9px] uppercase tracking-wider text-muted-foreground">Next case in</p>
