@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Pause, Sparkles, Timer, Zap } from "lucide-react";
+import { CheckCircle2, ClipboardList, Clock, Pause, Sparkles, Timer, Zap } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import "./_group.css";
 
-/* ── Variant A (rev 3): two-stage mixer + packaging quick-check ────────────
+/* ── Variant A (rev 4): full tab — timers + packaging + run-to-time + recipe ─
    The dough steppers with live countdown strips, driven by MEASURED times:
      • Mixer low / high speed (seconds) — SEQUENTIAL stages; total spin =
        low + high
@@ -24,6 +25,101 @@ const calc = {
 };
 
 const TRAY_PERIOD_S = (calc.perTray / calc.ppm) * 60; // 105 s
+
+const doughRecipeRows = [
+  { ingredient: "High-Gluten Flour", lbs: 250 },
+  { ingredient: "Water", lbs: 150 },
+  { ingredient: "Yeast", lbs: 5 },
+  { ingredient: "Salt", lbs: 6 },
+  { ingredient: "Soybean Oil", lbs: 10 },
+  { ingredient: "Sugar", lbs: 8 },
+];
+
+function fmtNum(n: number, d = 0) {
+  if (!Number.isFinite(n)) return "—";
+  return Number(n.toFixed(d)).toLocaleString(undefined, { maximumFractionDigits: d });
+}
+
+function to12hr(hhmm: string) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+function ReadOnlyRecipeCard({
+  title,
+  subtitle,
+  recipe,
+  accent,
+}: {
+  title: string;
+  subtitle?: string;
+  recipe: { ingredient: string; lbs: number }[];
+  accent: string;
+}) {
+  const total = recipe.reduce((s, r) => s + r.lbs, 0);
+  const SCALE_OPTIONS = [
+    { label: "½", value: 0.5 },
+    { label: "4", value: 1 },
+    { label: "5", value: 1.25 },
+    { label: "6", value: 1.5 },
+  ];
+  const [scale, setScale] = useState(1);
+  return (
+    <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-3 mb-0">
+      <div className={`h-1 ${accent} w-full`} />
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-center gap-2 justify-between">
+          <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <ClipboardList className="w-4 h-4" /> {title}
+          </CardTitle>
+          {subtitle ? (
+            <span className="text-xs text-muted-foreground font-mono truncate max-w-[55%] text-right">{subtitle}</span>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        <div className="w-full">
+          <div className="flex items-center flex-wrap gap-2 mb-3">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Batch Size</span>
+            <div className="flex gap-1 rounded-lg bg-muted/30 p-1">
+              {SCALE_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setScale(opt.value)}
+                  className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                    scale === opt.value ? "bg-orange-500 text-white" : "text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {scale !== 1 && <span className="text-[10px] text-muted-foreground">×{scale} — view only</span>}
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mb-1 px-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Ingredient</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Lbs / Batch</span>
+          </div>
+          <div className="space-y-0.5">
+            {recipe.map((r, idx) => (
+              <div key={idx} className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 items-center py-1.5 px-1 rounded odd:bg-muted/20">
+                <span className="text-sm text-foreground">{r.ingredient || "—"}</span>
+                <span className="text-sm font-mono text-right text-foreground tabular-nums">{fmtNum(r.lbs * scale, 1)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 mt-2 pt-2 border-t border-border/30 px-1">
+            <span className="text-xs font-semibold text-muted-foreground">Total / Batch</span>
+            <span className="text-xs font-mono text-right font-semibold text-foreground tabular-nums">{fmtNum(total * scale, 1)} lbs</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function fmtMS(totalSec: number) {
   if (!Number.isFinite(totalSec)) return "—:—";
@@ -182,6 +278,7 @@ export function TimersInline() {
   const [mixerLowSec, setMixerLowSec] = useState(330); // 5:30 on low speed
   const [mixerHighSec, setMixerHighSec] = useState(180); // 3:00 on high speed
   const [hopperSec, setHopperSec] = useState(70); // batch → doughballs
+  const [runToTime, setRunToTime] = useState("14:30");
 
   const onManual = () => setSuppressUntil(Date.now() / 1000 + 60);
   const running = autoOn && !suppressed;
@@ -234,6 +331,26 @@ export function TimersInline() {
   const packOnPace = packGapCases <= 2;
   const packBehindSec = packGapCases * casePeriodSec;
 
+  /* ── Run to Time (same formulas as the current tab, but min/batch now
+     comes from the MEASURED mixer time instead of a guess) ── */
+  const nowTime = new Date(now * 1000);
+  const target = new Date(nowTime);
+  const [rtHrs, rtMins] = runToTime.split(":").map(Number);
+  target.setHours(rtHrs || 0, rtMins || 0, 0, 0);
+  if (target <= nowTime) target.setDate(target.getDate() + 1);
+  const minutesAvailable = Math.max(0, (target.getTime() - nowTime.getTime()) / 60000);
+  const timePerBatchMin = spinTotalSec / 60;
+  const nowLabel = to12hr(
+    `${String(nowTime.getHours()).padStart(2, "0")}:${String(nowTime.getMinutes()).padStart(2, "0")}`
+  );
+  const totalDoughballsNeeded = calc.ppm > 0 ? calc.ppm * minutesAvailable : 0;
+  const doughOnHand = batchesReady * calc.perBatch + traysOnLine * calc.perTray;
+  const doughStillNeeded = Math.max(0, totalDoughballsNeeded - doughOnHand);
+  const batchesStillToMix = calc.perBatch > 0 ? doughStillNeeded / calc.perBatch : 0;
+  const traysFromBatches = calc.perTray > 0 ? (batchesStillToMix * calc.perBatch) / calc.perTray : 0;
+  const casesInWindow = calc.pizzasPerCase > 0 ? Math.floor(totalDoughballsNeeded / calc.pizzasPerCase) : 0;
+  const hasOnHand = batchesReady > 0 || traysOnLine > 0;
+
   /* Simulated ticks so the mockup visibly moves (real app: useAutoTrack) */
   const hasDeficit = calc.traysNeeded > 0 && calc.batchesNeeded > 0;
   useEffect(() => {
@@ -279,7 +396,7 @@ export function TimersInline() {
     <div className="dough-tab-scope dark min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · rev 3 — two-stage mixer</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · rev 4 — full tab</p>
           <button
             type="button"
             onClick={() => setAutoOn(a => !a)}
@@ -355,6 +472,28 @@ export function TimersInline() {
             {spinTotalSec >= safeHopper ? "mixer (low + high)" : "hopper"}.
           </p>
         </div>
+
+        {/* What You Need Now — same card as the current tab */}
+        <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mb-3">
+          <div className="h-1 bg-primary w-full" />
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              What You Need Now
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-muted/20 rounded-lg p-3 text-center">
+                <p className="text-3xl font-mono font-bold text-primary tabular-nums">{fmtNum(calc.batchesNeeded, 2)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Batches to mix</p>
+              </div>
+              <div className="bg-muted/20 rounded-lg p-3 text-center">
+                <p className="text-3xl font-mono font-bold tabular-nums">{fmtNum(calc.traysNeeded, 0)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Trays needed</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -455,6 +594,71 @@ export function TimersInline() {
             )}
           </p>
         </div>
+
+        {/* Run to Time — same card as the current tab; min/batch is now the
+            measured mixer total instead of a guess */}
+        <Card className="bg-card/50 border-border/50 shadow-md overflow-hidden mt-3 mb-0">
+          <div className="h-1 bg-amber-500 w-full" />
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Clock className="w-3.5 h-3.5" />
+              Run to Time
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-xs text-muted-foreground shrink-0">{nowLabel}</span>
+              <span className="text-xs text-muted-foreground shrink-0">→ run until</span>
+              <input
+                type="time"
+                value={runToTime}
+                onChange={e => setRunToTime(e.target.value)}
+                className="flex-1 rounded-md border border-input bg-background px-2 py-1 font-mono text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <span className="text-xs text-muted-foreground shrink-0 font-mono">{fmtNum(timePerBatchMin, 1)} min/batch</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="bg-muted/30 rounded-lg p-2 text-center">
+                <p className="text-xl font-mono font-bold text-amber-400">
+                  {Math.floor(minutesAvailable / 60) > 0 && `${Math.floor(minutesAvailable / 60)}h `}
+                  {Math.round(minutesAvailable % 60)}m
+                </p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Time available</p>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-2 text-center">
+                <p className="text-xl font-mono font-bold text-primary">{fmtNum(batchesStillToMix, 2)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Batches to mix</p>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-2 text-center">
+                <p className="text-xl font-mono font-bold text-emerald-400">{Math.ceil(traysFromBatches)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Trays to make</p>
+              </div>
+              <div className="bg-muted/30 rounded-lg p-2 text-center">
+                <p className="text-xl font-mono font-bold text-sky-400">{casesInWindow}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Cases in window</p>
+              </div>
+            </div>
+            {hasOnHand && (
+              <p className="text-[10px] text-muted-foreground mt-2">
+                {[
+                  batchesReady > 0 && `${batchesReady.toFixed(2)} batch${batchesReady !== 1 ? "es" : ""} ready`,
+                  traysOnLine > 0 && `${Math.round(traysOnLine)} tray${Math.round(traysOnLine) !== 1 ? "s" : ""} on line`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}{" "}
+                already on hand — subtracted from totals · min/batch = measured mixer time ({fmtMS(spinTotalSec)})
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Dough recipe (read-only view) — same card as the current tab */}
+        <ReadOnlyRecipeCard
+          title="Dough Recipe"
+          subtitle="House Thin Crust"
+          recipe={doughRecipeRows}
+          accent="bg-orange-500/70"
+        />
 
         <div className="mt-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
