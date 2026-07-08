@@ -23,6 +23,10 @@ prop surface and drift from the mockup anyway. Precedents: Dough tab, Packaging 
 - Compare the FULL mockup, not just the top fold — lower sections (tile-style adjustment
   fields with pencil icons vs plain NumField inputs, collapsible setup at the bottom) are
   where mismatches hid last time.
+- Match typography exactly, not just layout: leftover `font-mono` on big KPI numbers,
+  `text-[10px]` labels where the mockup uses `text-xs font-medium`, and glyph-prefixed
+  chip text (▲/▼) vs the mockup's plain text are the differences users actually notice.
+  Diff the mockup source line-by-line for the disputed sections instead of eyeballing.
 - Mockup-only simplifications (dropped number-typing, hold-repeat, per-field suggestion
   chips) are acceptable ONLY when the user approved that mockup behavior — call them out.
 - Verify with `typecheck` (not build), then an authenticated runTest e2e (create a throwaway

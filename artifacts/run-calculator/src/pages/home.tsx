@@ -10989,7 +10989,7 @@ export default function Home() {
                       </div>
                     </div>
                     <div className="flex flex-wrap items-stretch gap-3">
-                      <div className="flex-1 min-w-[240px] bg-background/60 border border-border/60 rounded-lg p-2.5">
+                      <div className="relative flex-1 min-w-[240px] bg-background/60 border border-border/60 rounded-lg p-2.5 pr-8">
                         <div className="text-[10px] text-muted-foreground uppercase font-medium mb-0.5">Brand &amp; Flavor</div>
                         <div className="flex items-center gap-1">
               <div className="relative">
@@ -11143,9 +11143,13 @@ export default function Home() {
                 </div>
               </div>
                       </div>
+                        <ChevronDown className="w-4 h-4 text-muted-foreground/50 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
-                      <div className="w-36 bg-background/60 border border-border/60 rounded-lg p-2.5">
-              <label className="text-[10px] text-muted-foreground uppercase font-medium block mb-0.5">Target Cases</label>
+                      <div className="w-32 bg-background/60 border border-border/60 rounded-lg p-2.5">
+              <div className="flex items-start justify-between gap-1 mb-0.5">
+                <label className="text-[10px] text-muted-foreground uppercase font-medium">Target Cases</label>
+                <Pencil className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />
+              </div>
               <input
                 type="number"
                 min="0"
@@ -11302,7 +11306,7 @@ export default function Home() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {v.casesNeeded > 0 && (
                         <div className="rounded-xl border border-border/60 bg-card/60 p-5 flex flex-col items-center justify-center relative overflow-hidden shadow-lg">
-                          <div className="absolute top-3 left-3 text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Completion</div>
+                          <div className="absolute top-3 left-3 text-xs font-medium text-muted-foreground uppercase tracking-wider">Completion</div>
                           <div className="absolute top-3 right-3 flex items-center gap-1.5">
                             {runStatus === "running" ? (
                               <>
@@ -11310,26 +11314,26 @@ export default function Home() {
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
                                 </span>
-                                <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wide">Running</span>
+                                <span className="text-xs font-bold text-emerald-500 uppercase tracking-wide">Running</span>
                               </>
                             ) : runStatus === "paused" ? (
                               <>
                                 <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-                                <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wide">Paused</span>
+                                <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">Paused</span>
                               </>
                             ) : runStatus === "ended" ? (
                               <>
                                 <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground" />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Ended</span>
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Ended</span>
                               </>
                             ) : (
                               <>
                                 <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/50" />
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wide">Not started</span>
+                                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Not started</span>
                               </>
                             )}
                           </div>
-                          <div className="mt-7 mb-2 text-5xl sm:text-6xl font-black text-foreground tabular-nums tracking-tighter font-mono" data-testid="tile-cases-completed">
+                          <div className="mt-7 mb-2 text-6xl font-black text-foreground tabular-nums tracking-tighter" data-testid="tile-cases-completed">
                             {fmtComma(calc.casesCompleted)}
                           </div>
                           {calc.casesCompleted >= v.casesNeeded ? (
@@ -11359,29 +11363,30 @@ export default function Home() {
                           {calc.paceStatus !== null && (
                             <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
                               <div className="flex items-center justify-between gap-2 mb-2">
-                                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Pace</span>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border tabular-nums ${
+                                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pace</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded border tabular-nums ${
                                   calc.paceStatus === "behind"
                                     ? "text-red-400 bg-red-400/10 border-red-400/20"
                                     : "text-emerald-400 bg-emerald-400/10 border-emerald-400/20"
                                 }`}>
-                                  {calc.paceStatus === "on-pace" ? "✓ On Pace" : calc.paceStatus === "ahead" ? `▲ ${calc.paceDelta} cases ahead` : `▼ ${Math.abs(calc.paceDelta)} cases behind`}
+                                  {calc.paceStatus === "on-pace" ? "On Pace" : calc.paceStatus === "ahead" ? `${calc.paceDelta} cases ahead` : `${Math.abs(calc.paceDelta)} cases behind`}
                                 </span>
                               </div>
                               <div className="flex items-baseline gap-2">
-                                <span className="text-3xl sm:text-4xl font-black text-foreground tabular-nums tracking-tight font-mono">{calc.ppm}</span>
+                                <span className="text-4xl font-black text-foreground tabular-nums tracking-tight">{calc.ppm}</span>
                                 <span className="text-sm text-muted-foreground font-bold uppercase">PPM</span>
                               </div>
                               {calc.catchUpPpm !== null && (
-                                <div className="text-xs font-semibold text-red-300 mt-2">
-                                  Need {calc.catchUpPpm} PPM to finish on time
+                                <div className="text-xs font-medium text-muted-foreground mt-2">
+                                  Need <strong className="text-amber-500">{calc.catchUpPpm} PPM</strong> to finish on time
                                 </div>
                               )}
                               {(() => {
                                 const dtSec = (currentRun?.stoppages ?? []).filter(s => s.endedAt && s.type !== "pause").reduce((a, s) => a + (s.endedAt! - s.startedAt) / 1000, 0);
                                 return dtSec > 0 ? (
-                                  <div className="text-xs font-medium text-red-300/80 mt-1">
-                                    ↓ {fmtTime(dtSec)} downtime
+                                  <div className="text-xs font-medium text-muted-foreground mt-1 flex items-center gap-1.5">
+                                    <Clock className="w-3 h-3" />
+                                    {fmtTime(dtSec)} downtime
                                   </div>
                                 ) : null;
                               })()}
@@ -11397,19 +11402,19 @@ export default function Home() {
                             const ahead = driftSec < 0;
                             return (
                               <div className="rounded-xl border border-border/60 bg-card/60 p-4 flex-1 flex flex-col justify-center shadow-lg">
-                                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
+                                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Est. Finish</div>
                                 <div className="flex items-baseline gap-2">
-                                  <span className="text-2xl sm:text-3xl font-black text-foreground tabular-nums tracking-tight font-mono">{fmtTime(calc.adjustedTimeSec)}</span>
+                                  <span className="text-3xl font-black text-foreground tabular-nums tracking-tight">{fmtTime(calc.adjustedTimeSec)}</span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2 mt-2 flex-wrap">
                                   <div className="text-sm font-medium text-foreground tabular-nums">at {fmtClock(Date.now() + calc.adjustedTimeSec * 1000)}</div>
                                   {showDrift && (
-                                    <div className={`text-[10px] font-bold border px-1.5 py-0.5 rounded tabular-nums ${
+                                    <div className={`text-xs font-bold border px-1.5 py-0.5 rounded tabular-nums ${
                                       ahead
                                         ? "text-emerald-400 border-emerald-400/20 bg-emerald-400/10"
                                         : "text-red-400 border-red-400/20 bg-red-400/10"
                                     }`}>
-                                      {ahead ? "▲" : "▼"} {fmtTime(Math.abs(driftSec))} {ahead ? "ahead" : "behind"}
+                                      {ahead ? "−" : "+"}{Math.max(1, Math.round(Math.abs(driftSec) / 60))} min
                                     </div>
                                   )}
                                 </div>
