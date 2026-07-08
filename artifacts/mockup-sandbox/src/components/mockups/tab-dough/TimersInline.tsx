@@ -710,8 +710,10 @@ export function TimersInline() {
             {fmtMS(safeHopper)} through the hopper. Ready batches drain at the slower of hopper speed and line demand —
             here the {effDrainSec === lineBatchSec ? "line" : "hopper"} is the limit, using a batch every{" "}
             {fmtMS(effDrainSec)} (¼ every {fmtMS(drainQuarterSec)}).
-            Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min = {fmtMS(TRAY_PERIOD_S)} per tray). Any
-            tap on a stepper still holds auto for 1 minute.
+            Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min = {fmtMS(TRAY_PERIOD_S)} per tray). The
+            packaging check compares cases packed vs cases the line has produced ({calc.pizzasPerCase} pizzas ÷{" "}
+            {calc.ppm}/min = 1 case every {fmtMS(casePeriodSec)}); skids = cases ÷ {calc.casesPerSkid}. Any tap on a
+            stepper still holds auto for 1 minute.
           </p>
         </div>
       </div>
