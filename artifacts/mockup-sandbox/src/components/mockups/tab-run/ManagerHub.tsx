@@ -14,10 +14,8 @@ import {
   ChevronDown,
   Clock
 } from "lucide-react";
-import { useState } from "react";
 
 export function ManagerHub() {
-  const [setupOpen, setSetupOpen] = useState(true);
   return (
     <div className="min-h-screen bg-neutral-950 text-slate-300 font-sans p-4 space-y-6 max-w-[620px] mx-auto pb-24">
       {/* 0. Top Bar: New Run & Context */}
@@ -34,17 +32,45 @@ export function ManagerHub() {
         </button>
       </div>
 
-      {/* 1. Run Identity (read-only glance — editing lives in Run Setup below) */}
-      <div className="flex items-center justify-between px-1">
-        <span className="text-lg font-bold text-slate-100">
-          Cornerbooth <span className="text-amber-500 mx-1">—</span> Pepperoni
-        </span>
-        <div className="flex gap-1">
-          <div className="px-2 py-1 flex items-center gap-1 bg-neutral-800 rounded text-xs font-bold text-slate-300 border border-neutral-700">
-            TX-16
+      {/* 1. Editable Setup Header */}
+      <div className="bg-neutral-900 border-2 border-neutral-800 rounded-xl p-4 flex flex-col gap-4 relative">
+        <div className="absolute top-0 right-0 m-4 flex gap-1">
+           <div className="px-2 py-1 flex items-center gap-1 bg-neutral-800 rounded text-xs font-bold text-slate-300 border border-neutral-700">
+             TX-16
+           </div>
+           <div className="px-2 py-1 bg-red-950/40 text-red-400 border border-red-900/50 rounded text-xs font-bold uppercase">
+             Wheat/Dairy
+           </div>
+        </div>
+
+        <div>
+          <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+            Run Setup
+            <Pencil className="w-3 h-3 ml-1" />
           </div>
-          <div className="px-2 py-1 bg-red-950/40 text-red-400 border border-red-900/50 rounded text-xs font-bold uppercase">
-            Wheat/Dairy
+          
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-2">
+              <button className="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-700 transition-colors rounded-lg p-2.5 flex items-center justify-between text-left group">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-neutral-500 uppercase font-medium">Brand & Flavor</span>
+                  <span className="text-base font-bold text-slate-100 mt-0.5">
+                    Cornerbooth <span className="text-amber-500 mx-1">—</span> Pepperoni
+                  </span>
+                </div>
+                <ChevronDown className="w-4 h-4 text-neutral-600 group-hover:text-neutral-400" />
+              </button>
+            </div>
+            
+            <div className="w-32">
+              <button className="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-700 transition-colors rounded-lg p-2.5 flex items-center justify-between text-left group">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-neutral-500 uppercase font-medium">Target Cases</span>
+                  <span className="text-lg font-black text-white leading-none mt-0.5 tabular-nums">850</span>
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-neutral-600 group-hover:text-neutral-400" />
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -241,61 +267,6 @@ export function ManagerHub() {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
-        </div>
-
-        {/* 8. Collapsible Run Setup (moved from top) */}
-        <div className="bg-neutral-900 border-2 border-neutral-800 rounded-xl overflow-hidden mt-6">
-          <button
-            className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-neutral-800/50 transition-colors"
-            onClick={() => setSetupOpen(!setupOpen)}
-          >
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-neutral-400" />
-              <span className="text-sm font-bold text-slate-200 uppercase tracking-wider">Run Setup</span>
-              <Pencil className="w-3 h-3 text-neutral-500" />
-            </div>
-            <ChevronDown className={`w-5 h-5 text-neutral-400 transition-transform ${setupOpen ? "rotate-180" : ""}`} />
-          </button>
-
-          {setupOpen && (
-            <div className="px-4 pb-4 pt-1 flex flex-col gap-3 border-t border-neutral-800">
-              <div className="flex items-end gap-3 mt-3">
-                <div className="flex-1">
-                  <button className="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-700 transition-colors rounded-lg p-2.5 flex items-center justify-between text-left group">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-neutral-500 uppercase font-medium">Brand & Flavor</span>
-                      <span className="text-base font-bold text-slate-100 mt-0.5">
-                        Cornerbooth <span className="text-amber-500 mx-1">—</span> Pepperoni
-                      </span>
-                    </div>
-                    <ChevronDown className="w-4 h-4 text-neutral-600 group-hover:text-neutral-400" />
-                  </button>
-                </div>
-                <div className="w-32">
-                  <button className="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-700 transition-colors rounded-lg p-2.5 flex items-center justify-between text-left group">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-neutral-500 uppercase font-medium">Target Cases</span>
-                      <span className="text-lg font-black text-white leading-none mt-0.5 tabular-nums">850</span>
-                    </div>
-                    <Pencil className="w-3.5 h-3.5 text-neutral-600 group-hover:text-neutral-400" />
-                  </button>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex gap-1.5">
-                  <button className="px-2.5 py-1.5 flex items-center gap-1.5 bg-neutral-950 rounded-lg text-xs font-bold text-slate-300 border border-neutral-800 hover:border-neutral-700">
-                    Die: TX-16
-                    <Pencil className="w-3 h-3 text-neutral-600" />
-                  </button>
-                  <button className="px-2.5 py-1.5 flex items-center gap-1.5 bg-neutral-950 rounded-lg text-xs font-bold text-red-400 border border-neutral-800 hover:border-neutral-700">
-                    Allergens: Wheat/Dairy
-                    <Pencil className="w-3 h-3 text-neutral-600" />
-                  </button>
-                </div>
-                <span className="text-[10px] text-neutral-500 font-medium">Last ran: 6/24 · 830 cases</span>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
