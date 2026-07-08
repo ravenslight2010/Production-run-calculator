@@ -22,7 +22,10 @@ const calc = {
   batchesNeeded: 2.4,
   pizzasPerCase: 12,
   casesPerSkid: 60,
+  casesNeeded: 320,
 };
+
+const SKIDS_TOTAL = Math.ceil(calc.casesNeeded / calc.casesPerSkid); // 6
 
 const TRAY_PERIOD_S = (calc.perTray / calc.ppm) * 60; // 105 s
 
@@ -576,7 +579,10 @@ export function TimersInline() {
                 >
                   −
                 </button>
-                <p className="text-xl font-mono font-bold text-foreground tabular-nums min-w-[2ch]">{packedSkids}</p>
+                <p className="text-xl font-mono font-bold text-foreground tabular-nums">
+                  {packedSkids}
+                  <span className="text-xs text-muted-foreground font-normal">/{SKIDS_TOTAL}</span>
+                </p>
                 <button
                   type="button"
                   onClick={() => { setPackedCasesTotal(c => c + calc.casesPerSkid); onManual(); }}
