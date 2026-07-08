@@ -1,21 +1,23 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Pause, Play, Sparkles, Zap } from "lucide-react";
+import { CheckCircle2, Pause, Sparkles, Timer, Zap } from "lucide-react";
 import "./_group.css";
 
-/* ── Variant A: Inline Detail ──────────────────────────────────────────────
-   The dough steppers exactly as today, but each auto-tracked counter gets a
-   live countdown strip right underneath it: when the next auto tick lands,
-   what it will do (+1 from the press / −1 eaten by the line), and a thin
-   progress bar filling toward the tick. Cadences use the real engine math:
-   tray tick = perTray/ppm, batch drain = perBatch/ppm/4, mixer = perBatch/ppm. */
+/* ── Variant A (rev 2): Inline Detail + measured mixer/hopper times ────────
+   The dough steppers with live countdown strips, now driven by MEASURED
+   times instead of guesses:
+     • Mixer Time Low / High (seconds) — how long a batch actually spins
+     • Hopper Time (seconds) — how long the hopper takes to turn one batch
+       into doughballs
+   Pipeline is 3 batches max: 1 prepped to spin · 1 spinning · 1 in the
+   hopper being turned into doughballs. Tray cadence stays line-speed based
+   (perTray / ppm). */
 
 const calc = { ppm: 24, perTray: 42, perBatch: 260, traysNeeded: 18, batchesNeeded: 2.4 };
 
 const TRAY_PERIOD_S = (calc.perTray / calc.ppm) * 60; // 105 s
-const BATCH_DRAIN_S = (calc.perBatch / calc.ppm / 4) * 60; // ~162 s (quarter-batch)
-const MIXER_PERIOD_S = (calc.perBatch / calc.ppm) * 60; // ~650 s
 
 function fmtMS(totalSec: number) {
+  if (!Number.isFinite(totalSec)) return "—:—";
   const s = Math.max(0, Math.round(totalSec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
@@ -31,11 +33,13 @@ function useNowSec() {
 
 function TickBar({
   label,
+  right,
   secLeft,
   periodSec,
   color,
 }: {
   label: string;
+  right?: string;
   secLeft: number;
   periodSec: number;
   color: string;
@@ -45,7 +49,7 @@ function TickBar({
     <div className="mt-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] text-muted-foreground">{label}</span>
-        <span className={`text-[10px] font-mono font-semibold tabular-nums ${color}`}>{fmtMS(secLeft)}</span>
+        <span className={`text-[10px] font-mono font-semibold tabular-nums ${color}`}>{right ?? fmtMS(secLeft)}</span>
       </div>
       <div className="h-1 rounded-full bg-muted/40 overflow-hidden mt-0.5">
         <div
@@ -53,6 +57,37 @@ function TickBar({
           style={{ width: `${pct}%`, transition: "width 1s linear" }}
         />
       </div>
+    </div>
+  );
+}
+
+function SecondsInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="min-w-0">
+      <label className="text-[10px] text-muted-foreground block truncate">{label}</label>
+      <div className="flex items-center gap-1.5 mt-1">
+        <input
+          type="number"
+          inputMode="numeric"
+          value={value}
+          onChange={e => {
+            const n = e.target.value === "" ? 0 : Number(e.target.value);
+            if (Number.isFinite(n) && n >= 0) onChange(n);
+          }}
+          onFocus={e => e.target.select()}
+          className="h-9 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-sm font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <span className="text-[9px] text-muted-foreground shrink-0">sec</span>
+      </div>
+      <p className="text-[9px] text-muted-foreground font-mono mt-0.5 text-center">= {fmtMS(value)}</p>
     </div>
   );
 }
@@ -65,8 +100,6 @@ function StepperField({
   onChange,
   min = 0,
   max,
-  suggestion,
-  onSuggest,
   onManualChange,
 }: {
   label: string;
@@ -76,33 +109,19 @@ function StepperField({
   onChange: (v: number) => void;
   min?: number;
   max?: number;
-  suggestion?: number | null;
-  onSuggest?: () => void;
   onManualChange?: () => void;
 }) {
   const atMax = max !== undefined && value >= max;
   return (
     <div>
-      <div className="flex items-center justify-between gap-2">
-        <label className="text-xs text-muted-foreground flex items-center gap-1.5">
-          {label}
-          {auto && (
-            <span className="flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-primary/15 border border-primary/30 text-primary">
-              <Zap className="w-2 h-2" /> Auto
-            </span>
-          )}
-        </label>
-        {suggestion !== null && suggestion !== undefined && suggestion !== value && onSuggest && (
-          <button
-            type="button"
-            onClick={onSuggest}
-            className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors shrink-0"
-          >
-            <Sparkles className="w-2.5 h-2.5" />
-            Expected: {suggestion}
-          </button>
+      <label className="text-xs text-muted-foreground flex items-center gap-1.5">
+        {label}
+        {auto && (
+          <span className="flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide px-1.5 py-px rounded-full bg-primary/15 border border-primary/30 text-primary">
+            <Zap className="w-2 h-2" /> Auto
+          </span>
         )}
-      </div>
+      </label>
       <div className="flex items-stretch mt-1">
         <button
           type="button"
@@ -148,58 +167,79 @@ export function TimersInline() {
   const [traysOnLine, setTraysOnLine] = useState(9);
   const [batchesReady, setBatchesReady] = useState(1.75);
 
-  const onManual = () => setSuppressUntil(Date.now() / 1000 + 60);
+  /* Measured machine times (seconds) — the new inputs */
+  const [mixerLowSec, setMixerLowSec] = useState(480); // 8:00 fastest spin
+  const [mixerHighSec, setMixerHighSec] = useState(600); // 10:00 slowest spin
+  const [hopperSec, setHopperSec] = useState(650); // batch → doughballs
 
+  const onManual = () => setSuppressUntil(Date.now() / 1000 + 60);
   const running = autoOn && !suppressed;
+
+  /* Tray cadence still comes from line speed */
   const trayLeft = TRAY_PERIOD_S - (elapsed % TRAY_PERIOD_S);
   const trayProdLeft = TRAY_PERIOD_S - ((elapsed + TRAY_PERIOD_S / 2) % TRAY_PERIOD_S);
-  const drainLeft = BATCH_DRAIN_S - (elapsed % BATCH_DRAIN_S);
-  const mixerLeft = MIXER_PERIOD_S - (elapsed % MIXER_PERIOD_S);
 
-  /* Simulated ticks so the mockup visibly moves (real app: useAutoTrack).
-     Mirrors the engine: consumption ticks drain, and — while the run still
-     has a dough deficit — production ticks add (+1 tray from the press,
-     offset half a cycle; +1 batch when the mixer finishes a full cycle). */
-  const hasDeficit = calc.traysNeeded > 0 && calc.batchesNeeded > 0; // mock deficit stays open
+  /* Batch cadence now comes from the MEASURED times (all guarded ≥ 1s so a
+     blank/zero input can never produce a divide-by-zero or NaN countdown).
+     The simulated spin cycle runs on the HIGH time — a batch is GUARANTEED
+     by the high time, and the low–high window shows when it could land. */
+  const safeLow = Math.max(1, mixerLowSec);
+  const safeHigh = Math.max(safeLow, Math.max(1, mixerHighSec));
+  const safeHopper = Math.max(1, hopperSec);
+  const drainQuarterSec = safeHopper / 4;
+  const spinElapsed = elapsed % safeHigh; // simulated current spin progress
+  const mixerLowLeft = Math.max(0, safeLow - spinElapsed);
+  const mixerHighLeft = Math.max(0, safeHigh - spinElapsed);
+  const drainLeft = drainQuarterSec - (elapsed % drainQuarterSec);
+  const hopperEmptyLeft = safeHopper - (elapsed % safeHopper);
+
+  /* Accuracy check: can the hopper keep the line fed? */
+  const hopperBallsPerMin = (calc.perBatch / safeHopper) * 60;
+  const hopperMargin = hopperBallsPerMin - calc.ppm;
+  const hopperKeepsUp = hopperMargin >= 0;
+  /* Bottleneck stage sets how often you must start a new batch */
+  const bottleneckSec = Math.max(safeHigh, safeHopper);
+
+  /* Simulated ticks so the mockup visibly moves (real app: useAutoTrack) */
+  const hasDeficit = calc.traysNeeded > 0 && calc.batchesNeeded > 0;
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => {
-      setTraysOnLine(t => Math.max(0, t - 1)); // line eats a tray
-    }, TRAY_PERIOD_S * 1000);
+    const id = setInterval(() => setTraysOnLine(t => Math.max(0, t - 1)), TRAY_PERIOD_S * 1000);
     return () => clearInterval(id);
   }, [running]);
   useEffect(() => {
     if (!running || !hasDeficit) return;
-    // Press production: first tick lands half a period out of phase.
     let id: ReturnType<typeof setInterval> | undefined;
     const t0 = setTimeout(() => {
-      setTraysOnLine(t => (t < 74 ? Math.min(74, t + 1) : t));
-      id = setInterval(() => {
-        setTraysOnLine(t => (t < 74 ? Math.min(74, t + 1) : t));
-      }, TRAY_PERIOD_S * 1000);
+      setTraysOnLine(t => Math.min(74, t + 1));
+      id = setInterval(() => setTraysOnLine(t => Math.min(74, t + 1)), TRAY_PERIOD_S * 1000);
     }, (TRAY_PERIOD_S / 2) * 1000);
     return () => { clearTimeout(t0); if (id) clearInterval(id); };
   }, [running, hasDeficit]);
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => {
-      setBatchesReady(b => Math.max(0, Math.round((b - 0.25) * 100) / 100)); // quarter-batch drain
-    }, BATCH_DRAIN_S * 1000);
+    const id = setInterval(
+      () => setBatchesReady(b => Math.max(0, Math.round((b - 0.25) * 100) / 100)),
+      drainQuarterSec * 1000,
+    );
     return () => clearInterval(id);
-  }, [running]);
+  }, [running, drainQuarterSec]);
   useEffect(() => {
     if (!running || !hasDeficit) return;
-    const id = setInterval(() => {
-      setBatchesReady(b => (b < 3 ? Math.min(3, Math.round((b + 1) * 100) / 100) : b)); // mixer +1
-    }, MIXER_PERIOD_S * 1000);
+    // Mixer +1 lands on the same cycle the countdown window runs on (the
+    // high time), so the display and the tick always agree.
+    const id = setInterval(
+      () => setBatchesReady(b => Math.min(3, Math.round((b + 1) * 100) / 100)),
+      safeHigh * 1000,
+    );
     return () => clearInterval(id);
-  }, [running, hasDeficit]);
+  }, [running, hasDeficit, safeHigh]);
 
   return (
     <div className="dough-tab-scope dark min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · Inline timer detail</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · rev 2 — measured times</p>
           <button
             type="button"
             onClick={() => setAutoOn(a => !a)}
@@ -217,15 +257,62 @@ export function TimersInline() {
             <span className="text-amber-400 font-semibold">
               Manual override active · auto resumes in {fmtMS(suppressedSecLeft)}
             </span>
-            <button
-              type="button"
-              onClick={() => setSuppressUntil(0)}
-              className="text-amber-400 hover:text-amber-300 font-semibold ml-2"
-            >
+            <button type="button" onClick={() => setSuppressUntil(0)} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">
               Resume now
             </button>
           </div>
         )}
+
+        {/* ── NEW: measured machine times ── */}
+        <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-2">
+            <Timer className="w-3 h-3" /> Machine Times (measured, not guessed)
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <SecondsInput label="Mixer time — low" value={mixerLowSec} onChange={setMixerLowSec} />
+            <SecondsInput label="Mixer time — high" value={mixerHighSec} onChange={setMixerHighSec} />
+            <SecondsInput label="Hopper: batch → balls" value={hopperSec} onChange={setHopperSec} />
+          </div>
+          {mixerHighSec < mixerLowSec && (
+            <p className="text-[10px] text-amber-400 font-semibold mt-1.5">High time should be ≥ low time</p>
+          )}
+        </div>
+
+        {/* ── NEW: 3-batch pipeline ── */}
+        <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+            Batch Pipeline · 3 max
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-muted/20 rounded-lg p-2 text-center border border-border/30">
+              <p className="text-[9px] uppercase tracking-wider text-muted-foreground">1 · Prepped</p>
+              <p className="text-xs font-semibold text-foreground mt-1">Waiting</p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">spins when mixer frees</p>
+            </div>
+            <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
+              <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
+              <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
+                {mixerLowLeft <= 0 ? `any sec — by ${fmtMS(mixerHighLeft)}` : `${fmtMS(mixerLowLeft)}–${fmtMS(mixerHighLeft)}`}
+              </p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">until done</p>
+            </div>
+            <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
+              <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
+              <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">{fmtMS(hopperEmptyLeft)}</p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">until empty</p>
+            </div>
+          </div>
+          <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${hopperKeepsUp ? "text-emerald-400" : "text-amber-400"}`}>
+            <CheckCircle2 className="w-3 h-3 shrink-0" />
+            {hopperKeepsUp
+              ? `Hopper keeps up: ${hopperBallsPerMin.toFixed(1)} balls/min out vs ${calc.ppm} needed (+${hopperMargin.toFixed(1)})`
+              : `Hopper too slow: ${hopperBallsPerMin.toFixed(1)} balls/min out vs ${calc.ppm} needed (${hopperMargin.toFixed(1)})`}
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1">
+            Start a new batch every <span className="font-mono text-foreground">{fmtMS(bottleneckSec)}</span> — set by the
+            slowest stage ({mixerHighSec >= hopperSec ? "mixer high time" : "hopper"}).
+          </p>
+        </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -244,7 +331,7 @@ export function TimersInline() {
               </>
             ) : (
               <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
-                <Pause className="w-2.5 h-2.5" /> Timers paused — counting stopped
+                <Pause className="w-2.5 h-2.5" /> Timers paused
               </p>
             )}
           </div>
@@ -260,38 +347,38 @@ export function TimersInline() {
             />
             {running ? (
               <>
-                <TickBar label="Drains ¼ batch in" secLeft={drainLeft} periodSec={BATCH_DRAIN_S} color="text-orange-400" />
-                <TickBar label="Mixer finishes +1 in" secLeft={mixerLeft} periodSec={MIXER_PERIOD_S} color="text-emerald-400" />
+                <TickBar
+                  label="Hopper drains ¼ batch in"
+                  secLeft={drainLeft}
+                  periodSec={drainQuarterSec}
+                  color="text-orange-400"
+                />
+                <TickBar
+                  label="Mixer finishes +1 in"
+                  right={mixerLowLeft <= 0 ? `by ${fmtMS(mixerHighLeft)}` : `${fmtMS(mixerLowLeft)}–${fmtMS(mixerHighLeft)}`}
+                  secLeft={mixerHighLeft}
+                  periodSec={mixerHighSec}
+                  color="text-emerald-400"
+                />
               </>
             ) : (
               <p className="text-[10px] text-muted-foreground mt-1.5 flex items-center gap-1">
-                <Pause className="w-2.5 h-2.5" /> Timers paused — counting stopped
+                <Pause className="w-2.5 h-2.5" /> Timers paused
               </p>
             )}
           </div>
         </div>
 
-        <div className="mt-4 rounded-lg border border-border/50 bg-card/50 px-4 py-3 space-y-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">How the pace is set</p>
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-muted/20 rounded-lg p-2">
-              <p className="text-lg font-mono font-bold text-foreground tabular-nums">{fmtMS(TRAY_PERIOD_S)}</p>
-              <p className="text-[9px] text-muted-foreground mt-0.5">per tray · {calc.perTray} balls ÷ {calc.ppm}/min</p>
-            </div>
-            <div className="bg-muted/20 rounded-lg p-2">
-              <p className="text-lg font-mono font-bold text-foreground tabular-nums">{fmtMS(BATCH_DRAIN_S)}</p>
-              <p className="text-[9px] text-muted-foreground mt-0.5">per ¼ batch drained</p>
-            </div>
-            <div className="bg-muted/20 rounded-lg p-2">
-              <p className="text-lg font-mono font-bold text-foreground tabular-nums">{fmtMS(MIXER_PERIOD_S)}</p>
-              <p className="text-[9px] text-muted-foreground mt-0.5">mixer batch time</p>
-            </div>
-          </div>
+        <div className="mt-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+            <Sparkles className="w-3 h-3" /> How the new formula works
+          </p>
           <p className="text-[10px] text-muted-foreground leading-relaxed">
-            Any tap on a stepper holds the timers for 1 minute so your correction sticks — the countdown keeps
-            running quietly and picks back up from <span className="text-foreground font-semibold">your</span> number, never its own.
-            If a counter is still 0 when its first tick lands, it self-fills with the suggested staging{" "}
-            (<Play className="inline w-2.5 h-2.5 -mt-px" /> so a crew that never types dough counts still gets a countdown).
+            Batch timing now uses <span className="text-foreground font-semibold">your measured times</span> instead of a
+            guess from line speed: the mixer window ({fmtMS(mixerLowSec)}–{fmtMS(mixerHighSec)}) says when the next batch
+            lands, and the hopper time ({fmtMS(hopperSec)}) sets how fast the ready batch drains (¼ every{" "}
+            {fmtMS(drainQuarterSec)}). Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min ={" "}
+            {fmtMS(TRAY_PERIOD_S)} per tray). Any tap on a stepper still holds auto for 1 minute.
           </p>
         </div>
       </div>
