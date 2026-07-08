@@ -700,22 +700,6 @@ export function TimersInline() {
           accent="bg-orange-500/70"
         />
 
-        <div className="mt-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
-            <Sparkles className="w-3 h-3" /> How the new formula works
-          </p>
-          <p className="text-[10px] text-muted-foreground leading-relaxed">
-            Batch timing now uses <span className="text-foreground font-semibold">your measured times</span>: a batch
-            spins {fmtMS(safeLow)} on low + {fmtMS(safeHigh)} on high = {fmtMS(spinTotalSec)}, then takes{" "}
-            {fmtMS(safeHopper)} through the hopper. Ready batches drain at the slower of hopper speed and line demand —
-            here the {effDrainSec === lineBatchSec ? "line" : "hopper"} is the limit, using a batch every{" "}
-            {fmtMS(effDrainSec)} (¼ every {fmtMS(drainQuarterSec)}).
-            Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min = {fmtMS(TRAY_PERIOD_S)} per tray). The
-            packaging check compares cases packed vs cases the line has produced ({calc.pizzasPerCase} pizzas ÷{" "}
-            {calc.ppm}/min = 1 case every {fmtMS(casePeriodSec)}); skids = cases ÷ {calc.casesPerSkid}. Any tap on a
-            stepper still holds auto for 1 minute.
-          </p>
-        </div>
       </div>
     </div>
   );
