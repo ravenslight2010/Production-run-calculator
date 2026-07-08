@@ -105,6 +105,20 @@ function isUniqueViolation(e: unknown): boolean {
 //     same-day rollover can ever fence sessions; a future/past write cannot.
 // Derived server-side (never trusted from the client payload) so the fence stays
 // authoritative regardless of what a client echoes back.
+//
+// SECURITY: `resetAt` itself is still attacker-controlled (it comes straight off
+// `payload.dayState.resetAt`), so it must never be adopted verbatim. A malicious
+// same-day write could set it to an arbitrary far-future millisecond timestamp,
+// which `requireAuth` would then treat as "every token issued before this instant
+// is signed out" — i.e. forever, taking the whole live deployment offline. Clamp
+// it to (server clock + a small skew allowance): a genuine same-day rollover's
+// `resetAt` is the WRITER's `Date.now()` at write time, which can be a second or
+// two ahead of the server's own clock/round-trip and is intentionally nudged a
+// beat past a token's second-truncated `iat` (see requireAuth's iat+1 comparison)
+// — this tolerance preserves that, while capping how far into the future a
+// crafted value can push the fence, bounding the DoS instead of eliminating any
+// self-healing time window.
+const MAX_RESET_AT_SKEW_MS = 5 * 60_000;
 function applyResetBoundary(
   merged: unknown,
   existingData: unknown,
@@ -115,8 +129,11 @@ function applyResetBoundary(
   if (!day || typeof day !== "object") return;
   if (isCurrentDay) {
     const resetAt = day.resetAt;
-    if (typeof resetAt === "number" && resetAt > 0) day.resetBoundaryAt = resetAt;
-    else delete day.resetBoundaryAt;
+    if (typeof resetAt === "number" && resetAt > 0) {
+      day.resetBoundaryAt = Math.min(resetAt, Date.now() + MAX_RESET_AT_SKEW_MS);
+    } else {
+      delete day.resetBoundaryAt;
+    }
   } else {
     // A future- (or past-) dated write must never establish or advance the fence.
     // Preserve any boundary a genuine same-day write already recorded on this row.
@@ -180,13 +197,22 @@ router.get("/sync/today", async (req: Request, res: Response): Promise<void> => 
 // is about to re-upload it — so reject the write (returning the new epoch) until
 // the client has wiped and re-adopted the empty state. This closes the re-adoption
 // race that used to require taking the API down during a manual purge.
+//
+// SECURITY: this check must fail CLOSED once a reset has ever happened for the
+// scope. A missing or malformed `?epoch=` param used to be treated the same as
+// "no opinion" (accept the write) — that let anyone skip the query param
+// entirely and immediately replay stale pre-reset data right after a manager
+// wiped it, defeating the whole point of the reset. Now, once the scope has a
+// nonzero server epoch, any push without a valid, sufficiently-advanced epoch
+// is treated as stale. Scopes that have never been reset (serverEpoch === 0)
+// have nothing to protect, so older/epoch-unaware clients keep working there.
 async function isStaleResetPush(req: Request, scope: Scope): Promise<number | null> {
-  const raw = req.query.epoch;
-  if (typeof raw !== "string" || raw === "") return null;
-  const clientEpoch = Number(raw);
-  if (!Number.isFinite(clientEpoch)) return null;
   const serverEpoch = await getResetEpoch(scope);
-  return clientEpoch < serverEpoch ? serverEpoch : null;
+  if (serverEpoch === 0) return null;
+  const raw = req.query.epoch;
+  const clientEpoch = typeof raw === "string" && raw !== "" ? Number(raw) : NaN;
+  if (!Number.isFinite(clientEpoch) || clientEpoch < serverEpoch) return serverEpoch;
+  return null;
 }
 
 router.get("/sync/reset-epoch", async (_req: Request, res: Response): Promise<void> => {

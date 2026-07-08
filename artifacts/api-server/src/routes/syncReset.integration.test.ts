@@ -215,8 +215,21 @@ describe("PUT epoch guard — the re-adoption race closer", () => {
     expect((row?.dayState?.runs ?? []).map((r) => r.id)).toEqual(["r1"]);
   });
 
-  it("accepts a push with no epoch param (older clients are not blocked)", async () => {
+  it("rejects a push with no epoch param once the scope has been reset (fail closed, not open)", async () => {
+    // SECURITY: omitting `?epoch=` used to be treated as "no opinion" and the
+    // write was accepted even right after a manager reset — letting anyone skip
+    // the query param entirely to replay stale pre-reset data. It must now be
+    // treated the same as an out-of-date epoch and rejected.
     await fetch(`${baseUrl}/api/sync/reset`, { method: "POST", headers: authHeaders(MANAGER) });
+    const res = await put(populated);
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { stale?: boolean; epoch?: number }).toMatchObject({ stale: true, epoch: 1 });
+    expect(await readRow()).toBeNull();
+  });
+
+  it("accepts a push with no epoch param when the scope has never been reset", async () => {
+    // A scope with no reset history (server epoch 0) has nothing to protect, so
+    // older/epoch-unaware clients keep working until the first reset happens.
     const res = await put(populated);
     expect(res.status).toBe(200);
     const row = await readRow();
