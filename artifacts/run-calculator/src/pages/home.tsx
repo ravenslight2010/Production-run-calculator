@@ -10834,7 +10834,7 @@ export default function Home() {
             <ProactiveAlertBanner alert={proactiveAlert} onDismiss={dismissProactiveAlert} />
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full print:hidden">
               {/* ─── RUN ─── */}
-              <TabsContent value="run">
+              <TabsContent value="run" className="max-w-[620px] mx-auto">
                 {/* ─── Run cockpit — identity, status & KPIs (graduated ManagerHub mockup) ─── */}
                 <div className="space-y-4 mb-4">
                   {/* Top bar: run position + last-run recall + run actions */}
@@ -11704,39 +11704,75 @@ export default function Home() {
                 )}
 
                 {/* Temporary adjustments — this-run-only overrides of Setup values
-                    (moved here from the Packaging tab) */}
-                <Card className="mt-4 bg-card/50 border-border/60 shadow-md">
-                  <CardContent className="pt-4 pb-4 px-5 space-y-3">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <p className="text-sm font-bold text-foreground flex items-center gap-2"><Settings className="w-4 h-4 text-muted-foreground" /> Temporary Adjustments</p>
+                    (moved here from the Packaging tab; tile style from the graduated ManagerHub mockup) */}
+                <div className="mt-6 pt-4 border-t border-border/60 space-y-4">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Settings className="w-4 h-4 text-muted-foreground" />
+                      <h3 className="text-sm font-bold text-foreground">Temporary Adjustments</h3>
                       {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
-                          <button
-                            type="button"
-                            data-testid="button-clear-temp-overrides"
-                            onClick={() => {
-                              form.setValue("tempFreezerTime", 0, { shouldDirty: true });
-                              form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
-                              form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
-                            }}
-                            className="text-[10px] font-bold text-amber-500 uppercase tracking-wider bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
-                          >
-                            Clear All
-                          </button>
-                        </div>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
-                    </p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <NumField control={form.control} name="tempFreezerTime" label={`Freezer Time${Number(v.freezerTime) > 0 ? ` (setup: ${fmtNum(Number(v.freezerTime), 0)})` : ""}`} step="1" testId="input-temp-freezer-time" />
-                      <NumField control={form.control} name="tempCrustsPerCycle" label={`Crusts / Cycle${Number(v.crustsPerCycle) > 0 ? ` (setup: ${fmtNum(Number(v.crustsPerCycle), 0)})` : ""}`} step="1" testId="input-temp-crusts-per-cycle" />
-                      <NumField control={form.control} name="tempCycleSpeed" label={`Cycle Speed${Number(v.cycleSpeed) > 0 ? ` (setup: ${fmtNum(Number(v.cycleSpeed), 1)})` : ""}`} step="0.1" testId="input-temp-cycle-speed" />
-                    </div>
-                  </CardContent>
-                </Card>
+                    <button
+                      type="button"
+                      data-testid="button-clear-temp-overrides"
+                      onClick={() => {
+                        form.setValue("tempFreezerTime", 0, { shouldDirty: true });
+                        form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
+                        form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
+                      }}
+                      className="text-[10px] font-bold text-amber-500 uppercase tracking-wider bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {([
+                      { name: "tempFreezerTime" as const, label: "Freezer Time", setup: Number(v.freezerTime) > 0 ? fmtNum(Number(v.freezerTime), 0) : null, step: "1", testId: "input-temp-freezer-time" },
+                      { name: "tempCrustsPerCycle" as const, label: "Crusts/Cycle", setup: Number(v.crustsPerCycle) > 0 ? fmtNum(Number(v.crustsPerCycle), 0) : null, step: "1", testId: "input-temp-crusts-per-cycle" },
+                      { name: "tempCycleSpeed" as const, label: "Cycle Speed", setup: Number(v.cycleSpeed) > 0 ? fmtNum(Number(v.cycleSpeed), 1) : null, step: "0.1", testId: "input-temp-cycle-speed" },
+                    ]).map((t) => (
+                      <FormField
+                        key={t.name}
+                        control={form.control}
+                        name={t.name}
+                        render={({ field }) => (
+                          <FormItem className="space-y-0">
+                            <div className={`bg-background/60 border rounded-lg p-3 relative transition-colors focus-within:border-amber-500/50 ${Number(v[t.name]) > 0 ? "border-amber-600/40" : "border-border/60 hover:border-border"}`}>
+                              {Number(v[t.name]) > 0 && (
+                                <div className="absolute top-0 right-0 w-2 h-2 bg-amber-500 rounded-full -mt-1 -mr-1 shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
+                              )}
+                              <div className="flex justify-between items-start mb-1 gap-1">
+                                <FormLabel className="text-[10px] text-muted-foreground uppercase font-bold leading-tight">
+                                  {t.label}{t.setup != null && <span className="normal-case font-medium text-muted-foreground/60"> · setup {t.setup}</span>}
+                                </FormLabel>
+                                <Pencil className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+                              </div>
+                              <FormControl>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  step={t.step}
+                                  data-testid={t.testId}
+                                  className="w-full bg-transparent border-0 p-0 text-lg font-black text-foreground tabular-nums focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  {...field}
+                                  value={field.value as any}
+                                  onChange={(e) => field.onChange(e.target.value === "" ? "" : Number(e.target.value))}
+                                  onFocus={(e) => e.target.select()}
+                                />
+                              </FormControl>
+                            </div>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
+                  </p>
+                </div>
 
                 {/* Run navigation — prev / dots / next (graduated mockup) */}
                 {dayState.runs.length > 1 && (

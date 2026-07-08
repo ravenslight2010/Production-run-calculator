@@ -16,6 +16,13 @@ prop surface and drift from the mockup anyway. Precedents: Dough tab, Packaging 
 
 **How to apply:**
 - Keep every existing calc/guard/clamp/handler verbatim; only restyle the JSX around them.
+- **Carry the mockup's column width.** Canvas mockups are 620px centered columns
+  (`max-w-[620px] mx-auto`), but home.tsx's page container is `max-w-5xl`; without adding
+  the mockup width to the tab's TabsContent, the graduated tab looks stretched/"not the one
+  we picked" on the user's 1920px iframe even when every section matches structurally.
+- Compare the FULL mockup, not just the top fold — lower sections (tile-style adjustment
+  fields with pencil icons vs plain NumField inputs, collapsible setup at the bottom) are
+  where mismatches hid last time.
 - Mockup-only simplifications (dropped number-typing, hold-repeat, per-field suggestion
   chips) are acceptable ONLY when the user approved that mockup behavior — call them out.
 - Verify with `typecheck` (not build), then an authenticated runTest e2e (create a throwaway
