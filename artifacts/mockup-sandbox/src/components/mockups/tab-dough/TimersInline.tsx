@@ -177,8 +177,8 @@ function SecondsInput({
 }) {
   return (
     <div className="min-w-0">
-      <label className="text-[10px] text-muted-foreground block truncate">{label}</label>
-      <div className="flex items-center gap-1.5 mt-1">
+      <label className="text-[9px] text-muted-foreground block truncate">{label}</label>
+      <div className="flex items-center gap-1 mt-0.5">
         <input
           type="number"
           inputMode="numeric"
@@ -188,11 +188,10 @@ function SecondsInput({
             if (Number.isFinite(n) && n >= 0) onChange(n);
           }}
           onFocus={e => e.target.select()}
-          className="h-9 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-sm font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="h-7 w-full min-w-0 rounded-md border border-input bg-background/50 text-center font-mono text-xs font-bold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
-        <span className="text-[9px] text-muted-foreground shrink-0">sec</span>
+        <span className="text-[9px] text-muted-foreground shrink-0 font-mono">= {fmtMS(value)}</span>
       </div>
-      <p className="text-[9px] text-muted-foreground font-mono mt-0.5 text-center">= {fmtMS(value)}</p>
     </div>
   );
 }
@@ -420,22 +419,6 @@ export function TimersInline() {
           </div>
         )}
 
-        {/* ── NEW: measured machine times ── */}
-        <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-2">
-            <Timer className="w-3 h-3" /> Machine Times (measured, not guessed)
-          </p>
-          <div className="grid grid-cols-3 gap-2">
-            <SecondsInput label="Mixer — low speed" value={mixerLowSec} onChange={setMixerLowSec} />
-            <SecondsInput label="Mixer — high speed" value={mixerHighSec} onChange={setMixerHighSec} />
-            <SecondsInput label="Hopper: batch → balls" value={hopperSec} onChange={setHopperSec} />
-          </div>
-          <p className="text-[10px] text-muted-foreground mt-1.5">
-            Total spin per batch: <span className="font-mono text-foreground font-semibold">{fmtMS(spinTotalSec)}</span>{" "}
-            (low {fmtMS(safeLow)} → high {fmtMS(safeHigh)}), then {fmtMS(safeHopper)} through the hopper.
-          </p>
-        </div>
-
         {/* ── NEW: 3-batch pipeline ── */}
         <div className="rounded-lg border border-border/50 bg-card/50 px-4 py-3 mb-3">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
@@ -471,6 +454,23 @@ export function TimersInline() {
             <span className="font-mono text-foreground">{fmtMS(supplySec)}</span> — set by the{" "}
             {spinTotalSec >= safeHopper ? "mixer (low + high)" : "hopper"}.
           </p>
+        </div>
+
+        {/* ── Measured machine times (compact) ── */}
+        <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2 mb-3">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1 shrink-0">
+              <Timer className="w-2.5 h-2.5" /> Machine Times
+            </p>
+            <p className="text-[9px] text-muted-foreground font-mono truncate">
+              spin {fmtMS(spinTotalSec)} + hopper {fmtMS(safeHopper)}
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <SecondsInput label="Mixer low (sec)" value={mixerLowSec} onChange={setMixerLowSec} />
+            <SecondsInput label="Mixer high (sec)" value={mixerHighSec} onChange={setMixerHighSec} />
+            <SecondsInput label="Hopper (sec)" value={hopperSec} onChange={setHopperSec} />
+          </div>
         </div>
 
         {/* What You Need Now — same card as the current tab */}
