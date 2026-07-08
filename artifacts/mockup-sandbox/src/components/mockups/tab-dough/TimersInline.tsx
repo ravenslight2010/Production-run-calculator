@@ -167,10 +167,12 @@ export function TimersInline() {
   const [traysOnLine, setTraysOnLine] = useState(9);
   const [batchesReady, setBatchesReady] = useState(1.75);
 
-  /* Measured machine times (seconds) — the new inputs */
-  const [mixerLowSec, setMixerLowSec] = useState(480); // 8:00 fastest spin
-  const [mixerHighSec, setMixerHighSec] = useState(600); // 10:00 slowest spin
-  const [hopperSec, setHopperSec] = useState(650); // batch → doughballs
+  /* Measured machine times (seconds) — the new inputs.
+     The mixer runs TWO stages back-to-back: low speed, then high speed.
+     Total spin time = low + high. Hopper then turns the batch into balls. */
+  const [mixerLowSec, setMixerLowSec] = useState(330); // 5:30 on low speed
+  const [mixerHighSec, setMixerHighSec] = useState(180); // 3:00 on high speed
+  const [hopperSec, setHopperSec] = useState(70); // batch → doughballs
 
   const onManual = () => setSuppressUntil(Date.now() / 1000 + 60);
   const running = autoOn && !suppressed;
@@ -179,26 +181,34 @@ export function TimersInline() {
   const trayLeft = TRAY_PERIOD_S - (elapsed % TRAY_PERIOD_S);
   const trayProdLeft = TRAY_PERIOD_S - ((elapsed + TRAY_PERIOD_S / 2) % TRAY_PERIOD_S);
 
-  /* Batch cadence now comes from the MEASURED times (all guarded ≥ 1s so a
+  /* Batch cadence comes from the MEASURED times (all guarded ≥ 1s so a
      blank/zero input can never produce a divide-by-zero or NaN countdown).
-     The simulated spin cycle runs on the HIGH time — a batch is GUARANTEED
-     by the high time, and the low–high window shows when it could land. */
+     Mixer = low stage + high stage run back-to-back; total spin = low+high. */
   const safeLow = Math.max(1, mixerLowSec);
-  const safeHigh = Math.max(safeLow, Math.max(1, mixerHighSec));
+  const safeHigh = Math.max(1, mixerHighSec);
   const safeHopper = Math.max(1, hopperSec);
-  const drainQuarterSec = safeHopper / 4;
-  const spinElapsed = elapsed % safeHigh; // simulated current spin progress
-  const mixerLowLeft = Math.max(0, safeLow - spinElapsed);
-  const mixerHighLeft = Math.max(0, safeHigh - spinElapsed);
-  const drainLeft = drainQuarterSec - (elapsed % drainQuarterSec);
-  const hopperEmptyLeft = safeHopper - (elapsed % safeHopper);
+  const spinTotalSec = safeLow + safeHigh;
 
-  /* Accuracy check: can the hopper keep the line fed? */
-  const hopperBallsPerMin = (calc.perBatch / safeHopper) * 60;
-  const hopperMargin = hopperBallsPerMin - calc.ppm;
-  const hopperKeepsUp = hopperMargin >= 0;
-  /* Bottleneck stage sets how often you must start a new batch */
-  const bottleneckSec = Math.max(safeHigh, safeHopper);
+  /* How often the LINE eats a whole batch's worth of balls */
+  const lineBatchSec = (calc.perBatch / calc.ppm) * 60; // 260 ÷ 24/min = 10:50
+
+  /* "Batches ready" can't drain faster than the line eats downstream, even
+     if the hopper converts faster — so effective drain = slower of the two */
+  const effDrainSec = Math.max(safeHopper, lineBatchSec);
+  const drainQuarterSec = effDrainSec / 4;
+
+  const spinElapsed = elapsed % spinTotalSec; // simulated current spin progress
+  const spinLeft = spinTotalSec - spinElapsed;
+  const onLowStage = spinElapsed < safeLow;
+  const stageLeft = onLowStage ? safeLow - spinElapsed : spinLeft;
+  const drainLeft = drainQuarterSec - (elapsed % drainQuarterSec);
+  const hopperConvertLeft = safeHopper - (elapsed % safeHopper);
+
+  /* Keep-up check: you can supply a batch every max(spin, hopper); the line
+     needs one every lineBatchSec */
+  const supplySec = Math.max(spinTotalSec, safeHopper);
+  const keepUpMargin = lineBatchSec - supplySec;
+  const keepsUp = keepUpMargin >= 0;
 
   /* Simulated ticks so the mockup visibly moves (real app: useAutoTrack) */
   const hasDeficit = calc.traysNeeded > 0 && calc.batchesNeeded > 0;
@@ -226,20 +236,20 @@ export function TimersInline() {
   }, [running, drainQuarterSec]);
   useEffect(() => {
     if (!running || !hasDeficit) return;
-    // Mixer +1 lands on the same cycle the countdown window runs on (the
-    // high time), so the display and the tick always agree.
+    // Mixer +1 lands on the same cycle the spin countdown runs on
+    // (low stage + high stage), so the display and the tick always agree.
     const id = setInterval(
       () => setBatchesReady(b => Math.min(3, Math.round((b + 1) * 100) / 100)),
-      safeHigh * 1000,
+      spinTotalSec * 1000,
     );
     return () => clearInterval(id);
-  }, [running, hasDeficit, safeHigh]);
+  }, [running, hasDeficit, spinTotalSec]);
 
   return (
     <div className="dough-tab-scope dark min-h-screen">
       <div className="max-w-3xl mx-auto px-4 py-4">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · rev 2 — measured times</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Variant A · rev 3 — two-stage mixer</p>
           <button
             type="button"
             onClick={() => setAutoOn(a => !a)}
@@ -269,13 +279,14 @@ export function TimersInline() {
             <Timer className="w-3 h-3" /> Machine Times (measured, not guessed)
           </p>
           <div className="grid grid-cols-3 gap-2">
-            <SecondsInput label="Mixer time — low" value={mixerLowSec} onChange={setMixerLowSec} />
-            <SecondsInput label="Mixer time — high" value={mixerHighSec} onChange={setMixerHighSec} />
+            <SecondsInput label="Mixer — low speed" value={mixerLowSec} onChange={setMixerLowSec} />
+            <SecondsInput label="Mixer — high speed" value={mixerHighSec} onChange={setMixerHighSec} />
             <SecondsInput label="Hopper: batch → balls" value={hopperSec} onChange={setHopperSec} />
           </div>
-          {mixerHighSec < mixerLowSec && (
-            <p className="text-[10px] text-amber-400 font-semibold mt-1.5">High time should be ≥ low time</p>
-          )}
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Total spin per batch: <span className="font-mono text-foreground font-semibold">{fmtMS(spinTotalSec)}</span>{" "}
+            (low {fmtMS(safeLow)} → high {fmtMS(safeHigh)}), then {fmtMS(safeHopper)} through the hopper.
+          </p>
         </div>
 
         {/* ── NEW: 3-batch pipeline ── */}
@@ -291,26 +302,27 @@ export function TimersInline() {
             </div>
             <div className="bg-primary/10 rounded-lg p-2 text-center border border-primary/30">
               <p className="text-[9px] uppercase tracking-wider text-primary">2 · Spinning</p>
-              <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">
-                {mixerLowLeft <= 0 ? `any sec — by ${fmtMS(mixerHighLeft)}` : `${fmtMS(mixerLowLeft)}–${fmtMS(mixerHighLeft)}`}
+              <p className="text-xs font-mono font-bold text-primary mt-1 tabular-nums">{fmtMS(spinLeft)}</p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">
+                {onLowStage ? `low speed · ${fmtMS(stageLeft)} to high` : `high speed · ${fmtMS(stageLeft)} left`}
               </p>
-              <p className="text-[9px] text-muted-foreground mt-0.5">until done</p>
             </div>
             <div className="bg-muted/20 rounded-lg p-2 text-center border border-orange-500/30">
               <p className="text-[9px] uppercase tracking-wider text-orange-400">3 · In Hopper</p>
-              <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">{fmtMS(hopperEmptyLeft)}</p>
-              <p className="text-[9px] text-muted-foreground mt-0.5">until empty</p>
+              <p className="text-xs font-mono font-bold text-orange-400 mt-1 tabular-nums">{fmtMS(hopperConvertLeft)}</p>
+              <p className="text-[9px] text-muted-foreground mt-0.5">until batch is all balls</p>
             </div>
           </div>
-          <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${hopperKeepsUp ? "text-emerald-400" : "text-amber-400"}`}>
+          <div className={`flex items-center gap-1.5 mt-2 text-[10px] font-semibold ${keepsUp ? "text-emerald-400" : "text-amber-400"}`}>
             <CheckCircle2 className="w-3 h-3 shrink-0" />
-            {hopperKeepsUp
-              ? `Hopper keeps up: ${hopperBallsPerMin.toFixed(1)} balls/min out vs ${calc.ppm} needed (+${hopperMargin.toFixed(1)})`
-              : `Hopper too slow: ${hopperBallsPerMin.toFixed(1)} balls/min out vs ${calc.ppm} needed (${hopperMargin.toFixed(1)})`}
+            {keepsUp
+              ? `Keeping up: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(keepUpMargin)} spare)`
+              : `Falling behind: a fresh batch every ${fmtMS(supplySec)}, line eats one every ${fmtMS(lineBatchSec)} (${fmtMS(-keepUpMargin)} short)`}
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">
-            Start a new batch every <span className="font-mono text-foreground">{fmtMS(bottleneckSec)}</span> — set by the
-            slowest stage ({mixerHighSec >= hopperSec ? "mixer high time" : "hopper"}).
+            Start prepping the next batch every{" "}
+            <span className="font-mono text-foreground">{fmtMS(supplySec)}</span> — set by the{" "}
+            {spinTotalSec >= safeHopper ? "mixer (low + high)" : "hopper"}.
           </p>
         </div>
 
@@ -348,16 +360,15 @@ export function TimersInline() {
             {running ? (
               <>
                 <TickBar
-                  label="Hopper drains ¼ batch in"
+                  label="Line uses ¼ batch in"
                   secLeft={drainLeft}
                   periodSec={drainQuarterSec}
                   color="text-orange-400"
                 />
                 <TickBar
                   label="Mixer finishes +1 in"
-                  right={mixerLowLeft <= 0 ? `by ${fmtMS(mixerHighLeft)}` : `${fmtMS(mixerLowLeft)}–${fmtMS(mixerHighLeft)}`}
-                  secLeft={mixerHighLeft}
-                  periodSec={mixerHighSec}
+                  secLeft={spinLeft}
+                  periodSec={spinTotalSec}
                   color="text-emerald-400"
                 />
               </>
@@ -374,11 +385,13 @@ export function TimersInline() {
             <Sparkles className="w-3 h-3" /> How the new formula works
           </p>
           <p className="text-[10px] text-muted-foreground leading-relaxed">
-            Batch timing now uses <span className="text-foreground font-semibold">your measured times</span> instead of a
-            guess from line speed: the mixer window ({fmtMS(mixerLowSec)}–{fmtMS(mixerHighSec)}) says when the next batch
-            lands, and the hopper time ({fmtMS(hopperSec)}) sets how fast the ready batch drains (¼ every{" "}
-            {fmtMS(drainQuarterSec)}). Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min ={" "}
-            {fmtMS(TRAY_PERIOD_S)} per tray). Any tap on a stepper still holds auto for 1 minute.
+            Batch timing now uses <span className="text-foreground font-semibold">your measured times</span>: a batch
+            spins {fmtMS(safeLow)} on low + {fmtMS(safeHigh)} on high = {fmtMS(spinTotalSec)}, then takes{" "}
+            {fmtMS(safeHopper)} through the hopper. Ready batches drain at the slower of hopper speed and line demand —
+            here the {effDrainSec === lineBatchSec ? "line" : "hopper"} is the limit, using a batch every{" "}
+            {fmtMS(effDrainSec)} (¼ every {fmtMS(drainQuarterSec)}).
+            Trays still follow line speed ({calc.perTray} balls ÷ {calc.ppm}/min = {fmtMS(TRAY_PERIOD_S)} per tray). Any
+            tap on a stepper still holds auto for 1 minute.
           </p>
         </div>
       </div>
