@@ -151,4 +151,5 @@
 - [Stick pep types](stick-pep-types.md) — spec importer stick applicator = pepperoni AND cheese sticks (both are `pepperonis` pep types, not cheese recipes); recognized in BOTH the parse prompt and STICK_PEP_NAME_RE/isStickPepOnlyCheeseRecipe.
 - [Shipping guide import](shipping-guide-import.md) — deterministic packaging-settings importer; omit-don't-guess mapping, targeted profile merge bypasses saveProfile guard by design.
 - [Profile-cleanup migration](profile-cleanup-migration.md) — one-time spec-sheet profile reconciliation in shared @workspace/profile-cleanup; mobile MUST apply via functional setAppState; any "has real data" gate must exclude dough or dough-only profiles become ghosts.
+- [Mockup graduation pattern](mockup-graduation-inline.md) — approved canvas mockups are inlined into the tab's JSX in home.tsx (keep all logic verbatim); e2e via throwaway account, then clean up.
 - [Sync reset boundary hardening](sync-reset-boundary-hardening.md) — epoch guard must fail-closed once a scope was ever reset; resetAt→resetBoundaryAt clamp needs a small future-skew allowance, not exact now, or session-fence tests break.

@@ -362,6 +362,8 @@ import {
   LogOut,
   Smartphone,
   Snowflake,
+  Zap,
+  MoveDown,
   Blend,
   ClipboardCheck,
   Users,
@@ -2022,6 +2024,87 @@ function StepperField({
         );
       }}
     />
+  );
+}
+
+// Vertical pipeline node for the Packaging tab timeline (graduated from the
+// "Merged A+B" canvas mockup). Purely presentational.
+function TimelineNode({
+  icon: Icon,
+  active,
+  done,
+  last,
+}: {
+  icon: React.ElementType;
+  active?: boolean;
+  done?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <div className="relative flex flex-col items-center w-10 shrink-0 mr-3 pt-2">
+      <div
+        className={`w-10 h-10 rounded-full flex items-center justify-center z-10 border-2 ${
+          done
+            ? "bg-emerald-950/80 border-emerald-600/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+            : active
+              ? "bg-primary/20 border-primary/50 text-primary shadow-[0_0_15px_rgba(255,149,0,0.3)]"
+              : "bg-muted/50 border-muted text-muted-foreground"
+        }`}
+      >
+        {done ? <CheckCircle2 className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
+      </div>
+      {!last && (
+        <div
+          className={`w-1 grow mt-2 mb-[-8px] rounded-full ${
+            done ? "bg-emerald-600/30" : active ? "bg-gradient-to-b from-primary/50 to-muted" : "bg-muted"
+          }`}
+        />
+      )}
+    </div>
+  );
+}
+
+// Compact − value/max + stepper used in the Packaging draining panel
+// (graduated from the "Merged A+B" canvas mockup).
+function PkgMiniStepper({
+  value,
+  onDec,
+  onInc,
+  max,
+  label,
+}: {
+  value: number;
+  onDec: () => void;
+  onInc: () => void;
+  max?: number;
+  label: string;
+}) {
+  const atMax = max !== undefined && value >= max;
+  return (
+    <div className="flex-1 min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-500/80 mb-1 truncate">{label}</p>
+      <div className="flex items-stretch h-10 w-full">
+        <button
+          type="button"
+          onClick={() => { navigator.vibrate?.(8); onDec(); }}
+          className="w-10 rounded-l-md border border-r-0 border-amber-700/30 bg-amber-950/50 hover:bg-amber-900/50 text-xl font-bold text-amber-400 transition-colors shrink-0 active:bg-amber-900/80 select-none"
+        >
+          −
+        </button>
+        <div className={`flex-1 border-y border-amber-700/30 bg-background/20 flex items-center justify-center text-lg font-mono font-bold tabular-nums${atMax ? " text-amber-500" : " text-amber-100"}`}>
+          {value}
+          {max !== undefined && <span className="text-xs text-amber-500/70 ml-1 font-sans font-normal">/{max}</span>}
+        </div>
+        <button
+          type="button"
+          onClick={() => { if (!atMax) { navigator.vibrate?.(8); onInc(); } }}
+          disabled={atMax}
+          className={`w-10 rounded-r-md border border-l-0 border-amber-700/30 bg-amber-950/50 hover:bg-amber-900/50 text-xl font-bold text-amber-400 transition-colors shrink-0 active:bg-amber-900/80 select-none${atMax ? " opacity-30 cursor-not-allowed" : ""}`}
+        >
+          +
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -12000,58 +12083,7 @@ export default function Home() {
 
               {/* ─── PACKAGING ─── */}
               <TabsContent value="packaging">
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                  <CardHeader className="pb-1 pt-3 px-4">
-                    <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                      <Package className="w-3.5 h-3.5" /> Packaging
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-4">
-                    {(() => {
-                      const cartonedVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
-                      const isCartoned = isCartonedValue(cartonedVal);
-                      const isLabeled = cartonedVal === "labeled";
-                      const posLabel = isLabeled ? labelPositionLabel(v.labelPosition as string) : "";
-                      const badgeText = isCartoned
-                        ? "Cartoned"
-                        : isLabeled
-                          ? posLabel ? `Labeled · ${posLabel}` : "Labeled"
-                          : "N/A";
-                      return (
-                        <span
-                          className={`inline-block mb-3 px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider border ${
-                            isCartoned
-                              ? "bg-primary/15 text-primary border-primary/40"
-                              : "bg-muted/40 text-muted-foreground border-border/60"
-                          }`}
-                        >
-                          {badgeText}
-                        </span>
-                      );
-                    })()}
-                    <div className="space-y-1.5">
-                      {isCartonedValue(v.cartoned as string) && (
-                        <div className="flex items-baseline justify-between gap-2 text-sm">
-                          <span className="text-muted-foreground">Cartons / Case</span>
-                          <span className="font-bold tabular-nums text-foreground whitespace-nowrap">
-                            {Number(v.cartonsPerCase) > 0 ? fmtNum(Number(v.cartonsPerCase), 0) : "—"}
-                          </span>
-                        </div>
-                      )}
-                      {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
-                        const val = ((v[f.name] as string) ?? "").trim();
-                        return (
-                          <div key={f.name} className="flex items-baseline justify-between gap-2 text-sm">
-                            <span className="text-muted-foreground">{f.label}</span>
-                            <span className="font-bold tabular-nums text-foreground capitalize whitespace-nowrap">
-                              {val || "—"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="flex flex-col">
                 {/* ─── Finishing — Freezer Draining (just-ended run still exiting freezer) ─── */}
                 {(() => {
                   // Pick the most-recently-ended run (other than the active one)
@@ -12087,7 +12119,6 @@ export default function Home() {
                   const skids = Number(dv.skidsCompleted) || 0;
                   const casesOnSkid = Number(dv.casesOnCurrentSkid) || 0;
                   const casesDone = skids * casesPerSkid + casesOnSkid;
-                  const casesLeft = Math.max(0, casesNeeded - casesDone);
                   const id = drainingRun.id;
                   const name =
                     `${drainingRun.brand ?? ""}${drainingRun.flavor ? ` – ${drainingRun.flavor}` : ""}`.trim() ||
@@ -12101,280 +12132,398 @@ export default function Home() {
                     casesPerSkid > 0 && casesOnSkid > 0 &&
                     casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
                   return (
-                    <Card className="bg-amber-950/10 border-amber-600/40 shadow-md mb-4">
-                      <CardHeader className="pb-1 pt-3 px-4">
-                        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-amber-400">
-                          Finishing — Freezer Draining
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="px-4 pb-4 space-y-2">
-                        <p className="text-base font-semibold text-foreground truncate">{name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          Finished pizzas are still exiting the freezer. Log skids &amp; cases as they come off.
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Total Skids Completed</p>
-                            <div className="flex items-stretch">
-                              <button
-                                type="button"
-                                onClick={() => { navigator.vibrate?.(8); updateDrainingRunValues(id, { skidsCompleted: Math.max(0, skids - 1) }); }}
-                                className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
-                              >
-                                −
-                              </button>
-                              <div className="flex-1 h-12 border-y border-input bg-background flex items-center justify-center text-lg font-mono font-bold tabular-nums text-foreground">
-                                {skids}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); updateDrainingRunValues(id, { skidsCompleted: skids + 1 }); }}
-                                className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
-                              >
-                                +
-                              </button>
+                    <div className="flex mb-4">
+                      <TimelineNode icon={Zap} active />
+                      <div className="flex-1 mt-2">
+                        <div className="bg-amber-950/30 border border-amber-600/30 rounded-xl p-3 relative overflow-hidden flex flex-col gap-3">
+                          <div className="absolute top-0 left-0 right-0 h-0.5 bg-amber-950">
+                            <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${pct * 100}%` }} />
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-500 mb-0.5">Draining Prior Run</p>
+                              <p className="text-sm font-semibold text-amber-100 truncate">{name}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-[10px] font-mono font-bold text-amber-500 mb-0.5">
+                                {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")} left
+                              </p>
+                              <p className="text-[10px] font-bold uppercase text-amber-200">{fmtNum(casesDone, 0)} / {fmtNum(casesNeeded, 0)} cases</p>
                             </div>
                           </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Cases on Current Skid</p>
-                            <div className="flex items-stretch">
-                              <button
-                                type="button"
-                                onClick={() => { navigator.vibrate?.(8); updateDrainingRunValues(id, { casesOnCurrentSkid: Math.max(0, casesOnSkid - 1) }); }}
-                                className="h-12 w-14 rounded-l-md border border-r-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
-                              >
-                                −
-                              </button>
-                              <div className="flex-1 h-12 border-y border-input bg-background flex items-center justify-center text-lg font-mono font-bold tabular-nums text-foreground">
-                                {casesOnSkid}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => { if (maxCasesOnSkid !== undefined && casesOnSkid >= maxCasesOnSkid) return; navigator.vibrate?.(8); updateDrainingRunValues(id, { casesOnCurrentSkid: casesOnSkid + 1 }); }}
-                                className="h-12 w-14 rounded-r-md border border-l-0 border-input bg-muted/40 hover:bg-muted text-xl font-bold text-foreground transition-colors shrink-0 active:bg-muted/80 select-none"
-                              >
-                                +
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                        {skidNearlyFull && (
-                          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            Skid nearly full — {casesPerSkid - casesOnSkid} case{casesPerSkid - casesOnSkid !== 1 ? "s" : ""} to go
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => { navigator.vibrate?.(15); updateDrainingRunValues(id, { skidsCompleted: skids + 1, casesOnCurrentSkid: 0 }); }}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/40 text-emerald-400 text-sm font-semibold transition-colors active:scale-[0.98]"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          Skid Done — log &amp; reset
-                        </button>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="bg-muted/20 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold tabular-nums text-emerald-400">{fmtNum(casesDone, 0)}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Cases done</p>
-                          </div>
-                          <div className="bg-muted/20 rounded-lg p-3 text-center">
-                            <p className="text-2xl font-mono font-bold tabular-nums">{fmtNum(casesLeft, 0)}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5">Cases left</p>
-                          </div>
-                        </div>
-                        <Separator className="opacity-30 my-1" />
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Freezer Emptying</p>
-                          <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-1000 bg-amber-500"
-                              style={{ width: `${pct * 100}%` }}
+                          <div className="flex gap-2 items-end">
+                            <PkgMiniStepper
+                              label="Skids"
+                              value={skids}
+                              max={maxSkids}
+                              onDec={() => updateDrainingRunValues(id, { skidsCompleted: Math.max(0, skids - 1) })}
+                              onInc={() => updateDrainingRunValues(id, { skidsCompleted: skids + 1 })}
                             />
+                            <PkgMiniStepper
+                              label="Cases on skid"
+                              value={casesOnSkid}
+                              max={maxCasesOnSkid}
+                              onDec={() => updateDrainingRunValues(id, { casesOnCurrentSkid: Math.max(0, casesOnSkid - 1) })}
+                              onInc={() => updateDrainingRunValues(id, { casesOnCurrentSkid: casesOnSkid + 1 })}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => { navigator.vibrate?.(15); updateDrainingRunValues(id, { skidsCompleted: skids + 1, casesOnCurrentSkid: 0 }); }}
+                              className="w-12 h-10 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 rounded-lg flex items-center justify-center active:scale-95 transition-all shrink-0"
+                              title="Skid done — log & reset"
+                              data-testid="btn-draining-skid-done"
+                            >
+                              <CheckCircle2 className="w-5 h-5" />
+                            </button>
                           </div>
-                          <p className="text-[10px] font-mono font-semibold text-right text-amber-400">
-                            {`Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
-                          </p>
+                          {skidNearlyFull && (
+                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              Skid nearly full — {casesPerSkid - casesOnSkid} case{casesPerSkid - casesOnSkid !== 1 ? "s" : ""} to go
+                            </div>
+                          )}
                         </div>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   );
                 })()}
-                <Card className="bg-card/50 border-border/50 shadow-md mb-4">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Current Progress
-                        </CardTitle>
-                        {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const next = !autoTrackProgress;
-                              setAutoTrackProgress(next);
-                              if (next) {
-                                autoSuppressUntilRef.current = 0;
-                                fireAutoTrackNow();
-                              }
-                            }}
-                            className={`flex items-center gap-1 text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${autoTrackProgress ? "border-primary/50 bg-primary/10 text-primary" : "border-border bg-muted/20 text-muted-foreground"}`}
-                          >
-                            <Sparkles className="w-2.5 h-2.5" />
-                            {autoTrackProgress ? "Auto" : "Manual"}
-                          </button>
-                        )}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-4 space-y-2">
-                      {(() => {
-                        const maxSkids = v.casesPerSkid > 0 ? Math.floor(v.casesNeeded / v.casesPerSkid) : undefined;
-                        const maxCasesOnSkid = v.casesPerSkid > 0 ? v.casesPerSkid : undefined;
-                        const s = autoTrackSuggestion;
-                        const suppressed = Date.now() < autoSuppressUntilRef.current;
-                        const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
-                        const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
-                        return (
-                          <>
-                            {autoTrackProgress && s && suppressed && (
-                              <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px]">
-                                <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
-                                <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
+                {/* ─── Freezer stage (filling while running, emptying for active ended run) ─── */}
+                {(() => {
+                  const showFilling = runStatus === "running" && Number(ve.freezerTime) > 0;
+                  const showEmptying =
+                    Number(ve.freezerTime) > 0 && !!lastEndedRun?.endedAt && lastEndedRun.id === currentRunId;
+                  if (!showFilling && !showEmptying) return null;
+                  return (
+                    <div className="flex mb-4">
+                      <TimelineNode icon={Snowflake} active />
+                      <div className="flex-1 mt-2 space-y-2">
+                        {showFilling && (() => {
+                          const totalSecs = Number(ve.freezerTime) * 60;
+                          const elapsedSecs = liveFreezerMin * 60;
+                          const remainSecs = Math.max(0, totalSecs - elapsedSecs);
+                          const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
+                          const mm = Math.floor(remainSecs / 60);
+                          const ss = Math.floor(remainSecs % 60);
+                          const done = remainSecs === 0;
+                          return (
+                            <div className="bg-primary/5 border border-primary/20 rounded-lg p-3">
+                              <div className="flex justify-between items-end mb-2">
+                                <span className="text-sm font-semibold uppercase tracking-wider text-primary">Freezer Loading</span>
+                                <span className={`text-xs font-mono font-bold ${done ? "text-green-400" : "text-primary/80"}`}>
+                                  {done ? "✓ Freezer full" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} rem`}
+                                </span>
                               </div>
-                            )}
-                            <div className="grid grid-cols-2 gap-2">
-                              <StepperField
-                                control={form.control}
-                                name="skidsCompleted"
-                                label={autoTrackProgress && s && !suppressed ? "Total Skids Completed · Auto" : "Total Skids Completed"}
-                                max={maxSkids}
-                                suggestion={!autoTrackProgress && s && s.skids !== v.skidsCompleted ? s.skids : null}
-                                onSuggest={() => { form.setValue("skidsCompleted", s!.skids, { shouldDirty: true }); form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                                onManualChange={onManual}
-                              />
-                              <StepperField
-                                control={form.control}
-                                name="casesOnCurrentSkid"
-                                label={autoTrackProgress && s && !suppressed ? "Cases on Current Skid · Auto" : "Cases on Current Skid"}
-                                max={maxCasesOnSkid}
-                                suggestion={!autoTrackProgress && s && s.casesOnSkid !== v.casesOnCurrentSkid ? s.casesOnSkid : null}
-                                onSuggest={() => { form.setValue("casesOnCurrentSkid", s!.casesOnSkid, { shouldDirty: true }); }}
-                                onManualChange={onManual}
-                              />
+                              <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary shadow-[0_0_10px_rgba(255,149,0,0.5)]"}`}
+                                  style={{ width: `${pct * 100}%` }}
+                                />
+                              </div>
                             </div>
-                            {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.vibrate?.(10);
-                                  form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
-                                  form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
-                                }}
-                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
-                              >
-                                <Sparkles className="w-3.5 h-3.5" />
-                                Apply expected — {s.skids} skids · {s.casesOnSkid} cases
-                              </button>
-                            )}
-                          </>
-                        );
-                      })()}
-                      {/* Skid nearly full nudge */}
-                      {v.casesPerSkid > 0 && v.casesOnCurrentSkid > 0 &&
-                        v.casesOnCurrentSkid >= v.casesPerSkid - 3 &&
-                        v.casesOnCurrentSkid < v.casesPerSkid && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-600/30 text-amber-400 text-xs font-semibold">
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                          Skid nearly full — {v.casesPerSkid - v.casesOnCurrentSkid} case{v.casesPerSkid - v.casesOnCurrentSkid !== 1 ? "s" : ""} to go
-                        </div>
-                      )}
-                      {/* Skid Done quick action */}
-                      {(runStatus === "running" || runStatus === "paused") && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.vibrate?.(15);
-                            autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
-                            form.setValue("skidsCompleted", v.skidsCompleted + 1, { shouldDirty: true });
-                            form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
-                          }}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/40 text-emerald-400 text-sm font-semibold transition-colors active:scale-[0.98]"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          Skid Done — log &amp; reset
-                        </button>
-                      )}
-                      {/* Freezer countdowns */}
-                      {Number(ve.freezerTime) > 0 && (runStatus === "running" || runStatus === "ended") && (
-                        <Separator className="opacity-30 my-1" />
-                      )}
-                      {runStatus === "running" && Number(ve.freezerTime) > 0 && (() => {
-                        const totalSecs = Number(ve.freezerTime) * 60;
-                        const elapsedSecs = liveFreezerMin * 60;
-                        const remainSecs = Math.max(0, totalSecs - elapsedSecs);
-                        const pct = totalSecs > 0 ? Math.min(elapsedSecs / totalSecs, 1) : 0;
-                        const mm = Math.floor(remainSecs / 60);
-                        const ss = Math.floor(remainSecs % 60);
-                        const done = remainSecs === 0;
-                        return (
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Freezer Filling</p>
-                            <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-green-500" : "bg-primary"}`}
-                                style={{ width: `${pct * 100}%` }}
-                              />
+                          );
+                        })()}
+                        {showEmptying && (() => {
+                          const freezerMs = Number(ve.freezerTime) * 60000;
+                          const remainMs = Math.max(0, lastEndedRun!.endedAt! + freezerMs - nowTime.getTime());
+                          const pct = Math.min(1 - remainMs / freezerMs, 1);
+                          const mm = Math.floor(remainMs / 60000);
+                          const ss = Math.floor((remainMs % 60000) / 1000);
+                          const done = remainMs === 0;
+                          return (
+                            <div className="bg-amber-950/20 border border-amber-600/30 rounded-lg p-3">
+                              <div className="flex justify-between items-end mb-2">
+                                <span className="text-sm font-semibold uppercase tracking-wider text-amber-400">Freezer Emptying</span>
+                                <span className={`text-xs font-mono font-bold ${done ? "text-emerald-400" : "text-amber-400"}`}>
+                                  {done ? "✓ Freezer empty" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 rounded-full bg-background border border-amber-600/10 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
+                                  style={{ width: `${pct * 100}%` }}
+                                />
+                              </div>
                             </div>
-                            <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-green-400" : "text-muted-foreground"}`}>
-                              {done ? "✓ Freezer full" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`}
-                            </p>
-                          </div>
-                        );
-                      })()}
-                      {Number(ve.freezerTime) > 0 && lastEndedRun?.endedAt && lastEndedRun.id === currentRunId && (() => {
-                        const freezerMs = Number(ve.freezerTime) * 60000;
-                        const remainMs = Math.max(0, lastEndedRun.endedAt + freezerMs - nowTime.getTime());
-                        const pct = Math.min(1 - remainMs / freezerMs, 1);
-                        const mm = Math.floor(remainMs / 60000);
-                        const ss = Math.floor((remainMs % 60000) / 1000);
-                        const done = remainMs === 0;
-                        return (
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Freezer Emptying</p>
-                            <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-1000 ${done ? "bg-emerald-500" : "bg-amber-500"}`}
-                                style={{ width: `${pct * 100}%` }}
-                              />
-                            </div>
-                            <p className={`text-[10px] font-mono font-semibold text-right ${done ? "text-emerald-400" : "text-amber-400"}`}>
-                              {done ? "✓ Freezer empty" : `Draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
-                            </p>
-                          </div>
-                        );
-                      })()}
-                    </CardContent>
-                  </Card>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  );
+                })()}
 
-                  {/* Output metrics */}
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    <div className="bg-muted/20 rounded-lg p-3 text-center">
-                      <p className="text-3xl font-mono font-bold tabular-nums text-emerald-400">{fmtNum(calc.casesCompleted, 0)}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Cases done</p>
-                    </div>
-                    <div className="bg-muted/20 rounded-lg p-3 text-center">
-                      <p className="text-3xl font-mono font-bold tabular-nums">{fmtNum(calc.casesLeftToRun, 0)}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Cases left</p>
-                    </div>
-                    <div className="bg-muted/20 rounded-lg p-3 text-center">
-                      <p className="text-3xl font-mono font-bold tabular-nums">{fmtNum(calc.casesOnLine, 0)}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">On line</p>
+                {/* ─── Line assembly stage ─── */}
+                <div className="flex mb-4">
+                  <TimelineNode icon={MoveDown} done />
+                  <div className="flex-1 mt-2">
+                    <div className="flex items-center justify-between bg-muted/10 border border-border/40 rounded-lg p-3">
+                      <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Line Assembly</span>
+                      <span className="text-lg font-mono font-bold tabular-nums text-foreground">
+                        {fmtNum(calc.casesOnLine, 0)}{" "}
+                        <span className="text-xs text-muted-foreground font-sans font-normal uppercase tracking-widest">on line</span>
+                      </span>
                     </div>
                   </div>
-                  {calc.extraCases > 0 && (
-                    <div className="mt-3 rounded-lg border border-emerald-700/40 bg-emerald-950/30 p-3 text-center">
-                      <p className="text-3xl font-mono font-bold tabular-nums text-emerald-400">+{fmtNum(calc.extraCases, 0)}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">Extra cases beyond target</p>
+                </div>
+
+                {/* ─── Active Skid Building (hero) ─── */}
+                <div className="flex">
+                  <TimelineNode icon={Boxes} last active />
+                  <div className="flex-1 mt-2">
+                    <div className="bg-card/60 border border-primary/30 rounded-2xl overflow-hidden shadow-[0_8px_30px_rgba(255,149,0,0.08)] flex flex-col">
+                      <div className="px-4 py-3 flex items-center justify-between bg-primary/5 border-b border-primary/20">
+                        <h3 className="text-sm font-bold text-primary uppercase tracking-wider">Active Skid Building</h3>
+                        {(runStatus === "running" || runStatus === "paused") && autoTrackSuggestion && (
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${autoTrackProgress ? "bg-primary animate-pulse shadow-[0_0_8px_rgba(255,149,0,0.8)]" : "bg-muted-foreground"}`} />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = !autoTrackProgress;
+                                setAutoTrackProgress(next);
+                                if (next) {
+                                  autoSuppressUntilRef.current = 0;
+                                  fireAutoTrackNow();
+                                }
+                              }}
+                              className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                            >
+                              <Sparkles className="w-3 h-3" /> {autoTrackProgress ? "Auto" : "Manual"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-5 text-center space-y-5">
+                        {(() => {
+                          const casesPerSkid = Number(v.casesPerSkid) || 0;
+                          const casesOnSkid = Number(v.casesOnCurrentSkid) || 0;
+                          const skids = Number(v.skidsCompleted) || 0;
+                          const maxSkids = casesPerSkid > 0 ? Math.floor(v.casesNeeded / casesPerSkid) : undefined;
+                          const totalSkids =
+                            casesPerSkid > 0 && Number(v.casesNeeded) > 0 ? Math.ceil(Number(v.casesNeeded) / casesPerSkid) : 0;
+                          const s = autoTrackSuggestion;
+                          const suppressed = Date.now() < autoSuppressUntilRef.current;
+                          const suppressedMinsLeft = suppressed ? Math.ceil((autoSuppressUntilRef.current - Date.now()) / 60000) : 0;
+                          const onManual = () => { autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS; };
+                          const skidNearlyFull =
+                            casesPerSkid > 0 && casesOnSkid > 0 &&
+                            casesOnSkid >= casesPerSkid - 3 && casesOnSkid < casesPerSkid;
+                          const skidPct = casesPerSkid > 0 ? Math.min(casesOnSkid / casesPerSkid, 1) : 0;
+                          return (
+                            <>
+                              {autoTrackProgress && s && suppressed && (
+                                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left">
+                                  <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
+                                  <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0">Resume now</button>
+                                </div>
+                              )}
+
+                              <div>
+                                <div className="flex justify-center items-end gap-3 font-mono">
+                                  <button
+                                    type="button"
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); form.setValue("skidsCompleted", Math.max(0, skids - 1), { shouldDirty: true }); }}
+                                    className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
+                                    data-testid="btn-dec-skidsCompleted"
+                                  >
+                                    −
+                                  </button>
+                                  <div className="text-[5rem] leading-[1] font-black tabular-nums tracking-tighter text-foreground drop-shadow-md" data-testid="text-skidsCompleted">
+                                    {skids}
+                                    {totalSkids > 0 && (
+                                      <span className="text-[2.5rem] text-muted-foreground font-bold">/{totalSkids}</span>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => { if (maxSkids !== undefined && skids >= maxSkids) return; navigator.vibrate?.(8); onManual(); form.setValue("skidsCompleted", skids + 1, { shouldDirty: true }); }}
+                                    className="w-12 h-16 rounded-xl bg-muted/40 text-2xl font-bold text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-all mb-1 select-none flex items-center justify-center"
+                                    data-testid="btn-inc-skidsCompleted"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mt-2">Skids Completed</p>
+                              </div>
+
+                              <div className="bg-background/50 rounded-xl p-4 border border-border/50 shadow-inner">
+                                <div className="flex justify-between items-center mb-3">
+                                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Cases on Skid</span>
+                                  <div className="font-mono text-xl font-bold tabular-nums">
+                                    <span className="text-foreground" data-testid="text-casesOnCurrentSkid">{casesOnSkid}</span>
+                                    <span className="text-muted-foreground">/{casesPerSkid > 0 ? casesPerSkid : "—"}</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => { navigator.vibrate?.(8); onManual(); form.setValue("casesOnCurrentSkid", Math.max(0, casesOnSkid - 1), { shouldDirty: true }); }}
+                                    className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
+                                    data-testid="btn-dec-casesOnCurrentSkid"
+                                  >
+                                    −
+                                  </button>
+                                  <div className="flex-1 relative h-8 bg-muted/30 rounded-md overflow-hidden border border-border/40">
+                                    <div
+                                      className="absolute inset-y-0 left-0 bg-primary transition-all duration-300 ease-out shadow-[0_0_15px_rgba(255,149,0,0.6)]"
+                                      style={{ width: `${skidPct * 100}%` }}
+                                    />
+                                    {skidNearlyFull && (
+                                      <div className="absolute inset-0 flex items-center justify-center text-primary-foreground font-bold text-[10px] uppercase tracking-widest animate-pulse">
+                                        Nearly Full
+                                      </div>
+                                    )}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => { if (casesPerSkid > 0 && casesOnSkid >= casesPerSkid) return; navigator.vibrate?.(8); onManual(); form.setValue("casesOnCurrentSkid", casesOnSkid + 1, { shouldDirty: true }); }}
+                                    className="w-14 h-12 rounded-lg bg-muted/40 border border-border/50 text-2xl font-bold text-foreground hover:bg-muted active:scale-95 transition-all shrink-0 select-none flex items-center justify-center"
+                                    data-testid="btn-inc-casesOnCurrentSkid"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              {!autoTrackProgress && s && (s.skids !== v.skidsCompleted || s.casesOnSkid !== v.casesOnCurrentSkid) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.vibrate?.(10);
+                                    form.setValue("skidsCompleted", s.skids, { shouldDirty: true });
+                                    form.setValue("casesOnCurrentSkid", s.casesOnSkid, { shouldDirty: true });
+                                  }}
+                                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-xs font-semibold transition-colors"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                  Apply expected — {s.skids} skids · {s.casesOnSkid} cases
+                                </button>
+                              )}
+
+                              {(runStatus === "running" || runStatus === "paused") && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.vibrate?.(15);
+                                    autoSuppressUntilRef.current = Date.now() + AUTO_SUPPRESS_MS;
+                                    form.setValue("skidsCompleted", skids + 1, { shouldDirty: true });
+                                    form.setValue("casesOnCurrentSkid", 0, { shouldDirty: true });
+                                  }}
+                                  className="w-full h-16 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 text-xl font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+                                  data-testid="btn-skid-done"
+                                >
+                                  <CheckCircle2 className="w-7 h-7" />
+                                  Skid Done
+                                </button>
+                              )}
+
+                              <div className="space-y-2">
+                                <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
+                                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
+                                  <span className="text-2xl font-mono font-black tabular-nums text-foreground">
+                                    {casesPerSkid > 0 ? (
+                                      <>
+                                        {fmtNum(Math.floor(calc.casesLeftToRun / casesPerSkid), 0)}
+                                        <span className="text-muted-foreground mx-1">/</span>
+                                        {fmtNum(calc.casesLeftToRun % casesPerSkid, 0)}
+                                      </>
+                                    ) : (
+                                      fmtNum(calc.casesLeftToRun, 0)
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
+                                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Cases Done</span>
+                                  <span className="text-2xl font-mono font-black tabular-nums text-emerald-400">{fmtNum(calc.casesCompleted, 0)}</span>
+                                </div>
+                                {calc.extraCases > 0 && (
+                                  <div className="bg-emerald-950/30 border border-emerald-700/40 rounded-xl p-3 flex items-center justify-between">
+                                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Extra Cases Beyond Target</span>
+                                    <span className="text-2xl font-mono font-black tabular-nums text-emerald-400">+{fmtNum(calc.extraCases, 0)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
                     </div>
-                  )}
+                  </div>
+                </div>
+                </div>
+
+                {/* ─── Packaging Config (collapsible) ─── */}
+                <details className="group mt-6 rounded-xl border border-border/40 bg-card/40 overflow-hidden">
+                  <summary className="list-none cursor-pointer px-4 py-3 flex items-center justify-between select-none [&::-webkit-details-marker]:hidden">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-bold text-foreground">Packaging Config</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const cartonedVal = ((v.cartoned as string) ?? "").trim().toLowerCase();
+                        const isCartoned = isCartonedValue(cartonedVal);
+                        const isLabeled = cartonedVal === "labeled";
+                        const posLabel = isLabeled ? labelPositionLabel(v.labelPosition as string) : "";
+                        const badgeText = isCartoned
+                          ? "Cartoned"
+                          : isLabeled
+                            ? posLabel ? `Labeled · ${posLabel}` : "Labeled"
+                            : "N/A";
+                        return (
+                          <div className="flex gap-1.5 group-open:hidden">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                                isCartoned
+                                  ? "bg-primary/10 text-primary border-primary/20"
+                                  : "bg-muted text-muted-foreground border-border/60"
+                              }`}
+                            >
+                              {badgeText}
+                            </span>
+                            {isCartoned && Number(v.cartonsPerCase) > 0 && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-muted text-muted-foreground">
+                                {fmtNum(Number(v.cartonsPerCase), 0)} / case
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      <ChevronDown className="w-4 h-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                    </div>
+                  </summary>
+                  <div className="px-4 pb-4 border-t border-border/20 pt-3 bg-card/60">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                      {isCartonedValue(v.cartoned as string) && (
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Cartons/Case</span>
+                          <span className="text-sm font-mono font-bold text-foreground">
+                            {Number(v.cartonsPerCase) > 0 ? fmtNum(Number(v.cartonsPerCase), 0) : "—"}
+                          </span>
+                        </div>
+                      )}
+                      {((v.cartoned as string) ?? "").trim().toLowerCase() === "labeled" && (
+                        <div className="flex flex-col">
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Label Position</span>
+                          <span className="text-sm font-semibold text-foreground capitalize truncate">
+                            {labelPositionLabel(v.labelPosition as string) || "—"}
+                          </span>
+                        </div>
+                      )}
+                      {PACKAGING_FIELDS.filter((f) => f.name !== "cartoned").map((f) => {
+                        const val = ((v[f.name] as string) ?? "").trim();
+                        return (
+                          <div key={f.name} className="flex flex-col">
+                            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold truncate">{f.label}</span>
+                            <span className="text-sm font-semibold text-foreground capitalize truncate" title={val}>
+                              {val || "—"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </details>
               </TabsContent>
 
               {/* ─── SAUCE ─── */}
