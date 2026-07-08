@@ -797,7 +797,7 @@ router.post(
 // ./qualityChecks so they can be unit-tested without a DB.
 router.post(
   "/inventory/quality-checks",
-  requireCapability("use-ai-tools"),
+  requireCapability("manage-inventory"),
   async (req, res): Promise<void> => {
     const validation = validateRecordQualityCheckBody(req.body);
     if (!validation.ok) {
@@ -841,7 +841,7 @@ router.post(
 // ignored rather than erroring so a stray query param never breaks the view.
 router.get(
   "/inventory/quality-checks",
-  requireCapability("use-ai-tools"),
+  requireCapability("manage-inventory"),
   async (req, res): Promise<void> => {
     const filter = parseHistoryFilter(req.query);
     const conditions = [];

@@ -144,13 +144,13 @@ function QualityRow({ check }: { check: QualityCheckRecord }) {
 
 export default function QualityHistoryTab() {
   const { hasCapability } = useMe();
-  const canUseAiTools = hasCapability("use-ai-tools");
+  const canManageInventory = hasCapability("manage-inventory");
   const [product, setProduct] = useState<ProductFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
 
   const query = useQuery({
     queryKey: ["qualityChecks", product, status],
-    enabled: canUseAiTools,
+    enabled: canManageInventory,
     queryFn: () =>
       fetchQualityChecks({
         productType: product === "all" ? undefined : product,
@@ -158,7 +158,7 @@ export default function QualityHistoryTab() {
       }),
   });
 
-  if (!canUseAiTools) {
+  if (!canManageInventory) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-10 text-center">
         <Lock className="w-8 h-8 mx-auto text-muted-foreground mb-3" />
