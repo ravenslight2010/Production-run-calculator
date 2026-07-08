@@ -10953,24 +10953,22 @@ export default function Home() {
                 >
                   Copy
                 </Button>
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
                   onClick={addRun}
                   disabled={dayState.runs.length >= MAX_RUNS}
-                  className="h-6 px-2 gap-1 text-xs"
+                  className="h-6 flex items-center gap-1 text-xs font-bold text-amber-500 bg-amber-500/10 px-2 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <Plus className="w-3 h-3" />
                   <span className="hidden sm:inline">New Run</span>
-                </Button>
+                </button>
               </div>
                   </div>
 
                   {/* Run setup — brand / flavor / target cases */}
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                  <div className="rounded-xl border-2 border-border/70 bg-card p-4">
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="text-[9px] uppercase tracking-widest text-primary/70 font-semibold">Current Run</div>
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-1">Run Setup <Pencil className="w-3 h-3 ml-1" /></div>
                       <div className="flex items-center gap-1.5">
               {v.dieType && (
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-muted/40 border border-border/50 text-muted-foreground tabular-nums">
@@ -10990,15 +10988,16 @@ export default function Home() {
               })()}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-start justify-center sm:justify-start gap-x-4 gap-y-3">
-                      <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-stretch gap-3">
+                      <div className="flex-1 min-w-[240px] bg-background/60 border border-border/60 rounded-lg p-2.5">
+                        <div className="text-[10px] text-muted-foreground uppercase font-medium mb-0.5">Brand &amp; Flavor</div>
+                        <div className="flex items-center gap-1">
               <div className="relative">
-                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Brand</div>
                 <div className="relative">
                   <input
                     value={showBrandDrop ? brandInput : (currentRun?.brand ?? "")}
                     placeholder="Brand…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    className="w-28 bg-transparent border-none text-base font-bold outline-none cursor-pointer p-0"
                     readOnly={!showBrandDrop}
                     onClick={() => {
                       setBrandInput(currentRun?.brand ?? "");
@@ -11066,14 +11065,13 @@ export default function Home() {
                   )}
                 </div>
               </div>
-                        <div className="text-muted-foreground/40 text-lg font-light mt-4">–</div>
+                        <span className="text-primary font-bold text-base mx-1">—</span>
               <div className="relative">
-                <div className="text-[9px] uppercase tracking-widest text-muted-foreground/60 font-semibold mb-0.5 text-center">Flavor</div>
                 <div className="relative">
                   <input
                     value={showFlavorDrop ? flavorInput : (currentRun?.flavor ?? "")}
                     placeholder="Flavor…"
-                    className="w-28 bg-background/60 border border-border/60 rounded px-2 py-1 text-sm font-semibold text-center outline-none focus:border-primary cursor-pointer"
+                    className="w-28 bg-transparent border-none text-base font-bold outline-none cursor-pointer p-0"
                     readOnly={!showFlavorDrop}
                     onClick={() => {
                       setFlavorInput(currentRun?.flavor ?? "");
@@ -11145,9 +11143,9 @@ export default function Home() {
                 </div>
               </div>
                       </div>
-                      <div className="w-40">
-            <div className="px-1">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1">Cases Needed</label>
+                      </div>
+                      <div className="w-36 bg-background/60 border border-border/60 rounded-lg p-2.5">
+              <label className="text-[10px] text-muted-foreground uppercase font-medium block mb-0.5">Target Cases</label>
               <input
                 type="number"
                 min="0"
@@ -11155,14 +11153,13 @@ export default function Home() {
                 value={v.casesNeeded === 0 ? "" : v.casesNeeded}
                 onChange={e => form.setValue("casesNeeded", Number(e.target.value) || 0, { shouldDirty: true })}
                 placeholder="0"
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full bg-transparent border-none p-0 text-lg font-black tabular-nums outline-none"
               />
               {Number(v.casesNeeded) === 0 && (
-                <p className="mt-1 text-xs font-medium text-amber-400 flex items-center gap-1">
-                  <span>⚠</span> Enter cases needed to enable calculations
+                <p className="mt-1 text-[10px] font-medium text-amber-400 flex items-center gap-1">
+                  <span>⚠</span> Enter cases to enable calculations
                 </p>
               )}
-            </div>
                       </div>
                     </div>
                   </div>
@@ -11625,95 +11622,93 @@ export default function Home() {
 
                 {/* Run Details (moved from Dough tab) — sub-view aware */}
                 {doughSubTab === "crusts" ? (
-                  <Card className="bg-card/50 border-border/50 shadow-md mt-4">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Line Details
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-3">
-                      <StatRow label="Cases Left to Run" value={fmtNum(calc.casesLeftToRun, 0)} testId="output-crust-cases-left" highlight />
-                      <StatRow label="Total Time Left" value={fmtTime(calc.totalTimeSec)} highlight />
-                      <StatRow label="Approx. Cases on Line" value={fmtNum(calc.casesOnLine, 0)} testId="output-cases-on-line" />
-                      <div className="flex items-center justify-between py-1.5">
-                        <span className="text-sm text-muted-foreground">Crust Supply</span>
+                  <div className="rounded-xl border border-border/60 bg-card/50 shadow-md mt-4 overflow-hidden">
+                    <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
+                      <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-crust-cases-left">{fmtNum(calc.casesLeftToRun, 0)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Total Time Left</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.totalTimeSec)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-cases-on-line">{fmtNum(calc.casesOnLine, 0)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtNum(calc.casesOnLastSkid, 0)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
+                        <span className="text-xs text-muted-foreground font-medium">Crust Supply</span>
                         {calc.doughShortCases > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
-                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
-                          </span>
+                          <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
                         ) : calc.buffer > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
-                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
-                            +{fmtNum(calc.buffer, 1)} cases ahead
-                          </span>
+                          <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+{fmtNum(calc.buffer, 1)} cases ahead</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                            Balanced
-                          </span>
+                          <span className="text-sm font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/50">Balanced</span>
                         )}
                       </div>
-                      <StatRow label="Cases on Last Skid" value={fmtNum(calc.casesOnLastSkid, 0)} />
-                      <Separator className="my-3 opacity-30" />
-                      <StatRow label="Stacks Per Skid" value={fmtNum(calc.traysPerSkid, 2)} />
-                      <StatRow label="Time Per Stack" value={fmtTime(calc.timePerTraySec)} />
-                      <StatRow label="Time Per Skid" value={fmtTime(calc.timePerSkidSec)} />
-                      <StatRow label="PPM" value={fmtNum(calc.ppm, 1)} testId="output-ppm-crust" />
-                    </CardContent>
-                  </Card>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Stacks Per Skid</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtNum(calc.traysPerSkid, 2)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Time Per Stack</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.timePerTraySec)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Time Per Skid</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums">{fmtTime(calc.timePerSkidSec)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">PPM</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-ppm-crust">{fmtNum(calc.ppm, 1)}</span>
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <Card className="bg-card/50 border-border/50 shadow-md mt-4">
-                    <CardHeader className="pb-1 pt-3 px-4">
-                      <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        Line Details
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-3">
-                      <StatRow
-                        label="Cases Left to Run"
-                        value={fmtNum(calc.casesLeftToRun, 0)}
-                        testId="output-dough-cases-left"
-                      />
-                      <StatRow
-                        label="Approx. Cases on Line"
-                        value={fmtNum(calc.casesOnLine, 0)}
-                        testId="output-cases-on-line"
-                      />
-                      <div className="flex items-center justify-between py-1.5" data-testid="output-dough-status">
-                        <span className="text-sm text-muted-foreground">Dough Status</span>
+                  <div className="rounded-xl border border-border/60 bg-card/50 shadow-md mt-4 overflow-hidden">
+                    <div className="bg-muted/30 px-4 py-3 border-b border-border/60">
+                      <span className="text-sm font-bold uppercase tracking-wider text-foreground">Line Details</span>
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Cases Left to Run</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-dough-cases-left">{fmtNum(calc.casesLeftToRun, 0)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground font-medium">Approx. Cases on Line</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-cases-on-line">{fmtNum(calc.casesOnLine, 0)}</span>
+                      </div>
+                      <div className="p-3 flex items-center justify-between gap-2 col-span-2" data-testid="output-dough-status">
+                        <span className="text-xs text-muted-foreground font-medium">Dough Status</span>
                         {calc.doughShortCases > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-400">
-                            <span className="h-2 w-2 rounded-full bg-red-400 shrink-0" />
-                            SHORT {fmtNum(calc.doughShortCases, 1)} cases
-                          </span>
+                          <span className="text-sm font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">SHORT {fmtNum(calc.doughShortCases, 1)} cases</span>
                         ) : calc.buffer > 0 ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-green-400">
-                            <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />
-                            +{fmtNum(calc.buffer, 1)} cases ahead
-                          </span>
+                          <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+{fmtNum(calc.buffer, 1)} cases ahead</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground">
-                            <span className="h-2 w-2 rounded-full bg-muted-foreground shrink-0" />
-                            Balanced
-                          </span>
+                          <span className="text-sm font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded border border-border/50">Balanced</span>
                         )}
                       </div>
-                      <StatRow
-                        label="Cases on Last Skid"
-                        value={fmtNum(calc.casesOnLastSkid, 0)}
-                        testId="output-last-skid-cases"
-                      />
-                    </CardContent>
-                  </Card>
+                      <div className="p-3 flex items-center justify-between gap-2 col-span-2">
+                        <span className="text-xs text-muted-foreground font-medium">Cases on Last Skid</span>
+                        <span className="text-sm font-bold text-foreground tabular-nums" data-testid="output-last-skid-cases">{fmtNum(calc.casesOnLastSkid, 0)}</span>
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 {/* Temporary adjustments — this-run-only overrides of Setup values
                     (moved here from the Packaging tab) */}
-                <Card className="mt-4 bg-card/50 border-dashed border-border/70 shadow-md">
+                <Card className="mt-4 bg-card/50 border-border/60 shadow-md">
                   <CardContent className="pt-4 pb-4 px-5 space-y-3">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Temporary Adjustments</p>
+                      <p className="text-sm font-bold text-foreground flex items-center gap-2"><Settings className="w-4 h-4 text-muted-foreground" /> Temporary Adjustments</p>
                       {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
                         <div className="flex items-center gap-2">
                           <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
@@ -11725,9 +11720,9 @@ export default function Home() {
                               form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
                               form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
                             }}
-                            className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                            className="text-[10px] font-bold text-amber-500 uppercase tracking-wider bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
                           >
-                            Clear
+                            Clear All
                           </button>
                         </div>
                       )}
