@@ -11547,6 +11547,41 @@ export default function Home() {
                   </Card>
                 )}
 
+                {/* Temporary adjustments — this-run-only overrides of Setup values
+                    (moved here from the Packaging tab) */}
+                <Card className="mt-4 bg-card/50 border-dashed border-border/70 shadow-md">
+                  <CardContent className="pt-4 pb-4 px-5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Temporary Adjustments</p>
+                      {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
+                          <button
+                            type="button"
+                            data-testid="button-clear-temp-overrides"
+                            onClick={() => {
+                              form.setValue("tempFreezerTime", 0, { shouldDirty: true });
+                              form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
+                              form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
+                            }}
+                            className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline underline-offset-2"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
+                    </p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <NumField control={form.control} name="tempFreezerTime" label={`Freezer Time${Number(v.freezerTime) > 0 ? ` (setup: ${fmtNum(Number(v.freezerTime), 0)})` : ""}`} step="1" testId="input-temp-freezer-time" />
+                      <NumField control={form.control} name="tempCrustsPerCycle" label={`Crusts / Cycle${Number(v.crustsPerCycle) > 0 ? ` (setup: ${fmtNum(Number(v.crustsPerCycle), 0)})` : ""}`} step="1" testId="input-temp-crusts-per-cycle" />
+                      <NumField control={form.control} name="tempCycleSpeed" label={`Cycle Speed${Number(v.cycleSpeed) > 0 ? ` (setup: ${fmtNum(Number(v.cycleSpeed), 1)})` : ""}`} step="0.1" testId="input-temp-cycle-speed" />
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Upcoming runs */}
                 {(() => {
                   const upcoming = dayState.runs.slice(dayState.currentIndex + 1);
@@ -12316,40 +12351,6 @@ export default function Home() {
                           </div>
                         );
                       })()}
-                    </CardContent>
-                  </Card>
-
-                  {/* Temporary adjustments — this-run-only overrides of Setup values */}
-                  <Card className="mt-4 bg-card/50 border-dashed border-border/70 shadow-md">
-                    <CardContent className="pt-4 pb-4 px-5 space-y-3">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Temporary Adjustments</p>
-                        {(Number(v.tempFreezerTime) > 0 || Number(v.tempCrustsPerCycle) > 0 || Number(v.tempCycleSpeed) > 0) && (
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded-full bg-amber-600/20 border border-amber-600/40 text-amber-400 text-[10px] font-bold uppercase">Override active</span>
-                            <button
-                              type="button"
-                              data-testid="button-clear-temp-overrides"
-                              onClick={() => {
-                                form.setValue("tempFreezerTime", 0, { shouldDirty: true });
-                                form.setValue("tempCrustsPerCycle", 0, { shouldDirty: true });
-                                form.setValue("tempCycleSpeed", 0, { shouldDirty: true });
-                              }}
-                              className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline underline-offset-2"
-                            >
-                              Clear
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">
-                        For this run only — leave at 0 to use the Setup value. Setup stays unchanged.
-                      </p>
-                      <div className="grid grid-cols-3 gap-3">
-                        <NumField control={form.control} name="tempFreezerTime" label={`Freezer Time${Number(v.freezerTime) > 0 ? ` (setup: ${fmtNum(Number(v.freezerTime), 0)})` : ""}`} step="1" testId="input-temp-freezer-time" />
-                        <NumField control={form.control} name="tempCrustsPerCycle" label={`Crusts / Cycle${Number(v.crustsPerCycle) > 0 ? ` (setup: ${fmtNum(Number(v.crustsPerCycle), 0)})` : ""}`} step="1" testId="input-temp-crusts-per-cycle" />
-                        <NumField control={form.control} name="tempCycleSpeed" label={`Cycle Speed${Number(v.cycleSpeed) > 0 ? ` (setup: ${fmtNum(Number(v.cycleSpeed), 1)})` : ""}`} step="0.1" testId="input-temp-cycle-speed" />
-                      </div>
                     </CardContent>
                   </Card>
 
