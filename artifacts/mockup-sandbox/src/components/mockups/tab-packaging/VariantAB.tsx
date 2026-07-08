@@ -155,18 +155,7 @@ export function VariantAB() {
       {/* ── Pipeline Story ── */}
       <div className="flex-1 flex flex-col">
         
-        {/* Stage 1: Line */}
-        <div className="flex mb-4">
-          <TimelineNode icon={MoveDown} done />
-          <div className="flex-1 mt-2">
-            <div className="flex items-center justify-between bg-muted/10 border border-border/40 rounded-lg p-3">
-              <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Line Assembly</span>
-              <span className="text-lg font-mono font-bold tabular-nums text-foreground">{fmtNum(calc.casesOnLine, 0)} <span className="text-xs text-muted-foreground font-sans font-normal uppercase tracking-widest">on line</span></span>
-            </div>
-          </div>
-        </div>
-
-        {/* Stage 2: Freezer Draining */}
+        {/* Stage 1: Freezer Draining */}
         <div className="flex mb-4">
           <TimelineNode icon={Zap} active />
           <div className="flex-1 mt-2">
@@ -226,6 +215,17 @@ export function VariantAB() {
                   style={{ width: `${fillPct * 100}%` }}
                 />
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Stage 3: Line */}
+        <div className="flex mb-4">
+          <TimelineNode icon={MoveDown} done />
+          <div className="flex-1 mt-2">
+            <div className="flex items-center justify-between bg-muted/10 border border-border/40 rounded-lg p-3">
+              <span className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Line Assembly</span>
+              <span className="text-lg font-mono font-bold tabular-nums text-foreground">{fmtNum(calc.casesOnLine, 0)} <span className="text-xs text-muted-foreground font-sans font-normal uppercase tracking-widest">on line</span></span>
             </div>
           </div>
         </div>
