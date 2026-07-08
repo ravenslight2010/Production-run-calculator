@@ -5,6 +5,7 @@ import {
   fetchMe,
   markOnboardingSeenRequest,
   markTourCompletedRequest,
+  setFloorModeRequest,
   setUnauthorizedHandler,
   signInRequest,
   signOutRequest,
@@ -144,6 +145,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     qc.setQueryData(["me"], updated);
   }, [qc]);
 
+  // Persist the Floor Mode on/off preference server-side so it follows the
+  // user across devices. Optimistic: flip the cached identity immediately so
+  // the toggle feels instant, then reconcile with the server's response; on
+  // failure re-probe /me so the UI falls back to the server's truth.
+  const setFloorModeEnabled = useCallback(
+    async (enabled: boolean) => {
+      qc.setQueryData(["me"], (prev: StaffMember | null | undefined) =>
+        prev ? { ...prev, floorModeEnabled: enabled } : prev,
+      );
+      try {
+        const updated = await setFloorModeRequest(enabled);
+        qc.setQueryData(["me"], updated);
+      } catch (err) {
+        void qc.invalidateQueries({ queryKey: ["me"] });
+        throw err;
+      }
+    },
+    [qc],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -159,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         changePassword,
         markOnboardingSeen,
         markTourCompleted,
+        setFloorModeEnabled,
       }}
     >
       {children}

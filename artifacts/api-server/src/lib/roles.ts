@@ -172,6 +172,10 @@ export type StaffMember = {
   name: string | null;
   onboardingSeen: boolean;
   tourCompleted: boolean;
+  // Whether Floor Mode (the idle big-numbers monitor) is enabled for this
+  // user. Per-user (not device-local) so the preference follows them across
+  // devices. Defaults on.
+  floorModeEnabled: boolean;
   sandbox: boolean;
   // ISO timestamp of when the sandbox was last re-copied from live, or null when
   // it has never been copied. Only meaningful for the sandbox account; null for
@@ -329,6 +333,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
       username: usersTable.username,
       onboardingSeen: usersTable.onboardingSeen,
       tourCompleted: usersTable.tourCompleted,
+      floorModeEnabled: usersTable.floorModeEnabled,
       sandbox: usersTable.sandbox,
     })
     .from(usersTable)
@@ -344,6 +349,7 @@ export async function getStaffMember(userId: string): Promise<StaffMember> {
     name: user?.username ?? null,
     onboardingSeen: user?.onboardingSeen ?? false,
     tourCompleted: user?.tourCompleted ?? false,
+    floorModeEnabled: user?.floorModeEnabled ?? true,
     sandbox: user?.sandbox ?? false,
     sandboxCopiedAt: copiedAt ? copiedAt.toISOString() : null,
     sandboxStale: user?.sandbox ? isSandboxCopyStale(copiedAt) : false,
@@ -371,6 +377,20 @@ export async function markTourCompleted(userId: string): Promise<StaffMember> {
   return getStaffMember(userId);
 }
 
+// Store the user's Floor Mode (idle big-numbers monitor) on/off preference so
+// it follows them across devices. Settable in both directions, unlike the
+// one-way onboarding/tour flags.
+export async function setFloorModeEnabled(
+  userId: string,
+  enabled: boolean,
+): Promise<StaffMember> {
+  await db
+    .update(usersTable)
+    .set({ floorModeEnabled: enabled })
+    .where(eq(usersTable.id, userId));
+  return getStaffMember(userId);
+}
+
 export async function listStaff(): Promise<StaffMember[]> {
   const [rows, capsByRole] = await Promise.all([
     db
@@ -380,6 +400,7 @@ export async function listStaff(): Promise<StaffMember[]> {
         username: usersTable.username,
         onboardingSeen: usersTable.onboardingSeen,
         tourCompleted: usersTable.tourCompleted,
+        floorModeEnabled: usersTable.floorModeEnabled,
         sandbox: usersTable.sandbox,
       })
       .from(userRolesTable)
@@ -395,6 +416,7 @@ export async function listStaff(): Promise<StaffMember[]> {
     name: r.username,
     onboardingSeen: r.onboardingSeen,
     tourCompleted: r.tourCompleted,
+    floorModeEnabled: r.floorModeEnabled,
     sandbox: r.sandbox,
     // The copy timestamp / staleness are only surfaced via the sandbox account's
     // own /me; the roster never needs them, so leave them at their inert values.

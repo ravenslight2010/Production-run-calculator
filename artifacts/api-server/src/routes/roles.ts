@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import {
   CreateRoleBody,
   ResetStaffPasswordBody,
+  SetFloorModeBody,
   SetStaffRoleBody,
   UpdateRoleBody,
 } from "@workspace/api-zod";
@@ -15,6 +16,7 @@ import {
   markOnboardingSeen,
   markTourCompleted,
   resetUserPassword,
+  setFloorModeEnabled,
   setUserRole,
   updateRoleCapabilities,
   type Capability,
@@ -53,6 +55,18 @@ router.post("/me/onboarding-seen", async (req, res): Promise<void> => {
 router.post("/me/tour-completed", async (req, res): Promise<void> => {
   const userId = req.userId!;
   res.json(await markTourCompleted(userId));
+});
+
+// Set the current user's Floor Mode on/off preference. Per-user (not
+// device-local) so it follows them across devices; settable both directions.
+router.post("/me/floor-mode", async (req, res): Promise<void> => {
+  const parsed = SetFloorModeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const userId = req.userId!;
+  res.json(await setFloorModeEnabled(userId, parsed.data.enabled));
 });
 
 // ---------------------------------------------------------------------------

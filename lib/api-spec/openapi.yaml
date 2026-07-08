@@ -2994,6 +2994,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/StaffMember"
 
+  /me/floor-mode:
+    post:
+      operationId: setFloorMode
+      tags: [roles]
+      summary: Set the current user's Floor Mode on/off preference
+      description: >-
+        Stores whether Floor Mode (the idle big-numbers monitor) is enabled for
+        the current user, so the preference follows them across devices.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetFloorMode"
+      responses:
+        "200":
+          description: Updated current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffMember"
+
   /roles:
     get:
       operationId: listRoles
@@ -4178,6 +4200,15 @@ components:
             "operator" is the default no-capability role. Built-in roles cannot
             be deleted.
 
+    SetFloorMode:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+          description: Whether Floor Mode should be enabled for this user.
+
     CreateRole:
       type: object
       required:
@@ -4221,6 +4252,7 @@ components:
         - name
         - onboardingSeen
         - tourCompleted
+        - floorModeEnabled
         - sandbox
         - sandboxCopiedAt
         - sandboxStale
@@ -4249,6 +4281,11 @@ components:
           description: >-
             Whether the user has finished the guided tour (reached its final
             step).
+        floorModeEnabled:
+          type: boolean
+          description: >-
+            Whether Floor Mode (the idle big-numbers monitor) is enabled for
+            this user. Per-user so the preference follows them across devices.
         sandbox:
           type: boolean
           description: >-

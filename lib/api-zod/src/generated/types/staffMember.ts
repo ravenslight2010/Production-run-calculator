@@ -21,6 +21,8 @@ export interface StaffMember {
   onboardingSeen: boolean;
   /** Whether the user has finished the guided tour (reached its final step). */
   tourCompleted: boolean;
+  /** Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices. */
+  floorModeEnabled: boolean;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
   /**

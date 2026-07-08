@@ -82,6 +82,7 @@ export const SignInResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -115,6 +116,7 @@ export const ChangePasswordResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -3314,6 +3316,7 @@ export const GetMeResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -3332,6 +3335,7 @@ export const MarkOnboardingSeenResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -3350,6 +3354,30 @@ export const MarkTourCompletedResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
+  "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
+  "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
+  "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
+})
+
+
+/**
+ * Stores whether Floor Mode (the idle big-numbers monitor) is enabled for the current user, so the preference follows them across devices.
+ * @summary Set the current user's Floor Mode on/off preference
+ */
+export const SetFloorModeBody = zod.object({
+  "enabled": zod.boolean().describe('Whether Floor Mode should be enabled for this user.')
+})
+
+export const SetFloorModeResponse = zod.object({
+  "userId": zod.string(),
+  "role": zod.string().describe('The name of the role assigned to this user.'),
+  "capabilities": zod.array(zod.enum(['manage-staff', 'manage-inventory', 'edit-production-rules', 'approve-password-resets', 'review-incidents', 'use-ai-tools']).describe('A discrete permission. A role grants a set of capabilities, and a user holds the union of their role\'s capabilities.')).describe('The capabilities granted by this user\'s role.'),
+  "email": zod.string().nullable(),
+  "name": zod.string().nullable(),
+  "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
+  "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -3422,6 +3450,7 @@ export const ListStaffResponseItem = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')
@@ -3448,6 +3477,7 @@ export const SetStaffRoleResponse = zod.object({
   "name": zod.string().nullable(),
   "onboardingSeen": zod.boolean().describe('Whether the user has dismissed the first-login \"Get Started\" overview.'),
   "tourCompleted": zod.boolean().describe('Whether the user has finished the guided tour (reached its final step).'),
+  "floorModeEnabled": zod.boolean().describe('Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices.'),
   "sandbox": zod.boolean().describe('Whether this is the seeded sandbox account, which operates in the isolated \"sandbox\" data scope. Clients show a persistent sandbox banner and offer a \"Reset sandbox\" action when true.'),
   "sandboxCopiedAt": zod.string().nullable().describe('ISO timestamp of when the sandbox was last re-copied from live, or null when it has never been copied. Only meaningful for the sandbox account (null for everyone else); clients show it in the banner as \"Sandbox copied from live at …\".'),
   "sandboxStale": zod.boolean().describe('Whether the sandbox copy is stale and due for an automatic refresh from live. The client drives the re-copy (reusing the manual reset flow); the server owns the staleness cutoff so web and mobile stay in lockstep. Always false for non-sandbox accounts.')

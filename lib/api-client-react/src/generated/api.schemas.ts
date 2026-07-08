@@ -625,6 +625,8 @@ export interface StaffMember {
   onboardingSeen: boolean;
   /** Whether the user has finished the guided tour (reached its final step). */
   tourCompleted: boolean;
+  /** Whether Floor Mode (the idle big-numbers monitor) is enabled for this user. Per-user so the preference follows them across devices. */
+  floorModeEnabled: boolean;
   /** Whether this is the seeded sandbox account, which operates in the isolated "sandbox" data scope. Clients show a persistent sandbox banner and offer a "Reset sandbox" action when true. */
   sandbox: boolean;
   /**
@@ -660,6 +662,11 @@ export interface RoleDefinition {
   capabilities: Capability[];
   /** Whether this is a built-in role. The "manager" role is protected (cannot be deleted and must keep the manage-staff capability) and "operator" is the default no-capability role. Built-in roles cannot be deleted. */
   builtin: boolean;
+}
+
+export interface SetFloorMode {
+  /** Whether Floor Mode should be enabled for this user. */
+  enabled: boolean;
 }
 
 export interface CreateRole {

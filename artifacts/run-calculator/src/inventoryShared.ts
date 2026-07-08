@@ -771,6 +771,10 @@ export type StaffMember = {
   name: string | null;
   onboardingSeen: boolean;
   tourCompleted: boolean;
+  // Whether Floor Mode (the idle big-numbers monitor) is enabled for this
+  // user. Per-user (not device-local) so the preference follows them across
+  // devices.
+  floorModeEnabled: boolean;
   // True only for the seeded sandbox account, which operates in the isolated
   // "sandbox" data scope. Clients show a persistent banner and a "Reset
   // sandbox" action when this is set.
@@ -792,6 +796,13 @@ export const markOnboardingSeenRequest = () =>
 // updated StaffMember so the caller can refresh its cached identity.
 export const markTourCompletedRequest = () =>
   api<StaffMember>("/me/tour-completed", { method: "POST" });
+// Store the user's Floor Mode on/off preference server-side so it follows
+// them across devices. Returns the updated StaffMember.
+export const setFloorModeRequest = (enabled: boolean) =>
+  api<StaffMember>("/me/floor-mode", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
 
 // Auth — username + password. On the web the server sets an httpOnly `rc_auth`
 // session cookie, which same-origin fetches send automatically, so we ignore the

@@ -1127,6 +1127,74 @@ describe("guided tour completion", () => {
   });
 });
 
+describe("per-user Floor Mode preference", () => {
+  // Floor Mode's on/off setting is a per-user account preference (not
+  // device-local) so it follows the user across devices. Unlike the one-way
+  // onboarding/tour flags it is settable in both directions via
+  // POST /me/floor-mode. Users are seeded directly (not via /auth/sign-up) so
+  // these tests don't eat into the shared public-auth rate-limit budget the
+  // sign-up gate tests below depend on.
+  it("a freshly created user defaults to floorModeEnabled=true (DB default + /me shape)", async () => {
+    // The seeded OPERATOR row never set the column, so it exercises the same
+    // DB-level default a real sign-up insert gets.
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(row.floorModeEnabled).toBe(true);
+
+    const me = await req(OPERATOR, "GET", "/api/me");
+    expect(me.status).toBe(200);
+    const meBody = (await me.json()) as { floorModeEnabled: boolean };
+    expect(meBody.floorModeEnabled).toBe(true);
+  });
+
+  it("POST /me/floor-mode persists off AND back on (settable both directions)", async () => {
+    const off = await req(OPERATOR, "POST", "/api/me/floor-mode", {
+      enabled: false,
+    });
+    expect(off.status).toBe(200);
+    expect(((await off.json()) as { floorModeEnabled: boolean }).floorModeEnabled).toBe(false);
+
+    // A fresh /me read (what another device would do) reflects the change.
+    const meOff = await req(OPERATOR, "GET", "/api/me");
+    expect(((await meOff.json()) as { floorModeEnabled: boolean }).floorModeEnabled).toBe(false);
+    const [rowOff] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(rowOff.floorModeEnabled).toBe(false);
+
+    const on = await req(OPERATOR, "POST", "/api/me/floor-mode", {
+      enabled: true,
+    });
+    expect(on.status).toBe(200);
+    expect(((await on.json()) as { floorModeEnabled: boolean }).floorModeEnabled).toBe(true);
+    const [rowOn] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(rowOn.floorModeEnabled).toBe(true);
+  });
+
+  it("rejects a malformed body with 400 and leaves the preference unchanged", async () => {
+    const bad = await req(OPERATOR, "POST", "/api/me/floor-mode", {
+      enabled: "nope",
+    });
+    expect(bad.status).toBe(400);
+    const [row] = await db
+      .select()
+      .from(usersTable)
+      .where(sql`${usersTable.id} = ${OPERATOR}`);
+    expect(row.floorModeEnabled).toBe(true);
+  });
+
+  it("rejects unauthenticated requests with 401", async () => {
+    const res = await req(null, "POST", "/api/me/floor-mode", { enabled: true });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("bootstrap manager assignment (INITIAL_MANAGER_USERNAME)", () => {
   // STAFF_SIGNUP_CODE is a shared onboarding secret handed to every ordinary
   // new hire, so it must never be sufficient on its own to become the first

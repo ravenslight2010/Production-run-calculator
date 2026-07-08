@@ -41,6 +41,9 @@ export type AuthContextValue = {
   // Mark the guided tour as completed (user reached its final step), persisting
   // it server-side and updating the cached identity.
   markTourCompleted: () => Promise<void>;
+  // Persist the user's Floor Mode on/off preference server-side so it follows
+  // them across devices. Optimistically updates the cached identity.
+  setFloorModeEnabled: (enabled: boolean) => Promise<void>;
 };
 
 // Belt-and-braces: in dev, stash the created context on a globalThis singleton

@@ -9,6 +9,17 @@ Floor Mode is the full-screen idle monitor for the line: big numbers, status, sm
 chips, frontline reference, action controls. It exists on BOTH web (inline in
 home.tsx) and mobile (`components/FloorMode.tsx`, wired in the Run tab).
 
+## Enable toggle is per-user server-side (web; 2026-07-08)
+The Floor Mode on/off setting follows the user's account, not the device: it lives in
+`users.floorModeEnabled` (default true) surfaced on `/me`, set via `POST /me/floor-mode`
+(requireAuth-only, settable both directions — unlike the one-way onboarding/tour flags).
+Web has a one-shot migration that pushes a legacy localStorage "off" onto the account
+then deletes the key. **Mobile still uses its local setting** — when parity resumes,
+wire mobile to the same `/me` field.
+**Gotcha:** roles.integration.test.ts has a tight shared public-auth rate-limit budget
+(20/60s); new tests there must seed users directly, not call `/auth/sign-up`, or the
+later fail-closed sign-up-gate test intermittently gets 429 instead of 403.
+
 ## Intentional platform diffs (NOT formula drift — like Cast-to-Screens)
 - **Third big number differs.** Web shows a live NEXT BATCH countdown; mobile has no
   live next-batch countdown, so mobile shows **Batches Ready** (`run.progress.batchesReady`).

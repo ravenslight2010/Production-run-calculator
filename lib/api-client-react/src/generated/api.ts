@@ -145,6 +145,7 @@ import type {
   SavedSpecSheetList,
   ScheduleOptimizeInput,
   ScheduleOptimizeResponse,
+  SetFloorMode,
   SignUpCredentials,
   SpecImportAliasList,
   SpecReconcileInput,
@@ -9462,6 +9463,78 @@ export const useMarkTourCompleted = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getMarkTourCompletedMutationOptions(options));
+    }
+
+export const getSetFloorModeUrl = () => {
+
+
+
+
+  return `/api/me/floor-mode`
+}
+
+/**
+ * Stores whether Floor Mode (the idle big-numbers monitor) is enabled for the current user, so the preference follows them across devices.
+ * @summary Set the current user's Floor Mode on/off preference
+ */
+export const setFloorMode = async (setFloorMode: SetFloorMode, options?: RequestInit): Promise<StaffMember> => {
+
+  return customFetch<StaffMember>(getSetFloorModeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      setFloorMode,)
+  }
+);}
+
+
+
+
+export const getSetFloorModeMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFloorMode>>, TError,{data: BodyType<SetFloorMode>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setFloorMode>>, TError,{data: BodyType<SetFloorMode>}, TContext> => {
+
+const mutationKey = ['setFloorMode'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setFloorMode>>, {data: BodyType<SetFloorMode>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  setFloorMode(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetFloorModeMutationResult = NonNullable<Awaited<ReturnType<typeof setFloorMode>>>
+    export type SetFloorModeMutationBody = BodyType<SetFloorMode>
+    export type SetFloorModeMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Set the current user's Floor Mode on/off preference
+ */
+export const useSetFloorMode = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFloorMode>>, TError,{data: BodyType<SetFloorMode>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setFloorMode>>,
+        TError,
+        {data: BodyType<SetFloorMode>},
+        TContext
+      > => {
+      return useMutation(getSetFloorModeMutationOptions(options));
     }
 
 export const getListRolesUrl = () => {

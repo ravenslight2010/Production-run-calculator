@@ -2274,8 +2274,15 @@ const GroupedPanel = ({
 );
 
 export default function Home() {
-  const { signOut, forceSignedOut, revalidate, me, markOnboardingSeen, markTourCompleted } =
-    useAuth();
+  const {
+    signOut,
+    forceSignedOut,
+    revalidate,
+    me,
+    markOnboardingSeen,
+    markTourCompleted,
+    setFloorModeEnabled: persistFloorModeEnabled,
+  } = useAuth();
   // Automatic sandbox refresh: when the server reports the sandbox copy is stale
   // (older than its cutoff, or never copied), re-copy live → sandbox and reload —
   // the same flow as the manual "Reset sandbox" button, minus the confirm. This
@@ -3344,19 +3351,36 @@ export default function Home() {
   const [showGlance, setShowGlance] = useState(false);
   const [showFloorMode, setShowFloorMode] = useState(false);
   // Floor Mode can be turned off entirely for users who don't want the big-number
-  // monitor (manual launch + idle auto-activate both gated on this). Device-local
-  // preference (not synced) so a floor TV and an office laptop can differ.
-  const [floorModeEnabled, setFloorModeEnabled] = useState<boolean>(() => {
-    try { return localStorage.getItem("run-calc-floor-mode") !== "0"; } catch { return true; }
-  });
+  // monitor (manual launch + idle auto-activate both gated on this). The
+  // preference is per-USER (stored on the account server-side) so it follows
+  // the user across devices instead of being tied to one browser.
+  const floorModeEnabled = me?.floorModeEnabled ?? true;
   function toggleFloorModeEnabled() {
-    setFloorModeEnabled(prev => {
-      const next = !prev;
-      try { localStorage.setItem("run-calc-floor-mode", next ? "1" : "0"); } catch { /* ignore */ }
-      if (!next) setShowFloorMode(false);
-      return next;
-    });
+    const next = !floorModeEnabled;
+    if (!next) setShowFloorMode(false);
+    // Optimistic cache flip happens inside persistFloorModeEnabled; a failed
+    // save re-probes /me so the toggle falls back to the server's truth.
+    void persistFloorModeEnabled(next).catch(() => { /* reverted via /me re-probe */ });
   }
+  // One-time migration of the old device-local preference: if this browser had
+  // Floor Mode explicitly turned OFF before the preference moved to the user
+  // account, carry that choice over once, then drop the legacy key so it never
+  // fights the account-level setting again.
+  const floorModeMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!me || floorModeMigratedRef.current) return;
+    floorModeMigratedRef.current = true;
+    try {
+      const legacy = localStorage.getItem("run-calc-floor-mode");
+      if (legacy !== null) {
+        localStorage.removeItem("run-calc-floor-mode");
+        if (legacy === "0" && me.floorModeEnabled) {
+          void persistFloorModeEnabled(false).catch(() => { /* best-effort */ });
+        }
+      }
+    } catch { /* ignore storage errors */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
   // Floor Mode monitor hygiene: dim the panel after a stretch of no interaction
   // so a screen left on all shift doesn't sit at full brightness (burn-in / glare).
   const [floorDimmed, setFloorDimmed] = useState(false);
