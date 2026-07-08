@@ -6,8 +6,10 @@
 // ingredient rows in the shared preset map) instead of Cheese: (a) names with
 // the standalone word "mix" that don't mention cheese, (b) names already in the
 // user Mix list — while genuine cheese recipes ("Aldo's Cheese Mix", "Cheese
-// Blend") keep landing under Cheese. Applicator-slot profile ties are identical
-// for both categories.
+// Blend") keep landing under Cheese. Mix-routed recipes must NOT be tied onto
+// the profile's cheese applicator slots: mixes are Mixes-screen master-data
+// (per-pizza oz), and writing them to app{n}CheeseRecipeName made a recipe the
+// user reclassified to "mix" still show up as cheese on the run's Cheese card.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import {
@@ -117,14 +119,43 @@ describe("applySpecImport mix routing", () => {
     ]);
   });
 
-  it("still ties the mix to the profile's applicator slot like a cheese recipe", () => {
+  it("does NOT tie a mix onto the profile's cheese applicator slot", () => {
     applySpecImport(importWithCheeseKindRecipe("White Fajita Mix"));
     const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
-    expect(prof?.app1CheeseRecipeName).toBe("White Fajita Mix");
+    expect(prof?.app1CheeseRecipeName ?? "").toBe("");
+    expect(prof?.app1CheeseRecipe ?? []).toEqual([]);
+  });
+
+  it("does NOT tie a recipe the user reclassified to 'mix' onto the cheese slot", () => {
+    // The user's review pick (forcedCategory) must win end-to-end: no cheese
+    // card tie, name under Mix, not Cheese.
+    const parsed = importWithCheeseKindRecipe("Aldo's Cheese Mix");
+    parsed.recipes[0].forcedCategory = "mix";
+    applySpecImport(parsed);
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    expect(prof?.app1CheeseRecipeName ?? "").toBe("");
+    expect(prof?.app1CheeseRecipe ?? []).toEqual([]);
+  });
+
+  it("still ties a genuine cheese recipe onto the profile's applicator slot", () => {
+    applySpecImport(importWithCheeseKindRecipe("Cheese Blend"));
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    expect(prof?.app1CheeseRecipeName).toBe("Cheese Blend");
     expect(prof?.app1CheeseRecipe).toEqual([
       { ingredient: "Monterey Jack", lbs: 20 },
       { ingredient: "Green Peppers", lbs: 5 },
     ]);
+  });
+
+  it("keeps a USER-RENAMED cheese recipe's typed name verbatim on the profile tie", () => {
+    const parsed = importWithCheeseKindRecipe("My Special Blend 2");
+    parsed.recipes[0].userNamed = true;
+    applySpecImport(parsed);
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    // Without the userNamed flag the tie-time cleaner would strip the trailing
+    // "2"; the user's typed name must survive exactly.
+    expect(prof?.app1CheeseRecipeName).toBe("My Special Blend 2");
+    expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).toContain("My Special Blend 2");
   });
 
   it("keeps a genuine cheese recipe under Cheese", () => {
@@ -138,6 +169,10 @@ describe("applySpecImport mix routing", () => {
     applySpecImport(importWithCheeseKindRecipe("Aldo's Cheese Mix"));
     expect(loadList(MIX_RECIPE_NAMES_KEY, [])).toContain("Aldo's Cheese Mix");
     expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).not.toContain("Aldo's Cheese Mix");
+    // Mix routing via the user Mix list must also skip the cheese-slot tie.
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    expect(prof?.app1CheeseRecipeName ?? "").toBe("");
+    expect(prof?.app1CheeseRecipe ?? []).toEqual([]);
   });
 
   it("clears the MIX deletion tombstone (not cheese) so sync can't strip the re-imported name", () => {

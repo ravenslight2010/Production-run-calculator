@@ -125,6 +125,19 @@ describe("canonicalizeSpecImportCheeseRecipeNames", () => {
     expect(drafts[0].name).toBe("Aldo's Cheese Mix");
   });
 
+  it("never rewrites a USER-RENAMED recipe (trailing number kept as typed)", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        {
+          ...cheese("My Blend 2", { brand: "Aldo's", flavor: "Cheese", app: 1 }),
+          userNamed: true,
+        },
+      ],
+    };
+    expect(canonicalizeSpecImportCheeseRecipeNames(parsed)).toBe(parsed);
+  });
+
   it("leaves mix-routed and non-cheese recipes untouched", () => {
     const input: ParsedSpecImport = {
       profiles: [],
@@ -324,6 +337,20 @@ describe("linkSpecImportCheeseToExisting", () => {
       ],
     };
     expect(linkSpecImportCheeseToExisting(parsed, ["house  blend"])).toBe(parsed);
+  });
+
+  it("never snaps a USER-RENAMED recipe back onto an existing pool name", () => {
+    const parsed: ParsedSpecImport = {
+      profiles: [],
+      recipes: [
+        {
+          ...cheese("Aldo's Cheese Mix", { brand: "Aldo's", flavor: "Cheese", app: 1 }),
+          userNamed: true,
+        },
+      ],
+    };
+    // Near-dup of the pool name — but the user typed it, so it must stay.
+    expect(linkSpecImportCheeseToExisting(parsed, ["Aldos  CHEESE mix"])).toBe(parsed);
   });
 
   it("snaps a name that differs from the saved one only by a filler word (Standard)", () => {

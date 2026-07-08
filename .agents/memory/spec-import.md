@@ -806,3 +806,18 @@ number+ingredient pairs → one cheese-kind recipe.
   (die, recipe brand/flavor); reset excluded rows' derived die/sauce to pristine.
   If you add another derived field to the wizard, seed it from `baseOrig` too.
 - **Parity:** WEB ONLY (parity paused) — mobile spec import stays a read-only summary.
+- **Review edits must survive commit (user wins over suggestions).** Two commit-time
+  passes re-run on the user-EDITED parse (`canonicalizeSpecImportCheeseRecipeNames` +
+  `linkSpecImportCheeseToExisting`), and the near-dup matcher used to snap a
+  user-typed rename right back onto the existing pool name. **Why:** the review
+  dialog's whole point is that the user's picks are final; silently reverting a
+  rename looks like the edit "didn't save". **How to apply:** the dialog stamps
+  `userNamed: true` on any recipe whose typed name differs from the parsed
+  suggestion; BOTH lib passes and the tie-time `cleanSpecCheeseRecipeName` skip
+  `userNamed` recipes. Any NEW commit-time name pass must skip them too.
+- **Mix-routed recipes must NOT tie onto profile cheese applicator slots.** The
+  tie loop skips `routesToMix(r)` recipes (respects `forcedCategory` from the
+  review's cheese/mix pick). **Why:** writing a mix to `app{n}CheeseRecipeName`
+  made a recipe the user reclassified to "mix" still show on the run's Cheese
+  card — mixes are Mixes-screen master-data (per-pizza oz, buildMixPlan), not
+  applicator cheese recipes.

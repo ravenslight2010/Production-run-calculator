@@ -373,6 +373,14 @@ export default function SpecImportDialog({
           ? { ...r.orig, name: linked, kind: parseKindOf(r.kind), referenceOnly: true }
           : { ...r.orig, name: r.name.trim(), kind: parseKindOf(r.kind) };
         if (!linked) delete out.referenceOnly;
+        // The user typed a different name than the parse suggested — flag it so
+        // the commit-time name passes (canonicalize / snap-to-existing) leave
+        // the rename exactly as typed instead of reverting to the suggestion.
+        if (!linked && out.name && out.name !== (r.orig.name ?? "").trim()) {
+          out.userNamed = true;
+        } else {
+          delete out.userNamed;
+        }
         // Cheese-vs-mix is a display split of the same parse kind — record the
         // user's pick so applySpecImport routes by it instead of the heuristic.
         if (r.kind === "mix") out.forcedCategory = "mix";

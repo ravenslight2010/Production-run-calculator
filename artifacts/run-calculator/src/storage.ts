@@ -2350,6 +2350,11 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
     ),
   ];
   for (const r of parsed.recipes) {
+    // A cheese-kind recipe routed to the MIXES category (user's review pick or
+    // the name heuristic) is factory master-data on the Mixes screen — it must
+    // NOT be tied onto profiles as a cheese-applicator recipe, or the run's
+    // Cheese card would show it as cheese despite the user's "mix" pick.
+    if (r.kind === "cheese" && routesToMix(r)) continue;
     // Reference-only recipes tie the user's EXISTING saved recipe onto the
     // import's profiles — pull its rows fresh from the library (never r.rows).
     // If the saved recipe is gone (stale/tampered pick), skip the tie entirely
@@ -2380,7 +2385,10 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
         // cheese slot whose name matches (or is still blank). Only fall back to the
         // legacy r.app/slot-1 guess when the profile has NO cheese applicator at all
         // (e.g. a standalone cheese sheet with no applicator grid).
-        const rKey = specImportNameMatchKey(cleanSpecCheeseRecipeName(r.name));
+        // A user-typed rename is used verbatim — never re-cleaned at tie time.
+        const rKey = specImportNameMatchKey(
+          r.userNamed ? r.name : cleanSpecCheeseRecipeName(r.name),
+        );
         const cheeseSlots = [1, 2, 3, 4].filter(
           n => String((values as Record<string, unknown>)[`app${n}Type`] ?? "").trim().toLowerCase() === "cheese",
         );
@@ -2393,7 +2401,9 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
           : cheeseSlots.length
             ? []
             : [r.app != null && r.app >= 1 && r.app <= 4 ? r.app : 1];
-        const cleanName = cleanSpecCheeseRecipeName(r.name) || r.name;
+        const cleanName = r.userNamed
+          ? r.name
+          : cleanSpecCheeseRecipeName(r.name) || r.name;
         for (const slot of targetSlots) {
           (values as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = cleanName;
           (values as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;

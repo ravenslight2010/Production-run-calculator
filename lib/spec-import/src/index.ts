@@ -115,6 +115,13 @@ export type ParsedRecipe = {
    */
   forcedCategory?: "mix" | "cheese";
   /**
+   * Import review only: the user EDITED this recipe's name in the review
+   * dialog. When true, the commit-time name passes (cheese-name canonicalize,
+   * snap-to-existing-pool link) must leave the name exactly as typed — the
+   * user's explicit rename always wins over a suggestion.
+   */
+  userNamed?: boolean;
+  /**
    * Import review only: the user chose to LINK this recipe to one of their
    * EXISTING recipes of the same kind (by exact `name`) instead of creating a
    * new one or overwriting a saved one. When true, the apply path must NOT write
@@ -569,6 +576,9 @@ export function linkSpecImportCheeseToExisting(
     if (r.kind !== "cheese" || !name || specImportRecipeIsMix(r, noUserMixes)) {
       return r;
     }
+    // A name the user explicitly typed in the review must never be snapped
+    // back onto an existing pool name — the rename is deliberate.
+    if (r.userNamed) return r;
     const existing = match(name);
     if (!existing || existing === name) return r;
     changed = true;
@@ -723,6 +733,8 @@ export function canonicalizeSpecImportCheeseRecipeNames(
   const recipes = (parsed.recipes ?? []).map((r) => {
     if (r.kind !== "cheese") return r;
     if (specImportRecipeIsMix(r, noUserMixes)) return r;
+    // Never rewrite a name the user explicitly typed in the review.
+    if (r.userNamed) return r;
     const cleaned = cleanSpecCheeseRecipeName(r.name ?? "");
     if (!cleaned || cleaned === (r.name ?? "").trim()) return r;
     changed = true;
