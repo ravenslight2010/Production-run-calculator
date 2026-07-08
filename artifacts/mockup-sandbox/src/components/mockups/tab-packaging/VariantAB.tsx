@@ -140,18 +140,6 @@ export function VariantAB() {
   return (
     <div className="pkg-tab-scope min-h-screen bg-background text-foreground p-4 max-w-md mx-auto flex flex-col pb-20">
       
-      {/* ── Top Dashboard Metrics ── */}
-      <div className="mb-6">
-        <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
-          <span className="text-2xl font-mono font-black tabular-nums text-foreground">
-            {fmtNum(Math.floor(calc.casesLeftToRun / casesPerSkid), 0)}
-            <span className="text-muted-foreground mx-1">/</span>
-            {fmtNum(calc.casesLeftToRun % casesPerSkid, 0)}
-          </span>
-        </div>
-      </div>
-
       {/* ── Pipeline Story ── */}
       <div className="flex-1 flex flex-col">
         
@@ -320,6 +308,15 @@ export function VariantAB() {
                   <CheckCircle2 className="w-7 h-7" />
                   Skid Done
                 </button>
+
+                <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
+                  <span className="text-2xl font-mono font-black tabular-nums text-foreground">
+                    {fmtNum(Math.floor(calc.casesLeftToRun / casesPerSkid), 0)}
+                    <span className="text-muted-foreground mx-1">/</span>
+                    {fmtNum(calc.casesLeftToRun % casesPerSkid, 0)}
+                  </span>
+                </div>
               </div>
             </div>
 
