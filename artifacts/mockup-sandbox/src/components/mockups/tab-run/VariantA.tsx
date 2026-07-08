@@ -1,0 +1,235 @@
+import { 
+  Play, 
+  Pause, 
+  Square, 
+  AlertTriangle, 
+  Snowflake, 
+  ChevronLeft, 
+  ChevronRight, 
+  Activity, 
+  Settings,
+  Clock,
+  ArrowRight,
+  Info
+} from "lucide-react";
+
+export function VariantA() {
+  return (
+    <div className="min-h-screen bg-neutral-950 text-slate-300 font-sans p-4 space-y-6 max-w-[620px] mx-auto pb-24">
+      {/* 1. Compact Header Strip: Identity */}
+      <div className="flex items-center justify-between bg-neutral-900 rounded-lg p-3 border border-neutral-800">
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <span className="text-xs text-neutral-400 font-medium uppercase tracking-wider">Run 2 of 4</span>
+            <div className="text-base font-bold text-slate-100 leading-tight">
+              Cornerbooth <span className="text-amber-500">—</span> Pepperoni
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="px-2 py-1 bg-neutral-800 rounded text-xs font-bold text-slate-300 border border-neutral-700">
+            TX-16
+          </div>
+          <div className="px-2 py-1 bg-red-950/40 text-red-400 border border-red-900/50 rounded text-xs font-bold uppercase">
+            Wheat/Dairy
+          </div>
+          <div className="text-right ml-2">
+            <div className="text-xs text-neutral-400 uppercase tracking-wider">Target</div>
+            <div className="text-lg font-black text-white leading-none">850</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Prioritized Alert Strip */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-3 bg-blue-950/30 border border-blue-900/50 p-2.5 rounded-lg text-blue-400">
+          <Snowflake className="w-5 h-5 flex-shrink-0 animate-pulse" />
+          <div className="flex-1 text-sm font-medium">
+            Freezer filling — First cases exit in <span className="font-bold text-blue-300">07:12</span> (35m tunnel)
+          </div>
+        </div>
+        <div className="flex items-center gap-3 bg-amber-950/30 border border-amber-900/50 p-2.5 rounded-lg text-amber-500">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+          <div className="flex-1 text-sm font-medium">
+            Die change required for next run: <span className="font-bold text-amber-400">TX-16 <ArrowRight className="inline w-3 h-3 mx-1" /> RD-12</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Giant KPI Tiles (The Cockpit) */}
+      <div className="grid grid-cols-2 gap-4">
+        {/* Progress Tile */}
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 flex flex-col items-center justify-center relative overflow-hidden">
+          <div className="absolute top-3 left-3 text-xs font-medium text-neutral-500 uppercase tracking-wider">Completion</div>
+          <div className="absolute top-3 right-3 flex items-center gap-1.5">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            </span>
+            <span className="text-xs font-bold text-emerald-500 uppercase">Running</span>
+          </div>
+          
+          <div className="mt-6 mb-2">
+            <div className="text-5xl font-black text-white tabular-nums tracking-tight">314</div>
+          </div>
+          <div className="text-sm font-medium text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
+            37% Done
+          </div>
+          
+          <div className="w-full bg-neutral-950 h-3 rounded-full mt-5 border border-neutral-800 overflow-hidden">
+            <div className="bg-amber-500 h-full rounded-full" style={{ width: '37%' }}></div>
+          </div>
+          <div className="w-full flex justify-between mt-2 text-xs text-neutral-400 font-medium">
+            <span>0</span>
+            <span>536 left</span>
+            <span>850</span>
+          </div>
+        </div>
+
+        {/* Pace & Time Tile */}
+        <div className="flex flex-col gap-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex-1 flex flex-col justify-center">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-neutral-500 uppercase tracking-wider">Pace</span>
+              <span className="text-xs font-bold text-red-400 bg-red-400/10 px-2 py-0.5 rounded border border-red-400/20">
+                12 cases behind
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-4xl font-black text-white tabular-nums tracking-tight">4.2</span>
+              <span className="text-sm text-neutral-400 font-medium uppercase">PPM</span>
+            </div>
+            <div className="text-xs text-neutral-400 mt-2">
+              Need <strong className="text-amber-500">4.8 PPM</strong> to finish on time
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">
+              6m 40s downtime
+            </div>
+          </div>
+          
+          <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex-1 flex flex-col justify-center">
+            <div className="text-xs font-medium text-neutral-500 uppercase tracking-wider mb-2">Est. Finish</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-black text-white tabular-nums tracking-tight">1h 52m</span>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <div className="text-sm font-medium text-slate-300">at 4:37 PM</div>
+              <div className="text-xs font-medium text-red-400 border border-red-400/20 bg-red-400/10 px-1.5 py-0.5 rounded">
+                +8 min
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. Giant Controls (Touch Confidence) */}
+      <div className="grid grid-cols-2 gap-3">
+        <button className="bg-amber-600 hover:bg-amber-500 text-neutral-950 font-black text-lg py-5 rounded-xl flex items-center justify-center gap-3 transition-colors">
+          <Pause className="w-6 h-6 fill-current" />
+          PAUSE RUN
+        </button>
+        <button className="bg-neutral-800 hover:bg-neutral-700 text-slate-100 font-black text-lg py-5 rounded-xl border border-neutral-700 flex items-center justify-center gap-3 transition-colors">
+          <Square className="w-6 h-6 fill-current" />
+          STOP RUN
+        </button>
+        <button className="col-span-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 font-bold text-sm py-4 rounded-xl border border-neutral-800 flex items-center justify-center gap-2 transition-colors">
+          <Activity className="w-4 h-4" />
+          LOG STOPPAGE
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-neutral-500 font-medium px-2">
+        <span>Elapsed: 2h 14m</span>
+        <span>Last ran: 3 days ago</span>
+      </div>
+
+      {/* 5. Dense Secondary Grid (Run Details) */}
+      <div className="bg-neutral-900 border border-neutral-800 rounded-xl overflow-hidden">
+        <div className="bg-neutral-800/50 px-4 py-3 border-b border-neutral-800">
+          <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">Line Details</h3>
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-y divide-neutral-800">
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">Cases Left</span>
+            <span className="text-sm font-bold text-white tabular-nums">536</span>
+          </div>
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">On Line</span>
+            <span className="text-sm font-bold text-white tabular-nums">~27</span>
+          </div>
+          <div className="p-3 flex justify-between items-center col-span-2">
+            <span className="text-xs text-neutral-400 font-medium">Dough Status</span>
+            <span className="text-sm font-bold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20">+3.5 cases ahead</span>
+          </div>
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">Cases on Last</span>
+            <span className="text-sm font-bold text-white tabular-nums">14</span>
+          </div>
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">Trays/Skid</span>
+            <span className="text-sm font-bold text-white tabular-nums">6.25</span>
+          </div>
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">Trays/Batch</span>
+            <span className="text-sm font-bold text-white tabular-nums">4.10</span>
+          </div>
+          <div className="p-3 flex justify-between items-center">
+            <span className="text-xs text-neutral-400 font-medium">Batches/Skid</span>
+            <span className="text-sm font-bold text-white tabular-nums">1.52</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 6. Demoted Actions (Temp Adjustments & Run Nav) */}
+      <div className="space-y-4 pt-4 border-t border-neutral-800">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Settings className="w-4 h-4 text-neutral-400" />
+            <h3 className="text-sm font-bold text-slate-300">Temporary Adjustments</h3>
+          </div>
+          <button className="text-xs font-bold text-amber-500 hover:text-amber-400">CLEAR ALL</button>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 relative">
+            <div className="absolute top-0 right-0 w-2 h-2 bg-amber-500 rounded-full -mt-1 -mr-1"></div>
+            <div className="text-[10px] text-neutral-500 uppercase font-bold mb-1 line-clamp-1">Freezer Time</div>
+            <div className="text-lg font-black text-white">35m</div>
+          </div>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3">
+            <div className="text-[10px] text-neutral-500 uppercase font-bold mb-1 line-clamp-1">Crusts/Cycle</div>
+            <div className="text-lg font-black text-white">3</div>
+          </div>
+          <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3">
+            <div className="text-[10px] text-neutral-500 uppercase font-bold mb-1 line-clamp-1">Cycle Speed</div>
+            <div className="text-lg font-black text-white">1.2s</div>
+          </div>
+        </div>
+
+        <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-3 mt-6">
+          <div className="flex items-center justify-between">
+            <button className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors text-sm font-medium">
+              <ChevronLeft className="w-4 h-4" />
+              <div className="flex flex-col items-start">
+                <span className="text-[10px] uppercase text-neutral-500">Previous</span>
+                <span className="truncate max-w-[100px]">Aldo's Cheese</span>
+              </div>
+            </button>
+            <div className="flex gap-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-neutral-600"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 ring-2 ring-amber-500/20"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-neutral-800"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-neutral-800"></div>
+            </div>
+            <button className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors text-sm font-medium text-right">
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] uppercase text-neutral-500">Next</span>
+                <span className="truncate max-w-[100px]">Cornerbooth Sausage</span>
+              </div>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
