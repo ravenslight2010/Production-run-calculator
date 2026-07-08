@@ -141,19 +141,13 @@ export function VariantAB() {
     <div className="pkg-tab-scope min-h-screen bg-background text-foreground p-4 max-w-md mx-auto flex flex-col pb-20">
       
       {/* ── Top Dashboard Metrics ── */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
+      <div className="mb-6">
         <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Skids / Cases Left</span>
           <span className="text-2xl font-mono font-black tabular-nums text-foreground">
-            {fmtNum(skids, 0)}
-            <span className="text-muted-foreground text-lg">/{fmtNum(Math.ceil(Number(v.casesNeeded) / casesPerSkid), 0)}</span>
-          </span>
-        </div>
-        <div className="bg-muted/20 border border-border/30 rounded-xl p-3 flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Cases</span>
-          <span className="text-2xl font-mono font-black tabular-nums text-foreground">
-            {fmtNum(calc.casesCompleted, 0)}
-            <span className="text-muted-foreground text-lg">/{fmtNum(Number(v.casesNeeded), 0)}</span>
+            {fmtNum(Math.floor(calc.casesLeftToRun / casesPerSkid), 0)}
+            <span className="text-muted-foreground mx-1">/</span>
+            {fmtNum(calc.casesLeftToRun % casesPerSkid, 0)}
           </span>
         </div>
       </div>
@@ -266,7 +260,10 @@ export function VariantAB() {
                     >
                       −
                     </button>
-                    <div className="text-[5rem] leading-[1] font-black tabular-nums tracking-tighter text-foreground drop-shadow-md">{skids}</div>
+                    <div className="text-[5rem] leading-[1] font-black tabular-nums tracking-tighter text-foreground drop-shadow-md">
+                      {skids}
+                      <span className="text-[2.5rem] text-muted-foreground font-bold">/{Math.ceil(Number(v.casesNeeded) / casesPerSkid)}</span>
+                    </div>
                     <button 
                       type="button" 
                       onClick={() => setSkids(s => s + 1)}
