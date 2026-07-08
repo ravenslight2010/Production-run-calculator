@@ -14,8 +14,19 @@ import {
   ChevronDown,
   Clock
 } from "lucide-react";
+import { useState } from "react";
+
+function SetupNum({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 flex flex-col">
+      <span className="text-[10px] text-neutral-500 uppercase font-medium">{label}</span>
+      <span className="text-base font-bold text-slate-100 mt-0.5 tabular-nums">{value}</span>
+    </div>
+  );
+}
 
 export function ManagerHub() {
+  const [lineSetupOpen, setLineSetupOpen] = useState(true);
   return (
     <div className="min-h-screen bg-neutral-950 text-slate-300 font-sans p-4 space-y-6 max-w-[620px] mx-auto pb-24">
       {/* 0. Top Bar: New Run & Context */}
@@ -267,6 +278,74 @@ export function ManagerHub() {
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* 8. Collapsible Line Setup (moved from the header menu) */}
+        <div className="bg-neutral-900 border-2 border-neutral-800 rounded-xl overflow-hidden mt-6">
+          <button
+            className="w-full px-4 py-3.5 flex items-center justify-between hover:bg-neutral-800/50 transition-colors"
+            onClick={() => setLineSetupOpen(!lineSetupOpen)}
+          >
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-neutral-400" />
+              <span className="text-sm font-bold text-slate-200 uppercase tracking-wider">Line Setup</span>
+            </div>
+            <ChevronDown className={`w-5 h-5 text-neutral-400 transition-transform ${lineSetupOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {lineSetupOpen && (
+            <div className="px-4 pb-4 pt-3 flex flex-col gap-4 border-t border-neutral-800">
+              {/* Line type toggle */}
+              <div>
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Line Type</span>
+                <div className="flex gap-1 p-1 bg-neutral-950 rounded-lg w-fit border border-neutral-800">
+                  <button className="px-4 py-1.5 rounded-md text-sm font-semibold bg-neutral-800 text-white shadow-sm">Dough</button>
+                  <button className="px-4 py-1.5 rounded-md text-sm font-semibold text-neutral-500 hover:text-neutral-300">Crust</button>
+                </div>
+              </div>
+
+              {/* Die type chips */}
+              <div>
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Die Type</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border bg-amber-600 text-neutral-950 border-amber-600">TX-16</button>
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-600">RD-12</button>
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border bg-neutral-950 text-neutral-400 border-neutral-800 hover:border-neutral-600">SQ-10</button>
+                  <button className="px-2 py-1 rounded-md text-xs border border-dashed border-neutral-700 text-neutral-600 hover:text-neutral-400">
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Allergen chips */}
+              <div>
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Allergen</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border border-neutral-700 text-neutral-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 h-2 rounded-full bg-neutral-500" /> None
+                  </button>
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border flex items-center gap-1.5 bg-red-900/60 border-red-700 text-red-200">
+                    <span className="inline-block w-2 h-2 rounded-full bg-red-500" /> Wheat/Dairy
+                  </button>
+                  <button className="px-2.5 py-1 rounded-md text-xs font-semibold border border-orange-800 text-orange-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 h-2 rounded-full bg-orange-500" /> Soy
+                  </button>
+                </div>
+              </div>
+
+              {/* Numeric line settings */}
+              <div className="grid grid-cols-2 gap-2">
+                <SetupNum label="Crusts Per Cycle" value="3" />
+                <SetupNum label="Cycle Speed (cyc/min)" value="1.2" />
+                <SetupNum label="Speed Adjustment" value="0" />
+                <SetupNum label="Freezer Time (min)" value="35" />
+                <SetupNum label="Pizzas Per Case" value="12" />
+                <SetupNum label="Cases Per Skid" value="64" />
+                <SetupNum label="Extra Case Buffer" value="2" />
+                <SetupNum label="Doughballs Per Tray" value="24" />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
