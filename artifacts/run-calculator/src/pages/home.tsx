@@ -4761,12 +4761,12 @@ export default function Home() {
         brandFlavors: loadBrandFlavors(),
         deletedItems: loadDeletedItems(),
       };
-      const res = await fetch(`/api/sync/${scheduleEditorDate}`, {
+      const res = await fetch(`/api/sync/${scheduleEditorDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload }),
       });
-      if (res.ok) {
+      if (res.ok && !handleStaleSyncWrite(await res.json().catch(() => null))) {
         fetch(`/api/sync/scheduled?include=runs&today=${todayStr()}`).then(r => r.json()).then(d => setScheduledDays(d as {date:string;runCount:number;runs?:{id:string;brand:string;flavor:string;casesNeeded:number;dieType:string}[]}[])).catch(() => {});
         setScheduleView("list");
       }
@@ -4822,12 +4822,12 @@ export default function Home() {
       dayState: { ...(base.dayState ?? src.dayState), runs: target, date: toDate, resetAt: writeDayResetAt(toDate, todayStr(), (base.dayState ?? src.dayState)?.resetAt, dayStateRef.current.resetAt, Date.now()) },
       runValues: vals.target,
     };
-    const tRes = await fetch(`/api/sync/${toDate}`, {
+    const tRes = await fetch(`/api/sync/${toDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ payload: targetPayload }),
     });
-    if (!tRes.ok) return;
+    if (!tRes.ok || handleStaleSyncWrite(await tRes.json().catch(() => null))) return;
     if (source.length === 0) {
       await fetch(`/api/sync/${fromDate}?today=${todayStr()}`, { method: "DELETE" });
     } else {
@@ -4836,11 +4836,12 @@ export default function Home() {
         dayState: { ...src.dayState, runs: source, date: fromDate },
         runValues: vals.source,
       };
-      await fetch(`/api/sync/${fromDate}`, {
+      const sRes = await fetch(`/api/sync/${fromDate}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: sourcePayload }),
       });
+      handleStaleSyncWrite(await sRes.json().catch(() => null));
     }
     await refreshScheduledDays();
   }
@@ -5616,6 +5617,21 @@ export default function Home() {
     };
   }, []);
 
+  // The server's PUT epoch guard fails CLOSED once the scope has ever been
+  // reset: any sync write that doesn't carry a current `?epoch=` is answered
+  // with {ok:true, stale:true} and silently DROPPED — the client thinks it
+  // synced while nothing persisted (runs "un-starting" on the next receive).
+  // So every sync write must append `epoch=${getStoredResetEpoch()}` and run
+  // its response through this handler. A stale rejection means this device
+  // hasn't honoured the latest data reset: adopt it (wipe + reload) so we stop
+  // pushing pre-reset data. Returns true when the write was rejected as stale.
+  function handleStaleSyncWrite(body: unknown): boolean {
+    const b = body as { stale?: boolean; epoch?: number } | null;
+    if (!b?.stale) return false;
+    if (typeof b.epoch === "number" && applyResetWipe(b.epoch)) window.location.reload();
+    return true;
+  }
+
   function doFetch(payload: SyncPayload, retriesLeft: number, sig?: string) {
     // Guard the retry path too: buildSyncPayload stamps the payload with the
     // date it was built on. A push queued just before midnight could otherwise
@@ -5627,12 +5643,20 @@ export default function Home() {
     // Key the live row by the CLIENT's local date (?today=). The server is UTC, so
     // without this a client behind UTC writes the live day into its local
     // "tomorrow" row — clobbering a scheduled day (and its case counts).
-    fetch(`/api/sync/today?today=${todayStr()}`, {
+    fetch(`/api/sync/today?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ senderId: clientId.current, payload }),
-    }).then(() => {
+    }).then(async (res) => {
+      const body = await res.json().catch(() => null);
       pushAcknowledgedRef.current = true;
+      if (handleStaleSyncWrite(body)) {
+        // The server dropped this write (data reset not yet honoured). The
+        // handler wipes + reloads when adoption applies; either way this push
+        // did NOT persist, so flag it instead of recording it as synced.
+        setSyncPushFailed(true);
+        return;
+      }
       setSyncPushFailed(false);
       // Record the synced signature ONLY after a successful PUT, so a failed
       // push is never treated as synced (which would block its retry).
@@ -7778,13 +7802,13 @@ export default function Home() {
       // Key the day boundary + live-view broadcast on the operator's local
       // `today`, not the server's UTC date (see commitMultiDayImport) — else an
       // import onto today never shows up live when the two dates disagree.
-      const res = await fetch(`/api/sync/${date}?today=${todayStr()}`, {
+      const res = await fetch(`/api/sync/${date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ payload: outPayload }),
       });
-      ok = res.ok;
-      if (res.ok) {
+      ok = res.ok && !handleStaleSyncWrite(await res.clone().json().catch(() => null));
+      if (ok) {
         // If this import targets today, apply it onto THIS device right away
         // (same union-merge the SSE path uses) instead of waiting for the SSE
         // echo — otherwise today's imported runs may never show live here.
@@ -7918,12 +7942,12 @@ export default function Home() {
         // server's UTC day (e.g. a US evening) writes today's runs to the row
         // but never broadcasts them, so the open app never shows today's
         // schedule even though future days appear in the scheduled list.
-        const res = await fetch(`/api/sync/${date}?today=${todayStr()}`, {
+        const res = await fetch(`/api/sync/${date}?today=${todayStr()}&epoch=${getStoredResetEpoch()}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ payload: outPayload }),
         });
-        dayOk = res.ok;
+        dayOk = res.ok && !handleStaleSyncWrite(await res.clone().json().catch(() => null));
         if (!res.ok) {
           // A 401 means the sign-in session expired (e.g. the daily midnight
           // boundary): every remaining day would fail identically, so stop,
