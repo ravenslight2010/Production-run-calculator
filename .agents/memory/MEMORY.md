@@ -5,7 +5,6 @@
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [Die-type master heal](die-type-master-heal.md) — imports write profile dieType VALUE but not the picker's master list; both apps self-heal DIE_TYPES from profiles, honoring deletions.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
-- [Spec-import seed pattern](spec-import-seed-pattern.md) — HISTORICAL: seeds removed 2026-07-03 (see one-time-data-purge.md); pattern kept for reference only.
 - [Ingredient near-dup merges](ingredient-dedupe.md) — INGREDIENT_RENAMES mirrored web+mobile; FR/Parmesan/mozz-fat carve-outs kept, "Diced" merges by default; bump dedupe marker when adding entries.
 - [Mobile seed ordering](mobile-seed-ordering.md) — all marker-guarded AsyncStorage seeds in mobile RunContext must run in ONE ordered effect, else a later seed races and drops fields.
 - [Spec preset seeding](spec-preset-seeding.md) — imported pizza-spec presets: marker-guarded, only-if-absent, case-insensitive additive merges; target weight/spec range intentionally skipped.
@@ -39,8 +38,7 @@
 - [Role gating](role-gating.md) — roles are DB rows (name+capabilities+builtin); requireCapability resolves caps from rolesTable (tests MUST seedRoles); 6 caps, escalation/last-manager guards; never gate /sync.
 - [Daily-reset auth boundary](daily-reset-auth-boundary.md) — stateless HMAC tokens force-expired at midnight via today's resetAt; client-pushed boundary, mobile forcedOutRef latch, reactive 401 bounce.
 - [AI optimize assistant](ai-optimize-assistant.md) — /ai/optimize reuses photo-intake plumbing; parity is in the shaped OptimizeInput; mobile has no "pause" stoppage type so counts all stoppages (same meaning as web's pause filter).
-- [Password reset relay](password-reset-relay.md) — no-email forgot-password = manager approves & relays one-time code; enumeration-safe; /auth/* exempt from 401 bounce.
-- [Password-reset nav badge](reset-request-nav-badge.md) — manager nav badge via usePendingResetCount hook; reuses ["passwordResetRequests"] key, gated enabled:isManager; web+mobile parity.
+- [Password reset relay](password-reset-relay.md) — manager approves & relays one-time code; enumeration-safe; /auth/* exempt from 401 bounce; manager nav badge in reset-request-nav-badge.md.
 - [Isolated DB predates migrations](isolated-db-may-predate-migrations.md) — task env Postgres may lag Drizzle schema (no users table, Clerk-era user_roles); verify \d before building.
 - [Integration test DB binding](integration-test-db-binding.md) — in *.integration.test.ts, never statically import a module that pulls @workspace/db; the pool binds to DATABASE_URL at import, before beforeAll repoints it.
 - [Rate limiter shared store](rate-limit-shared-store.md) — cost-cap limiter has pluggable store; Postgres-backed in prod for cross-instance cap, memory otherwise; window anchored on app clock not DB clock.
@@ -48,7 +46,7 @@
 - [Onboarding flag](onboarding-seen-flag.md) — first-login "Get Started" overview gated by server-side per-user users.onboardingSeen; auto-open once via ref guard, reopen from header menu; web+mobile parity.
 - [Generic JSX breaks metadata plugin](generic-jsx-breaks-metadata-plugin.md) — `<Comp<T>/>` typechecks but white-screens Vite dev build; drop the type arg, pin via prop casts.
 - [expo-secure-store web crash](expo-secure-store-web-crash.md) — SecureStore has no web impl; blanks Expo web build (Replit preview + UI tests); branch on Platform.OS, use localStorage on web.
-- [Fill-missing assistant](fill-missing-assistant.md) — "fill missing data" panel: source priority learned→profile→spec→default→AI; never auto-apply; context-aware applicability (record must carry subTab); web+mobile parity.
+- [Fill-missing assistant](fill-missing-assistant.md) — source priority learned→profile→spec→default→AI; never auto-apply; record must carry subTab; web+mobile parity.
 - [Web test harness](web-test-harness.md) — web artifact owns shared web+mobile vitest; mobile module loaded via strip-imports→transpile→temp-mjs; serialize files + big timeouts or validation flakes under dev-workflow contention.
 - [Fill-missing shared lib](fill-missing-shared-lib.md) — fill-missing pure logic now in @workspace/fill-missing; each app keeps only platform glue + re-exports; test imports lib directly.
 - [inventory-math shared lib](inventory-math-shared-lib.md) — consumption/summary math now in @workspace/inventory-math; web+mobile keep thin wrappers; DEFAULT_PEP_TYPES injected; web maps targetDoughballWeight→doughballWeightOz.
@@ -71,18 +69,15 @@
 - [Floor Mode parity](floor-mode.md) — idle big-numbers monitor on web+mobile; intentional diffs; drift+auto-dim; idle auto-open tab-focus-gated; on/off toggle is per-user server-side (/me) on web, mobile still local.
 - [Production Rules](production-rules.md) — manager-editable factory-wide run rules (required-field/numeric-range/sequence), flexible=warn/strict=block-Start; server-persisted (NOT in sync), POST/DELETE manager-only; web+mobile field-map + numeric-range seed gotcha.
 - [Merge deny + change history](merge-deny-and-change-history.md) — factory-wide server-persisted denied merge pairs (filtered at shared glue) + LOCAL (unsynced) master-data undo trail w/ rollback-to-point; web+mobile parity.
-- [Merge tombstones](merge-tombstones.md) — merges need a synced `mergedAway` tombstone to survive additive live-sync union (filter EVERY list incl. one-off ingredientTypes; push-before-reload on web); union semantics = cross-peer re-add tradeoff.
-- [Deletion tombstones](deletion-tombstones.md) — plain deletes need a synced per-namespace `deletedItems` map (parallel to mergedAway) or the additive union resurrects them; brand-delete must tombstone each flavor too; web+mobile parity.
+- [Merge](merge-tombstones.md) + [deletion tombstones](deletion-tombstones.md) — merges need synced `mergedAway`, deletes need per-namespace `deletedItems`, or the additive sync union resurrects them; filter EVERY list; brand-delete tombstones each flavor.
 - [runTest Expo-web quirks](runtest-expo-web-quirks.md) — RN Alert no-op; 10-iteration cap; if capped, drive playwright-core + nix chromium yourself; /mobile/ path unusable; mobile scheduled is local-only.
 - [Shared AI memory](shared-ai-memory.md) — facility-knowledge store (domain/key/fact, factory-wide) + per-user conversation turns; ONE fail-safe grounding path all AI prompts call; distinct from name-corrections pool; web+mobile parity.
 - [Proactive shift alerts](proactive-alerts.md) — separate /ai/proactive-alert endpoint; server returns ≤1 keyed nudge, client owns dedup/cooldown; poll hook must live in persistent spot (home.tsx / (tabs)/_layout.tsx), not assistant tab; web+mobile parity.
 - [Ask-the-day AI chat](ask-the-day-chat.md) — all-staff plain-language Q&A grounded in day-state (reuses OptimizeInput/buildInput); requireAuth NOT requireRole; per-user conversation window; optimize stays manager-gated; web+mobile parity.
 - [Quality check & waste insight AI](quality-and-waste-ai.md) — read-only quality photo check (confirm→facility memory "quality") + expiry/waste insight (server flags, AI only when at-risk); manager-gated, never auto-write; web+mobile parity.
-- [AI demand forecast](demand-forecast.md) — manager-gated /ai/forecast predicts next day's run plan from finished history; null+note when thin, confidence field, never auto-commits (seeds editable schedule); records to facility memory; web+mobile parity.
-- [Forecast accuracy](forecast-accuracy.md) — manager-only forecast-vs-actual scoring; /ai/forecast-accuracy is pure math (no AI/limit); formatForecastFact↔parseForecastFact canonical round-trip, truncation-tolerant; web+mobile parity.
+- [AI demand forecast](demand-forecast.md) + [accuracy](forecast-accuracy.md) — manager-gated /ai/forecast never auto-commits (seeds editable schedule); accuracy scoring is pure math; forecastFact round-trip truncation-tolerant.
 - [AI recipe assistant](recipe-assistant.md) — staff /ai/recipe-assistant single-shot (no convo memory; NO userId to grounding); scale/sub/explain over real recipes; shared buildRecipeAssistContext verbatim; advisory-only; web+mobile parity.
-- [Voice ask input](voice-ask-input.md) — mic on Ask-the-day chat = Web Speech API (no native lib); mobile guards Platform.OS==="web"; hidden when unsupported (native) = graceful typing fallback; web+mobile parity.
-- [Voice ask output](voice-ask-output.md) — "speak answers" toggle reads newest AI reply via SpeechSynthesis (useSpeechOutput, mirrors useSpeechInput); auto-speak effect + lastSpokenRef; hidden when unsupported; web+mobile parity.
+- [Voice ask input](voice-ask-input.md) + [output](voice-ask-output.md) — mic (Web Speech) + "speak answers" (SpeechSynthesis); hidden when unsupported; mobile guards Platform.OS==="web"; web+mobile parity.
 - [Isolated env stale workspace links](isolated-env-stale-workspace-links.md) — task env may miss @workspace/* node_modules symlinks → "cannot find module"/build fails; fix with `pnpm install` (+ typecheck:libs), not code changes.
 - [Voice commands](voice-commands.md) — spoken phrase → /ai/command classifies question vs command; actions run via EXISTING handlers (no confirm, Undo safety net); parity in @workspace/voice-commands dispatch; server grounds fuzzy refs; mobile Undo drift accepted.
 - [Additive push-force schema](additive-push-force-schema.md) — adding a col to a POPULATED table must be additive or push-force prompts/breaks: uniqueIndex not .unique()/composite-PK-with-new-col; keep int singleton PKs (not serial).
@@ -158,3 +153,4 @@
 - [Cold-start import hang](cold-start-import-hang.md) — autoscale scale-to-zero can hang fetches at the edge (zero app logs); blocking-dialog fetches need AbortSignal.timeout + visible Cancel.
 - [Freezer WIP completion](freezer-wip-completion.md) — casesInFreezer is additive display-only (never in spreadsheet math); resumeRun shifts startedAt so only an end-while-paused open pause is subtracted in the drain.
 - [Today-schedule edits via live path](today-schedule-edit-live-path.md) — editing TODAY in the schedule editor must write through the live day-state path (stamps+tombstones), never the raw scheduled PUT, or sync/Start Run reverts the edits.
+- [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.

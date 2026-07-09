@@ -6101,6 +6101,14 @@ export default function Home() {
         profile.frontlineRecipe = [];
       }
       form.reset(profile); resetFieldArrays(profile);
+    } else {
+      // No saved profile for the new identity — reset to defaults. Keeping the
+      // OLD run's values here silently rebrands them as the new brand/flavor,
+      // and the very next autosave/navigation then saves that contamination AS
+      // the new identity's profile (the "House Special filled with another
+      // product's numbers" cross-profile data bleed). Mirrors addRunWithIdentity.
+      form.reset(DEFAULT_VALUES);
+      resetFieldArrays(DEFAULT_VALUES);
     }
     schedulePush(newDs, 0);
   }
@@ -7473,9 +7481,40 @@ export default function Home() {
     // imported). Capture before clearing the prepared payload.
     const importedRecipes = editedParsed.recipes.length > 0;
     try {
-      const { mixesAdded, cheeseRecipesAdded } = await commitSpecImport(toCommit);
+      const { mixesAdded, cheeseRecipesAdded, touchedProfiles } = await commitSpecImport(toCommit);
       // Refresh derived dropdowns/profiles now that storage changed.
       reloadMasterData();
+      // If the CURRENT run's brand+flavor profile was rewritten by this import,
+      // reload it into the live form immediately. Otherwise the open form still
+      // holds the pre-import values, and the next navigation/autosave saves them
+      // right back over the freshly imported profile (the "re-imported my specs
+      // but the run never changed" clobber). Mirrors addRunWithIdentity's load.
+      // Re-resolve the run from the live ref — the captured currentRun/dayState
+      // may be stale after the (slow) await if the user navigated meanwhile.
+      const liveDay = dayStateRef.current;
+      const liveRun = liveDay.runs[liveDay.currentIndex] ?? liveDay.runs[0];
+      if (liveRun && (liveRun.brand || liveRun.flavor)) {
+        const touched = touchedProfiles.some(
+          (t) =>
+            t.brand.toLowerCase() === (liveRun.brand ?? "").toLowerCase() &&
+            t.flavor.toLowerCase() === (liveRun.flavor ?? "").toLowerCase(),
+        );
+        const profile = touched ? loadProfile(liveRun.brand, liveRun.flavor) : null;
+        if (profile) {
+          // Strip mix recipe names from sauce fields — they belong in the applicator mix field
+          if (profile.frontlineRecipeName && SEED_MIX_RECIPE_NAMES.has(profile.frontlineRecipeName)) {
+            profile.frontlineRecipeName = "";
+            profile.frontlineRecipe = [];
+          }
+          const now = Date.now();
+          saveRunValues(liveRun.id, profile);
+          markRunValuesUpdated(liveRun.id, now);
+          lastLocalEditRef.current = now;
+          form.reset(profile);
+          resetFieldArrays(profile);
+          schedulePush(dayStateRef.current, 0);
+        }
+      }
       // Any dough / sauce recipes the sheet added are pushed into the server pool
       // so they become factory-wide master-data (like the Mixes / Cheese pools).
       // Best-effort, manager-only server-side; never blocks the committed import.

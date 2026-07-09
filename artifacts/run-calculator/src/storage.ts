@@ -2120,8 +2120,8 @@ export function specImportRecipeDisplayKind(r: ParsedRecipe): SpecImportDisplayK
  * brand/flavor/type/ingredient/recipe name becomes selectable. Best-effort and
  * fail-safe: a malformed entry is skipped rather than aborting the whole import.
  */
-export function applySpecImport(parsed: ParsedSpecImport): void {
-  if (typeof localStorage === "undefined") return;
+export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string; flavor: string }> {
+  if (typeof localStorage === "undefined") return [];
 
   // ── Un-tombstone anything the user chose to re-include ──
   // A profile/recipe reaching apply was explicitly kept in the review. If it had
@@ -2449,6 +2449,13 @@ export function applySpecImport(parsed: ParsedSpecImport): void {
   if (newPepTypes.length) {
     saveList(PEP_TYPES_KEY, mergeListInsensitive(loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES), newPepTypes));
   }
+
+  // Every brand+flavor profile this import wrote (spec fields and/or recipe
+  // ties). The caller uses this to reload any OPEN run form for a touched
+  // profile — otherwise the stale form re-saves the pre-import values over the
+  // freshly imported profile on the next navigation/autosave (the "re-imported
+  // my specs but nothing changed" clobber).
+  return [...touchedProfiles.values()];
 }
 
 /** Re-export so the importer glue can pass the alias type through to clients. */

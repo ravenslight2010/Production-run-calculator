@@ -465,7 +465,10 @@ export default function SpecImportDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            // While the commit is writing profiles/recipes, closing would let the
+            // user navigate mid-apply — keep the dialog up until it finishes.
+            disabled={applying}
+            className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

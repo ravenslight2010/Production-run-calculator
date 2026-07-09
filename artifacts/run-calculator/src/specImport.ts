@@ -744,7 +744,12 @@ export async function prepareSpecImportMulti(
  */
 export async function commitSpecImport(
   prepared: SpecImportPrepared,
-): Promise<{ mixesAdded: number; cheeseRecipesAdded: number }> {
+): Promise<{
+  mixesAdded: number;
+  cheeseRecipesAdded: number;
+  /** Brand+flavor profiles this import wrote — see applySpecImport. */
+  touchedProfiles: Array<{ brand: string; flavor: string }>;
+}> {
   // Collapse per-weight cheese-blend name variants ("Aldo's Cheese Mix 2.07" /
   // "…1.75") to one clean name up front, so the profile applicator fields and the
   // server cheese pool both link to a single recipe (the per-pizza weight lives
@@ -768,7 +773,7 @@ export async function commitSpecImport(
     // Best-effort — apply with imported names if the pool is unavailable.
   }
 
-  applySpecImport(prepared.parsed);
+  const touchedProfiles = applySpecImport(prepared.parsed);
 
   // Add any mixes detected in this import to the factory-wide Mixes list so they
   // appear on the Mixes screen alongside premix-imported ones. Manager-gated on
@@ -858,5 +863,5 @@ export async function commitSpecImport(
     );
   }
 
-  return { mixesAdded, cheeseRecipesAdded };
+  return { mixesAdded, cheeseRecipesAdded, touchedProfiles };
 }
