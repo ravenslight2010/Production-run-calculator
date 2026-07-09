@@ -9,18 +9,21 @@ import {
   Search,
   ChevronDown,
   ChevronRight,
+  Pencil,
 } from "lucide-react";
 import {
   DEFAULT_DAYS_EARLY,
   normalizeMix,
   mixMatchesQuery,
   groupMixesByBrand,
+  renameMixesBrand,
   type Mix,
   type MixComponent,
 } from "@workspace/mixes";
 import { useMixes } from "../hooks/useMixes";
 import { saveMixes, deleteMixes } from "../mixes";
 import { ConfirmDeleteButton } from "@/components/ConfirmDeleteButton";
+import { BrandRenamePanel } from "@/components/BrandRenamePanel";
 
 function genId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -68,12 +71,20 @@ export default function MixesManager({
   const [query, setQuery] = useState("");
   const [openBrands, setOpenBrands] = useState<Set<string>>(new Set());
   const [openMixes, setOpenMixes] = useState<Set<string>>(new Set());
+  // Brand group (lowercased key) whose rename/merge panel is open, if any.
+  const [renamingBrand, setRenamingBrand] = useState<string | null>(null);
 
   const searching = query.trim().length > 0;
   const groups = useMemo(() => {
     const filtered = items.filter((m) => mixMatchesQuery(m, query));
     return groupMixesByBrand(filtered);
   }, [items, query]);
+  // All brand names in the FULL pool (ignoring the search filter), so the
+  // rename panel can offer every possible merge target.
+  const allBrands = useMemo(
+    () => groupMixesByBrand(items).map((g) => g.brand).filter(Boolean),
+    [items],
+  );
 
   function toggleBrand(key: string) {
     setOpenBrands((prev) => {
@@ -114,6 +125,23 @@ export default function MixesManager({
   });
 
   const busy = saveMutation.isPending || deleteMutation.isPending;
+
+  // Rename a whole brand group (or merge it into another group when the new
+  // name matches an existing brand — grouping is case-insensitive). Rewrites
+  // only the changed rows through the normal save path.
+  function renameBrandGroup(fromBrand: string, toBrand: string) {
+    const changed = renameMixesBrand(items, fromBrand, toBrand);
+    setRenamingBrand(null);
+    if (changed.length === 0) return;
+    // Keep the group open under its new key so the result stays visible.
+    setOpenBrands((prev) => {
+      const next = new Set(prev);
+      next.delete(fromBrand.trim().toLowerCase());
+      next.add(toBrand.trim().toLowerCase());
+      return next;
+    });
+    saveMutation.mutate(changed);
+  }
 
   function addMix() {
     const draft = blankMix();
@@ -185,23 +213,54 @@ export default function MixesManager({
                     key={key || "(none)"}
                     className="rounded-md border border-border/60 overflow-hidden"
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggleBrand(key)}
-                      className="w-full flex items-center gap-2 px-2.5 py-2 bg-muted/40 hover:bg-muted/60 text-left"
-                    >
-                      {open ? (
-                        <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex items-stretch bg-muted/40">
+                      <button
+                        type="button"
+                        onClick={() => toggleBrand(key)}
+                        className="flex-1 min-w-0 flex items-center gap-2 px-2.5 py-2 hover:bg-muted/60 text-left"
+                      >
+                        {open ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        )}
+                        <span className="text-xs font-semibold flex-1 truncate">
+                          {group.brand || "No brand"}
+                        </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">
+                          {group.mixes.length}
+                        </span>
+                      </button>
+                      {group.brand && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRenamingBrand((prev) =>
+                              prev === key ? null : key,
+                            )
+                          }
+                          disabled={busy}
+                          title="Rename or merge this brand"
+                          className="px-2.5 flex items-center text-muted-foreground hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                       )}
-                      <span className="text-xs font-semibold flex-1 truncate">
-                        {group.brand || "No brand"}
-                      </span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">
-                        {group.mixes.length}
-                      </span>
-                    </button>
+                    </div>
+                    {renamingBrand === key && group.brand && (
+                      <BrandRenamePanel
+                        brand={group.brand}
+                        nounLabel="brand"
+                        itemCount={group.mixes.length}
+                        itemNoun="mix"
+                        otherBrands={allBrands.filter(
+                          (b) => b.toLowerCase() !== key,
+                        )}
+                        disabled={busy}
+                        onSave={(newName) => renameBrandGroup(group.brand, newName)}
+                        onCancel={() => setRenamingBrand(null)}
+                      />
+                    )}
                     {open && (
                       <div className="flex flex-col gap-1.5 p-1.5 border-t border-border/40">
                         {group.mixes.map((mix) => {

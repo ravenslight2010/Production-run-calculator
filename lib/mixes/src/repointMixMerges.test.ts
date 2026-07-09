@@ -3,6 +3,7 @@ import {
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
   repointMixIngredients,
+  renameMixesBrand,
   type Mix,
 } from "./index";
 
@@ -39,6 +40,43 @@ describe("repointMixesForBrandMerge", () => {
     expect(repointMixesForBrandMerge(mixes, ["Zeta"], "Beta")).toEqual([]);
     expect(repointMixesForBrandMerge(mixes, ["Alpha"], "   ")).toEqual([]);
     expect(repointMixesForBrandMerge(mixes, ["Alpha"], "Alpha")).toEqual([]);
+  });
+});
+
+describe("renameMixesBrand", () => {
+  it("renames every mix in the brand group (case-insensitive match) and returns only changed rows", () => {
+    const mixes = [
+      make({ id: "1", brand: "Bobo Pizza", name: "Veggie" }),
+      make({ id: "2", brand: "bobo pizza", name: "Meat" }),
+      make({ id: "3", brand: "Other", name: "Cheese" }),
+    ];
+    const changed = renameMixesBrand(mixes, "Bobo Pizza", "Bobo");
+    expect(changed.map((m) => m.id).sort()).toEqual(["1", "2"]);
+    expect(changed.every((m) => m.brand === "Bobo")).toBe(true);
+  });
+
+  it("allows a case-only respelling (unlike the merge repoint helper)", () => {
+    const mixes = [make({ id: "1", brand: "aldos" })];
+    const changed = renameMixesBrand(mixes, "aldos", "Aldos");
+    expect(changed).toHaveLength(1);
+    expect(changed[0].brand).toBe("Aldos");
+  });
+
+  it("merging into an existing brand's spelling rewrites only the source group's rows", () => {
+    const mixes = [
+      make({ id: "1", brand: "Bobo's" }),
+      make({ id: "2", brand: "Bobo" }),
+    ];
+    const changed = renameMixesBrand(mixes, "Bobo's", "Bobo");
+    expect(changed.map((m) => m.id)).toEqual(["1"]);
+    expect(changed[0].brand).toBe("Bobo");
+  });
+
+  it("returns nothing for a blank target, a blank source (No brand group), or an exact no-op", () => {
+    const mixes = [make({ id: "1", brand: "Alpha" }), make({ id: "2", brand: "" })];
+    expect(renameMixesBrand(mixes, "Alpha", "   ")).toEqual([]);
+    expect(renameMixesBrand(mixes, "   ", "Beta")).toEqual([]);
+    expect(renameMixesBrand(mixes, "Alpha", "Alpha")).toEqual([]);
   });
 });
 

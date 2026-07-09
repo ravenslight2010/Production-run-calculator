@@ -195,6 +195,31 @@ export function repointMixesForBrandMerge(
 }
 
 /**
+ * Rename one brand group in the mixes pool (Manage Lists "rename / merge
+ * brand" control). Every mix whose brand matches `from` (case-insensitive)
+ * is rewritten to `to`. Unlike the merge repoint helper this ALLOWS a
+ * case-only respelling ("aldos" → "Aldo's"); renaming to another existing
+ * brand's name merges the groups (grouping is case-insensitive). Returns
+ * only the changed rows. Pure.
+ */
+export function renameMixesBrand(
+  mixes: ReadonlyArray<Mix>,
+  from: string,
+  to: string,
+): Mix[] {
+  const tgt = to.trim();
+  const fromKey = from.trim().toLowerCase();
+  if (!tgt || !fromKey || from.trim() === tgt) return [];
+  const changed: Mix[] = [];
+  for (const m of mixes) {
+    if (m.brand.trim().toLowerCase() === fromKey && m.brand.trim() !== tgt) {
+      changed.push({ ...m, brand: tgt });
+    }
+  }
+  return changed;
+}
+
+/**
  * Re-point mixes when flavors are merged WITHIN a brand. Only mixes of that
  * brand whose flavor is a merged-away source are rewritten to the target.
  */

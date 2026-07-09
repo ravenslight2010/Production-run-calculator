@@ -313,6 +313,31 @@ export function repointCheeseRecipesForBrandMerge(
   return changed;
 }
 
+/**
+ * Rename one customer (brand) group in the cheese-recipes pool (Manage Lists
+ * "rename / merge brand" control). Every recipe whose brand matches `from`
+ * (case-insensitive) is rewritten to `to`. Unlike the merge repoint helper
+ * this ALLOWS a case-only respelling ("aldos" → "Aldo's"); renaming to
+ * another existing customer's name merges the groups (grouping is
+ * case-insensitive). Returns only the changed rows. Pure.
+ */
+export function renameCheeseRecipesBrand(
+  recipes: ReadonlyArray<CheeseRecipe>,
+  from: string,
+  to: string,
+): CheeseRecipe[] {
+  const tgt = to.trim();
+  const fromKey = from.trim().toLowerCase();
+  if (!tgt || !fromKey || from.trim() === tgt) return [];
+  const changed: CheeseRecipe[] = [];
+  for (const r of recipes) {
+    if (r.brand.trim().toLowerCase() === fromKey && r.brand.trim() !== tgt) {
+      changed.push({ ...r, brand: tgt });
+    }
+  }
+  return changed;
+}
+
 // Re-point cheese recipes when flavors are merged WITHIN a brand. A flavor merge
 // keeps the recipe under the same brand, but its per-flavor assignment list
 // (`flavors`) can still name a merged-away flavor. Returns ONLY the recipes of

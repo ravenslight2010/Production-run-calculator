@@ -9,6 +9,7 @@ import {
   specCheeseDraftToRecipe,
   mergeCheeseRecipes,
   repointCheeseRecipesForBrandMerge,
+  renameCheeseRecipesBrand,
   repointCheeseRecipesForFlavorMerge,
   repointCheeseRecipeIngredients,
   cheeseRecipeMatchesQuery,
@@ -248,6 +249,43 @@ describe("repointCheeseRecipesForBrandMerge", () => {
   it("ignores a source equal to the target (nothing to move)", () => {
     const recipes = [make({ id: "1", brand: "Alpha" })];
     expect(repointCheeseRecipesForBrandMerge(recipes, ["Alpha"], "Alpha")).toEqual([]);
+  });
+
+  describe("renameCheeseRecipesBrand", () => {
+    it("renames every recipe in the customer group (case-insensitive) and returns only changed rows", () => {
+      const recipes = [
+        make({ id: "1", brand: "Corner Booth" }),
+        make({ id: "2", brand: "corner booth" }),
+        make({ id: "3", brand: "Other Co" }),
+      ];
+      const changed = renameCheeseRecipesBrand(recipes, "Corner Booth", "Cornerbooth");
+      expect(changed.map((r) => r.id).sort()).toEqual(["1", "2"]);
+      expect(changed.every((r) => r.brand === "Cornerbooth")).toBe(true);
+    });
+
+    it("allows a case-only respelling (unlike the merge repoint helper)", () => {
+      const recipes = [make({ id: "1", brand: "aldos" })];
+      const changed = renameCheeseRecipesBrand(recipes, "aldos", "Aldos");
+      expect(changed).toHaveLength(1);
+      expect(changed[0].brand).toBe("Aldos");
+    });
+
+    it("merging into an existing customer's spelling rewrites only the source group's rows", () => {
+      const recipes = [
+        make({ id: "1", brand: "Aldo's Pizza" }),
+        make({ id: "2", brand: "Aldo's" }),
+      ];
+      const changed = renameCheeseRecipesBrand(recipes, "Aldo's Pizza", "Aldo's");
+      expect(changed.map((r) => r.id)).toEqual(["1"]);
+      expect(changed[0].brand).toBe("Aldo's");
+    });
+
+    it("returns nothing for a blank target, a blank source, or an exact no-op", () => {
+      const recipes = [make({ id: "1", brand: "Alpha" }), make({ id: "2", brand: "" })];
+      expect(renameCheeseRecipesBrand(recipes, "Alpha", "   ")).toEqual([]);
+      expect(renameCheeseRecipesBrand(recipes, "   ", "Beta")).toEqual([]);
+      expect(renameCheeseRecipesBrand(recipes, "Alpha", "Alpha")).toEqual([]);
+    });
   });
 
   describe("flavor merge re-pointing", () => {
