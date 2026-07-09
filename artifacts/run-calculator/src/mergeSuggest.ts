@@ -26,6 +26,7 @@ import {
 } from "@workspace/merge-suggest";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type { MergeAlias, MergeSuggestion, DeniedMerge, MergeSuggestCategory };
 
@@ -49,9 +50,15 @@ export async function fetchMergeAliases(
   category?: MergeSuggestCategory,
   brand?: string,
 ): Promise<MergeAlias[]> {
-  const res = await fetch(`/api/merge-aliases${scopeParams(category, brand)}`, {
-    headers: { "x-client-id": inventoryClientId() },
-  });
+  // Bounded wait: this runs inside the post-import background merge scan. If
+  // the deployment is cold-starting the request can hang at the platform edge;
+  // suggestMerges treats a failure as "no learned aliases" and continues, so a
+  // timeout keeps the scan (and its "possible duplicates" toast) alive.
+  const res = await fetchWithTimeout(
+    `/api/merge-aliases${scopeParams(category, brand)}`,
+    { headers: { "x-client-id": inventoryClientId() } },
+    15_000,
+  );
   if (!res.ok) throw new Error(`List merge aliases failed (${res.status})`);
   const data = (await res.json()) as { aliases: MergeAlias[] };
   return data.aliases ?? [];
@@ -87,9 +94,13 @@ export async function fetchDeniedMerges(
   category?: MergeSuggestCategory,
   brand?: string,
 ): Promise<DeniedMerge[]> {
-  const res = await fetch(`/api/denied-merges${scopeParams(category, brand)}`, {
-    headers: { "x-client-id": inventoryClientId() },
-  });
+  // Bounded wait — same cold-start rationale as fetchMergeAliases; a failure
+  // just means denied pairs aren't filtered this scan.
+  const res = await fetchWithTimeout(
+    `/api/denied-merges${scopeParams(category, brand)}`,
+    { headers: { "x-client-id": inventoryClientId() } },
+    15_000,
+  );
   if (!res.ok) throw new Error(`List denied merges failed (${res.status})`);
   const data = (await res.json()) as { denied: DeniedMerge[] };
   return data.denied ?? [];
@@ -182,19 +193,26 @@ async function requestAiSuggestMerges(
   category?: MergeSuggestCategory,
   brand?: string,
 ): Promise<ReviewedMergeSuggestion[]> {
-  const res = await fetch("/api/ai/suggest-merges", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
+  // Bounded wait so a cold-starting deployment can't hang the post-import
+  // merge scan forever; suggestMerges falls back to look-alike/remembered
+  // groups on any failure.
+  const res = await fetchWithTimeout(
+    "/api/ai/suggest-merges",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      body: JSON.stringify({
+        names,
+        aliases,
+        ...(category ? { category } : {}),
+        ...(category === "flavor" && brand ? { brand } : {}),
+      }),
     },
-    body: JSON.stringify({
-      names,
-      aliases,
-      ...(category ? { category } : {}),
-      ...(category === "flavor" && brand ? { brand } : {}),
-    }),
-  });
+    120_000,
+  );
   if (!res.ok) {
     let detail = "";
     try {
