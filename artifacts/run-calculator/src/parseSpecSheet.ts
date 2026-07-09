@@ -20,6 +20,7 @@ import type {
 } from "@workspace/spec-import";
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type SpecSheetKnown = {
   brands?: string[];
@@ -58,14 +59,21 @@ export type ParseSpecSheetResult = Omit<ParsedSpecImport, "profiles" | "recipes"
 export async function requestParseSpecSheet(
   input: ParseSpecSheetInput,
 ): Promise<ParseSpecSheetResult> {
-  const res = await fetch("/api/ai/parse-spec-sheet", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
+  // Generous bound — the AI parse legitimately runs 30-60s — but finite, so a
+  // request that hangs at the platform edge (cold-starting deployment) surfaces
+  // a clear retryable error instead of freezing the loading dialog forever.
+  const res = await fetchWithTimeout(
+    "/api/ai/parse-spec-sheet",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      body: JSON.stringify(input),
     },
-    body: JSON.stringify(input),
-  });
+    180_000,
+  );
   if (!res.ok) {
     let detail = "";
     try {

@@ -481,6 +481,20 @@ export default function SpecImportDialog({
                   ? `Reading file ${Math.min(progress.done + 1, progress.total)} of ${progress.total} and interpreting spec sheets & recipes…`
                   : "Reading the workbook and interpreting spec sheets & recipes…"}
               </p>
+              <p className="text-xs text-muted-foreground/80">
+                This usually takes about a minute. If the app sat idle, the server may need a
+                moment to wake up first.
+              </p>
+              {/* Explicit escape hatch: if a request stalls (e.g. the server is
+                  cold-starting), the user shouldn't have to find the small X to
+                  get out of the blocking backdrop. */}
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                Cancel import
+              </button>
             </div>
           )}
 

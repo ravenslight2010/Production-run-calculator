@@ -13,6 +13,7 @@
 
 import type { PremixMatch } from "@workspace/premix-import";
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type MatchPremixInput = {
   unmatchedNames: string[];
@@ -27,14 +28,20 @@ export type MatchPremixResult = {
 };
 
 export async function requestMatchPremix(input: MatchPremixInput): Promise<MatchPremixResult> {
-  const res = await fetch("/api/ai/match-premix", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
+  // Bounded wait so a cold-starting deployment can't hang the import's loading
+  // dialog forever; callers fall back to fuzzy matching on any failure.
+  const res = await fetchWithTimeout(
+    "/api/ai/match-premix",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      body: JSON.stringify(input),
     },
-    body: JSON.stringify(input),
-  });
+    120_000,
+  );
   if (!res.ok) {
     throw new Error(`Match-premix request failed (${res.status})`);
   }

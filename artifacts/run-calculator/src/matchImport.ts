@@ -12,6 +12,7 @@
 
 import type { ReviewVerdict } from "@workspace/ai-review";
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export type MatchImportInput = {
   brands: string[];
@@ -52,14 +53,20 @@ export type MatchImportResult = {
 };
 
 export async function requestMatchImport(input: MatchImportInput): Promise<MatchImportResult> {
-  const res = await fetch("/api/ai/match-import", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-client-id": inventoryClientId(),
+  // Bounded wait so a cold-starting deployment can't hang the import's loading
+  // dialog forever; callers fall back to fuzzy matching on any failure.
+  const res = await fetchWithTimeout(
+    "/api/ai/match-import",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-client-id": inventoryClientId(),
+      },
+      body: JSON.stringify(input),
     },
-    body: JSON.stringify(input),
-  });
+    120_000,
+  );
   if (!res.ok) {
     throw new Error(`Match-import request failed (${res.status})`);
   }

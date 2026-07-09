@@ -14,11 +14,18 @@
 
 import type { SpecImportAlias } from "@workspace/spec-import";
 import { inventoryClientId } from "./inventoryShared";
+import { fetchWithTimeout } from "./fetchWithTimeout";
 
 export async function fetchSpecImportAliases(): Promise<SpecImportAlias[]> {
-  const res = await fetch("/api/spec-import-aliases", {
-    headers: { "x-client-id": inventoryClientId() },
-  });
+  // Bounded wait: this is the FIRST request of every spec import. If the
+  // deployment is cold-starting it can hang at the edge; the caller treats any
+  // failure as "no learned aliases" and proceeds, so a short timeout keeps the
+  // import moving instead of freezing the loading dialog.
+  const res = await fetchWithTimeout(
+    "/api/spec-import-aliases",
+    { headers: { "x-client-id": inventoryClientId() } },
+    15_000,
+  );
   if (!res.ok) throw new Error(`List spec-import aliases failed (${res.status})`);
   const data = (await res.json()) as { aliases: SpecImportAlias[] };
   return data.aliases ?? [];
