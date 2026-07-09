@@ -28,7 +28,7 @@ import {
 } from "./aiMixAssistant";
 import { UpdateProactiveAlertSettingsBody } from "@workspace/api-zod";
 import { openai, pickModel } from "@workspace/integrations-openai-ai-server";
-import { fetchModelJsonWithRetry } from "../lib/aiJsonRetry";
+import { fetchModelJsonWithRetry, aiCallFailureHttp } from "../lib/aiJsonRetry";
 import { rateLimit } from "../middlewares/rateLimit";
 import { PostgresRateLimitStore } from "../middlewares/rateLimitStore";
 import { requireCapability } from "../middlewares/requireCapability";
@@ -1333,8 +1333,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({ forecast: null, forecasts: [], generatedAt: Date.now() });
@@ -1776,8 +1777,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({ suggestions: [], generatedAt: Date.now() });
@@ -1860,8 +1862,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({ brandMatches: [], flavorMatches: [], generatedAt: Date.now() });
@@ -1985,8 +1988,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({
@@ -2084,8 +2088,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({ matches: [], generatedAt: Date.now() });
@@ -2159,8 +2164,9 @@ router.post(
       },
     });
     if (!result.ok) {
-      if (result.reason === "provider") {
-        res.status(502).json({ error: "AI provider error" });
+      if (result.reason === "provider" || result.reason === "rate-limited") {
+        const failure = aiCallFailureHttp(result, "AI provider error");
+        res.status(failure.status).json({ error: failure.error });
         return;
       }
       res.json({ suggestions: [], generatedAt: Date.now() });

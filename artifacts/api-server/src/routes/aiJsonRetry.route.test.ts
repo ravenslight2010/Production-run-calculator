@@ -19,7 +19,8 @@
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import express, { type Express } from "express";
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { setAiRateLimitBackoffMsForTests, AI_RATE_LIMITED_MESSAGE } from "../lib/aiJsonRetry";
 
 // Queue-based mock of the OpenAI chat client: each call shifts the next reply
 // off `queue`; when the queue is empty (e.g. the advisory reviewer's extra
@@ -30,6 +31,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vites
 const mock = vi.hoisted(() => ({
   queue: [] as string[],
   shouldThrow: false as boolean,
+  shouldThrow429: false as boolean,
   mainCalls: 0,
 }));
 
@@ -46,6 +48,13 @@ vi.mock("@workspace/integrations-openai-ai-server", () => {
             if (!isReviewer) mock.mainCalls += 1;
             if (isReviewer) return { choices: [{ message: { content: "{}" } }] };
             if (mock.shouldThrow) throw new Error("provider blew up");
+            if (mock.shouldThrow429) {
+              const err = new Error(
+                '{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}',
+              ) as Error & { status: number };
+              err.status = 429;
+              throw err;
+            }
             const content = mock.queue.length > 0 ? mock.queue.shift() : "{}";
             return { choices: [{ message: { content } }] };
           },
@@ -91,11 +100,18 @@ afterAll(async () => {
 });
 
 let userCounter = 0;
+let prevBackoff: number;
 beforeEach(() => {
   mock.queue = [];
   mock.shouldThrow = false;
+  mock.shouldThrow429 = false;
   mock.mainCalls = 0;
   userCounter += 1;
+  // Exercise the 429 retry path without a real 20-second backoff sleep.
+  prevBackoff = setAiRateLimitBackoffMsForTests(0);
+});
+afterEach(() => {
+  setAiRateLimitBackoffMsForTests(prevBackoff);
 });
 
 async function post(path: string, body: unknown): Promise<Response> {
@@ -233,6 +249,16 @@ describe("shared retry semantics (pinned once — same helper on every route)", 
     const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
     expect(res.status).toBe(502);
     expect(mock.mainCalls).toBe(1);
+  });
+
+  it("retries a 429 rate-limit rejection once, then returns HTTP 429 with a friendly message", async () => {
+    mock.shouldThrow429 = true;
+    const res = await post("/ai/suggest-merges", { names: ["Mozzarella", "Mozz"] });
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe(AI_RATE_LIMITED_MESSAGE);
+    // A 429 rejection is free, so exactly one retry happens (2 attempts total).
+    expect(mock.mainCalls).toBe(2);
   });
 
   it("does not retry a first-attempt success", async () => {

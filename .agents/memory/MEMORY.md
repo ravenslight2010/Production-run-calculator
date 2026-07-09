@@ -1,7 +1,7 @@
 - [Near-dup scan perf](near-dup-scan-perf.md) — in-pool duplicate scans build ONE matcher (excludeSelf), never rebuild per name; O(n²) rebuilds froze the page as import pools grew.
 - [Recipe print/share](recipe-print-share.md) — AbortError=shared (never clipboard-clobber), escaped print popup; web-only, mobile pending.
 - [Dough inline timers](dough-inline-timers.md) — measured mixer/hopper times pace auto-track; UI countdowns must anchor to tickDueRefs; resume must reset ALL due refs incl. prod.
-- [AI JSON bounded retry](ai-json-retry.md) — AI routes that fail-safe to empty on malformed model JSON must use the shared 2-attempt retry helper; retry parse failures only, never provider throws.
+- [AI JSON bounded retry](ai-json-retry.md) — AI routes must use the shared 2-attempt retry helper; retry malformed JSON + free 429 rejections (backoff→friendly 429), never other provider throws.
 - [Die size source](die-size-source.md) — dieType is seeded from the spec-sheet CRUST row, not the size header (they disagree); 7 profiles intentionally blank.
 - [Die-type master heal](die-type-master-heal.md) — imports write profile dieType VALUE but not the picker's master list; both apps self-heal DIE_TYPES from profiles, honoring deletions.
 - [mixSeed alias set](mixseed-alias-set.md) — MIX_SEED.frontlineIngredients is a backward-compat alias superset; never normalize/dedupe it, only recipe data.
