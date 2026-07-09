@@ -4605,6 +4605,9 @@ export default function Home() {
   const [expandedScheduleDay, setExpandedScheduleDay] = useState<string | null>(null);
   const [scheduleView, setScheduleView] = useState<"list" | "editor" | "advanced">("list");
   const [scheduleEditorDate, setScheduleEditorDate] = useState("");
+  // True when the editor was opened on the LIVE day (Today card): the date is
+  // locked so today's live run ids can't be copied onto another date's row.
+  const [scheduleEditorIsLiveDay, setScheduleEditorIsLiveDay] = useState(false);
   const [scheduleEditorRuns, setScheduleEditorRuns] = useState<{id: string; brand: string; flavor: string; casesNeeded: number}[]>([]);
   const [scheduleEditorRunValues, setScheduleEditorRunValues] = useState<Record<string, FormValues>>({});
   const [scheduleAdvancedRunId, setScheduleAdvancedRunId] = useState<string | null>(null);
@@ -4617,8 +4620,31 @@ export default function Home() {
     const d = new Date(); d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
+  // Run ids the schedule editor actually LOADED when it was opened. On save we
+  // may only treat a live run as "removed by the user" if the editor showed it
+  // to them (its id is in this set) — an editor opened blank ("Schedule New
+  // Day") must never delete today's existing runs it never displayed.
+  const scheduleEditorLoadedRunIdsRef = useRef<Set<string>>(new Set());
   async function openScheduleEditor(date?: string) {
     setScheduleAdvancedRunId(null);
+    // TODAY is the live day — seed the editor from the in-memory day state (the
+    // freshest copy this tab has, including in-flight form edits), NOT the
+    // server row. Saving routes back through the live day-state path below.
+    if (date === todayStr()) {
+      const vals: Record<string, FormValues> = {};
+      const runs = dayState.runs.map(r => {
+        const v = r.id === currentRunId ? form.getValues() : loadRunValues(r.id);
+        vals[r.id] = v;
+        return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
+      });
+      setScheduleEditorRunValues(vals);
+      setScheduleEditorDate(date);
+      setScheduleEditorRuns(runs);
+      scheduleEditorLoadedRunIdsRef.current = new Set(runs.map(r => r.id));
+      setScheduleEditorIsLiveDay(true);
+      setScheduleView("editor");
+      return;
+    }
     if (date) {
       try {
         const res = await fetch(`/api/sync/${date}`);
@@ -4634,6 +4660,8 @@ export default function Home() {
                 return { id: r.id, brand: r.brand, flavor: r.flavor, casesNeeded: v.casesNeeded ?? 0 };
               })
             );
+            scheduleEditorLoadedRunIdsRef.current = new Set(payload.dayState.runs.map(r => r.id));
+            setScheduleEditorIsLiveDay(false);
             setScheduleView("editor");
             return;
           }
@@ -4644,11 +4672,76 @@ export default function Home() {
     setScheduleEditorRunValues({ [newId]: { ...DEFAULT_VALUES } });
     setScheduleEditorDate(todayStr());
     setScheduleEditorRuns([{ id: newId, brand: "", flavor: "", casesNeeded: 0 }]);
+    scheduleEditorLoadedRunIdsRef.current = new Set();
+    setScheduleEditorIsLiveDay(false);
     setScheduleView("editor");
   }
   async function saveScheduledDay() {
     if (!scheduleEditorDate) return;
     setScheduleSaving(true);
+    // TODAY: apply the edits through the LIVE day-state path, never a raw PUT.
+    // A raw PUT for today loses silently: it carries no runValuesUpdatedAt
+    // stamps (the server's per-run LWW keeps every stored stamped value), no
+    // run tombstones (the additive union resurrects removed runs), and it never
+    // touches this tab's in-memory day — so the next push (e.g. Start Run)
+    // visibly "reverts" everything to the original schedule.
+    if (scheduleEditorDate === todayStr()) {
+      try {
+        const now = Date.now();
+        const liveById = new Map(dayState.runs.map(r => [r.id, r]));
+        const editorIds = new Set(scheduleEditorRuns.map(r => r.id));
+        // Editor order first; existing runs keep their lifecycle fields
+        // (startedAt/stoppages/…) — saveDayState diff-stamps metaUpdatedAt.
+        const newRuns: RunMeta[] = scheduleEditorRuns.map(er => {
+          const live = liveById.get(er.id);
+          return live
+            ? { ...live, brand: er.brand, flavor: er.flavor }
+            : { id: er.id, brand: er.brand, flavor: er.flavor };
+        });
+        // Live runs the editor omitted: treat as user-deleted ONLY if the
+        // editor actually showed them and they never started; keep the rest.
+        for (const r of dayState.runs) {
+          if (editorIds.has(r.id)) continue;
+          if (scheduleEditorLoadedRunIdsRef.current.has(r.id) && !r.startedAt && !r.endedAt) {
+            tombstoneDeleted("runs", r.id);
+          } else {
+            newRuns.push(r);
+          }
+        }
+        if (newRuns.length === 0) { setScheduleSaving(false); return; } // never leave the day with 0 runs
+        // Persist values with a fresh edit stamp ONLY when they actually
+        // changed, so untouched runs don't gratuitously win the LWW merge.
+        let currentValsChanged = false;
+        for (const r of scheduleEditorRuns) {
+          const stored = scheduleEditorRunValues[r.id];
+          const profile = r.brand ? loadProfile(r.brand, r.flavor) : null;
+          const base: FormValues = stored ?? profile ?? DEFAULT_VALUES;
+          const v = backfillSauceFromProfile({ ...base, casesNeeded: r.casesNeeded }, r.brand, r.flavor);
+          if (!deepEqual(v, loadRunValues(r.id))) {
+            saveRunValues(r.id, v);
+            markRunValuesUpdated(r.id, now);
+            if (r.id === currentRunId) currentValsChanged = true;
+          }
+        }
+        const prevCurId = dayState.runs[dayState.currentIndex]?.id;
+        const newIndex = Math.max(0, newRuns.findIndex(r => r.id === prevCurId));
+        const newDs = { ...dayState, runs: newRuns, currentIndex: newIndex };
+        setDayState(newDs);
+        saveDayState(newDs);
+        // Re-load the form if the current run's stored values changed (or the
+        // current run itself was removed), so the live form can't autosave the
+        // pre-edit values back over the schedule changes.
+        if (currentValsChanged || newRuns[newIndex].id !== prevCurId) {
+          const curVals = loadRunValues(newRuns[newIndex].id);
+          form.reset(curVals);
+          resetFieldArrays(curVals);
+        }
+        schedulePush(newDs, 0);
+        setScheduleView("list");
+      } catch {}
+      setScheduleSaving(false);
+      return;
+    }
     try {
       const runs: RunMeta[] = scheduleEditorRuns.map(r => ({ id: r.id, brand: r.brand, flavor: r.flavor }));
       const runValues: Record<string, FormValues> = {};
@@ -16399,6 +16492,27 @@ export default function Home() {
                           />
                         );
                       })()}
+                    {/* Today — the LIVE day. Editing routes through the live
+                        day-state path (stamped values + tombstones + push), so
+                        changes stick instead of being reverted by the next
+                        sync push (e.g. Start Run). */}
+                    <div className="rounded-lg bg-primary/5 border border-primary/30 overflow-hidden">
+                      <div className="flex items-center justify-between gap-3 p-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            Today — {new Date(todayStr() + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{dayState.runs.length} run{dayState.runs.length !== 1 ? "s" : ""} on today's plan</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openScheduleEditor(todayStr())}
+                          className="flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-muted/50 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                        >
+                          <Pencil className="w-3 h-3" /> Edit
+                        </button>
+                      </div>
+                    </div>
                     {scheduledDays.length === 0 ? (
                       <div className="text-center py-10">
                         <CalendarPlus className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -16603,9 +16717,13 @@ export default function Home() {
                         type="date"
                         value={scheduleEditorDate}
                         min={todayStr()}
+                        disabled={scheduleEditorIsLiveDay}
                         onChange={e => setScheduleEditorDate(e.target.value)}
-                        className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors"
+                        className="w-full h-9 px-3 rounded-md bg-muted/40 border border-border/60 text-sm outline-none focus:border-primary/60 transition-colors disabled:opacity-60"
                       />
+                      {scheduleEditorIsLiveDay && (
+                        <p className="text-[11px] text-muted-foreground mt-1">You're editing today's live plan — changes apply right away.</p>
+                      )}
                     </div>
                     {/* Runs */}
                     <div>
