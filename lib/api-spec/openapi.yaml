@@ -2770,6 +2770,49 @@ paths:
         "400":
           description: Invalid input
 
+  /ingredient-batch-weights:
+    get:
+      operationId: listIngredientBatchWeights
+      tags: [ingredientBatchWeights]
+      summary: List learned per-ingredient batch weights
+      description: >-
+        Returns every learned ingredient batch weight — the "Batch Weight
+        (lbs)" a user previously entered for a plain ingredient (applicator
+        topping, non-default pep type, or ready-made sauce barrel), keyed by
+        ingredient name. Clients auto-fill the remembered weight when that
+        ingredient is picked again, the same way mixes and cheese recipes carry
+        their own batch weight. Available to any signed-in user.
+      responses:
+        "200":
+          description: All learned batch weights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientBatchWeightList"
+    post:
+      operationId: saveIngredientBatchWeights
+      tags: [ingredientBatchWeights]
+      summary: Save learned ingredient batch weights (case-insensitive upsert)
+      description: >-
+        Persists a batch of entered batch weights, keyed case-insensitively on
+        ingredient name. Existing entries are updated; new ones are inserted.
+        Available to any signed-in user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveIngredientBatchWeightsInput"
+      responses:
+        "200":
+          description: The full updated weight list after the upsert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngredientBatchWeightList"
+        "400":
+          description: Invalid input
+
   /photo-aliases:
     get:
       operationId: listPhotoAliases
@@ -6343,6 +6386,41 @@ components:
           description: The batch of learned values to upsert (confirmed by the user)
           items:
             $ref: "#/components/schemas/FillMissingValue"
+
+    IngredientBatchWeight:
+      type: object
+      description: A learned batch weight a user entered for a plain ingredient.
+      required:
+        - name
+        - lbs
+      properties:
+        name:
+          type: string
+          description: The ingredient name (matched case-insensitively)
+        lbs:
+          type: number
+          description: The batch weight in lbs the user last entered
+
+    IngredientBatchWeightList:
+      type: object
+      required:
+        - weights
+      properties:
+        weights:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngredientBatchWeight"
+
+    SaveIngredientBatchWeightsInput:
+      type: object
+      required:
+        - weights
+      properties:
+        weights:
+          type: array
+          description: The batch of learned weights to upsert (entered by the user)
+          items:
+            $ref: "#/components/schemas/IngredientBatchWeight"
 
     PhotoAlias:
       type: object

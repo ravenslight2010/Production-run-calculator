@@ -3087,6 +3087,37 @@ export const SaveFillMissingValuesResponse = zod.object({
 
 
 /**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
+ * @summary List learned per-ingredient batch weights
+ */
+export const ListIngredientBatchWeightsResponse = zod.object({
+  "weights": zod.array(zod.object({
+  "name": zod.string().describe('The ingredient name (matched case-insensitively)'),
+  "lbs": zod.number().describe('The batch weight in lbs the user last entered')
+}).describe('A learned batch weight a user entered for a plain ingredient.'))
+})
+
+
+/**
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ */
+export const SaveIngredientBatchWeightsBody = zod.object({
+  "weights": zod.array(zod.object({
+  "name": zod.string().describe('The ingredient name (matched case-insensitively)'),
+  "lbs": zod.number().describe('The batch weight in lbs the user last entered')
+}).describe('A learned batch weight a user entered for a plain ingredient.')).describe('The batch of learned weights to upsert (entered by the user)')
+})
+
+export const SaveIngredientBatchWeightsResponse = zod.object({
+  "weights": zod.array(zod.object({
+  "name": zod.string().describe('The ingredient name (matched case-insensitively)'),
+  "lbs": zod.number().describe('The batch weight in lbs the user last entered')
+}).describe('A learned batch weight a user entered for a plain ingredient.'))
+})
+
+
+/**
  * Returns every learned photo-intake alias — a saved mapping from a vision model's guessed item name to the inventory item key a user confirmed it matches. Clients use these to auto-apply remembered matches when identifying inventory from a photo. Available to any signed-in user.
  * @summary List learned photo-intake aliases (guessName -> itemKey)
  */

@@ -68,6 +68,7 @@ import type {
   IncidentClustersInput,
   IncidentClustersResult,
   IncidentDiagnosis,
+  IngredientBatchWeightList,
   IngredientList,
   InventoryItem,
   InventoryLedgerEntry,
@@ -130,6 +131,7 @@ import type {
   SaveFillMissingValuesInput,
   SaveFreezerPullItemsInput,
   SaveImportAliasesInput,
+  SaveIngredientBatchWeightsInput,
   SaveIngredientsInput,
   SaveMergeAliasesInput,
   SaveMergedAwayInput,
@@ -8648,6 +8650,156 @@ export const useSaveFillMissingValues = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveFillMissingValuesMutationOptions(options));
+    }
+
+export const getListIngredientBatchWeightsUrl = () => {
+
+
+
+
+  return `/api/ingredient-batch-weights`
+}
+
+/**
+ * Returns every learned ingredient batch weight — the "Batch Weight (lbs)" a user previously entered for a plain ingredient (applicator topping, non-default pep type, or ready-made sauce barrel), keyed by ingredient name. Clients auto-fill the remembered weight when that ingredient is picked again, the same way mixes and cheese recipes carry their own batch weight. Available to any signed-in user.
+ * @summary List learned per-ingredient batch weights
+ */
+export const listIngredientBatchWeights = async ( options?: RequestInit): Promise<IngredientBatchWeightList> => {
+
+  return customFetch<IngredientBatchWeightList>(getListIngredientBatchWeightsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListIngredientBatchWeightsQueryKey = () => {
+    return [
+    `/api/ingredient-batch-weights`
+    ] as const;
+    }
+
+
+export const getListIngredientBatchWeightsQueryOptions = <TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListIngredientBatchWeightsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listIngredientBatchWeights>>> = ({ signal }) => listIngredientBatchWeights({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListIngredientBatchWeightsQueryResult = NonNullable<Awaited<ReturnType<typeof listIngredientBatchWeights>>>
+export type ListIngredientBatchWeightsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List learned per-ingredient batch weights
+ */
+
+export function useListIngredientBatchWeights<TData = Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listIngredientBatchWeights>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListIngredientBatchWeightsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getSaveIngredientBatchWeightsUrl = () => {
+
+
+
+
+  return `/api/ingredient-batch-weights`
+}
+
+/**
+ * Persists a batch of entered batch weights, keyed case-insensitively on ingredient name. Existing entries are updated; new ones are inserted. Available to any signed-in user.
+ * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ */
+export const saveIngredientBatchWeights = async (saveIngredientBatchWeightsInput: SaveIngredientBatchWeightsInput, options?: RequestInit): Promise<IngredientBatchWeightList> => {
+
+  return customFetch<IngredientBatchWeightList>(getSaveIngredientBatchWeightsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      saveIngredientBatchWeightsInput,)
+  }
+);}
+
+
+
+
+export const getSaveIngredientBatchWeightsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, TError,{data: BodyType<SaveIngredientBatchWeightsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, TError,{data: BodyType<SaveIngredientBatchWeightsInput>}, TContext> => {
+
+const mutationKey = ['saveIngredientBatchWeights'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, {data: BodyType<SaveIngredientBatchWeightsInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveIngredientBatchWeights(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveIngredientBatchWeightsMutationResult = NonNullable<Awaited<ReturnType<typeof saveIngredientBatchWeights>>>
+    export type SaveIngredientBatchWeightsMutationBody = BodyType<SaveIngredientBatchWeightsInput>
+    export type SaveIngredientBatchWeightsMutationError = ErrorType<void>
+
+    /**
+ * @summary Save learned ingredient batch weights (case-insensitive upsert)
+ */
+export const useSaveIngredientBatchWeights = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveIngredientBatchWeights>>, TError,{data: BodyType<SaveIngredientBatchWeightsInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveIngredientBatchWeights>>,
+        TError,
+        {data: BodyType<SaveIngredientBatchWeightsInput>},
+        TContext
+      > => {
+      return useMutation(getSaveIngredientBatchWeightsMutationOptions(options));
     }
 
 export const getListPhotoAliasesUrl = () => {

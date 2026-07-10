@@ -206,7 +206,7 @@ import {
 } from "@workspace/cycle-count";
 import { useCycleCountSchedules } from "../hooks/useCycleCountSchedules";
 import { markCycleCountCounted } from "../cycleCount";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import StaffRolesCard from "../components/StaffRolesCard";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import RecipeSubstitutionBadge from "../components/RecipeSubstitutionBadge";
@@ -222,6 +222,14 @@ import {
   type VoiceCommandResult,
 } from "@workspace/voice-commands";
 import { restockInventory, adjustInventory, resetSandboxRequest, reportUnauthorized } from "../inventoryShared";
+import {
+  fetchIngredientBatchWeights,
+  saveIngredientBatchWeights,
+  buildBatchWeightMap,
+  lookupBatchWeight,
+  collectBatchWeightCandidates,
+  type BatchWeightCandidate,
+} from "../ingredientBatchWeights";
 import FillMissingPanel from "../components/FillMissingPanel";
 import IncidentsTab from "../components/IncidentsTab";
 import DowntimeTrendsTab from "../components/DowntimeTrendsTab";
@@ -3275,6 +3283,48 @@ export default function Home() {
     onSuccess: (saved) =>
       cycleCountQc.setQueryData(["cycleCountSchedules"], saved),
   });
+  // Learned per-ingredient batch weights (factory-wide server memory, open to
+  // all signed-in users like the other learned stores). Mixes and cheese
+  // recipes carry their batch weight from their recipe rows; plain ingredients
+  // only have the typed "Batch Weight (lbs)" field — once someone enters it,
+  // the weight follows the ingredient: picking that ingredient again (on any
+  // device) auto-fills the remembered weight.
+  const { data: learnedBatchWeightRows, isSuccess: batchWeightsLoaded } = useQuery({
+    queryKey: ["ingredientBatchWeights"],
+    queryFn: fetchIngredientBatchWeights,
+    staleTime: 5 * 60_000,
+  });
+  const learnedBatchWeights = useMemo(
+    () => buildBatchWeightMap(learnedBatchWeightRows ?? []),
+    [learnedBatchWeightRows],
+  );
+  const learnedBatchWeightsRef = useRef(learnedBatchWeights);
+  learnedBatchWeightsRef.current = learnedBatchWeights;
+  // Saves are chained so an older in-flight request can never land after (and
+  // overwrite) a newer one — the server applies them in the order entered.
+  const batchWeightSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // Called from the type dropdowns when an ingredient is picked: fills the
+  // matching batch-lbs field with the remembered weight (if any). Reads the
+  // ref so the inline JSX handlers never go stale.
+  const applyLearnedBatchLbs = useCallback(
+    (
+      name: string,
+      field:
+        | "app1BatchLbs"
+        | "app2BatchLbs"
+        | "app3BatchLbs"
+        | "app4BatchLbs"
+        | "pep1BatchLbs"
+        | "pep1BatchLbsB"
+        | "pep2BatchLbs"
+        | "pep2BatchLbsB"
+        | "sauceBarrelLbs",
+    ) => {
+      const lbs = lookupBatchWeight(learnedBatchWeightsRef.current, name);
+      if (lbs !== null) form.setValue(field, lbs, { shouldDirty: true });
+    },
+    [form],
+  );
   // Server-side role (distinct from the local supervisor PIN toggle below).
   const { isManager, hasCapability } = useMe();
   const canEditRules = hasCapability("edit-production-rules");
@@ -8348,6 +8398,57 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [v.app1CheeseRecipe, v.app2CheeseRecipe, v.app3CheeseRecipe, v.app4CheeseRecipe,
       v.app1Type, v.app2Type, v.app3Type, v.app4Type]);
+
+  // Learn typed batch weights (debounced, best-effort). Any batch-lbs value
+  // whose manual field is actually VISIBLE right now (not a mix, not a
+  // recipe-backed slot, not a default stick-pep type), is positive, and
+  // differs from the remembered weight gets upserted server-side so the
+  // weight follows the ingredient onto every device. Gated on the learned
+  // list having loaded so we never blind-resave unchanged values on mount.
+  const batchWeightCandidatesSig = JSON.stringify(
+    batchWeightsLoaded
+      ? collectBatchWeightCandidates(
+          {
+            apps: [
+              { type: v.app1Type, batchLbs: v.app1BatchLbs, cheeseRecipe: v.app1CheeseRecipe },
+              { type: v.app2Type, batchLbs: v.app2BatchLbs, cheeseRecipe: v.app2CheeseRecipe },
+              { type: v.app3Type, batchLbs: v.app3BatchLbs, cheeseRecipe: v.app3CheeseRecipe },
+              { type: v.app4Type, batchLbs: v.app4BatchLbs, cheeseRecipe: v.app4CheeseRecipe },
+            ],
+            peps: [
+              { type: v.pep1Type, batchLbs: v.pep1BatchLbs },
+              { type: v.pep1TypeB, batchLbs: v.pep1BatchLbsB },
+              // Pep 2 slots are hidden while pep 1 covers both applicators.
+              ...(v.pep1Combined === true
+                ? []
+                : [
+                    { type: v.pep2Type, batchLbs: v.pep2BatchLbs },
+                    { type: v.pep2TypeB, batchLbs: v.pep2BatchLbsB },
+                  ]),
+            ],
+            defaultPepTypes: DEFAULT_PEP_TYPES,
+            sauce: {
+              recipeName: v.frontlineRecipeName,
+              barrelLbs: v.sauceBarrelLbs,
+              recipe: v.frontlineRecipe,
+            },
+          },
+          learnedBatchWeights,
+        )
+      : [],
+  );
+  useEffect(() => {
+    const candidates = JSON.parse(batchWeightCandidatesSig) as BatchWeightCandidate[];
+    if (candidates.length === 0) return;
+    const t = setTimeout(() => {
+      batchWeightSaveChainRef.current = batchWeightSaveChainRef.current
+        .then(() => saveIngredientBatchWeights(candidates))
+        .then(() => cycleCountQc.invalidateQueries({ queryKey: ["ingredientBatchWeights"] }))
+        .catch(() => {}); // best-effort: never block the user's entry
+    }, 2000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchWeightCandidatesSig]);
 
   const calc = useMemo(() => {
     const ppm =
@@ -14710,7 +14811,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Sauce"
                         value={v.frontlineRecipeName}
-                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } } }}
+                        onChange={val => { form.setValue("frontlineRecipeName", val, { shouldDirty: true }); if (!val) { form.setValue("sauceOzPerPizza", 0, { shouldDirty: true }); form.setValue("sauceBarrelLbs", 0, { shouldDirty: true }); } else { const rows = serverSauceRowsByName.get(val.trim().toLowerCase()) ?? loadFrontlineRecipePresets()[val.trim()]; if (rows) { form.setValue("frontlineRecipe", rows, { shouldDirty: true }); replaceFrontline(rows); } if (!(rows ?? []).some(r => Number(r.lbs) > 0)) { applyLearnedBatchLbs(val, "sauceBarrelLbs"); } } }}
                         options={frontlineRecipeNameOptions}
                         onAddOption={addFrontlineRecipeName}
                         onRemoveOption={removeFrontlineRecipeName}
@@ -14764,7 +14865,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 1"
                         value={v.app1Type}
-                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app1Type", val, { shouldDirty: true }); if (!val) { form.setValue("app1OzPerPizza", 0, { shouldDirty: true }); form.setValue("app1BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app1BatchLbs"); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -14829,7 +14930,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 2"
                         value={v.app2Type}
-                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app2Type", val, { shouldDirty: true }); if (!val) { form.setValue("app2OzPerPizza", 0, { shouldDirty: true }); form.setValue("app2BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app2BatchLbs"); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -14894,7 +14995,7 @@ export default function Home() {
                       <TypeDropdown
                         label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
                         value={v.pep1Type}
-                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep1BatchLbs"); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
                         options={pepTypes}
                         onAddOption={addPepType}
                         onRemoveOption={removePepType}
@@ -14954,7 +15055,7 @@ export default function Home() {
                           <TypeDropdown
                             label="Pep Type"
                             value={v.pep1TypeB ?? ""}
-                            onChange={val => { form.setValue("pep1TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); } }}
+                            onChange={val => { form.setValue("pep1TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbsB", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep1BatchLbsB"); } if (!val) { form.setValue("pep1SticksB", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizzaB", 0, { shouldDirty: true }); } }}
                             options={pepTypes}
                             onAddOption={addPepType}
                             onRemoveOption={removePepType}
@@ -14987,7 +15088,7 @@ export default function Home() {
                           <TypeDropdown
                             label="Pep Applicator 2"
                             value={v.pep2Type}
-                            onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
+                            onChange={val => { form.setValue("pep2Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbs", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep2BatchLbs"); } if (!val) { form.setValue("pep2Sticks", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizza", 0, { shouldDirty: true }); } }}
                             options={pepTypes}
                             onAddOption={addPepType}
                             onRemoveOption={removePepType}
@@ -15038,7 +15139,7 @@ export default function Home() {
                               <TypeDropdown
                                 label="Pep Type"
                                 value={v.pep2TypeB ?? ""}
-                                onChange={val => { form.setValue("pep2TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); } }}
+                                onChange={val => { form.setValue("pep2TypeB", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep2BatchLbsB", 0, { shouldDirty: true }); } else { applyLearnedBatchLbs(val, "pep2BatchLbsB"); } if (!val) { form.setValue("pep2SticksB", 0, { shouldDirty: true }); form.setValue("pep2OzPerPizzaB", 0, { shouldDirty: true }); } }}
                                 options={pepTypes}
                                 onAddOption={addPepType}
                                 onRemoveOption={removePepType}
@@ -15071,7 +15172,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 3"
                         value={v.app3Type}
-                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app3BatchLbs"); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}
@@ -15136,7 +15237,7 @@ export default function Home() {
                       <TypeDropdown
                         label="Applicator 4"
                         value={v.app4Type}
-                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
+                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } else if (!val.trim().toLowerCase().includes("mix")) { applyLearnedBatchLbs(val, "app4BatchLbs"); } }}
                         options={ingredientTypes}
                         onAddOption={addIngredientType}
                         onRemoveOption={removeIngredientType}

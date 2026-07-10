@@ -2003,6 +2003,25 @@ export interface SaveFillMissingValuesInput {
 }
 
 /**
+ * A learned batch weight a user entered for a plain ingredient.
+ */
+export interface IngredientBatchWeight {
+  /** The ingredient name (matched case-insensitively) */
+  name: string;
+  /** The batch weight in lbs the user last entered */
+  lbs: number;
+}
+
+export interface IngredientBatchWeightList {
+  weights: IngredientBatchWeight[];
+}
+
+export interface SaveIngredientBatchWeightsInput {
+  /** The batch of learned weights to upsert (entered by the user) */
+  weights: IngredientBatchWeight[];
+}
+
+/**
  * A learned mapping from a vision-model guessed name to an inventory item key.
  */
 export interface PhotoAlias {

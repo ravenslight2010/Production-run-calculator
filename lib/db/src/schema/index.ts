@@ -13,6 +13,7 @@ export * from "./rateLimit";
 export * from "./incidents";
 export * from "./importAliases";
 export * from "./fillMissingValues";
+export * from "./ingredientBatchWeights";
 export * from "./photoAliases";
 export * from "./specImportAliases";
 export * from "./savedSpecSheets";
