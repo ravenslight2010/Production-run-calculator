@@ -43,7 +43,7 @@ function fmtDate(ms: number): string {
   try {
     return new Date(ms).toLocaleString(undefined, {
       month: "short", day: "numeric", year: "numeric",
-      hour: "numeric", minute: "2-digit",
+      hour: "numeric", minute: "2-digit", hour12: true,
     });
   } catch {
     return "";

@@ -125,7 +125,7 @@ export function printRecipe(r: ShareableRecipe): boolean {
 </head>
 <body>
 <h1>${heading}</h1>
-<p class="sub">Printed ${escapeHtml(new Date().toLocaleString())}</p>
+<p class="sub">Printed ${escapeHtml(new Date().toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true }))}</p>
 <table>
   <thead><tr><th>Ingredient</th><th class="num">Amount</th></tr></thead>
   <tbody>${rowsHtml}</tbody>

@@ -38,7 +38,29 @@ export function fmtComma(n: number, dec = 0): string {
 }
 
 export function fmtClock(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+// Duration in whole minutes → "2 hr 5 min" / "45 min" (never a bare 3-digit
+// minute count). Rounds to the nearest minute.
+export function fmtMins(min: number): string {
+  const num = Number(min);
+  if (!isFinite(num) || num < 0) return "—";
+  const total = Math.round(num);
+  if (total < 60) return `${total} min`;
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return m > 0 ? `${h} hr ${m} min` : `${h} hr`;
+}
+
+// Countdown from precomputed minute/second parts. Keeps the MM:SS feel under
+// an hour and rolls into H:MM:SS beyond it (so "75:00" never appears).
+export function fmtCountdownParts(mm: number, ss: number): string {
+  if (mm >= 60) {
+    const h = Math.floor(mm / 60);
+    return `${h}:${String(mm % 60).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+  return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
 export function genId(): string {

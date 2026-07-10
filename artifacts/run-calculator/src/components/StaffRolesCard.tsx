@@ -237,7 +237,7 @@ export default function StaffRolesCard() {
                     </p>
                     <p className="text-[11px] text-muted-foreground">
                       Requested{" "}
-                      {new Date(reqItem.requestedAt).toLocaleString()}
+                      {new Date(reqItem.requestedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -496,7 +496,7 @@ export default function StaffRolesCard() {
             </p>
             {approvedCode && (
               <p className="mt-2 text-center text-xs text-muted-foreground">
-                Expires {new Date(approvedCode.expiresAt).toLocaleString()}
+                Expires {new Date(approvedCode.expiresAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}
               </p>
             )}
           </div>

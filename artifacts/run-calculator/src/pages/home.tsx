@@ -71,6 +71,8 @@ import {
   fmtNum,
   fmtComma,
   fmtClock,
+  fmtMins,
+  fmtCountdownParts,
   computeSummaryStats,
   computeCheesePull,
   computeCheesePerPizzaOz,
@@ -2155,6 +2157,7 @@ function fmtSandboxCopiedAt(iso: string): string {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    hour12: true,
   });
 }
 
@@ -8812,7 +8815,7 @@ export default function Home() {
             {calc.paceDelta !== 0 && (
               <p className="text-2xl font-bold text-muted-foreground">
                 {calc.paceDelta > 0 ? "+" : ""}{fmtComma(Math.abs(calc.paceDelta))} cases
-                {dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~{dashMinutesDelta} min)</span>}
+                {dashMinutesDelta > 0 && <span className="text-lg ml-2 opacity-70">(~{fmtMins(dashMinutesDelta)})</span>}
               </p>
             )}
             {dashDowntimeSec > 0 && (
@@ -8869,7 +8872,7 @@ export default function Home() {
               {batchDue ? "🍕 Start Next Batch Now!" : "Next Batch In"}
             </p>
             <p className={`text-[10rem] font-black tabular-nums leading-none ${batchDue ? "text-orange-400 animate-pulse" : batchUrgent ? "text-amber-400" : "text-primary"}`}>
-              {batchDue ? "GO" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`}
+              {batchDue ? "GO" : `${fmtCountdownParts(mm, ss)}`}
             </p>
             <div className="flex items-center gap-8 text-center mt-4">
               <div>
@@ -9157,12 +9160,12 @@ export default function Home() {
               {freezerDraining && (
                 <>
                   <p className="text-[8rem] font-black tabular-nums leading-none text-amber-400">
-                    {String(fmm).padStart(2, "0")}:{String(fss).padStart(2, "0")}
+                    {fmtCountdownParts(fmm, fss)}
                   </p>
                   <div className="h-4 rounded-full bg-muted/30 overflow-hidden">
                     <div className="h-full rounded-full bg-amber-500 transition-all duration-1000" style={{ width: `${freezerPct * 100}%` }} />
                   </div>
-                  <p className="text-lg text-muted-foreground">{fmtNum(Number(ve.freezerTime), 0)} min total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
+                  <p className="text-lg text-muted-foreground">{fmtMins(Number(ve.freezerTime))} total · clears at {fmtClock((currentRun?.endedAt ?? 0) + freezerMs)}</p>
                 </>
               )}
               {!freezerDraining && (
@@ -9427,7 +9430,7 @@ export default function Home() {
         const mm = Math.floor(secUntilNextBatch / 60);
         const ss = Math.floor(secUntilNextBatch % 60);
         const batchStr = calc.timePerBatchSec > 0 && (runStatus === "running" || runStatus === "paused")
-          ? `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+          ? `${fmtCountdownParts(mm, ss)}`
           : "—";
         const downtimeStr = currentRunDowntimeMs > 0 ? fmtTime(currentRunDowntimeMs / 1000) : "0m";
         const estFinish = calc.adjustedTimeSec > 0 && (runStatus === "running" || runStatus === "paused")
@@ -10712,7 +10715,7 @@ export default function Home() {
                             }`}>{entry.type}</span>
                             <div className="min-w-0 flex-1">
                               <p className="text-xs truncate" title={entry.description}>{entry.description}</p>
-                              <p className="text-[10px] text-muted-foreground">{new Date(entry.ts).toLocaleString()}</p>
+                              <p className="text-[10px] text-muted-foreground">{new Date(entry.ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true })}</p>
                             </div>
                             <button
                               type="button"
@@ -10920,8 +10923,8 @@ export default function Home() {
                   <Timer className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} />
                   <span className={`text-[11px] font-semibold ${tone.text}`}>
                     {filling
-                      ? `Freezer filling — first cases exit in ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
-                      : `Freezer emptying — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} until last cases exit`}
+                      ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
+                      : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
                   </span>
                 </div>
               );
@@ -11630,7 +11633,7 @@ export default function Home() {
                 return draining ? (
                   <span className="flex items-center gap-1.5 text-xs text-amber-400 font-semibold">
                     <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
-                    Freezer draining · {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")}
+                    Freezer draining · {fmtCountdownParts(mm, ss)}
                   </span>
                 ) : (
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-semibold">
@@ -11644,7 +11647,7 @@ export default function Home() {
             {/* Auto-detected stall nudge (advisory — never writes on its own) */}
             {stallPrompt && (
               <div className="flex flex-wrap items-center justify-center gap-2 py-2 px-4 rounded-lg text-xs font-semibold bg-amber-950/40 border border-amber-700/30 text-amber-400" data-testid="stall-banner">
-                <span>⚠ Line looks stalled — about {stallCheck.behindMinutes} min behind with no stoppage logged</span>
+                <span>⚠ Line looks stalled — about {fmtMins(stallCheck.behindMinutes)} behind with no stoppage logged</span>
                 <button
                   type="button"
                   data-testid="button-stall-log"
@@ -11789,7 +11792,7 @@ export default function Home() {
                                         ? "text-emerald-400 border-emerald-400/20 bg-emerald-400/10"
                                         : "text-red-400 border-red-400/20 bg-red-400/10"
                                     }`}>
-                                      {ahead ? "−" : "+"}{Math.max(1, Math.round(Math.abs(driftSec) / 60))} min
+                                      {ahead ? "−" : "+"}{fmtMins(Math.max(1, Math.round(Math.abs(driftSec) / 60)))}
                                     </div>
                                   )}
                                 </div>
@@ -11820,11 +11823,11 @@ export default function Home() {
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-semibold ${draining ? "text-amber-400" : "text-emerald-400"}`}>
                             {draining
-                              ? `Freezer draining — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} remaining`
+                              ? `Freezer draining — ${fmtCountdownParts(mm, ss)} remaining`
                               : emptyMs > 0 ? "Freezer empty — run complete." : "Run ended."}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtNum(Number(ve.freezerTime), 0)} min freezer time` : ""} — switch to another run to continue.
+                            Run stopped at {fmtClock(currentRun.endedAt)}{emptyMs > 0 ? ` · ${fmtMins(Number(ve.freezerTime))} freezer time` : ""} — switch to another run to continue.
                           </p>
                           {v.dieType && nextRunDieType && v.dieType !== nextRunDieType && (
                             <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-400">
@@ -11925,12 +11928,12 @@ export default function Home() {
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-semibold ${tone.text}`}>
                             {filling
-                              ? `Freezer filling — first cases exit in ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
-                              : `Freezer emptying — ${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} until last cases exit`}
+                              ? `Freezer filling — first cases exit in ${fmtCountdownParts(mm, ss)}`
+                              : `Freezer emptying — ${fmtCountdownParts(mm, ss)} until last cases exit`}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {filling
-                              ? `Product is still travelling the ${fmtNum(freezerMin, 0)} min freezer tunnel — the completed count starts climbing once it clears.`
+                              ? `Product is still travelling the ${fmtMins(freezerMin)} freezer tunnel — the completed count starts climbing once it clears.`
                               : `Dough feed is done — the tunnel is draining the last cases.`}
                           </p>
                           <div className="mt-2 h-1.5 rounded-full bg-muted/30 overflow-hidden">
@@ -12721,7 +12724,7 @@ export default function Home() {
                             </div>
                             <div className="text-right shrink-0">
                               <p className="text-[10px] font-mono font-bold text-amber-500 mb-0.5">
-                                {String(mm).padStart(2, "0")}:{String(ss).padStart(2, "0")} left
+                                {fmtCountdownParts(mm, ss)} left
                               </p>
                               <p className="text-[10px] font-bold uppercase text-amber-200">{fmtNum(casesDone, 0)} / {fmtNum(casesNeeded, 0)} cases</p>
                             </div>
@@ -12785,7 +12788,7 @@ export default function Home() {
                               <div className="flex justify-between items-end mb-2">
                                 <span className="text-sm font-semibold uppercase tracking-wider text-primary">Freezer Loading</span>
                                 <span className={`text-xs font-mono font-bold ${done ? "text-green-400" : "text-primary/80"}`}>
-                                  {done ? "✓ Freezer full" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} rem`}
+                                  {done ? "✓ Freezer full" : `${fmtCountdownParts(mm, ss)} rem`}
                                 </span>
                               </div>
                               <div className="w-full h-1.5 rounded-full bg-background border border-primary/10 overflow-hidden">
@@ -12809,7 +12812,7 @@ export default function Home() {
                               <div className="flex justify-between items-end mb-2">
                                 <span className="text-sm font-semibold uppercase tracking-wider text-amber-400">Freezer Emptying</span>
                                 <span className={`text-xs font-mono font-bold ${done ? "text-emerald-400" : "text-amber-400"}`}>
-                                  {done ? "✓ Freezer empty" : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")} left`}
+                                  {done ? "✓ Freezer empty" : `${fmtCountdownParts(mm, ss)} left`}
                                 </span>
                               </div>
                               <div className="w-full h-1.5 rounded-full bg-background border border-amber-600/10 overflow-hidden">
@@ -12888,7 +12891,7 @@ export default function Home() {
                             <>
                               {autoTrackProgress && s && suppressed && (
                                 <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] text-left">
-                                  <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeft} min</span>
+                                  <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{fmtMins(suppressedMinsLeft)}</span>
                                   <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2 shrink-0">Resume now</button>
                                 </div>
                               )}
@@ -13945,7 +13948,7 @@ export default function Home() {
                     <>
                       {autoTrackProgress && autoTrackSuggestion && suppressedNow && (
                         <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-amber-950/20 border border-amber-600/20 text-[10px] mb-2">
-                          <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{suppressedMinsLeftNow} min</span>
+                          <span className="text-amber-400 font-semibold">Manual override active · auto resumes in ~{fmtMins(suppressedMinsLeftNow)}</span>
                           <button type="button" onClick={() => { autoSuppressUntilRef.current = 0; fireAutoTrackNow(); }} className="text-amber-400 hover:text-amber-300 font-semibold ml-2">Resume now</button>
                         </div>
                       )}
