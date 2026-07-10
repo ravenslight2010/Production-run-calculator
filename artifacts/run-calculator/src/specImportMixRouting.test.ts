@@ -23,7 +23,12 @@ import {
   loadDeletedItems,
   tombstoneDeleted,
 } from "./storage";
-import { CHEESE_RECIPE_NAMES_KEY, MIX_RECIPE_NAMES_KEY, CHEESE_INGREDIENTS_KEY } from "./types";
+import {
+  CHEESE_RECIPE_NAMES_KEY,
+  MIX_RECIPE_NAMES_KEY,
+  CHEESE_INGREDIENTS_KEY,
+  INGREDIENT_TYPES_KEY,
+} from "./types";
 import type { ParsedSpecImport } from "@workspace/spec-import";
 
 beforeEach(() => {
@@ -223,6 +228,35 @@ describe("applySpecImport mix routing", () => {
     applySpecImport(parsed);
     expect(loadList(CHEESE_RECIPE_NAMES_KEY, [])).toContain("White Fajita Mix");
     expect(loadList(MIX_RECIPE_NAMES_KEY, [])).not.toContain("White Fajita Mix");
+  });
+
+  it("places a mix onto an applicator slot typed with the mix's name: 'Mix' type + name link + rows", () => {
+    const parsed = importWithCheeseKindRecipe("White Fajita Mix");
+    parsed.profiles[0].applicators = [{ type: "White Fajita Mix", ozPerPizza: 3 }];
+    applySpecImport(parsed);
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    expect(prof?.app1Type).toBe("Mix");
+    expect(prof?.app1CheeseRecipeName).toBe("White Fajita Mix");
+    expect(prof?.app1CheeseRecipe).toEqual([
+      { ingredient: "Monterey Jack", lbs: 20 },
+      { ingredient: "Green Peppers", lbs: 5 },
+    ]);
+    // The raw mix name must NOT leak into the shared Type dropdown.
+    expect(loadList(INGREDIENT_TYPES_KEY, [])).not.toContain("White Fajita Mix");
+  });
+
+  it("with multiple 'Mix' slots, ties only onto matching-or-blank ones (prelinked other mixes untouched)", () => {
+    const parsed = importWithCheeseKindRecipe("White Fajita Mix");
+    parsed.profiles[0].applicators = [
+      { type: "Mix", ozPerPizza: 2 }, // blank link → filled
+      { type: "White Fajita Mix", ozPerPizza: 3 }, // matches → re-typed + filled
+    ];
+    applySpecImport(parsed);
+    const prof = loadProfile("Corner Booth", "FAJITA") as Record<string, unknown> | null;
+    expect(prof?.app1Type).toBe("Mix");
+    expect(prof?.app1CheeseRecipeName).toBe("White Fajita Mix");
+    expect(prof?.app2Type).toBe("Mix");
+    expect(prof?.app2CheeseRecipeName).toBe("White Fajita Mix");
   });
 
   it("registers the mix's ingredients into the cheese ingredient pool", () => {

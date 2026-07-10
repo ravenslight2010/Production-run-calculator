@@ -123,6 +123,9 @@ import {
   applyPepTaxonomyMigrationIfNeeded,
   applyIngredientDedupeMigrationIfNeeded,
   applyStrayMixRecategorizeIfNeeded,
+  applyMixSlotRecategorizeIfNeeded,
+  loadPendingServerMixPushes,
+  clearPendingServerMixPushes,
   applyMixCheeseOverlapDedupeIfNeeded,
   getStoredResetEpoch,
   applyResetWipe,
@@ -190,8 +193,10 @@ import {
   repointMixesForBrandMerge,
   repointMixesForFlavorMerge,
   repointMixIngredients,
+  addSpecMixesIfAbsent,
   type Mix,
 } from "@workspace/mixes";
+import { specMixDraftToMix } from "@workspace/premix-import";
 import { fetchMixes, saveMixes, deleteMixes } from "@/mixes";
 import {
   buildCycleCountDueList,
@@ -444,6 +449,7 @@ import {
 applyPepTaxonomyMigrationIfNeeded();
 applyIngredientDedupeMigrationIfNeeded();
 applyStrayMixRecategorizeIfNeeded();
+applyMixSlotRecategorizeIfNeeded();
 applyMixCheeseOverlapDedupeIfNeeded();
 applyProfileCleanupIfNeeded();
 purgeOrphanedProfilesIfNeeded();
@@ -3296,6 +3302,31 @@ export default function Home() {
       .catch(() => { doughSauceMigratedRef.current = false; });
   }, [canManageInventory, pushLocalDoughSauceToServer]);
 
+  // Best-effort follow-through for the one-time mix-slot cleanup migration:
+  // mixes it queued (raw applicator-type mix names converted to "Mix" slots)
+  // are pushed into the server Mixes pool so the run form's Mix card can
+  // hydrate them. Manager-only (server enforces manage-inventory); the queue
+  // survives failures and retries on the next mount/session.
+  const pendingMixPushRef = useRef(false);
+  useEffect(() => {
+    if (pendingMixPushRef.current || !canManageInventory) return;
+    const pending = loadPendingServerMixPushes();
+    if (pending.length === 0) { pendingMixPushRef.current = true; return; }
+    pendingMixPushRef.current = true;
+    (async () => {
+      const existing = await fetchMixes();
+      const candidates = pending
+        .map((p) => specMixDraftToMix({ name: p.name, brand: "", flavor: "", componentIngredients: p.componentIngredients }))
+        .filter((m): m is Mix => m != null);
+      const { merged, added } = addSpecMixesIfAbsent(existing, candidates);
+      if (added > 0) {
+        await saveMixes(merged);
+        void cycleCountQc.invalidateQueries({ queryKey: ["mixes"] });
+      }
+      clearPendingServerMixPushes();
+    })().catch(() => { pendingMixPushRef.current = false; });
+  }, [canManageInventory, cycleCountQc]);
+
   const [showReportIssue, setShowReportIssue] = useState(false);
   // First-login "Get Started" overview. Auto-opens once when the server says
   // this user hasn't seen it yet; reopenable any time from the header menu.
@@ -3663,7 +3694,9 @@ export default function Home() {
         // legitimately end in "mix" (allowlisted below, e.g. "Hot Giardiniera
         // Mix"). See `.local/parity-pause-log.md`.
         const realIngredientAllowlist = new Set(
-          [...DEFAULT_INGREDIENT_TYPES, ...MIX_SEED.frontlineIngredients, ...pepTypes].map((n) =>
+          // "mix"/"cheese" are the generic applicator types (Mix/Cheese cards
+          // gate on them) — legitimate dropdown entries, never stray names.
+          ["mix", "cheese", ...DEFAULT_INGREDIENT_TYPES, ...MIX_SEED.frontlineIngredients, ...pepTypes].map((n) =>
             n.toLowerCase(),
           ),
         );
@@ -14731,136 +14764,6 @@ export default function Home() {
                       )}
 
                       <TypeDropdown
-                        label="Applicator 3"
-                        value={v.app3Type}
-                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
-                        options={ingredientTypes}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app3Type.trim() && (() => {
-                        const isMix = v.app3Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app3CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      {v.app3Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          batches={calc.app3Batches}
-                          ozPerPizza={v.app3OzPerPizza}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map(r => ({ ...r }));
-                            form.setValue("app3CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese3(copy);
-                          }}
-                        />
-                      )}
-                      {v.app3Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app3Type || "Applicator 3"}
-                          totalRunLbs={calc.app3Lbs}
-                          fields={cheese3Fields}
-                          recipe={v.app3CheeseRecipe ?? []}
-                          fieldPrefix="app3CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={serverMixIngredients}
-                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese3}
-                          recipeName={v.app3CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          onRecipeNameChange={val => {
-                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); }
-                          }}
-                        />
-                      )}
-
-                      <TypeDropdown
-                        label="Applicator 4"
-                        value={v.app4Type}
-                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
-                        options={ingredientTypes}
-                        onAddOption={addIngredientType}
-                        onRemoveOption={removeIngredientType}
-                        allowClear
-                      />
-                      {v.app4Type.trim() && (() => {
-                        const isMix = v.app4Type.trim().toLowerCase().includes("mix");
-                        const hasRecipe = !isMix && (v.app4CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
-                        return (
-                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
-                            <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
-                            {!isMix && !hasRecipe && (
-                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
-                            )}
-                          </div>
-                        );
-                      })()}
-                      {v.app4Type.trim().toLowerCase() === "cheese" && (
-                        <CheesePickCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          batches={calc.app4Batches}
-                          ozPerPizza={v.app4OzPerPizza}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
-                          recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
-                          shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
-                          cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
-                            const copy = (rows ?? []).map(r => ({ ...r }));
-                            form.setValue("app4CheeseRecipe", copy, { shouldDirty: true });
-                            replaceCheese4(copy);
-                          }}
-                        />
-                      )}
-                      {v.app4Type.trim().toLowerCase().includes("mix") && (
-                        <MixRecipeCard
-                          embedded
-                          label={v.app4Type || "Applicator 4"}
-                          totalRunLbs={calc.app4Lbs}
-                          fields={cheese4Fields}
-                          recipe={v.app4CheeseRecipe ?? []}
-                          fieldPrefix="app4CheeseRecipe"
-                          register={form.register}
-                          ingredientOptions={serverMixIngredients}
-                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
-                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
-                          onRemove={removeCheese4}
-                          recipeName={v.app4CheeseRecipeName ?? ""}
-                          recipeNameOptions={serverMixNames}
-                          onRecipeNameChange={val => {
-                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
-                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
-                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); }
-                          }}
-                        />
-                      )}
-
-                      <TypeDropdown
                         label={v.pep1Combined === true ? "Pep Applicator 1 & 2" : "Pep Applicator 1"}
                         value={v.pep1Type}
                         onChange={val => { form.setValue("pep1Type", val, { shouldDirty: true }); if (!val || DEFAULT_PEP_TYPES.includes(val)) { form.setValue("pep1BatchLbs", 0, { shouldDirty: true }); } if (!val) { form.setValue("pep1Sticks", 0, { shouldDirty: true }); form.setValue("pep1OzPerPizza", 0, { shouldDirty: true }); } }}
@@ -15035,6 +14938,136 @@ export default function Home() {
                             >+ Add pep type</button>
                           )}
                         </>
+                      )}
+
+                      <TypeDropdown
+                        label="Applicator 3"
+                        value={v.app3Type}
+                        onChange={val => { form.setValue("app3Type", val, { shouldDirty: true }); if (!val) { form.setValue("app3OzPerPizza", 0, { shouldDirty: true }); form.setValue("app3BatchLbs", 0, { shouldDirty: true }); } }}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
+                        allowClear
+                      />
+                      {v.app3Type.trim() && (() => {
+                        const isMix = v.app3Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app3CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app3OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app3BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {v.app3Type.trim().toLowerCase() === "cheese" && (
+                        <CheesePickCard
+                          embedded
+                          label={v.app3Type || "Applicator 3"}
+                          batches={calc.app3Batches}
+                          ozPerPizza={v.app3OzPerPizza}
+                          recipe={v.app3CheeseRecipe ?? []}
+                          recipeName={v.app3CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app3CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app3CheeseRecipeName ?? "").trim().toLowerCase())}
+                          shredderSetting={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app3CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          onRecipeNameChange={val => {
+                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app3CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese3(copy);
+                          }}
+                        />
+                      )}
+                      {v.app3Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app3Type || "Applicator 3"}
+                          totalRunLbs={calc.app3Lbs}
+                          fields={cheese3Fields}
+                          recipe={v.app3CheeseRecipe ?? []}
+                          fieldPrefix="app3CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={serverMixIngredients}
+                          onSetIngredient={(idx, val) => form.setValue(`app3CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese3({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese3}
+                          recipeName={v.app3CheeseRecipeName ?? ""}
+                          recipeNameOptions={serverMixNames}
+                          onRecipeNameChange={val => {
+                            form.setValue("app3CheeseRecipeName", val, { shouldDirty: true });
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app3CheeseRecipe", rows, { shouldDirty: true }); replaceCheese3(rows); }
+                          }}
+                        />
+                      )}
+
+                      <TypeDropdown
+                        label="Applicator 4"
+                        value={v.app4Type}
+                        onChange={val => { form.setValue("app4Type", val, { shouldDirty: true }); if (!val) { form.setValue("app4OzPerPizza", 0, { shouldDirty: true }); form.setValue("app4BatchLbs", 0, { shouldDirty: true }); } }}
+                        options={ingredientTypes}
+                        onAddOption={addIngredientType}
+                        onRemoveOption={removeIngredientType}
+                        allowClear
+                      />
+                      {v.app4Type.trim() && (() => {
+                        const isMix = v.app4Type.trim().toLowerCase().includes("mix");
+                        const hasRecipe = !isMix && (v.app4CheeseRecipe ?? []).some(r => Number(r.lbs) > 0);
+                        return (
+                          <div className={isMix || hasRecipe ? "grid grid-cols-1 gap-3" : "grid grid-cols-2 gap-3"}>
+                            <NumField control={form.control} name="app4OzPerPizza" label="Oz Per Pizza" />
+                            {!isMix && !hasRecipe && (
+                              <NumField control={form.control} name="app4BatchLbs" label="Batch Weight (lbs)" />
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {v.app4Type.trim().toLowerCase() === "cheese" && (
+                        <CheesePickCard
+                          embedded
+                          label={v.app4Type || "Applicator 4"}
+                          batches={calc.app4Batches}
+                          ozPerPizza={v.app4OzPerPizza}
+                          recipe={v.app4CheeseRecipe ?? []}
+                          recipeName={v.app4CheeseRecipeName ?? ""}
+                          recipeNameOptions={cheeseNamesForRun(currentRun?.brand ?? "", currentRun?.flavor ?? "")}
+                          recipeMissing={(v.app4CheeseRecipeName ?? "").trim() !== "" && !serverCheeseByName.has((v.app4CheeseRecipeName ?? "").trim().toLowerCase())}
+                          shredderSetting={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.shredderSetting ?? ""}
+                          cellulose={serverCheeseByName.get((v.app4CheeseRecipeName ?? "").trim().toLowerCase())?.cellulose ?? ""}
+                          onRecipeNameChange={val => {
+                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                            const rows = val.trim() ? serverCheeseRowsByName.get(val.trim().toLowerCase()) : undefined;
+                            const copy = (rows ?? []).map(r => ({ ...r }));
+                            form.setValue("app4CheeseRecipe", copy, { shouldDirty: true });
+                            replaceCheese4(copy);
+                          }}
+                        />
+                      )}
+                      {v.app4Type.trim().toLowerCase().includes("mix") && (
+                        <MixRecipeCard
+                          embedded
+                          label={v.app4Type || "Applicator 4"}
+                          totalRunLbs={calc.app4Lbs}
+                          fields={cheese4Fields}
+                          recipe={v.app4CheeseRecipe ?? []}
+                          fieldPrefix="app4CheeseRecipe"
+                          register={form.register}
+                          ingredientOptions={serverMixIngredients}
+                          onSetIngredient={(idx, val) => form.setValue(`app4CheeseRecipe.${idx}.ingredient`, val, { shouldDirty: true })}
+                          onAppend={() => appendCheese4({ ingredient: "", lbs: 0 })}
+                          onRemove={removeCheese4}
+                          recipeName={v.app4CheeseRecipeName ?? ""}
+                          recipeNameOptions={serverMixNames}
+                          onRecipeNameChange={val => {
+                            form.setValue("app4CheeseRecipeName", val, { shouldDirty: true });
+                            const serverMix = serverMixRowsByName.get(val.trim().toLowerCase());
+                            if (serverMix) { const rows = serverMix.map(r => ({ ...r })); form.setValue("app4CheeseRecipe", rows, { shouldDirty: true }); replaceCheese4(rows); }
+                          }}
+                        />
                       )}
                     </CardContent>}
                   </Card>

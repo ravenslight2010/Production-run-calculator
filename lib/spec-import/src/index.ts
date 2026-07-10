@@ -821,6 +821,9 @@ export type CheeseApplicatorSlot = {
 const isCheeseApplicatorType = (type: string): boolean =>
   (type ?? "").trim().toLowerCase() === "cheese";
 
+const isMixApplicatorType = (type: string): boolean =>
+  (type ?? "").trim().toLowerCase() === "mix";
+
 /**
  * Mirror a lone cheese blend across a product's cheese applicators. A pizza can
  * run TWO "cheese" applicators using the SAME blend at different per-pizza
@@ -933,6 +936,64 @@ export function resolveCheeseApplicatorSlots(
     links.push({ slot: i + 1, recipeName });
     changed = true;
     return { ...a, type: "cheese" };
+  });
+  return { applicators: changed ? out : [...applicators], links };
+}
+
+/** One applicator slot the resolver matched to a MIX recipe. `slot` is 1-based. */
+export type MixSlotLink = { slot: number; recipeName: string };
+
+/** Result of {@link resolveMixApplicatorSlots}. */
+export type ResolvedMixApplicators = {
+  /** Applicators with matched slots' `type` normalized to the literal "Mix". */
+  applicators: ParsedApplicator[];
+  /** Which slots matched a mix recipe, with the recipe's canonical name. */
+  links: MixSlotLink[];
+};
+
+/**
+ * Decide which of a profile's applicator slots are MIXES and normalize them to
+ * the literal type "Mix", the mirror of {@link resolveCheeseApplicatorSlots}.
+ * A spec grid names a mix applicator by its RECIPE (e.g. "White Fajita Mix"),
+ * which historically became a raw entry in the shared ingredient-type list —
+ * one dropdown entry per mix, disconnected from the factory Mixes pool. Matched
+ * slots keep their oz, are re-typed to the generic "Mix", and the returned
+ * `links` carry the pool recipe name each slot should reference so the run
+ * form's Mix card hydrates from the Mixes master list.
+ *
+ * Matching uses the SAME loose key as the cheese resolver
+ * (`specImportNameMatchKey` over `cleanSpecCheeseRecipeName`) so a weight
+ * suffix baked into the grid cell ("White Fajita Mix 1.5") still matches.
+ * Slots already typed "cheese" or "Mix" and slots matching nothing are left
+ * untouched. `candidateMixNames` should be the names of recipes that ROUTE to
+ * the Mixes category (callers filter via `specImportRecipeIsMix` /
+ * their routing override). Pure — never mutates the input.
+ */
+export function resolveMixApplicatorSlots(
+  applicators: ReadonlyArray<ParsedApplicator>,
+  candidateMixNames: ReadonlyArray<string>,
+): ResolvedMixApplicators {
+  const byKey = new Map<string, string>();
+  for (const name of candidateMixNames) {
+    const clean = (name ?? "").trim();
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(clean));
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, clean);
+  }
+  if (byKey.size === 0) return { applicators: [...applicators], links: [] };
+  const links: MixSlotLink[] = [];
+  let changed = false;
+  const out = applicators.map((a, i) => {
+    const type = (a.type ?? "").trim();
+    if (!type) return a;
+    // Already a cheese or mix applicator — leave it (name resolved elsewhere).
+    if (isCheeseApplicatorType(type) || isMixApplicatorType(type)) return a;
+    const key = specImportNameMatchKey(cleanSpecCheeseRecipeName(type));
+    const recipeName = key ? byKey.get(key) : undefined;
+    if (!recipeName) return a;
+    links.push({ slot: i + 1, recipeName });
+    changed = true;
+    return { ...a, type: "Mix" };
   });
   return { applicators: changed ? out : [...applicators], links };
 }

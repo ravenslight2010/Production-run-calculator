@@ -80,7 +80,7 @@ import {
   saveIngredients as saveIngredientsRemote,
   findOrBuildIngredient,
 } from "./ingredients";
-import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, resolveCheeseApplicatorSlots, specImportRecipeIsMix, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
+import { recipeApplyTargets, mirrorSingleCheeseAcrossApplicators, resolveCheeseApplicatorSlots, resolveMixApplicatorSlots, specImportNameMatchKey, cleanSpecCheeseRecipeName } from "@workspace/spec-import";
 import type {
   ParsedSpecImport,
   ParsedRecipe,
@@ -1460,6 +1460,11 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
     const ingredients = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
     const allowlist = new Set(
       [
+        // The generic "Mix"/"Cheese" applicator types are legitimate dropdown
+        // entries (the run form's Mix/Cheese cards gate on them) — a fresh
+        // device must never tombstone them out of the factory-wide list.
+        "mix",
+        "cheese",
         ...DEFAULT_INGREDIENT_TYPES,
         ...MIX_SEED.frontlineIngredients,
         ...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
@@ -1499,6 +1504,181 @@ export function applyStrayMixRecategorizeIfNeeded(): void {
     for (const n of mixAdds) clearDeleted("mixRecipeNames", n);
 
     localStorage.setItem(RECAT_STRAY_MIX_KEY, "1");
+  } catch {}
+}
+
+const RECAT_MIX_SLOT_KEY = "run-calc-mix-slot-recat-v1";
+const PENDING_SERVER_MIX_PUSH_KEY = "run-calc-pending-server-mix-push-v1";
+
+/** A mix queued for a best-effort push to the server Mixes pool (see below). */
+export type PendingServerMixPush = { name: string; componentIngredients: string[] };
+
+/** Mixes the cleanup migration queued for the server pool (empty when none). */
+export function loadPendingServerMixPushes(): PendingServerMixPush[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(PENDING_SERVER_MIX_PUSH_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((p): p is PendingServerMixPush => !!p && typeof (p as PendingServerMixPush).name === "string")
+      .map((p) => ({
+        name: p.name,
+        componentIngredients: Array.isArray(p.componentIngredients)
+          ? p.componentIngredients.filter((i): i is string => typeof i === "string")
+          : [],
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Clear the queue after a successful server push. */
+export function clearPendingServerMixPushes(): void {
+  try { localStorage.removeItem(PENDING_SERVER_MIX_PUSH_KEY); } catch {}
+}
+
+/**
+ * One-time cleanup (approved 2026-07-09): applicator TYPE slots that hold a raw
+ * mix/cheese-blend RECIPE name (e.g. "White Fajita Mix") are converted to the
+ * generic types the run form's recipe cards gate on — literal "Mix" for mixes,
+ * "cheese" for cheese blends — with the original name preserved as the slot's
+ * recipe-name link (and rows backfilled from the local presets when the slot
+ * has none). New spec imports already place slots this way; this migrates what
+ * older imports left behind. Also:
+ *  - moves any REMAINING stray recipe names out of `ingredientTypes` (same
+ *    rules + tombstones as applyStrayMixRecategorizeIfNeeded — that pass ran
+ *    before newer imports could re-add strays),
+ *  - ensures the generic "Cheese" and "Mix" entries exist in the Type dropdown
+ *    (tombstones cleared so the additive sync union keeps them), and
+ *  - queues converted/stray mix names for a best-effort push to the server
+ *    Mixes pool (the run form's Mix card hydrates from the server list), which
+ *    home.tsx retries on boot until a manager session succeeds.
+ * Live/scheduled RUN VALUES are intentionally NOT rewritten — the run-form
+ * gates match raw mix names case-insensitively ("…mix"), so today's open runs
+ * keep working and tomorrow's runs pull from the converted profiles.
+ * Runs once, guarded by a version marker.
+ */
+export function applyMixSlotRecategorizeIfNeeded(): void {
+  if (typeof localStorage === "undefined") return;
+  if (localStorage.getItem(RECAT_MIX_SLOT_KEY)) return;
+  try {
+    const allowlist = new Set(
+      [
+        "mix",
+        "cheese",
+        ...DEFAULT_INGREDIENT_TYPES,
+        ...MIX_SEED.frontlineIngredients,
+        ...loadList(PEP_TYPES_KEY, DEFAULT_PEP_TYPES),
+      ].map((n) => n.toLowerCase()),
+    );
+
+    // ── Remaining strays out of the shared Type dropdown, generics in ──
+    const ingredients = loadList(INGREDIENT_TYPES_KEY, DEFAULT_INGREDIENT_TYPES);
+    const stray = ingredients.filter((n) => isStrayMixName(n, allowlist));
+    const strayCheese = stray.filter((n) => /cheese/i.test(n));
+    const strayMix = stray.filter((n) => !/cheese/i.test(n));
+    saveList(
+      INGREDIENT_TYPES_KEY,
+      mergeListInsensitive(
+        ingredients.filter((n) => !stray.includes(n)),
+        ["Cheese", "Mix"],
+      ).sort((a, b) => a.localeCompare(b)),
+    );
+    for (const n of stray) tombstoneDeleted("ingredientTypes", n);
+    clearDeleted("ingredientTypes", "Cheese");
+    clearDeleted("ingredientTypes", "Mix");
+
+    // ── Convert saved profiles' applicator slots ──
+    const presets = loadCheeseRecipePresets();
+    const presetByLower = new Map(Object.keys(presets).map((k) => [k.toLowerCase(), k] as const));
+    const presetRowsFor = (name: string): RecipeRow[] => {
+      const pk = presetByLower.get(name.trim().toLowerCase());
+      const rows = pk ? presets[pk] ?? [] : [];
+      return rows
+        .filter((r) => (r.ingredient ?? "").trim())
+        .map((r) => ({ ingredient: r.ingredient, lbs: r.lbs }));
+    };
+    const pendingByLower = new Map<string, PendingServerMixPush>();
+    const queueMixPush = (name: string) => {
+      const key = name.trim().toLowerCase();
+      if (!key || pendingByLower.has(key)) return;
+      pendingByLower.set(key, {
+        name: name.trim(),
+        componentIngredients: presetRowsFor(name).map((r) => r.ingredient),
+      });
+    };
+    const cheeseNameAdds: string[] = [...strayCheese];
+    const mixNameAdds: string[] = [...strayMix];
+    for (const n of strayMix) queueMixPush(n);
+
+    const bf = loadBrandFlavors();
+    for (const [brand, flavors] of Object.entries(bf)) {
+      for (const flavor of flavors) {
+        const saved = loadProfile(brand, flavor);
+        if (!saved) continue;
+        const rec = saved as unknown as Record<string, unknown>;
+        let changed = false;
+        for (const slot of [1, 2, 3, 4]) {
+          const t = String(rec[`app${slot}Type`] ?? "").trim();
+          if (!t) continue;
+          if (!isStrayMixName(t, allowlist)) continue;
+          const isCheese = /cheese/i.test(t);
+          rec[`app${slot}Type`] = isCheese ? "cheese" : "Mix";
+          const existingName = String(rec[`app${slot}CheeseRecipeName`] ?? "").trim();
+          const linkName = existingName || t;
+          if (!existingName) rec[`app${slot}CheeseRecipeName`] = t;
+          const rows = rec[`app${slot}CheeseRecipe`];
+          const hasRows =
+            Array.isArray(rows) &&
+            rows.some((r) => String((r as RecipeRow)?.ingredient ?? "").trim());
+          if (!hasRows) {
+            const presetRows = presetRowsFor(linkName);
+            if (presetRows.length) rec[`app${slot}CheeseRecipe`] = presetRows;
+          }
+          if (isCheese) cheeseNameAdds.push(linkName);
+          else {
+            mixNameAdds.push(linkName);
+            queueMixPush(linkName);
+          }
+          changed = true;
+        }
+        if (!changed) continue;
+        // Targeted dough-blob write (NOT saveProfile: the loaded blob has no
+        // crust fields, so saveProfile would overwrite the crust profile with
+        // an empty extract). Mirrors applyPackagingPatchToProfile.
+        try { localStorage.setItem(PROFILE_KEY(brand, flavor), JSON.stringify(rec)); } catch {}
+      }
+    }
+
+    // ── Recipe-name lists (merge tabs read these) + tombstone clears ──
+    if (cheeseNameAdds.length) {
+      saveList(
+        CHEESE_RECIPE_NAMES_KEY,
+        mergeListInsensitive(loadList(CHEESE_RECIPE_NAMES_KEY, []), cheeseNameAdds).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      );
+      for (const n of cheeseNameAdds) clearDeleted("cheeseRecipeNames", n);
+    }
+    if (mixNameAdds.length) {
+      saveList(
+        MIX_RECIPE_NAMES_KEY,
+        mergeListInsensitive(loadList(MIX_RECIPE_NAMES_KEY, []), mixNameAdds).sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      );
+      for (const n of mixNameAdds) clearDeleted("mixRecipeNames", n);
+    }
+
+    if (pendingByLower.size) {
+      const existing = loadPendingServerMixPushes();
+      const seen = new Set(existing.map((p) => p.name.trim().toLowerCase()));
+      const merged = [...existing, ...[...pendingByLower.values()].filter((p) => !seen.has(p.name.trim().toLowerCase()))];
+      try { localStorage.setItem(PENDING_SERVER_MIX_PUSH_KEY, JSON.stringify(merged)); } catch {}
+    }
+
+    localStorage.setItem(RECAT_MIX_SLOT_KEY, "1");
   } catch {}
 }
 
@@ -2244,7 +2424,14 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
   // a profile's applicator slots are CHEESE (matched by loose key) so they render
   // the pick-only Cheese card instead of a raw blend name that never opens it.
   const cheeseCandidateNames = parsed.recipes
-    .filter(r => r.kind === "cheese" && !specImportRecipeIsMix(r, new Set<string>()))
+    .filter(r => r.kind === "cheese" && !routesToMix(r))
+    .map(r => r.name);
+  // Every MIX-routed recipe name — the same treatment for mix applicator slots:
+  // re-type them to the generic "Mix" and reference the pool recipe by name,
+  // instead of leaking one raw ingredient-type entry per mix into the shared
+  // Type dropdown (disconnected from the Mixes screen the recipe lives on).
+  const mixCandidateNames = parsed.recipes
+    .filter(r => r.kind === "cheese" && routesToMix(r))
     .map(r => r.name);
 
   for (const p of parsed.profiles) {
@@ -2292,9 +2479,15 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     // (the run form's pick-only Cheese card gates on that exactly); the blend
     // name is recorded as the slot's cheese recipe name so it hydrates from the
     // server pool, and the recipe-tie loop below writes its rows.
-    const { applicators: resolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
+    const { applicators: cheeseResolvedApps, links: cheeseLinks } = resolveCheeseApplicatorSlots(
       p.applicators.slice(0, 4),
       cheeseCandidateNames,
+    );
+    // Mix slots re-type to the literal "Mix" (the run form's Mix card + Mixes
+    // pool picker); the recipe name is linked below just like cheese.
+    const { applicators: resolvedApps, links: mixLinks } = resolveMixApplicatorSlots(
+      cheeseResolvedApps,
+      mixCandidateNames,
     );
     resolvedApps.forEach((a, i) => {
       const slot = i + 1;
@@ -2310,6 +2503,9 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
       newAppTypes.push(type);
     });
     for (const link of cheeseLinks) {
+      (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
+    }
+    for (const link of mixLinks) {
       (values as Record<string, unknown>)[`app${link.slot}CheeseRecipeName`] = link.recipeName;
     }
     const namedPeps = p.pepperonis.slice(0, 2).filter(pp => pp.type.trim());
@@ -2353,8 +2549,10 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     // A cheese-kind recipe routed to the MIXES category (user's review pick or
     // the name heuristic) is factory master-data on the Mixes screen — it must
     // NOT be tied onto profiles as a cheese-applicator recipe, or the run's
-    // Cheese card would show it as cheese despite the user's "mix" pick.
-    if (r.kind === "cheese" && routesToMix(r)) continue;
+    // Cheese card would show it as cheese despite the user's "mix" pick. It DOES
+    // tie onto slots the profile loop re-typed to the generic "Mix" (name+rows),
+    // handled in the mix branch below.
+    const isMixRecipe = r.kind === "cheese" && routesToMix(r);
     // Reference-only recipes tie the user's EXISTING saved recipe onto the
     // import's profiles — pull its rows fresh from the library (never r.rows).
     // If the saved recipe is gone (stale/tampered pick), skip the tie entirely
@@ -2365,6 +2563,35 @@ export function applySpecImport(parsed: ParsedSpecImport): Array<{ brand: string
     if (r.referenceOnly && sourceRows.length === 0) continue;
     const rows = sourceRows.map(row => ({ ingredient: row.ingredient, lbs: row.lbs }));
     for (const { brand, flavor } of recipeApplyTargets(r, applyProfilePool)) {
+      if (isMixRecipe) {
+        // Fill the profile's "Mix" applicator slot(s) that reference this mix
+        // (matched by loose name key, or still blank). No legacy slot fallback:
+        // a mix with no Mix slot on the profile lives only on the Mixes screen.
+        // Skip entirely (no register/touch/save) when nothing matches so a
+        // mix-only import never creates or rewrites unrelated profiles.
+        const existing = loadProfile(brand, flavor);
+        if (!existing) continue;
+        const rec = { ...DEFAULT_VALUES, ...existing } as FormValues;
+        const rKey = specImportNameMatchKey(
+          r.userNamed ? r.name : cleanSpecCheeseRecipeName(r.name),
+        );
+        const mixSlots = [1, 2, 3, 4].filter(
+          n => String((rec as Record<string, unknown>)[`app${n}Type`] ?? "").trim().toLowerCase() === "mix",
+        );
+        const matched = mixSlots.filter(n => {
+          const nm = String((rec as Record<string, unknown>)[`app${n}CheeseRecipeName`] ?? "").trim();
+          return !nm || specImportNameMatchKey(cleanSpecCheeseRecipeName(nm)) === rKey;
+        });
+        if (matched.length === 0) continue;
+        registerBrandFlavor(brand, flavor);
+        markTouched(brand, flavor);
+        for (const slot of matched) {
+          (rec as Record<string, unknown>)[`app${slot}CheeseRecipeName`] = r.name;
+          (rec as Record<string, unknown>)[`app${slot}CheeseRecipe`] = rows;
+        }
+        saveProfile(brand, flavor, rec);
+        continue;
+      }
       registerBrandFlavor(brand, flavor);
       markTouched(brand, flavor);
       const values: FormValues = { ...DEFAULT_VALUES, ...(loadProfile(brand, flavor) ?? {}) };

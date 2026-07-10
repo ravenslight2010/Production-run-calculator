@@ -153,4 +153,5 @@
 - [Cold-start import hang](cold-start-import-hang.md) — autoscale scale-to-zero can hang fetches at the edge (zero app logs); blocking-dialog fetches need AbortSignal.timeout + visible Cancel.
 - [Freezer WIP completion](freezer-wip-completion.md) — casesInFreezer is additive display-only (never in spreadsheet math); resumeRun shifts startedAt so only an end-while-paused open pause is subtracted in the drain.
 - [Today-schedule edits via live path](today-schedule-edit-live-path.md) — editing TODAY in the schedule editor must write through the live day-state path (stamps+tombstones), never the raw scheduled PUT, or sync/Start Run reverts the edits.
+- [Mix applicator slots](mix-applicator-slots.md) — slot TYPE is generic "Mix"/"cheese", name lives in the CheeseRecipeName link; allowlist "mix"/"cheese" in stray filters; migration used targeted profile writes, not saveProfile.
 - [Open form clobbers profiles](open-form-profile-clobber.md) — every web nav path saves the OPEN form→profile; anything that rewrites a profile out-of-band (spec import) must reload the open form, and identity-change with no profile must reset to defaults.
