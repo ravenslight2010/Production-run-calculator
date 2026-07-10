@@ -11856,6 +11856,41 @@ export default function Home() {
                   );
                 })()}
 
+                {/* Missing-setup nudge — a running run with no line-speed /
+                    case / freezer numbers can't compute anything: the count,
+                    timing, and freezer status all silently sit at 0. Tell the
+                    operator exactly which numbers are missing instead. */}
+                {!currentRun?.endedAt && runStatus === "running" && (() => {
+                  const missing: string[] = [];
+                  if (calc.ppm <= 0) {
+                    if (doughSubTab === "crusts") {
+                      missing.push("Approximate Line Speed");
+                    } else {
+                      if (!(Number(ve.crustsPerCycle) > 0)) missing.push("Crusts Per Cycle");
+                      if (!(Number(ve.cycleSpeed) > 0)) missing.push("Cycle Speed");
+                      if (!(Number(v.speedAdjustment) > 0)) missing.push("Speed Adjustment");
+                    }
+                  }
+                  if (!(Number(v.pizzasPerCase) > 0)) missing.push("Pizzas Per Case");
+                  const freezerMissing = !(Number(ve.freezerTime) > 0);
+                  if (missing.length === 0 && !freezerMissing) return null;
+                  const headline = missing.length > 0
+                    ? `Counts can't track yet — ${[...missing, ...(freezerMissing ? ["Freezer Time"] : [])].join(", ")} not set`
+                    : "Freezer status can't show yet — Freezer Time not set";
+                  const detail = missing.length > 0
+                    ? "Scroll down on this tab and fill in those numbers under the line settings. The completed count, timing, and freezer status all start working once they're in."
+                    : "If this run uses the freezer tunnel, scroll down and enter Freezer Time (min) under the line settings to see the filling/emptying status.";
+                  return (
+                    <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-2.5" data-testid="banner-missing-line-setup">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">{headline}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Freezer status — filling at run start, emptying at run end.
                     Auto-hidden whenever the tunnel is in steady state. */}
                 {!currentRun?.endedAt && runStatus === "running" && (() => {
